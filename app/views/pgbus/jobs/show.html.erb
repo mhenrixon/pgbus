@@ -1,0 +1,57 @@
+<div class="mb-6">
+  <%= link_to "&larr; Back to Jobs".html_safe, pgbus.jobs_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+</div>
+
+<% if @job %>
+  <h1 class="text-2xl font-bold text-gray-900 mb-6">Failed Job #<%= @job["id"] %></h1>
+
+  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+    <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div>
+        <dt class="text-sm font-medium text-gray-500">Queue</dt>
+        <dd class="text-sm text-gray-900"><%= @job["queue_name"] %></dd>
+      </div>
+      <div>
+        <dt class="text-sm font-medium text-gray-500">Failed At</dt>
+        <dd class="text-sm text-gray-900"><%= @job["failed_at"] %></dd>
+      </div>
+      <div>
+        <dt class="text-sm font-medium text-gray-500">Error Class</dt>
+        <dd class="text-sm text-red-600 font-medium"><%= @job["error_class"] %></dd>
+      </div>
+      <div>
+        <dt class="text-sm font-medium text-gray-500">Retry Count</dt>
+        <dd class="text-sm text-gray-900"><%= @job["retry_count"] %></dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+    <h2 class="text-sm font-medium text-gray-500 mb-2">Error Message</h2>
+    <p class="text-sm text-red-700"><%= @job["error_message"] %></p>
+  </div>
+
+  <% if @job["backtrace"].present? %>
+    <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+      <h2 class="text-sm font-medium text-gray-500 mb-2">Backtrace</h2>
+      <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto max-h-96"><%= @job["backtrace"] %></pre>
+    </div>
+  <% end %>
+
+  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+    <h2 class="text-sm font-medium text-gray-500 mb-2">Payload</h2>
+    <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@job["payload"])) rescue @job["payload"] %></pre>
+  </div>
+
+  <div class="flex space-x-2">
+    <%= button_to "Retry", pgbus.retry_job_path(@job["id"]), method: :post,
+          class: "rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500" %>
+    <%= button_to "Discard", pgbus.discard_job_path(@job["id"]), method: :post,
+          class: "rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500",
+          data: { turbo_confirm: "Discard this job permanently?" } %>
+  </div>
+<% else %>
+  <div class="text-center py-12">
+    <p class="text-gray-400">Job not found</p>
+  </div>
+<% end %>

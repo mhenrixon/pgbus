@@ -22,5 +22,10 @@ module Pgbus
         Pgbus.configuration.logger ||= Rails.logger
       end
     end
+
+    initializer "pgbus.web" do
+      require "pgbus/web/authentication"
+      require "pgbus/web/data_source"
+    end
   end
 end
