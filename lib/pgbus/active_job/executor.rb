@@ -38,7 +38,7 @@ module Pgbus
         end
       end
 
-      def handle_failure(message, queue_name, error)
+      def handle_failure(_message, _queue_name, error)
         Pgbus.logger.error { "[Pgbus] Job failed: #{error.class}: #{error.message}" }
         Pgbus.logger.debug { error.backtrace&.join("\n") }
 

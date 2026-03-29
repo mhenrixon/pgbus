@@ -79,7 +79,7 @@ module Pgbus
         -> { ActiveRecord::Base.connection.raw_connection }
       else
         raise ConfigurationError, "No database connection configured. " \
-          "Set Pgbus.configuration.database_url, connection_params, or use with Rails."
+                                  "Set Pgbus.configuration.database_url, connection_params, or use with Rails."
       end
     end
   end

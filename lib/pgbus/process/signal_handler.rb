@@ -23,7 +23,11 @@ module Pgbus
       end
 
       def process_signals
-        while (sig = @signal_queue.pop(true) rescue nil)
+        while (sig = begin
+          @signal_queue.pop(true)
+        rescue StandardError
+          nil
+        end)
           case sig
           when "INT", "TERM"
             graceful_shutdown

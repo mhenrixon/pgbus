@@ -38,16 +38,16 @@ module Pgbus
           "SELECT kind, hostname, pid, metadata, last_heartbeat_at FROM pgbus_processes ORDER BY kind, created_at"
         )
 
-        if processes.count.zero?
+        if processes.none?
           puts "No Pgbus processes running."
           return
         end
 
-        puts format("%-12s %-20s %-8s %-30s %s", "KIND", "HOST", "PID", "HEARTBEAT", "METADATA")
+        puts "KIND         HOST                 PID      HEARTBEAT                      METADATA"
         puts "-" * 100
         processes.each do |p|
           puts format("%-12s %-20s %-8s %-30s %s",
-            p["kind"], p["hostname"], p["pid"], p["last_heartbeat_at"], p["metadata"])
+                      p["kind"], p["hostname"], p["pid"], p["last_heartbeat_at"], p["metadata"])
         end
       else
         puts "ActiveRecord not available. Run from a Rails context."
@@ -55,16 +55,16 @@ module Pgbus
     end
 
     def list_queues
-      queues = Pgbus.client.list_queues
+      Pgbus.client.list_queues
       metrics = Pgbus.client.metrics
 
-      puts format("%-40s %-10s %-10s %-15s %-15s", "QUEUE", "DEPTH", "VISIBLE", "OLDEST (s)", "TOTAL")
+      puts "QUEUE                                    DEPTH      VISIBLE    OLDEST (s)      TOTAL          "
       puts "-" * 95
 
       Array(metrics).each do |m|
         puts format("%-40s %-10s %-10s %-15s %-15s",
-          m.queue_name, m.queue_length, m.queue_visible_length,
-          m.oldest_msg_age_sec || "-", m.total_messages)
+                    m.queue_name, m.queue_length, m.queue_visible_length,
+                    m.oldest_msg_age_sec || "-", m.total_messages)
       end
     end
 

@@ -42,9 +42,9 @@ module Pgbus
 
       def matches?(pattern, routing_key)
         regex = pattern
-          .gsub(".", "\\.")
-          .gsub("*", "[^.]+")
-          .gsub("#", ".*")
+                .gsub(".", "\\.")
+                .gsub("*", "[^.]+")
+                .gsub("#", ".*")
         routing_key.match?(/\A#{regex}\z/)
       end
     end

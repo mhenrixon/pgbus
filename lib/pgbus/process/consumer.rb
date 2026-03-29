@@ -46,10 +46,10 @@ module Pgbus
       private
 
       def setup_subscriptions
-        @queue_names = @registry.subscribers
-          .select { |s| topics.any? { |t| pattern_overlaps?(t, s.pattern) } }
-          .map(&:queue_name)
-          .uniq
+        matching = @registry.subscribers.select do |s|
+          topics.any? { |t| pattern_overlaps?(t, s.pattern) }
+        end
+        @queue_names = matching.map(&:queue_name).uniq
       end
 
       def consume

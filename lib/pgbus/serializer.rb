@@ -21,19 +21,17 @@ module Pgbus
     def serialize_event(event)
       payload = event.respond_to?(:to_global_id) ? { "_global_id" => event.to_global_id.to_s } : event
       JSON.generate({
-        "event_id" => event.respond_to?(:event_id) ? event.event_id : SecureRandom.uuid,
-        "payload" => payload,
-        "published_at" => Time.now.utc.iso8601(6)
-      })
+                      "event_id" => event.respond_to?(:event_id) ? event.event_id : SecureRandom.uuid,
+                      "payload" => payload,
+                      "published_at" => Time.now.utc.iso8601(6)
+                    })
     end
 
     def deserialize_event(json_string)
       data = JSON.parse(json_string)
       payload = data["payload"]
 
-      if payload.is_a?(Hash) && payload["_global_id"]
-        data["payload"] = GlobalID::Locator.locate(payload["_global_id"])
-      end
+      data["payload"] = GlobalID::Locator.locate(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
 
       Event.new(
         event_id: data["event_id"],

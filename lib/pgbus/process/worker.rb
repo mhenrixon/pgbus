@@ -90,31 +90,39 @@ module Pgbus
       end
 
       def recycle_needed?
-        if config.max_jobs_per_worker && @stats[:jobs_processed] >= config.max_jobs_per_worker
-          Pgbus.logger.info { "[Pgbus] Worker recycling: max_jobs reached (#{@stats[:jobs_processed]})" }
-          return true
-        end
+        exceeded_max_jobs? || exceeded_max_memory? || exceeded_max_lifetime?
+      end
 
-        if config.max_memory_mb && current_memory_mb > config.max_memory_mb
-          Pgbus.logger.info { "[Pgbus] Worker recycling: memory limit exceeded (#{current_memory_mb}MB > #{config.max_memory_mb}MB)" }
-          return true
-        end
+      def exceeded_max_jobs?
+        return false unless config.max_jobs_per_worker && @stats[:jobs_processed] >= config.max_jobs_per_worker
 
-        if config.max_worker_lifetime && (Time.now - @stats[:started_at]) > config.max_worker_lifetime
-          Pgbus.logger.info { "[Pgbus] Worker recycling: lifetime exceeded" }
-          return true
-        end
+        Pgbus.logger.info { "[Pgbus] Worker recycling: max_jobs reached (#{@stats[:jobs_processed]})" }
+        true
+      end
 
-        false
+      def exceeded_max_memory?
+        return false unless config.max_memory_mb && current_memory_mb > config.max_memory_mb
+
+        Pgbus.logger.info { "[Pgbus] Worker recycling: memory limit (#{current_memory_mb}MB > #{config.max_memory_mb}MB)" }
+        true
+      end
+
+      def exceeded_max_lifetime?
+        return false unless config.max_worker_lifetime && (Time.now - @stats[:started_at]) > config.max_worker_lifetime
+
+        Pgbus.logger.info { "[Pgbus] Worker recycling: lifetime exceeded" }
+        true
       end
 
       def current_memory_mb
         if RUBY_PLATFORM.include?("darwin")
           `ps -o rss= -p #{::Process.pid}`.to_i / 1024
         else
-          File.read("/proc/#{::Process.pid}/statm").split[1].to_i * 4096 / (1024 * 1024)
-        rescue Errno::ENOENT
-          0
+          begin
+            File.read("/proc/#{::Process.pid}/statm").split[1].to_i * 4096 / (1024 * 1024)
+          rescue Errno::ENOENT
+            0
+          end
         end
       end
 

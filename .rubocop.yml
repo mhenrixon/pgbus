@@ -1,4 +1,4 @@
-require:
+plugins:
   - rubocop-rspec
 
 AllCops:
@@ -12,10 +12,39 @@ Style/StringLiterals:
 Style/StringLiteralsInInterpolation:
   EnforcedStyle: double_quotes
 
+Style/Documentation:
+  Enabled: false
+
+Style/FormatStringToken:
+  Enabled: false
+
 Metrics/BlockLength:
   Exclude:
     - spec/**/*
     - pgbus.gemspec
+
+Metrics/MethodLength:
+  Max: 20
+
+Metrics/AbcSize:
+  Max: 25
+
+Metrics/ClassLength:
+  Max: 150
+
+Metrics/CyclomaticComplexity:
+  Max: 10
+
+Metrics/PerceivedComplexity:
+  Max: 10
+
+Naming/MethodParameterName:
+  AllowedNames:
+    - vt
+    - id
+
+Layout/LineLength:
+  Max: 140
 
 RSpec/ExampleLength:
   Max: 20
@@ -25,3 +54,9 @@ RSpec/MultipleExpectations:
 
 RSpec/NestedGroups:
   Max: 4
+
+RSpec/LeakyConstantDeclaration:
+  Enabled: false
+
+RSpec/IdenticalEqualityAssertion:
+  Enabled: false

@@ -24,12 +24,12 @@ module Pgbus
         event_id = SecureRandom.uuid
 
         serialized_payload = if payload.respond_to?(:to_global_id)
-          { "_global_id" => payload.to_global_id.to_s }
-        elsif payload.is_a?(Hash)
-          payload
-        else
-          { "value" => payload }
-        end
+                               { "_global_id" => payload.to_global_id.to_s }
+                             elsif payload.is_a?(Hash)
+                               payload
+                             else
+                               { "value" => payload }
+                             end
 
         {
           "event_id" => event_id,
