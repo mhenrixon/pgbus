@@ -3,13 +3,13 @@
 Pgbus::Engine.routes.draw do
   root to: "dashboard#show"
 
-  resources :queues, only: [:index, :show], param: :name do
+  resources :queues, only: %i[index show], param: :name do
     member do
       post :purge
     end
   end
 
-  resources :jobs, only: [:index, :show] do
+  resources :jobs, only: %i[index show] do
     member do
       post :retry
       post :discard
@@ -22,13 +22,13 @@ Pgbus::Engine.routes.draw do
 
   resources :processes, only: [:index]
 
-  resources :events, only: [:index, :show] do
+  resources :events, only: %i[index show] do
     member do
       post :replay
     end
   end
 
-  resources :dead_letter, only: [:index, :show], path: "dlq" do
+  resources :dead_letter, only: %i[index show], path: "dlq" do
     member do
       post :retry
       post :discard

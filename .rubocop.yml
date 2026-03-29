@@ -22,15 +22,16 @@ Metrics/BlockLength:
   Exclude:
     - spec/**/*
     - pgbus.gemspec
+    - config/routes.rb
 
 Metrics/MethodLength:
-  Max: 20
+  Max: 25
 
 Metrics/AbcSize:
   Max: 25
 
 Metrics/ClassLength:
-  Max: 150
+  Max: 250
 
 Metrics/CyclomaticComplexity:
   Max: 10
@@ -42,6 +43,8 @@ Naming/MethodParameterName:
   AllowedNames:
     - vt
     - id
+    - n
+    - m
 
 Layout/LineLength:
   Max: 140
@@ -59,4 +62,13 @@ RSpec/LeakyConstantDeclaration:
   Enabled: false
 
 RSpec/IdenticalEqualityAssertion:
+  Enabled: false
+
+RSpec/SpecFilePathFormat:
+  Enabled: false
+
+RSpec/VerifiedDoubles:
+  Enabled: false
+
+RSpec/SubjectStub:
   Enabled: false

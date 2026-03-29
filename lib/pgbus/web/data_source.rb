@@ -154,7 +154,7 @@ module Pgbus
           query_queue_messages_raw(q[:name], 100, 0)
         end
 
-        messages.sort_by { |m| -(m[:msg_id].to_i) }.slice(offset, per_page) || []
+        messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, per_page) || []
       rescue StandardError
         []
       end
@@ -253,7 +253,7 @@ module Pgbus
         messages = queues.flat_map do |q|
           query_queue_messages_raw(q[:name], 100, 0)
         end
-        messages.sort_by { |m| -(m[:msg_id].to_i) }.slice(offset, limit) || []
+        messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, limit) || []
       end
 
       def format_metrics(m)

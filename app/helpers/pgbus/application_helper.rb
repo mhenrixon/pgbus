@@ -59,10 +59,10 @@ module Pgbus
     def pgbus_nav_link(label, path)
       active = request.path == path || (path != pgbus.root_path && request.path.start_with?(path))
       css = if active
-        "rounded-md px-3 py-2 text-sm font-medium text-white bg-gray-800"
-      else
-        "rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700"
-      end
+              "rounded-md px-3 py-2 text-sm font-medium text-white bg-gray-800"
+            else
+              "rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700"
+            end
       link_to label, path, class: css
     end
   end

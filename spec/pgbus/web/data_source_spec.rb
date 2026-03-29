@@ -4,9 +4,9 @@ require_relative "../../../lib/pgbus/web/data_source"
 
 RSpec.describe Pgbus::Web::DataSource do
   # Stub the Client class to avoid loading pgmq-ruby
-  let(:mock_client) { double("Pgbus::Client", pgmq: double("pgmq")) }
-
   subject(:data_source) { described_class.new(client: mock_client) }
+
+  let(:mock_client) { double("Pgbus::Client", pgmq: double("pgmq")) }
 
   describe "#queues_with_metrics" do
     it "returns formatted metrics" do
@@ -65,13 +65,12 @@ RSpec.describe Pgbus::Web::DataSource do
     it "computes aggregate stats" do
       metrics = [
         double(queue_name: "pgbus_default", queue_length: "10", queue_visible_length: "8",
-          oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "100"),
+               oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "100"),
         double(queue_name: "pgbus_default_dlq", queue_length: "2", queue_visible_length: "2",
-          oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "5")
+               oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "5")
       ]
       allow(mock_client).to receive(:metrics).with(no_args).and_return(metrics)
-      allow(data_source).to receive(:failed_events_count).and_return(3)
-      allow(data_source).to receive(:processes).and_return([{ id: 1 }, { id: 2 }])
+      allow(data_source).to receive_messages(failed_events_count: 3, processes: [{ id: 1 }, { id: 2 }])
 
       stats = data_source.summary_stats
       expect(stats[:total_queues]).to eq(2)
