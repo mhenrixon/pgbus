@@ -35,9 +35,7 @@ module Pgbus
 
       def build_event(raw)
         payload = raw["payload"]
-        if payload.is_a?(Hash) && payload["_global_id"]
-          payload = GlobalID::Locator.locate(payload["_global_id"])
-        end
+        payload = GlobalID::Locator.locate(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
 
         Event.new(
           event_id: raw["event_id"],

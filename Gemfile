@@ -18,8 +18,8 @@ group :test do
 end
 
 group :development, :test do
-  gem "activerecord", ">= 7.1", "< 9.0"
-  gem "activejob", ">= 7.1", "< 9.0"
   gem "actioncable", ">= 7.1", "< 9.0"
+  gem "activejob", ">= 7.1", "< 9.0"
+  gem "activerecord", ">= 7.1", "< 9.0"
   gem "pg", "~> 1.5"
 end

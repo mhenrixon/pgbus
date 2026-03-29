@@ -15,7 +15,9 @@ module Pgbus
       def run
         setup_signals
         start_heartbeat
-        Pgbus.logger.info { "[Pgbus] Dispatcher started: interval=#{config.dispatch_interval}s batch=#{config.dispatch_batch_size}" }
+        Pgbus.logger.info do
+          "[Pgbus] Dispatcher started: interval=#{config.dispatch_interval}s batch=#{config.dispatch_batch_size}"
+        end
 
         loop do
           break if @shutting_down
@@ -41,7 +43,19 @@ module Pgbus
       def dispatch_scheduled
         return 0 unless defined?(ActiveRecord::Base)
 
-        result = ActiveRecord::Base.connection.execute(<<~SQL)
+        result = fetch_due_events
+        result.each { |row| enqueue_event(row) }
+
+        count = result.count
+        Pgbus.logger.debug { "[Pgbus] Dispatched #{count} scheduled events" } if count.positive?
+        count
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Dispatcher error: #{e.message}" }
+        0
+      end
+
+      def fetch_due_events
+        ActiveRecord::Base.connection.execute(<<~SQL)
           DELETE FROM pgbus_scheduled_events
           WHERE id IN (
             SELECT id FROM pgbus_scheduled_events
@@ -52,21 +66,14 @@ module Pgbus
           )
           RETURNING queue_name, payload, headers
         SQL
+      end
 
-        result.each do |row|
-          Pgbus.client.send_message(
-            row["queue_name"],
-            JSON.parse(row["payload"]),
-            headers: row["headers"] ? JSON.parse(row["headers"]) : nil
-          )
-        end
-
-        count = result.count
-        Pgbus.logger.debug { "[Pgbus] Dispatched #{count} scheduled events" } if count > 0
-        count
-      rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Dispatcher error: #{e.message}" }
-        0
+      def enqueue_event(row)
+        Pgbus.client.send_message(
+          row["queue_name"],
+          JSON.parse(row["payload"]),
+          headers: row["headers"] ? JSON.parse(row["headers"]) : nil
+        )
       end
 
       def start_heartbeat

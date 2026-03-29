@@ -128,7 +128,9 @@ module Pgbus
           if @shutting_down
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
           else
-            Pgbus.logger.warn { "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus}), restarting..." }
+            Pgbus.logger.warn do
+              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus}), restarting..."
+            end
             restart_child(info)
           end
         rescue Errno::ECHILD

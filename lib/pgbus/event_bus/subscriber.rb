@@ -20,10 +20,10 @@ module Pgbus
 
       def derive_queue_name
         handler_class.name
-          .gsub("::", "_")
-          .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
-          .gsub(/([a-z\d])([A-Z])/, '\1_\2')
-          .downcase
+                     .gsub("::", "_")
+                     .gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2')
+                     .gsub(/([a-z\d])([A-Z])/, '\1_\2')
+                     .downcase
       end
     end
   end

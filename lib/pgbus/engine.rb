@@ -8,9 +8,7 @@ module Pgbus
 
     initializer "pgbus.configure" do |app|
       config_path = app.root.join("config", "pgbus.yml")
-      if config_path.exist?
-        Pgbus::ConfigLoader.load(config_path)
-      end
+      Pgbus::ConfigLoader.load(config_path) if config_path.exist?
     end
 
     initializer "pgbus.active_job" do

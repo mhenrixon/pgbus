@@ -31,8 +31,8 @@ RSpec.describe Pgbus::ConfigLoader do
       expect(Pgbus.configuration.pool_size).to eq(3)
       expect(Pgbus.configuration.max_retries).to eq(10)
     ensure
-      Tmpfile&.close
-      Tmpfile&.unlink
+      Tmpfile.close
+      Tmpfile.unlink
     end
   end
 
@@ -40,10 +40,10 @@ RSpec.describe Pgbus::ConfigLoader do
     it "sets configuration values from a hash" do
       Pgbus.reset!
       described_class.apply({
-        "queue_prefix" => "custom",
-        "max_retries" => 7,
-        "polling_interval" => 0.5
-      })
+                              "queue_prefix" => "custom",
+                              "max_retries" => 7,
+                              "polling_interval" => 0.5
+                            })
 
       expect(Pgbus.configuration.queue_prefix).to eq("custom")
       expect(Pgbus.configuration.max_retries).to eq(7)
@@ -51,9 +51,9 @@ RSpec.describe Pgbus::ConfigLoader do
     end
 
     it "ignores unknown keys" do
-      expect {
+      expect do
         described_class.apply({ "nonexistent_setting" => "value" })
-      }.not_to raise_error
+      end.not_to raise_error
     end
   end
 end

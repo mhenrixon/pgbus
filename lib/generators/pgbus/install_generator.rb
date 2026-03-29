@@ -28,11 +28,11 @@ module Pgbus
       def configure_active_job
         application_config = "config.active_job.queue_adapter = :pgbus"
 
-        if File.exist?(File.join(destination_root, "config", "application.rb"))
-          inject_into_file "config/application.rb",
-            "\n    #{application_config}\n",
-            after: "class Application < Rails::Application\n"
-        end
+        return unless File.exist?(File.join(destination_root, "config", "application.rb"))
+
+        inject_into_file "config/application.rb",
+                         "\n    #{application_config}\n",
+                         after: "class Application < Rails::Application\n"
       end
 
       def display_post_install

@@ -23,9 +23,7 @@ module Pgbus
         return if @queues_created[full_name]
 
         @pgmq.create(full_name)
-        if config.listen_notify
-          @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms)
-        end
+        @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
         @queues_created[full_name] = true
       end
     end
