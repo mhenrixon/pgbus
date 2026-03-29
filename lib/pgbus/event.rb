@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module Pgbus
   class Event
     attr_reader :event_id, :payload, :published_at, :routing_key, :headers
