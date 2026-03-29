@@ -1,0 +1,75 @@
+# Pgbus configuration
+# https://github.com/mhenrixon/pgbus
+
+default: &default
+  # Queue prefix for all PGMQ queues
+  queue_prefix: pgbus
+
+  # Default queue name (without prefix)
+  default_queue: default
+
+  # Connection pool for PGMQ client
+  pool_size: 5
+  pool_timeout: 5
+
+  # Use PostgreSQL LISTEN/NOTIFY for instant job wake-up
+  listen_notify: true
+  notify_throttle_ms: 250
+
+  # Visibility timeout in seconds (how long a message is invisible after being read)
+  visibility_timeout: 30
+
+  # Dead letter queue
+  max_retries: 5
+
+  # Idempotency deduplication TTL (seconds)
+  idempotency_ttl: 604800  # 7 days
+
+  # Worker definitions
+  workers:
+    - queues:
+        - critical
+        - default
+      threads: 5
+    - queues:
+        - low
+      threads: 2
+
+  # Worker recycling (prevents memory bloat)
+  max_jobs_per_worker: 10000
+  max_memory_mb: 512
+  # max_worker_lifetime: 3600  # seconds
+
+  # Dispatcher settings (moves scheduled jobs to ready queues)
+  dispatch_interval: 1.0
+  dispatch_batch_size: 500
+
+  # Event consumers (uncomment to enable event bus)
+  # event_consumers:
+  #   - topics:
+  #       - "orders.#"
+  #     threads: 3
+  #   - topics:
+  #       - "notifications.#"
+  #     threads: 1
+
+development:
+  <<: *default
+  workers:
+    - queues:
+        - default
+      threads: 2
+  max_jobs_per_worker: ~
+  max_memory_mb: ~
+
+test:
+  <<: *default
+  workers:
+    - queues:
+        - default
+      threads: 1
+  polling_interval: 0.01
+  visibility_timeout: 5
+
+production:
+  <<: *default

@@ -1,0 +1,27 @@
+require:
+  - rubocop-rspec
+
+AllCops:
+  TargetRubyVersion: 3.2
+  NewCops: enable
+  SuggestExtensions: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+
+Metrics/BlockLength:
+  Exclude:
+    - spec/**/*
+    - pgbus.gemspec
+
+RSpec/ExampleLength:
+  Max: 20
+
+RSpec/MultipleExpectations:
+  Max: 5
+
+RSpec/NestedGroups:
+  Max: 4

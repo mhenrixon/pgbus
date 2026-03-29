@@ -1,0 +1,73 @@
+class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Install PGMQ extension
+    enable_extension "pgmq"
+
+    # Idempotent event processing deduplication
+    create_table :pgbus_processed_events do |t|
+      t.string :event_id, null: false
+      t.string :handler_class, null: false
+      t.datetime :processed_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_processed_events, [:event_id, :handler_class],
+      unique: true, name: "idx_pgbus_processed_events_unique"
+
+    # Scheduled events (for enqueue_at / delayed delivery)
+    create_table :pgbus_scheduled_events do |t|
+      t.string :queue_name, null: false
+      t.jsonb :payload, null: false
+      t.jsonb :headers
+      t.datetime :scheduled_at, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_scheduled_events, [:scheduled_at, :queue_name],
+      name: "idx_pgbus_scheduled_events_dispatch"
+
+    # Process registry (heartbeats, monitoring)
+    create_table :pgbus_processes do |t|
+      t.string :kind, null: false
+      t.string :hostname
+      t.integer :pid
+      t.jsonb :metadata, default: {}
+      t.datetime :last_heartbeat_at
+      t.timestamps
+    end
+
+    add_index :pgbus_processes, :last_heartbeat_at,
+      name: "idx_pgbus_processes_heartbeat"
+
+    # Failed events log (for dashboard visibility)
+    create_table :pgbus_failed_events do |t|
+      t.string :queue_name, null: false
+      t.bigint :msg_id
+      t.jsonb :payload
+      t.jsonb :headers
+      t.string :error_class
+      t.text :error_message
+      t.text :backtrace
+      t.integer :retry_count, default: 0
+      t.datetime :failed_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_failed_events, :queue_name, name: "idx_pgbus_failed_events_queue"
+    add_index :pgbus_failed_events, :failed_at, name: "idx_pgbus_failed_events_time"
+
+    # Create default queues via PGMQ
+    execute "SELECT pgmq.create('pgbus_default')"
+    execute "SELECT pgmq.create('pgbus_default_dlq')"
+  end
+
+  def down
+    execute "SELECT pgmq.drop_queue('pgbus_default_dlq')"
+    execute "SELECT pgmq.drop_queue('pgbus_default')"
+
+    drop_table :pgbus_failed_events
+    drop_table :pgbus_processes
+    drop_table :pgbus_scheduled_events
+    drop_table :pgbus_processed_events
+
+    disable_extension "pgmq"
+  end
+end
