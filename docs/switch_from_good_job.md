@@ -127,10 +127,10 @@ class ProcessOrderJob < ApplicationJob
 end
 ```
 
-> Pgbus plans to add concurrency controls. In the meantime, use PostgreSQL advisory locks for mutual exclusion:
+> Pgbus plans to add concurrency controls. For now, use row-level locking for mutual exclusion:
 > ```ruby
 > def perform(order)
->   order.with_lock { process(order) }
+>   order.with_lock { process(order) }  # SELECT ... FOR UPDATE
 > end
 > ```
 
