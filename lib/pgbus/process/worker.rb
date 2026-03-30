@@ -7,16 +7,22 @@ module Pgbus
     class Worker
       include SignalHandler
 
-      attr_reader :queues, :threads, :config, :stats
+      attr_reader :queues, :threads, :config
 
       def initialize(queues:, threads: 5, config: Pgbus.configuration)
         @queues = Array(queues)
         @threads = threads
         @config = config
         @shutting_down = false
-        @stats = { jobs_processed: 0, jobs_failed: 0, started_at: Time.now }
+        @jobs_processed = Concurrent::AtomicFixnum.new(0)
+        @jobs_failed = Concurrent::AtomicFixnum.new(0)
+        @started_at = Time.now
         @executor = Pgbus::ActiveJob::Executor.new
         @pool = Concurrent::FixedThreadPool.new(threads)
+      end
+
+      def stats
+        { jobs_processed: @jobs_processed.value, jobs_failed: @jobs_failed.value, started_at: @started_at }
       end
 
       def run
@@ -82,10 +88,10 @@ module Pgbus
 
       def process_message(message, queue_name)
         result = @executor.execute(message, queue_name)
-        @stats[:jobs_processed] += 1
-        @stats[:jobs_failed] += 1 if result == :failed
+        @jobs_processed.increment
+        @jobs_failed.increment if result == :failed
       rescue StandardError => e
-        @stats[:jobs_failed] += 1
+        @jobs_failed.increment
         Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
       end
 
@@ -94,9 +100,9 @@ module Pgbus
       end
 
       def exceeded_max_jobs?
-        return false unless config.max_jobs_per_worker && @stats[:jobs_processed] >= config.max_jobs_per_worker
+        return false unless config.max_jobs_per_worker && @jobs_processed.value >= config.max_jobs_per_worker
 
-        Pgbus.logger.info { "[Pgbus] Worker recycling: max_jobs reached (#{@stats[:jobs_processed]})" }
+        Pgbus.logger.info { "[Pgbus] Worker recycling: max_jobs reached (#{@jobs_processed.value})" }
         true
       end
 
@@ -108,7 +114,7 @@ module Pgbus
       end
 
       def exceeded_max_lifetime?
-        return false unless config.max_worker_lifetime && (Time.now - @stats[:started_at]) > config.max_worker_lifetime
+        return false unless config.max_worker_lifetime && (Time.now - @started_at) > config.max_worker_lifetime
 
         Pgbus.logger.info { "[Pgbus] Worker recycling: lifetime exceeded" }
         true
@@ -140,7 +146,7 @@ module Pgbus
         @pool.wait_for_termination(30)
         @heartbeat&.stop
         restore_signals
-        Pgbus.logger.info { "[Pgbus] Worker stopped. Processed: #{@stats[:jobs_processed]}, Failed: #{@stats[:jobs_failed]}" }
+        Pgbus.logger.info { "[Pgbus] Worker stopped. Processed: #{@jobs_processed.value}, Failed: #{@jobs_failed.value}" }
       end
     end
   end

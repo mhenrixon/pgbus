@@ -31,6 +31,9 @@ module Pgbus
     # LISTEN/NOTIFY
     attr_accessor :listen_notify, :notify_throttle_ms
 
+    # Event consumers
+    attr_accessor :event_consumers
+
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
 
@@ -63,6 +66,8 @@ module Pgbus
 
       @listen_notify = true
       @notify_throttle_ms = 250
+
+      @event_consumers = nil
 
       @web_auth = nil
       @web_refresh_interval = 5000

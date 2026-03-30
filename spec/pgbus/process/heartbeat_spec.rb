@@ -48,9 +48,13 @@ RSpec.describe Pgbus::Process::Heartbeat do
         heartbeat.start
       end
 
-      it "updates the heartbeat timestamp" do
+      it "updates the heartbeat timestamp with bind params" do
         heartbeat.beat
-        expect(connection).to have_received(:execute).with(/UPDATE pgbus_processes SET last_heartbeat_at/)
+        expect(connection).to have_received(:execute).with(
+          "UPDATE pgbus_processes SET last_heartbeat_at = NOW() WHERE id = $1",
+          "Pgbus Heartbeat",
+          [42]
+        )
       end
     end
 
@@ -63,8 +67,6 @@ RSpec.describe Pgbus::Process::Heartbeat do
     end
 
     context "when ActiveRecord raises an error" do
-      let(:failing_connection) { double("AR::Connection") }
-
       before do
         stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
         heartbeat.start
@@ -89,9 +91,13 @@ RSpec.describe Pgbus::Process::Heartbeat do
       expect(timer).to have_received(:shutdown)
     end
 
-    it "deregisters the process" do
+    it "deregisters the process with bind params" do
       heartbeat.stop
-      expect(connection).to have_received(:execute).with(/DELETE FROM pgbus_processes/)
+      expect(connection).to have_received(:execute).with(
+        "DELETE FROM pgbus_processes WHERE id = $1",
+        "Pgbus Deregister Process",
+        [42]
+      )
     end
   end
 end

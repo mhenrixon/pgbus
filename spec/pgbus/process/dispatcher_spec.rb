@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 require "spec_helper"
-require "json"
-require "socket"
 
 RSpec.describe Pgbus::Process::Dispatcher do
   let(:heartbeat) { instance_double(Pgbus::Process::Heartbeat, start: true, stop: true) }
@@ -28,62 +26,93 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
   end
 
-  describe "#dispatch_scheduled (private)" do
+  describe "#cleanup_processed_events (private)" do
     context "when ActiveRecord is not defined" do
       before { hide_const("ActiveRecord") }
 
-      it "returns 0" do
-        expect(dispatcher.send(:dispatch_scheduled)).to eq(0)
+      it "returns early" do
+        expect(dispatcher.send(:cleanup_processed_events)).to be_nil
       end
     end
 
     context "when ActiveRecord is defined" do
       let(:connection) { double("AR::Connection") }
-      let(:due_events) do
-        [
-          { "queue_name" => "pgbus_test_default", "payload" => '{"job_class":"TestJob"}', "headers" => nil }
-        ]
-      end
 
       before do
         stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-        allow(connection).to receive(:execute).and_return(due_events)
       end
 
-      it "fetches due events and enqueues them" do
-        result = dispatcher.send(:dispatch_scheduled)
-        expect(result).to eq(1)
-        expect(mock_client).to have_received(:send_message).with("pgbus_test_default", { "job_class" => "TestJob" }, headers: nil)
+      it "deletes expired processed events with bind params" do
+        allow(connection).to receive(:delete).and_return(5)
+        dispatcher.send(:cleanup_processed_events)
+        expect(connection).to have_received(:delete).with(
+          "DELETE FROM pgbus_processed_events WHERE processed_at < $1",
+          "Pgbus Idempotency Cleanup",
+          [an_instance_of(Time)]
+        )
       end
 
-      it "returns 0 and logs when enqueue raises" do
-        allow(mock_client).to receive(:send_message).and_raise(StandardError, "enqueue failed")
-        allow(connection).to receive(:quote) { |v| "'#{v}'" }
-
-        result = dispatcher.send(:dispatch_scheduled)
-        expect(result).to eq(0)
-      end
-    end
-
-    context "when fetch_due_events raises" do
-      let(:connection) { double("AR::Connection") }
-
-      before do
-        stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-        allow(connection).to receive(:execute).and_raise(StandardError, "connection lost")
+      it "returns early when idempotency_ttl is not set" do
+        original_ttl = dispatcher.config.idempotency_ttl
+        dispatcher.config.idempotency_ttl = nil
+        allow(connection).to receive(:delete)
+        dispatcher.send(:cleanup_processed_events)
+        expect(connection).not_to have_received(:delete)
+      ensure
+        dispatcher.config.idempotency_ttl = original_ttl
       end
 
-      it "returns 0" do
-        expect(dispatcher.send(:dispatch_scheduled)).to eq(0)
+      it "rescues StandardError and logs a warning" do
+        allow(connection).to receive(:delete).and_raise(StandardError, "db error")
+        expect { dispatcher.send(:cleanup_processed_events) }.not_to raise_error
       end
     end
   end
 
-  describe "#enqueue_event (private)" do
-    it "sends a message via Pgbus.client with parsed payload and headers" do
-      row = { "queue_name" => "pgbus_test_jobs", "payload" => '{"foo":"bar"}', "headers" => '{"h":"v"}' }
-      dispatcher.send(:enqueue_event, row)
-      expect(mock_client).to have_received(:send_message).with("pgbus_test_jobs", { "foo" => "bar" }, headers: { "h" => "v" })
+  describe "#reap_stale_processes (private)" do
+    context "when ActiveRecord is not defined" do
+      before { hide_const("ActiveRecord") }
+
+      it "returns early" do
+        expect(dispatcher.send(:reap_stale_processes)).to be_nil
+      end
+    end
+
+    context "when ActiveRecord is defined" do
+      let(:connection) { double("AR::Connection") }
+
+      before do
+        stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
+      end
+
+      it "deletes stale processes with bind params" do
+        allow(connection).to receive(:delete).and_return(2)
+        dispatcher.send(:reap_stale_processes)
+        expect(connection).to have_received(:delete).with(
+          "DELETE FROM pgbus_processes WHERE last_heartbeat_at < $1",
+          "Pgbus Stale Process Reap",
+          [an_instance_of(Time)]
+        )
+      end
+
+      it "rescues StandardError and logs a warning" do
+        allow(connection).to receive(:delete).and_raise(StandardError, "db error")
+        expect { dispatcher.send(:reap_stale_processes) }.not_to raise_error
+      end
+    end
+  end
+
+  describe "#run_maintenance (private)" do
+    it "calls cleanup_processed_events and reap_stale_processes" do
+      allow(dispatcher).to receive_messages(cleanup_processed_events: nil, reap_stale_processes: nil)
+      dispatcher.send(:run_maintenance)
+      expect(dispatcher).to have_received(:cleanup_processed_events)
+      expect(dispatcher).to have_received(:reap_stale_processes)
+    end
+
+    it "rescues errors from maintenance methods" do
+      allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
+      expect { dispatcher.send(:run_maintenance) }.not_to raise_error
     end
   end
 

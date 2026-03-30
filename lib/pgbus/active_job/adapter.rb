@@ -53,5 +53,5 @@ module Pgbus
   end
 end
 
-# Register the adapter with ActiveJob
-ActiveJob::QueueAdapters.register(:pgbus, Pgbus::ActiveJob::Adapter)
+# Register the adapter with ActiveJob (register method added in Rails 7.2+)
+ActiveJob::QueueAdapters.register(:pgbus, Pgbus::ActiveJob::Adapter) if ActiveJob::QueueAdapters.respond_to?(:register)
