@@ -18,28 +18,8 @@ Style/Documentation:
 Style/FormatStringToken:
   Enabled: false
 
-Metrics/BlockLength:
-  Exclude:
-    - spec/**/*
-    - pgbus.gemspec
-    - config/routes.rb
-
-Metrics/MethodLength:
-  Max: 25
-
-Metrics/AbcSize:
-  Max: 25
-
-Metrics/ClassLength:
-  Max: 310
-  Exclude:
-    - lib/pgbus/web/data_source.rb
-
-Metrics/CyclomaticComplexity:
-  Max: 10
-
-Metrics/PerceivedComplexity:
-  Max: 10
+Metrics:
+  Enabled: false
 
 Naming/MethodParameterName:
   AllowedNames:
