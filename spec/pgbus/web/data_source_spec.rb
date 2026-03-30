@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "spec_helper"
+
 require_relative "../../../lib/pgbus/web/data_source"
 
 RSpec.describe Pgbus::Web::DataSource do

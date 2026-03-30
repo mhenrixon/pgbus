@@ -31,5 +31,45 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
-      - name: Run the default task
+      - name: Run unit tests and rubocop
         run: bundle exec rake
+
+  system_test:
+    runs-on: ubuntu-latest
+    name: System Tests
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install Playwright
+        run: |
+          npm install
+          npx playwright install chromium
+          npx playwright install-deps chromium
+
+      - name: Run system tests
+        env:
+          RAILS_ENV: test
+          HEADLESS: "true"
+        run: bundle exec rspec spec/system/
+
+      - name: Upload failure screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: capybara-screenshots
+          path: spec/dummy/tmp/capybara/**/*.png
+          if-no-files-found: ignore

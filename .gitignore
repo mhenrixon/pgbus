@@ -10,3 +10,11 @@
 Gemfile.lock
 .rspec_status
 .claude/settings.local.json
+node_modules/
+package-lock.json
+spec/dummy/db/*.sqlite3
+spec/dummy/log/
+spec/dummy/tmp/
+tmp/capybara/
+bin/rspec
+bin/rubocop

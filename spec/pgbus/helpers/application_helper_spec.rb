@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "spec_helper"
+
 require_relative "../../../app/helpers/pgbus/application_helper"
 
 RSpec.describe Pgbus::ApplicationHelper do

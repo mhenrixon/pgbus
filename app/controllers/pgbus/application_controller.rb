@@ -13,7 +13,7 @@ module Pgbus
     private
 
     def data_source
-      @data_source ||= Web::DataSource.new
+      @data_source ||= Pgbus.configuration.web_data_source || Web::DataSource.new
     end
 
     def page_param

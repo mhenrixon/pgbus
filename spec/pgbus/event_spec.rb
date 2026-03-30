@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "spec_helper"
+
 RSpec.describe Pgbus::Event do
   subject(:event) do
     described_class.new(
