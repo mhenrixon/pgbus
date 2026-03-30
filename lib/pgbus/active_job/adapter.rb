@@ -9,6 +9,7 @@ module Pgbus
         queue = active_job.queue_name || Pgbus.configuration.default_queue
         payload_hash = JSON.parse(Serializer.serialize_job(active_job))
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
+        payload_hash = inject_batch_metadata(payload_hash)
 
         enqueue_with_concurrency(active_job, queue, payload_hash)
       end
@@ -17,6 +18,7 @@ module Pgbus
         queue = active_job.queue_name || Pgbus.configuration.default_queue
         payload_hash = JSON.parse(Serializer.serialize_job(active_job))
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
+        payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.now.to_f).ceil, 0].max
 
         enqueue_with_concurrency(active_job, queue, payload_hash, delay: delay)
@@ -73,6 +75,14 @@ module Pgbus
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
         end
+      end
+
+      def inject_batch_metadata(payload_hash)
+        batch_id = Thread.current[:pgbus_batch_id]
+        return payload_hash unless batch_id
+
+        Thread.current[:pgbus_batch_job_count] = (Thread.current[:pgbus_batch_job_count] || 0) + 1
+        payload_hash.merge(Batch::METADATA_KEY => batch_id)
       end
 
       def enqueue_immediate(queue, jobs)

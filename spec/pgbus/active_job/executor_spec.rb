@@ -103,6 +103,36 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    context "with batch_id in payload" do
+      let(:batch_payload) { job_payload.merge("pgbus_batch_id" => "batch-abc") }
+      let(:message_json) { JSON.generate(batch_payload) }
+      let(:message) { build_message_double(msg_id: 30, message: message_json, read_ct: 1) }
+
+      before do
+        allow(ActiveJob::Base).to receive(:deserialize).with(batch_payload).and_return(job_double)
+        allow(Pgbus::Batch).to receive(:job_completed)
+        allow(Pgbus::Batch).to receive(:job_discarded)
+      end
+
+      it "signals batch completed on success" do
+        executor.execute(message, queue_name)
+        expect(Pgbus::Batch).to have_received(:job_completed).with("batch-abc")
+      end
+
+      it "signals batch discarded on dead letter" do
+        dlq_message = build_message_double(msg_id: 31, message: message_json, read_ct: config.max_retries + 1)
+        executor.execute(dlq_message, queue_name)
+        expect(Pgbus::Batch).to have_received(:job_discarded).with("batch-abc")
+      end
+
+      it "does not signal batch on transient failure" do
+        allow(job_double).to receive(:perform_now).and_raise(StandardError, "transient")
+        executor.execute(message, queue_name)
+        expect(Pgbus::Batch).not_to have_received(:job_completed)
+        expect(Pgbus::Batch).not_to have_received(:job_discarded)
+      end
+    end
+
     context "with concurrency key in payload" do
       let(:concurrency_payload) { job_payload.merge("pgbus_concurrency_key" => "TestJob-42") }
       let(:message_json) { JSON.generate(concurrency_payload) }

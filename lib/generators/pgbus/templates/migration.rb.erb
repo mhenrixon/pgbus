@@ -71,6 +71,28 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
     add_index :pgbus_blocked_executions, [:concurrency_key, :priority, :created_at],
       name: "idx_pgbus_blocked_release_order"
 
+    # Batch tracking (coordinated job groups with callbacks)
+    create_table :pgbus_batches do |t|
+      t.string :batch_id, null: false
+      t.string :description
+      t.string :on_finish_class
+      t.string :on_success_class
+      t.string :on_discard_class
+      t.jsonb :properties, default: {}
+      t.integer :total_jobs, null: false, default: 0
+      t.integer :completed_jobs, null: false, default: 0
+      t.integer :failed_jobs, null: false, default: 0
+      t.integer :discarded_jobs, null: false, default: 0
+      t.string :status, null: false, default: "pending"
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+      t.datetime :finished_at
+    end
+
+    add_index :pgbus_batches, :batch_id,
+      unique: true, name: "idx_pgbus_batches_batch_id"
+    add_index :pgbus_batches, :status,
+      name: "idx_pgbus_batches_status"
+
     # Create default queues via PGMQ
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
@@ -80,6 +102,7 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
     execute "SELECT pgmq.drop_queue('pgbus_default_dlq')"
     execute "SELECT pgmq.drop_queue('pgbus_default')"
 
+    drop_table :pgbus_batches
     drop_table :pgbus_blocked_executions
     drop_table :pgbus_semaphores
     drop_table :pgbus_failed_events

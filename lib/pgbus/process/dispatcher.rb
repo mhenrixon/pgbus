@@ -9,6 +9,7 @@ module Pgbus
       CLEANUP_INTERVAL = 3600       # Run idempotency cleanup every hour
       REAP_INTERVAL = 300           # Run stale process reaping every 5 minutes
       CONCURRENCY_INTERVAL = 300    # Run concurrency cleanup every 5 minutes
+      BATCH_CLEANUP_INTERVAL = 3600 # Run batch cleanup every hour
 
       attr_reader :config
 
@@ -18,6 +19,7 @@ module Pgbus
         @last_cleanup_at = Time.now
         @last_reap_at = Time.now
         @last_concurrency_at = Time.now
+        @last_batch_cleanup_at = Time.now
       end
 
       def run
@@ -68,6 +70,11 @@ module Pgbus
         if now - @last_concurrency_at >= CONCURRENCY_INTERVAL
           cleanup_concurrency
           @last_concurrency_at = now
+        end
+
+        if now - @last_batch_cleanup_at >= BATCH_CLEANUP_INTERVAL
+          cleanup_batches
+          @last_batch_cleanup_at = now
         end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
@@ -120,6 +127,13 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Released blocked execution for key: #{key}" } if promoted
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Failed to release blocked execution for #{key}: #{e.message}" }
+      end
+
+      def cleanup_batches
+        deleted = Batch.cleanup(older_than: Time.now.utc - (7 * 24 * 3600)) # 7 days
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
       end
 
       def start_heartbeat
