@@ -31,6 +31,9 @@ module Pgbus
     # LISTEN/NOTIFY
     attr_accessor :listen_notify, :notify_throttle_ms
 
+    # Web dashboard
+    attr_accessor :web_auth, :web_refresh_interval, :web_per_page
+
     def initialize
       @database_url = nil
       @connection_params = nil
@@ -60,6 +63,10 @@ module Pgbus
 
       @listen_notify = true
       @notify_throttle_ms = 250
+
+      @web_auth = nil
+      @web_refresh_interval = 5000
+      @web_per_page = 25
     end
 
     def queue_name(name)

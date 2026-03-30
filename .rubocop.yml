@@ -18,30 +18,15 @@ Style/Documentation:
 Style/FormatStringToken:
   Enabled: false
 
-Metrics/BlockLength:
-  Exclude:
-    - spec/**/*
-    - pgbus.gemspec
-
-Metrics/MethodLength:
-  Max: 20
-
-Metrics/AbcSize:
-  Max: 25
-
-Metrics/ClassLength:
-  Max: 150
-
-Metrics/CyclomaticComplexity:
-  Max: 10
-
-Metrics/PerceivedComplexity:
-  Max: 10
+Metrics:
+  Enabled: false
 
 Naming/MethodParameterName:
   AllowedNames:
     - vt
     - id
+    - n
+    - m
 
 Layout/LineLength:
   Max: 140
@@ -59,4 +44,13 @@ RSpec/LeakyConstantDeclaration:
   Enabled: false
 
 RSpec/IdenticalEqualityAssertion:
+  Enabled: false
+
+RSpec/SpecFilePathFormat:
+  Enabled: false
+
+RSpec/VerifiedDoubles:
+  Enabled: false
+
+RSpec/SubjectStub:
   Enabled: false

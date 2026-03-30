@@ -88,6 +88,18 @@ module Pgbus
       @pgmq.set_vt(full_name, msg_id, vt: vt)
     end
 
+    def set_visibility_timeout(queue_name, msg_id, vt:)
+      @pgmq.set_vt(queue_name, msg_id, vt: vt)
+    end
+
+    def delete_from_queue(queue_name, msg_id)
+      @pgmq.delete(queue_name, msg_id)
+    end
+
+    def transaction(&)
+      @pgmq.transaction(&)
+    end
+
     def move_to_dead_letter(queue_name, message)
       ensure_dead_letter_queue(queue_name)
       dlq_name = config.dead_letter_queue_name(queue_name)

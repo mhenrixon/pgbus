@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pgbus Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script type="module">
+    import * as Turbo from "https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017.esm.js";
+
+    // Auto-refresh dashboard
+    const interval = <%= Pgbus.configuration.web_refresh_interval %>;
+    if (interval > 0) {
+      setInterval(() => {
+        const frames = document.querySelectorAll("turbo-frame[data-auto-refresh]");
+        frames.forEach(frame => frame.reload());
+      }, interval);
+    }
+  </script>
+</head>
+<body class="h-full">
+  <div class="min-h-full">
+    <!-- Top nav -->
+    <nav class="bg-gray-900">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex h-14 items-center justify-between">
+          <div class="flex items-center space-x-8">
+            <%= link_to pgbus.root_path, class: "flex items-center space-x-2" do %>
+              <span class="text-lg font-bold text-white">Pgbus</span>
+              <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300"><%= Pgbus::VERSION %></span>
+            <% end %>
+
+            <div class="flex space-x-1">
+              <%= pgbus_nav_link "Dashboard", pgbus.root_path %>
+              <%= pgbus_nav_link "Queues", pgbus.queues_path %>
+              <%= pgbus_nav_link "Jobs", pgbus.jobs_path %>
+              <%= pgbus_nav_link "Processes", pgbus.processes_path %>
+              <%= pgbus_nav_link "Events", pgbus.events_path %>
+              <%= pgbus_nav_link "DLQ", pgbus.dead_letter_index_path %>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Flash messages -->
+    <% if notice %>
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
+        <div class="rounded-md bg-green-50 p-3">
+          <p class="text-sm text-green-800"><%= notice %></p>
+        </div>
+      </div>
+    <% end %>
+    <% if alert %>
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
+        <div class="rounded-md bg-red-50 p-3">
+          <p class="text-sm text-red-800"><%= alert %></p>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Content -->
+    <main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+      <%= yield %>
+    </main>
+  </div>
+</body>
+</html>

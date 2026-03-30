@@ -44,11 +44,17 @@ module Pgbus
         return 0 unless defined?(ActiveRecord::Base)
 
         result = fetch_due_events
-        result.each { |row| enqueue_event(row) }
+        success_count = 0
+        result.each do |row|
+          enqueue_event(row)
+          success_count += 1
+        rescue StandardError => e
+          Pgbus.logger.error { "[Pgbus] Failed to dispatch event: #{e.message}" }
+          track_failed_dispatch(row, e)
+        end
 
-        count = result.count
-        Pgbus.logger.debug { "[Pgbus] Dispatched #{count} scheduled events" } if count.positive?
-        count
+        Pgbus.logger.debug { "[Pgbus] Dispatched #{success_count} scheduled events" } if success_count.positive?
+        success_count
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher error: #{e.message}" }
         0
@@ -74,6 +80,23 @@ module Pgbus
           JSON.parse(row["payload"]),
           headers: row["headers"] ? JSON.parse(row["headers"]) : nil
         )
+      end
+
+      def track_failed_dispatch(row, error)
+        conn = ActiveRecord::Base.connection
+        conn.execute(<<~SQL)
+          INSERT INTO pgbus_failed_events (queue_name, payload, headers, error_message, error_class, failed_at)
+          VALUES (
+            #{conn.quote(row["queue_name"])},
+            #{conn.quote(row["payload"])},
+            #{conn.quote(row["headers"])},
+            #{conn.quote(error.message)},
+            #{conn.quote(error.class.name)},
+            NOW()
+          )
+        SQL
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to track dispatch failure: #{e.message}" }
       end
 
       def start_heartbeat
