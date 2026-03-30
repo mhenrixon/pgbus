@@ -12,40 +12,4 @@
   <% end %>
 </div>
 
-<div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-  <table class="min-w-full divide-y divide-gray-200">
-    <thead class="bg-gray-50">
-      <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">ID</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source Queue</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Enqueued</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Reads</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Payload</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-gray-100">
-      <% @messages.each do |m| %>
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-3 text-sm font-mono text-gray-900"><%= m[:msg_id] %></td>
-          <td class="px-4 py-3 text-sm text-gray-700"><%= m[:queue_name] %></td>
-          <td class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(m[:enqueued_at]) %></td>
-          <td class="px-4 py-3 text-sm text-gray-500"><%= m[:read_ct] %></td>
-          <td class="px-4 py-3 text-sm text-gray-600 font-mono text-xs max-w-md truncate">
-            <%= pgbus_json_preview(m[:message]) %>
-          </td>
-          <td class="px-4 py-3 text-sm text-right space-x-2">
-            <%= button_to "Retry", pgbus.retry_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
-                  class: "text-xs text-indigo-600 hover:text-indigo-800 font-medium" %>
-            <%= button_to "Discard", pgbus.discard_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
-                  class: "text-xs text-red-600 hover:text-red-800 font-medium",
-                  data: { turbo_confirm: "Permanently discard?" } %>
-          </td>
-        </tr>
-      <% end %>
-      <% if @messages.empty? %>
-        <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">Dead letter queue is empty</td></tr>
-      <% end %>
-    </tbody>
-  </table>
-</div>
+<%= render "pgbus/dead_letter/messages_table" %>

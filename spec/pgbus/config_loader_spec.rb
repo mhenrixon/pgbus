@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "spec_helper"
+
 require "tempfile"
 
 RSpec.describe Pgbus::ConfigLoader do

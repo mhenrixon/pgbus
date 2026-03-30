@@ -1,0 +1,39 @@
+<turbo-frame id="dashboard-queues" data-auto-refresh src="<%= pgbus.root_path(frame: 'queues') %>">
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold text-gray-900">Queues</h2>
+      <%= link_to "View all", pgbus.queues_path, class: "text-sm text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
+    </div>
+
+    <div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
+            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Depth</th>
+            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Visible</th>
+            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Oldest (s)</th>
+            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Total</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          <% @queues.each do |q| %>
+            <tr class="hover:bg-gray-50">
+              <td class="px-4 py-3 text-sm">
+                <%= link_to q[:name], pgbus.queue_path(name: q[:name]), class: "font-medium text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
+                <%= pgbus_queue_badge(q[:name]) %>
+              </td>
+              <td class="px-4 py-3 text-sm text-right text-gray-700"><%= pgbus_number(q[:queue_length]) %></td>
+              <td class="px-4 py-3 text-sm text-right text-gray-700"><%= pgbus_number(q[:queue_visible_length]) %></td>
+              <td class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:oldest_msg_age_sec] || "—" %></td>
+              <td class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_number(q[:total_messages]) %></td>
+            </tr>
+          <% end %>
+          <% if @queues.empty? %>
+            <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400">No queues found</td></tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</turbo-frame>

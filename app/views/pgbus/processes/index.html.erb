@@ -1,37 +1,3 @@
 <h1 class="text-2xl font-bold text-gray-900 mb-6">Processes</h1>
 
-<div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-  <table class="min-w-full divide-y divide-gray-200">
-    <thead class="bg-gray-50">
-      <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Kind</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Hostname</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">PID</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Last Heartbeat</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Metadata</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-gray-100">
-      <% @processes.each do |p| %>
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-3 text-sm font-medium text-gray-900"><%= p[:kind] %></td>
-          <td class="px-4 py-3 text-sm text-gray-700"><%= p[:hostname] %></td>
-          <td class="px-4 py-3 text-sm font-mono text-gray-700"><%= p[:pid] %></td>
-          <td class="px-4 py-3 text-sm"><%= pgbus_status_badge(p[:healthy]) %></td>
-          <td class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(p[:last_heartbeat_at]) %></td>
-          <td class="px-4 py-3 text-sm text-gray-500 font-mono text-xs max-w-xs truncate">
-            <% if p[:metadata].is_a?(Hash) %>
-              <% p[:metadata].each do |k, v| %>
-                <span class="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-xs mr-1"><%= k %>: <%= v %></span>
-              <% end %>
-            <% end %>
-          </td>
-        </tr>
-      <% end %>
-      <% if @processes.empty? %>
-        <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No processes running</td></tr>
-      <% end %>
-    </tbody>
-  </table>
-</div>
+<%= render "pgbus/processes/processes_table" %>

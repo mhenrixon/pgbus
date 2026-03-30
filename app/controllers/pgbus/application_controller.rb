@@ -13,7 +13,7 @@ module Pgbus
     private
 
     def data_source
-      @data_source ||= Web::DataSource.new
+      @data_source ||= Pgbus.configuration.web_data_source || Web::DataSource.new
     end
 
     def page_param
@@ -22,6 +22,14 @@ module Pgbus
 
     def per_page
       Pgbus.configuration.web_per_page
+    end
+
+    def turbo_frame_request?
+      request.headers["Turbo-Frame"].present? || params[:frame].present?
+    end
+
+    def render_frame(partial)
+      render partial: partial, layout: false
     end
   end
 end

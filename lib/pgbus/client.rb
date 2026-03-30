@@ -1,12 +1,11 @@
 # frozen_string_literal: true
 
-require "pgmq-ruby"
-
 module Pgbus
   class Client
     attr_reader :pgmq, :config
 
     def initialize(config = Pgbus.configuration)
+      require "pgmq-ruby"
       @config = config
       @pgmq = PGMQ::Client.new(
         config.connection_options,

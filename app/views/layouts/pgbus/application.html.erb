@@ -8,14 +8,22 @@
   <script type="module">
     import * as Turbo from "https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017.esm.js";
 
-    // Auto-refresh dashboard
+    <% if Pgbus.configuration.web_live_updates %>
+    // Auto-refresh turbo frames, pausing when tab is hidden
     const interval = <%= Pgbus.configuration.web_refresh_interval %>;
     if (interval > 0) {
-      setInterval(() => {
-        const frames = document.querySelectorAll("turbo-frame[data-auto-refresh]");
-        frames.forEach(frame => frame.reload());
-      }, interval);
+      let timer;
+      function refreshFrames() {
+        if (document.hidden) return;
+        document.querySelectorAll("turbo-frame[data-auto-refresh]")
+          .forEach(frame => frame.reload());
+      }
+      function start() { timer = setInterval(refreshFrames, interval); }
+      function stop() { clearInterval(timer); }
+      document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
+      start();
     }
+    <% end %>
   </script>
 </head>
 <body class="h-full">

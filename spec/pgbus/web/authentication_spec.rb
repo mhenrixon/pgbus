@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "spec_helper"
+
 require "active_support"
 require_relative "../../../lib/pgbus/web/authentication"
 

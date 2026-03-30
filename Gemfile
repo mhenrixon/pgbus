@@ -15,6 +15,12 @@ end
 group :test do
   gem "rspec", "~> 3.0"
   gem "rspec-rails", "~> 7.0"
+
+  # System tests
+  gem "capybara", require: false
+  gem "capybara-playwright-driver", require: false
+  gem "puma"
+  gem "sqlite3"
 end
 
 group :development, :test do
