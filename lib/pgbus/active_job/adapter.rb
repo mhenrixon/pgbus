@@ -38,7 +38,10 @@ module Pgbus
 
         payloads = jobs.map { |j| JSON.parse(Serializer.serialize_job(j)) }
         msg_ids = Pgbus.client.send_batch(queue, payloads)
-        return unless msg_ids
+
+        unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
+          raise "Pgbus batch enqueue failed: expected #{jobs.size} ids, got #{msg_ids&.size || 0}"
+        end
 
         jobs.zip(msg_ids).each { |job, id| job.provider_job_id = id }
       end

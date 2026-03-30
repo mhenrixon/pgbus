@@ -32,6 +32,8 @@ Metrics/AbcSize:
 
 Metrics/ClassLength:
   Max: 310
+  Exclude:
+    - lib/pgbus/web/data_source.rb
 
 Metrics/CyclomaticComplexity:
   Max: 10

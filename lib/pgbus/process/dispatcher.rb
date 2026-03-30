@@ -48,6 +48,7 @@ module Pgbus
           enqueue_event(row)
         rescue StandardError => e
           Pgbus.logger.error { "[Pgbus] Failed to dispatch event: #{e.message}" }
+          track_failed_dispatch(row, e)
         end
 
         count = result.count
@@ -78,6 +79,23 @@ module Pgbus
           JSON.parse(row["payload"]),
           headers: row["headers"] ? JSON.parse(row["headers"]) : nil
         )
+      end
+
+      def track_failed_dispatch(row, error)
+        conn = ActiveRecord::Base.connection
+        conn.execute(<<~SQL)
+          INSERT INTO pgbus_failed_events (queue_name, payload, headers, error_message, error_class, failed_at)
+          VALUES (
+            #{conn.quote(row["queue_name"])},
+            #{conn.quote(row["payload"])},
+            #{conn.quote(row["headers"])},
+            #{conn.quote(error.message)},
+            #{conn.quote(error.class.name)},
+            NOW()
+          )
+        SQL
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to track dispatch failure: #{e.message}" }
       end
 
       def start_heartbeat

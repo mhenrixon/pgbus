@@ -14,7 +14,8 @@ module Pgbus
         queues = queues_with_metrics
         total_depth = queues.sum { |q| q[:queue_length] }
         total_visible = queues.sum { |q| q[:queue_visible_length] }
-        dlq_depth = queues.select { |q| q[:name].end_with?("_dlq") }.sum { |q| q[:queue_length] }
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_depth = queues.select { |q| q[:name].end_with?(dlq_suffix) }.sum { |q| q[:queue_length] }
 
         {
           total_queues: queues.size,
@@ -30,14 +31,16 @@ module Pgbus
       def queues_with_metrics
         metrics = @client.metrics || []
         Array(metrics).map { |m| format_metrics(m) }
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching queue metrics: #{e.message}" }
         []
       end
 
       def queue_detail(name)
         m = @client.metrics(name)
         m ? format_metrics(m) : nil
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching queue detail for #{name}: #{e.message}" }
         nil
       end
 
@@ -67,13 +70,14 @@ module Pgbus
           [msg_id.to_i]
         )
         row ? format_message(row, queue_name) : nil
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching job detail: #{e.message}" }
         nil
       end
 
       def retry_job(queue_name, msg_id)
         full_name = Pgbus.configuration.queue_name(queue_name)
-        @client.pgmq.set_vt(full_name, msg_id.to_i, vt: 0)
+        @client.set_visibility_timeout(full_name, msg_id.to_i, vt: 0)
       end
 
       def discard_job(queue_name, msg_id)
@@ -89,14 +93,16 @@ module Pgbus
           [per_page, offset]
         )
         rows.to_a
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching failed events: #{e.message}" }
         []
       end
 
       def failed_events_count
         result = connection.select_value("SELECT COUNT(*) FROM pgbus_failed_events")
         result.to_i
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error counting failed events: #{e.message}" }
         0
       end
 
@@ -106,7 +112,8 @@ module Pgbus
           "Pgbus Failed Event",
           [id.to_i]
         )
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching failed event #{id}: #{e.message}" }
         nil
       end
 
@@ -119,14 +126,16 @@ module Pgbus
           connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
         end
         true
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error retrying failed event #{id}: #{e.message}" }
         false
       end
 
       def discard_failed_event(id)
         connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
         true
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding failed event #{id}: #{e.message}" }
         false
       end
 
@@ -147,7 +156,8 @@ module Pgbus
       def discard_all_failed
         result = connection.execute("DELETE FROM pgbus_failed_events")
         result.cmd_tuples
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding all failed events: #{e.message}" }
         0
       end
 
@@ -155,7 +165,8 @@ module Pgbus
       # Note: DLQ queue names from queues_with_metrics are already fully qualified
       # (e.g., "pgbus_default_dlq"), so we use them directly without re-prefixing.
       def dlq_messages(page: 1, per_page: 25)
-        queues = queues_with_metrics.select { |q| q[:name].end_with?("_dlq") }
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }
         offset = (page - 1) * per_page
 
         messages = queues.flat_map do |q|
@@ -163,12 +174,14 @@ module Pgbus
         end
 
         messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, per_page) || []
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching DLQ messages: #{e.message}" }
         []
       end
 
       def dlq_message_detail(msg_id)
-        queues = queues_with_metrics.select { |q| q[:name].end_with?("_dlq") }
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }
         queues.each do |q|
           row = connection.select_one(
             "SELECT * FROM pgmq.q_#{sanitize_name(q[:name])} WHERE msg_id = $1",
@@ -178,7 +191,8 @@ module Pgbus
           return format_message(row, q[:name]) if row
         end
         nil
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching DLQ message #{msg_id}: #{e.message}" }
         nil
       end
 
@@ -194,20 +208,22 @@ module Pgbus
         )
         return false unless row
 
-        @client.pgmq.transaction do |txn|
+        @client.transaction do |txn|
           txn.produce(original_queue, row["message"])
           txn.delete(queue_name, msg_id.to_i)
         end
         true
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error retrying DLQ message #{msg_id}: #{e.message}" }
         false
       end
 
       def discard_dlq_message(queue_name, msg_id)
         # queue_name here is the full DLQ name (already prefixed)
-        @client.pgmq.delete(queue_name, msg_id.to_i)
+        @client.delete_from_queue(queue_name, msg_id.to_i)
         true
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding DLQ message #{msg_id}: #{e.message}" }
         false
       end
 
@@ -216,7 +232,8 @@ module Pgbus
         count = 0
         messages.each do |m|
           retry_dlq_message(m[:queue_name], m[:msg_id]) && count += 1
-        rescue StandardError
+        rescue StandardError => e
+          Pgbus.logger.debug { "[Pgbus::Web] Error retrying DLQ message #{m[:msg_id]}: #{e.message}" }
           next
         end
         count
@@ -227,7 +244,8 @@ module Pgbus
         count = 0
         messages.each do |m|
           discard_dlq_message(m[:queue_name], m[:msg_id]) && count += 1
-        rescue StandardError
+        rescue StandardError => e
+          Pgbus.logger.debug { "[Pgbus::Web] Error discarding DLQ message #{m[:msg_id]}: #{e.message}" }
           next
         end
         count
@@ -239,7 +257,8 @@ module Pgbus
           "SELECT * FROM pgbus_processes ORDER BY kind, created_at"
         )
         rows.to_a.map { |r| format_process(r) }
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching processes: #{e.message}" }
         []
       end
 
@@ -252,7 +271,8 @@ module Pgbus
           [per_page, offset]
         )
         rows.to_a
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching processed events: #{e.message}" }
         []
       end
 
@@ -262,14 +282,16 @@ module Pgbus
           "Pgbus Processed Event",
           [id.to_i]
         )
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching processed event #{id}: #{e.message}" }
         nil
       end
 
       def processed_events_count
         result = connection.select_value("SELECT COUNT(*) FROM pgbus_processed_events")
         result.to_i
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error counting processed events: #{e.message}" }
         0
       end
 
@@ -280,7 +302,8 @@ module Pgbus
 
         @client.publish_to_topic(routing_key, event["payload"] || "{}")
         true
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error replaying event: #{e.message}" }
         false
       end
 
@@ -289,7 +312,8 @@ module Pgbus
         EventBus::Registry.instance.subscribers.map do |s|
           { pattern: s.pattern, handler_class: s.handler_class.name, queue_name: s.queue_name }
         end
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching subscribers: #{e.message}" }
         []
       end
 
@@ -311,12 +335,14 @@ module Pgbus
           [limit, offset]
         )
         rows.to_a.map { |r| format_message(r, full_name) }
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error querying messages from #{full_name}: #{e.message}" }
         []
       end
 
       def all_queue_messages(limit, offset)
-        queues = queues_with_metrics.reject { |q| q[:name].end_with?("_dlq") }
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        queues = queues_with_metrics.reject { |q| q[:name].end_with?(dlq_suffix) }
         messages = queues.flat_map do |q|
           query_queue_messages_raw(q[:name], limit + offset, 0)
         end
