@@ -37,6 +37,11 @@ jobs:
   system_test:
     runs-on: ubuntu-latest
     name: System Tests
+    env:
+      RAILS_ENV: test
+      HEADLESS: "true"
+      PLAYWRIGHT_BROWSERS_PATH: /home/runner/.cache/ms-playwright
+
     steps:
       - uses: actions/checkout@v6
         with:
@@ -48,22 +53,32 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "22"
-          cache: "npm"
+          bun-version-file: ".bun-version"
 
-      - name: Install Playwright
-        run: |
-          npm install
-          npx playwright install chromium
-          npx playwright install-deps chromium
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        run: bunx --bun playwright install chromium
+
+      - name: Install Playwright system dependencies
+        timeout-minutes: 3
+        run: sudo bunx --bun playwright install-deps chromium 2>/dev/null || true
 
       - name: Run system tests
-        env:
-          RAILS_ENV: test
-          HEADLESS: "true"
         run: bundle exec rspec spec/system/
 
       - name: Upload failure screenshots
@@ -71,5 +86,5 @@ jobs:
         if: failure()
         with:
           name: capybara-screenshots
-          path: spec/dummy/tmp/capybara/**/*.png
+          path: tmp/capybara/**/*.png
           if-no-files-found: ignore
