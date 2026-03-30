@@ -33,7 +33,7 @@ RSpec.describe Pgbus::Batch do
   describe "#enqueue" do
     it "creates a batch record in the database" do
       batch = described_class.new(description: "test")
-      batch.enqueue { }
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
       expect(connection).to have_received(:exec_query).with(
         a_string_matching(/INSERT INTO pgbus_batches/),
@@ -44,7 +44,7 @@ RSpec.describe Pgbus::Batch do
 
     it "updates total_jobs after counting" do
       batch = described_class.new
-      batch.enqueue { }
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
       expect(connection).to have_received(:exec_query).with(
         a_string_matching(/UPDATE pgbus_batches SET total_jobs/),
@@ -68,12 +68,13 @@ RSpec.describe Pgbus::Batch do
 
   describe ".job_completed" do
     it "increments completed_jobs counter" do
-      result = double("Result", first: {
+      row = {
         "status" => "processing",
         "total_jobs" => "3",
         "completed_jobs" => "1",
         "discarded_jobs" => "0"
-      })
+      }
+      result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
         .with(a_string_matching(/completed_jobs = completed_jobs \+ 1/), anything, anything)
         .and_return(result)
@@ -88,7 +89,7 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_finish callback when batch finishes" do
-      result = double("Result", first: {
+      row = {
         "status" => "finished",
         "total_jobs" => "2",
         "completed_jobs" => "2",
@@ -97,12 +98,13 @@ RSpec.describe Pgbus::Batch do
         "on_success_class" => nil,
         "on_discard_class" => nil,
         "properties" => '{"user_id":1}'
-      })
+      }
+      result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
         .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
         .and_return(result)
 
-      callback_job = class_double("BatchCallbackJob", perform_later: nil)
+      callback_job = class_double("BatchCallbackJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("BatchCallbackJob", callback_job)
 
       described_class.job_completed("batch-123")
@@ -111,7 +113,7 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_success callback when all jobs succeed" do
-      result = double("Result", first: {
+      row = {
         "status" => "finished",
         "total_jobs" => "1",
         "completed_jobs" => "1",
@@ -120,12 +122,13 @@ RSpec.describe Pgbus::Batch do
         "on_success_class" => "SuccessJob",
         "on_discard_class" => nil,
         "properties" => "{}"
-      })
+      }
+      result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
         .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
         .and_return(result)
 
-      callback_job = class_double("SuccessJob", perform_later: nil)
+      callback_job = class_double("SuccessJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("SuccessJob", callback_job)
 
       described_class.job_completed("batch-123")
@@ -134,7 +137,7 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_discard callback when some jobs were discarded" do
-      result = double("Result", first: {
+      row = {
         "status" => "finished",
         "total_jobs" => "2",
         "completed_jobs" => "1",
@@ -143,12 +146,13 @@ RSpec.describe Pgbus::Batch do
         "on_success_class" => nil,
         "on_discard_class" => "DiscardJob",
         "properties" => "{}"
-      })
+      }
+      result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
         .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
         .and_return(result)
 
-      callback_job = class_double("DiscardJob", perform_later: nil)
+      callback_job = class_double("DiscardJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("DiscardJob", callback_job)
 
       described_class.job_discarded("batch-123")
