@@ -206,6 +206,7 @@ Once all Sidekiq jobs have drained and you've verified Pgbus is processing corre
 |-----------------|-----------------|
 | Batches (Pro) | Planned |
 | Rate limiting (Enterprise) | Planned |
+| Concurrency controls (Enterprise) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
 | Unique jobs (Enterprise / `sidekiq-unique-jobs`) | Partial -- event bus has idempotency; job-level dedup planned |
 | Cron / recurring jobs (`sidekiq-cron`) | Planned |
 | Real-time metrics (Sidekiq Web) | Pgbus dashboard covers queue depth, failures, processes |

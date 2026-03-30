@@ -8,6 +8,7 @@ module Pgbus
   class SerializationError < Error; end
   class QueueNotFoundError < Error; end
   class DeadLetterError < Error; end
+  class ConcurrencyLimitExceeded < Error; end
 
   class << self
     def loader

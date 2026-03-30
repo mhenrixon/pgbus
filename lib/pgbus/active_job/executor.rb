@@ -16,17 +16,21 @@ module Pgbus
 
         if read_count > config.max_retries
           handle_dead_letter(message, queue_name, payload)
+          signal_concurrency(payload)
           return :dead_lettered
         end
 
         job = ::ActiveJob::Base.deserialize(payload)
         execute_job(job)
         client.archive_message(queue_name, message.msg_id.to_i)
+        signal_concurrency(payload)
         instrument("pgbus.job_completed", queue: queue_name, job_class: payload["job_class"])
         :success
       rescue StandardError => e
         handle_failure(message, queue_name, e)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
+        # Don't signal concurrency on transient failure — the job will be retried.
+        # Semaphore is released only on success or dead-lettering.
         :failed
       end
 
@@ -55,6 +59,20 @@ module Pgbus
         ActiveSupport::Notifications.instrument(event_name, payload)
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus] Notification failure #{event_name}: #{e.class}: #{e.message}" }
+      end
+
+      def signal_concurrency(payload)
+        key = Concurrency.extract_key(payload)
+        return unless key
+
+        # Atomic permit handoff: try to promote a blocked job first.
+        # promote_next wraps delete + enqueue in a transaction so neither is lost.
+        # If promoted, the slot stays occupied (no release needed).
+        # Only release the semaphore if there's nothing to promote.
+        promoted = Concurrency::BlockedExecution.promote_next(key, client: client)
+        Concurrency::Semaphore.release(key) unless promoted
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Concurrency signal failed: #{e.message}" }
       end
 
       def handle_dead_letter(message, queue_name, payload)
