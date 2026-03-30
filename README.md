@@ -6,6 +6,21 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 
 [![Ruby](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml/badge.svg)](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml)
 
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration reference](#configuration-reference)
+- [Architecture](#architecture)
+- [CLI](#cli)
+- [Dashboard](#dashboard)
+- [Database tables](#database-tables)
+- [Switching from another backend](#switching-from-another-backend)
+- [Development](#development)
+- [License](#license)
+
 ## Features
 
 - **ActiveJob adapter** -- drop-in replacement, zero config migration from other backends
@@ -277,6 +292,16 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_processes` | Heartbeat tracking for workers/dispatcher/consumers |
 | `pgbus_failed_events` | Failed event dispatch records |
 | `pgbus_processed_events` | Idempotency deduplication (event_id, handler_class) |
+
+## Switching from another backend
+
+Already using a different job processor? These guides walk you through the migration:
+
+- **[Switch from Sidekiq](docs/switch_from_sidekiq.md)** -- remove Redis, convert native workers, replace middleware with callbacks
+- **[Switch from SolidQueue](docs/switch_from_solid_queue.md)** -- similar architecture, swap config format, gain LISTEN/NOTIFY + worker recycling
+- **[Switch from GoodJob](docs/switch_from_good_job.md)** -- both PostgreSQL-native, swap advisory locks for PGMQ visibility timeouts
+
+See [docs/README.md](docs/README.md) for a full feature comparison table.
 
 ## Development
 
