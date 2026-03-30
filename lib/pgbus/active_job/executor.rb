@@ -26,7 +26,7 @@ module Pgbus
         :success
       rescue StandardError => e
         handle_failure(message, queue_name, e)
-        instrument("pgbus.job_failed", queue: queue_name, job_class: payload["job_class"], error: e.class.name)
+        instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
         :failed
       end
 

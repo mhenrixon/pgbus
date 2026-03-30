@@ -4,6 +4,7 @@ module Pgbus
   class DeadLetterController < ApplicationController
     def index
       @messages = data_source.dlq_messages(page: page_param, per_page: per_page)
+      render_frame("pgbus/dead_letter/messages_table") if params[:frame] == "list"
     end
 
     def show
