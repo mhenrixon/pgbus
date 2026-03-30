@@ -30,45 +30,28 @@ RSpec.describe Pgbus::CLI do
   end
 
   describe ".show_status" do
-    context "when ActiveRecord is defined" do
-      let(:connection_double) { double("connection") }
+    it "prints processes table when processes exist" do
+      process = double("ProcessRecord",
+                       kind: "supervisor", hostname: "web-1", pid: "100",
+                       last_heartbeat_at: "2026-01-01 00:00:00", metadata: "{}")
+      scope = double("scope", none?: false, each: nil)
+      allow(scope).to receive(:each).and_yield(process)
+      allow(Pgbus::ProcessRecord).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
 
-      before do
-        stub_const("ActiveRecord::Base", Class.new)
-        allow(ActiveRecord::Base).to receive(:connection).and_return(connection_double)
-      end
+      output = capture_stdout { described_class.show_status }
 
-      it "prints processes table when processes exist" do
-        rows = [
-          { "kind" => "supervisor", "hostname" => "web-1", "pid" => "100",
-            "last_heartbeat_at" => "2026-01-01 00:00:00", "metadata" => "{}" }
-        ]
-        allow(connection_double).to receive(:execute).and_return(rows)
-
-        output = capture_stdout { described_class.show_status }
-
-        expect(output).to include("KIND")
-        expect(output).to include("supervisor")
-        expect(output).to include("web-1")
-      end
-
-      it "prints 'no processes' when result is empty" do
-        allow(connection_double).to receive(:execute).and_return([])
-
-        output = capture_stdout { described_class.show_status }
-
-        expect(output).to include("No Pgbus processes running.")
-      end
+      expect(output).to include("KIND")
+      expect(output).to include("supervisor")
+      expect(output).to include("web-1")
     end
 
-    context "when ActiveRecord is not defined" do
-      it "prints 'not available' message" do
-        hide_const("ActiveRecord::Base")
+    it "prints 'no processes' when result is empty" do
+      scope = double("scope", none?: true)
+      allow(Pgbus::ProcessRecord).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
 
-        output = capture_stdout { described_class.show_status }
+      output = capture_stdout { described_class.show_status }
 
-        expect(output).to include("ActiveRecord not available")
-      end
+      expect(output).to include("No Pgbus processes running.")
     end
   end
 

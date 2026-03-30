@@ -24,5 +24,5 @@ Switching to Pgbus from another job backend? These guides cover what changes, wh
 | Idempotent events | No | No | No | Yes |
 | Concurrency controls | Enterprise | `limits_concurrency` | `good_job_control_concurrency_with` | `Pgbus::Concurrency` |
 | Recurring/cron jobs | `sidekiq-cron` gem | `config/recurring.yml` | `config.good_job.cron` | Planned |
-| Batches | Pro | No | `GoodJob::Batch` | Planned |
+| Batches | Pro | No | `GoodJob::Batch` | `Pgbus::Batch` |
 | Web dashboard | `Sidekiq::Web` | Mission Control | `GoodJob::Engine` | `Pgbus::Engine` |

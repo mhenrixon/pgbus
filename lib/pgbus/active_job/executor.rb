@@ -17,6 +17,7 @@ module Pgbus
         if read_count > config.max_retries
           handle_dead_letter(message, queue_name, payload)
           signal_concurrency(payload)
+          signal_batch_discarded(payload)
           return :dead_lettered
         end
 
@@ -24,6 +25,7 @@ module Pgbus
         execute_job(job)
         client.archive_message(queue_name, message.msg_id.to_i)
         signal_concurrency(payload)
+        signal_batch_completed(payload)
         instrument("pgbus.job_completed", queue: queue_name, job_class: payload["job_class"])
         :success
       rescue StandardError => e
@@ -73,6 +75,24 @@ module Pgbus
         Concurrency::Semaphore.release(key) unless promoted
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Concurrency signal failed: #{e.message}" }
+      end
+
+      def signal_batch_completed(payload)
+        batch_id = payload[Batch::METADATA_KEY]
+        return unless batch_id
+
+        Batch.job_completed(batch_id)
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Batch completion signal failed: #{e.message}" }
+      end
+
+      def signal_batch_discarded(payload)
+        batch_id = payload[Batch::METADATA_KEY]
+        return unless batch_id
+
+        Batch.job_discarded(batch_id)
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Batch discard signal failed: #{e.message}" }
       end
 
       def handle_dead_letter(message, queue_name, payload)

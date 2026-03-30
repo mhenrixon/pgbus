@@ -9,6 +9,7 @@ module Pgbus
       CLEANUP_INTERVAL = 3600       # Run idempotency cleanup every hour
       REAP_INTERVAL = 300           # Run stale process reaping every 5 minutes
       CONCURRENCY_INTERVAL = 300    # Run concurrency cleanup every 5 minutes
+      BATCH_CLEANUP_INTERVAL = 3600 # Run batch cleanup every hour
 
       attr_reader :config
 
@@ -18,6 +19,7 @@ module Pgbus
         @last_cleanup_at = Time.now
         @last_reap_at = Time.now
         @last_concurrency_at = Time.now
+        @last_batch_cleanup_at = Time.now
       end
 
       def run
@@ -69,35 +71,28 @@ module Pgbus
           cleanup_concurrency
           @last_concurrency_at = now
         end
+
+        if now - @last_batch_cleanup_at >= BATCH_CLEANUP_INTERVAL
+          cleanup_batches
+          @last_batch_cleanup_at = now
+        end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
       end
 
       def cleanup_processed_events
-        return unless defined?(ActiveRecord::Base)
-
         ttl = config.idempotency_ttl
         return unless ttl&.positive?
 
-        deleted = ActiveRecord::Base.connection.delete(
-          "DELETE FROM pgbus_processed_events WHERE processed_at < $1",
-          "Pgbus Idempotency Cleanup",
-          [Time.now.utc - ttl]
-        )
+        deleted = ProcessedEventRecord.expired(Time.now.utc - ttl).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
       end
 
       def reap_stale_processes
-        return unless defined?(ActiveRecord::Base)
-
         threshold = Heartbeat::ALIVE_THRESHOLD
-        deleted = ActiveRecord::Base.connection.delete(
-          "DELETE FROM pgbus_processes WHERE last_heartbeat_at < $1",
-          "Pgbus Stale Process Reap",
-          [Time.now.utc - threshold]
-        )
+        deleted = ProcessRecord.stale(Time.now.utc - threshold).delete_all
         Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
@@ -120,6 +115,13 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Released blocked execution for key: #{key}" } if promoted
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Failed to release blocked execution for #{key}: #{e.message}" }
+      end
+
+      def cleanup_batches
+        deleted = Batch.cleanup(older_than: Time.now.utc - (7 * 24 * 3600)) # 7 days
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
       end
 
       def start_heartbeat

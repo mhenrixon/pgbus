@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "active_record"
 require "pgbus"
 
 Dir[File.join(__dir__, "support/**/*.rb")].each { |f| require f }

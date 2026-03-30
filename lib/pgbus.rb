@@ -16,6 +16,12 @@ module Pgbus
         loader = Zeitwerk::Loader.for_gem
         loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
         loader.ignore("#{__dir__}/generators")
+        # Register app/models for non-Rails usage (specs, standalone).
+        # When Rails is running, the Engine handles autoloading app/models.
+        unless defined?(Rails::Engine)
+          models_dir = File.expand_path("../app/models", __dir__)
+          loader.push_dir(models_dir) if File.directory?(models_dir)
+        end
         loader
       end
     end

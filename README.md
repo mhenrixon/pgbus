@@ -13,6 +13,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Concurrency controls](#concurrency-controls)
+- [Batches](#batches)
 - [Configuration reference](#configuration-reference)
 - [Architecture](#architecture)
 - [CLI](#cli)
@@ -239,6 +240,51 @@ end
 2. **Complete**: After a job succeeds or is dead-lettered, the executor decrements the semaphore and releases the next blocked job (if any).
 3. **Safety net**: The dispatcher periodically cleans up expired semaphores and orphaned blocked executions to recover from crashed workers.
 
+## Batches
+
+Coordinate groups of jobs with callbacks when all complete:
+
+```ruby
+batch = Pgbus::Batch.new(
+  on_finish: BatchFinishedJob,
+  on_success: BatchSucceededJob,
+  on_discard: BatchFailedJob,
+  description: "Import users",
+  properties: { initiated_by: current_user.id }
+)
+
+batch.enqueue do
+  users.each { |user| ImportUserJob.perform_later(user.id) }
+end
+```
+
+### Callbacks
+
+| Callback | Fired when |
+|----------|------------|
+| `on_finish` | All jobs completed (success or discard) |
+| `on_success` | All jobs completed successfully (zero discarded) |
+| `on_discard` | At least one job was dead-lettered |
+
+Callback jobs receive the batch `properties` hash as their argument:
+
+```ruby
+class BatchFinishedJob < ApplicationJob
+  def perform(properties)
+    user = User.find(properties["initiated_by"])
+    ImportMailer.complete(user).deliver_later
+  end
+end
+```
+
+### How it works
+
+1. `Batch.new(...)` creates a tracking row in `pgbus_batches` with `status: "pending"`
+2. `batch.enqueue { ... }` tags each enqueued job with the `pgbus_batch_id` in its payload
+3. After each job completes or is dead-lettered, the executor atomically updates the batch counters
+4. When `completed_jobs + discarded_jobs == total_jobs`, the batch status flips to `"finished"` and callback jobs are enqueued
+5. The dispatcher cleans up finished batches older than 7 days
+
 ## Configuration reference
 
 | Option | Default | Description |
@@ -337,6 +383,7 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_processed_events` | Idempotency deduplication (event_id, handler_class) |
 | `pgbus_semaphores` | Concurrency control counting semaphores |
 | `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
+| `pgbus_batches` | Batch tracking with job counters and callback config |
 
 ## Switching from another backend
 
