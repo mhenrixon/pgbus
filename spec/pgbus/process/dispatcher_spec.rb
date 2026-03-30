@@ -24,6 +24,10 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "has a concurrency interval of 5 minutes" do
       expect(described_class::CONCURRENCY_INTERVAL).to eq(300)
     end
+
+    it "has a batch cleanup interval of 1 hour" do
+      expect(described_class::BATCH_CLEANUP_INTERVAL).to eq(3600)
+    end
   end
 
   describe "#graceful_shutdown" do
@@ -156,6 +160,15 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect(dispatcher).to have_received(:cleanup_concurrency)
     end
 
+    it "runs batch cleanup when batch interval has elapsed" do
+      allow(dispatcher).to receive(:cleanup_batches)
+
+      dispatcher.instance_variable_set(:@last_batch_cleanup_at, Time.now - described_class::BATCH_CLEANUP_INTERVAL - 1)
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:cleanup_batches)
+    end
+
     it "rescues errors from maintenance methods" do
       dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
@@ -190,6 +203,21 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "rescues errors gracefully" do
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_raise(StandardError, "db error")
       expect { dispatcher.send(:cleanup_concurrency) }.not_to raise_error
+    end
+  end
+
+  describe "#cleanup_batches (private)" do
+    it "cleans up finished batches older than 7 days" do
+      allow(Pgbus::Batch).to receive(:cleanup).and_return(3)
+
+      dispatcher.send(:cleanup_batches)
+
+      expect(Pgbus::Batch).to have_received(:cleanup).with(older_than: an_instance_of(Time))
+    end
+
+    it "rescues errors gracefully" do
+      allow(Pgbus::Batch).to receive(:cleanup).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:cleanup_batches) }.not_to raise_error
     end
   end
 

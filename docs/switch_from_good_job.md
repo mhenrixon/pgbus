@@ -260,7 +260,7 @@ end
 |-----------------|-----------------|
 | Concurrency controls (`good_job_control_concurrency_with`) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
 | Throttling (`enqueue_throttle`, `perform_throttle`) | Planned |
-| Batches (`GoodJob::Batch`) | Planned |
+| Batches (`GoodJob::Batch`) | `Pgbus::Batch` with on_finish/on_success/on_discard callbacks |
 | Cron / recurring jobs | Planned |
 | Async execution mode (in-process) | Not planned (forked processes only) |
 | Capsules (isolated thread pools) | Workers are isolated by design (forked processes) |

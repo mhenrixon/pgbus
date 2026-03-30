@@ -204,7 +204,7 @@ Once all Sidekiq jobs have drained and you've verified Pgbus is processing corre
 
 | Sidekiq feature | Status in Pgbus |
 |-----------------|-----------------|
-| Batches (Pro) | Planned |
+| Batches (Pro) | `Pgbus::Batch` with on_finish/on_success/on_discard callbacks |
 | Rate limiting (Enterprise) | Planned |
 | Concurrency controls (Enterprise) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
 | Unique jobs (Enterprise / `sidekiq-unique-jobs`) | Partial -- event bus has idempotency; job-level dedup planned |
