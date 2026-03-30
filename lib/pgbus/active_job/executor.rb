@@ -22,9 +22,11 @@ module Pgbus
         job = ::ActiveJob::Base.deserialize(payload)
         execute_job(job)
         client.archive_message(queue_name, message.msg_id.to_i)
+        instrument("pgbus.job_completed", queue: queue_name, job_class: payload["job_class"])
         :success
       rescue StandardError => e
         handle_failure(message, queue_name, e)
+        instrument("pgbus.job_failed", queue: queue_name, job_class: payload["job_class"], error: e.class.name)
         :failed
       end
 
@@ -45,6 +47,12 @@ module Pgbus
         # Message visibility timeout will expire and it becomes available again.
         # read_ct tracks delivery attempts — when it exceeds max_retries,
         # the next read will route to DLQ.
+      end
+
+      def instrument(event_name, payload = {})
+        return unless defined?(ActiveSupport::Notifications)
+
+        ActiveSupport::Notifications.instrument(event_name, payload)
       end
 
       def handle_dead_letter(message, queue_name, payload)

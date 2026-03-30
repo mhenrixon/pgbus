@@ -24,6 +24,7 @@ module Pgbus
         end
 
         handle(event)
+        instrument("pgbus.event_processed", event_id: event.event_id, handler: self.class.name)
         :handled
       end
 
@@ -42,6 +43,12 @@ module Pgbus
           payload: payload,
           published_at: raw["published_at"] ? Time.parse(raw["published_at"]) : nil
         )
+      end
+
+      def instrument(event_name, payload = {})
+        return unless defined?(ActiveSupport::Notifications)
+
+        ActiveSupport::Notifications.instrument(event_name, payload)
       end
 
       def already_processed?(event_id)
