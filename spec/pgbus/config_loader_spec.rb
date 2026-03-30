@@ -5,6 +5,8 @@ require "spec_helper"
 require "tempfile"
 
 RSpec.describe Pgbus::ConfigLoader do
+  after { Pgbus.reset! }
+
   describe ".load" do
     let(:config_content) do
       <<~YAML

@@ -17,8 +17,9 @@ RSpec.describe Pgbus::Client do
   end
 
   let(:config) do
-    Pgbus.configuration.tap do |c|
+    Pgbus::Configuration.new.tap do |c|
       c.database_url = "postgres://localhost/pgbus_test"
+      c.queue_prefix = "pgbus_test"
     end
   end
   let(:mock_pgmq) { build_mock_pgmq }
