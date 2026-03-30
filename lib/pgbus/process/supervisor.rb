@@ -84,7 +84,7 @@ module Pgbus
       end
 
       def boot_consumers
-        return unless config.respond_to?(:event_consumers) && config.event_consumers
+        return unless config.event_consumers
 
         config.event_consumers.each do |consumer_config|
           fork_consumer(consumer_config)

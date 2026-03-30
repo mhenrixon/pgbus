@@ -17,7 +17,7 @@ module Pgbus
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
 
     # Dispatcher settings
-    attr_accessor :dispatch_interval, :dispatch_batch_size
+    attr_accessor :dispatch_interval
 
     # Dead letter queue
     attr_accessor :max_retries, :dead_letter_queue_suffix
@@ -30,6 +30,9 @@ module Pgbus
 
     # LISTEN/NOTIFY
     attr_accessor :listen_notify, :notify_throttle_ms
+
+    # Event consumers
+    attr_accessor :event_consumers
 
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
@@ -52,7 +55,6 @@ module Pgbus
       @max_worker_lifetime = nil
 
       @dispatch_interval = 1.0
-      @dispatch_batch_size = 500
 
       @max_retries = 5
       @dead_letter_queue_suffix = "_dlq"
@@ -63,6 +65,8 @@ module Pgbus
 
       @listen_notify = true
       @notify_throttle_ms = 250
+
+      @event_consumers = nil
 
       @web_auth = nil
       @web_refresh_interval = 5000

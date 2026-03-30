@@ -5,26 +5,36 @@ module Pgbus
     class Dispatcher
       include SignalHandler
 
+      # Maintenance runs on coarser intervals than the main loop
+      CLEANUP_INTERVAL = 3600       # Run idempotency cleanup every hour
+      REAP_INTERVAL = 300           # Run stale process reaping every 5 minutes
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
         @config = config
         @shutting_down = false
+        @last_cleanup_at = Time.now
+        @last_reap_at = Time.now
       end
 
       def run
         setup_signals
         start_heartbeat
         Pgbus.logger.info do
-          "[Pgbus] Dispatcher started: interval=#{config.dispatch_interval}s batch=#{config.dispatch_batch_size}"
+          "[Pgbus] Dispatcher started: interval=#{config.dispatch_interval}s"
         end
 
         loop do
           break if @shutting_down
 
           process_signals
-          dispatched = dispatch_scheduled
-          sleep(dispatched < config.dispatch_batch_size ? config.dispatch_interval : 0)
+          break if @shutting_down
+
+          run_maintenance
+          break if @shutting_down
+
+          sleep(config.dispatch_interval)
         end
 
         shutdown
@@ -40,63 +50,50 @@ module Pgbus
 
       private
 
-      def dispatch_scheduled
-        return 0 unless defined?(ActiveRecord::Base)
+      def run_maintenance
+        now = Time.now
 
-        result = fetch_due_events
-        success_count = 0
-        result.each do |row|
-          enqueue_event(row)
-          success_count += 1
-        rescue StandardError => e
-          Pgbus.logger.error { "[Pgbus] Failed to dispatch event: #{e.message}" }
-          track_failed_dispatch(row, e)
+        if now - @last_cleanup_at >= CLEANUP_INTERVAL
+          cleanup_processed_events
+          @last_cleanup_at = now
         end
 
-        Pgbus.logger.debug { "[Pgbus] Dispatched #{success_count} scheduled events" } if success_count.positive?
-        success_count
+        if now - @last_reap_at >= REAP_INTERVAL
+          reap_stale_processes
+          @last_reap_at = now
+        end
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Dispatcher error: #{e.message}" }
-        0
+        Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
       end
 
-      def fetch_due_events
-        ActiveRecord::Base.connection.execute(<<~SQL)
-          DELETE FROM pgbus_scheduled_events
-          WHERE id IN (
-            SELECT id FROM pgbus_scheduled_events
-            WHERE scheduled_at <= NOW()
-            ORDER BY scheduled_at ASC
-            LIMIT #{config.dispatch_batch_size}
-            FOR UPDATE SKIP LOCKED
-          )
-          RETURNING queue_name, payload, headers
-        SQL
-      end
+      def cleanup_processed_events
+        return unless defined?(ActiveRecord::Base)
 
-      def enqueue_event(row)
-        Pgbus.client.send_message(
-          row["queue_name"],
-          JSON.parse(row["payload"]),
-          headers: row["headers"] ? JSON.parse(row["headers"]) : nil
+        ttl = config.idempotency_ttl
+        return unless ttl&.positive?
+
+        deleted = ActiveRecord::Base.connection.delete(
+          "DELETE FROM pgbus_processed_events WHERE processed_at < $1",
+          "Pgbus Idempotency Cleanup",
+          [Time.now.utc - ttl]
         )
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
       end
 
-      def track_failed_dispatch(row, error)
-        conn = ActiveRecord::Base.connection
-        conn.execute(<<~SQL)
-          INSERT INTO pgbus_failed_events (queue_name, payload, headers, error_message, error_class, failed_at)
-          VALUES (
-            #{conn.quote(row["queue_name"])},
-            #{conn.quote(row["payload"])},
-            #{conn.quote(row["headers"])},
-            #{conn.quote(error.message)},
-            #{conn.quote(error.class.name)},
-            NOW()
-          )
-        SQL
+      def reap_stale_processes
+        return unless defined?(ActiveRecord::Base)
+
+        threshold = Heartbeat::ALIVE_THRESHOLD
+        deleted = ActiveRecord::Base.connection.delete(
+          "DELETE FROM pgbus_processes WHERE last_heartbeat_at < $1",
+          "Pgbus Stale Process Reap",
+          [Time.now.utc - threshold]
+        )
+        Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Failed to track dispatch failure: #{e.message}" }
+        Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
       end
 
       def start_heartbeat

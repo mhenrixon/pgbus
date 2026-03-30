@@ -31,7 +31,9 @@ module Pgbus
         return unless @process_id && defined?(ActiveRecord::Base)
 
         ActiveRecord::Base.connection.execute(
-          "UPDATE pgbus_processes SET last_heartbeat_at = NOW() WHERE id = #{@process_id}"
+          "UPDATE pgbus_processes SET last_heartbeat_at = NOW() WHERE id = $1",
+          "Pgbus Heartbeat",
+          [@process_id]
         )
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }
@@ -57,7 +59,9 @@ module Pgbus
         return unless @process_id && defined?(ActiveRecord::Base)
 
         ActiveRecord::Base.connection.execute(
-          "DELETE FROM pgbus_processes WHERE id = #{@process_id}"
+          "DELETE FROM pgbus_processes WHERE id = $1",
+          "Pgbus Deregister Process",
+          [@process_id]
         )
       rescue StandardError
         # Best effort — process is exiting anyway

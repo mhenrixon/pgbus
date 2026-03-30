@@ -12,18 +12,8 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
 
     add_index :pgbus_processed_events, [:event_id, :handler_class],
       unique: true, name: "idx_pgbus_processed_events_unique"
-
-    # Scheduled events (for enqueue_at / delayed delivery)
-    create_table :pgbus_scheduled_events do |t|
-      t.string :queue_name, null: false
-      t.jsonb :payload, null: false
-      t.jsonb :headers
-      t.datetime :scheduled_at, null: false
-      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
-    end
-
-    add_index :pgbus_scheduled_events, [:scheduled_at, :queue_name],
-      name: "idx_pgbus_scheduled_events_dispatch"
+    add_index :pgbus_processed_events, :processed_at,
+      name: "idx_pgbus_processed_events_cleanup"
 
     # Process registry (heartbeats, monitoring)
     create_table :pgbus_processes do |t|
@@ -65,7 +55,6 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
 
     drop_table :pgbus_failed_events
     drop_table :pgbus_processes
-    drop_table :pgbus_scheduled_events
     drop_table :pgbus_processed_events
 
     disable_extension "pgmq"

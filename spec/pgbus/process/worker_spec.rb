@@ -55,12 +55,12 @@ RSpec.describe Pgbus::Process::Worker do
       before { worker.config.max_jobs_per_worker = 100 }
 
       it "returns true when jobs_processed reaches the limit" do
-        worker.stats[:jobs_processed] = 100
+        worker.instance_variable_get(:@jobs_processed).value = 100
         expect(worker.send(:recycle_needed?)).to be true
       end
 
       it "returns false when below the limit" do
-        worker.stats[:jobs_processed] = 50
+        worker.instance_variable_get(:@jobs_processed).value = 50
         expect(worker.send(:recycle_needed?)).to be false
       end
     end
@@ -69,7 +69,7 @@ RSpec.describe Pgbus::Process::Worker do
       before { worker.config.max_worker_lifetime = 60 }
 
       it "returns true when lifetime is exceeded" do
-        worker.stats[:started_at] = Time.now - 120
+        worker.instance_variable_set(:@started_at, Time.now - 120)
         expect(worker.send(:recycle_needed?)).to be true
       end
     end
