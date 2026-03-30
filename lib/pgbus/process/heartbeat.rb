@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "concurrent"
+require "socket"
 
 module Pgbus
   module Process
@@ -42,7 +43,7 @@ module Pgbus
           kind: @kind,
           hostname: Socket.gethostname,
           pid: ::Process.pid,
-          metadata: JSON.generate(@metadata),
+          metadata: @metadata,
           last_heartbeat_at: Time.current
         )
         @process_id = record.id
@@ -54,8 +55,8 @@ module Pgbus
         return unless @process_id
 
         ProcessRecord.where(id: @process_id).delete_all
-      rescue StandardError
-        # Best effort — process is exiting anyway
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Process deregistration failed: #{e.message}" }
       end
     end
   end

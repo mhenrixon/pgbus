@@ -64,19 +64,48 @@ module Pgbus
     end
 
     def count_jobs(&)
+      previous_batch_id = Thread.current[:pgbus_batch_id]
+      previous_count = Thread.current[:pgbus_batch_job_count]
+
       Thread.current[:pgbus_batch_id] = batch_id
-      @job_count = 0
+      Thread.current[:pgbus_batch_job_count] = 0
 
       yield
 
       @job_count = Thread.current[:pgbus_batch_job_count] || 0
     ensure
-      Thread.current[:pgbus_batch_id] = nil
-      Thread.current[:pgbus_batch_job_count] = nil
+      Thread.current[:pgbus_batch_id] = previous_batch_id
+      Thread.current[:pgbus_batch_job_count] = previous_count
     end
 
     def update_total
-      BatchRecord.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
+      if @job_count.zero?
+        # Finish empty batches immediately — no jobs to signal completion
+        BatchRecord.where(batch_id: batch_id).update_all(
+          total_jobs: 0,
+          status: "finished",
+          finished_at: Time.current
+        )
+        fire_empty_batch_callbacks
+      else
+        BatchRecord.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
+      end
+    end
+
+    def fire_empty_batch_callbacks
+      record = BatchRecord.find_by(batch_id: batch_id)
+      return unless record
+
+      properties = parse_properties(record.properties)
+      self.class.send(:enqueue_callback, record.on_finish_class, properties) if record.on_finish_class
+      self.class.send(:enqueue_callback, record.on_success_class, properties) if record.on_success_class
+    end
+
+    def parse_properties(props)
+      JSON.parse(props.presence || "{}")
+    rescue JSON::ParserError => e
+      Pgbus.logger.error { "[Pgbus] Invalid batch properties JSON: #{e.message}" }
+      {}
     end
 
     class << self
@@ -91,7 +120,12 @@ module Pgbus
       end
 
       def fire_callbacks(record)
-        properties = JSON.parse(record.properties.presence || "{}")
+        properties = begin
+          JSON.parse(record.properties.presence || "{}")
+        rescue JSON::ParserError => e
+          Pgbus.logger.error { "[Pgbus] Invalid batch properties JSON: #{e.message}" }
+          {}
+        end
         all_succeeded = record.discarded_jobs.zero?
 
         enqueue_callback(record.on_finish_class, properties) if record.on_finish_class

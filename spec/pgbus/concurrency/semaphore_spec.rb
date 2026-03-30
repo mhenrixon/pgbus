@@ -31,8 +31,10 @@ RSpec.describe Pgbus::Concurrency::Semaphore do
 
   describe ".expire_stale" do
     it "deletes expired semaphores and returns their keys" do
-      scope = double("scope", pluck: %w[old-key-1 old-key-2], delete_all: 2)
-      allow(Pgbus::SemaphoreRecord).to receive(:expired).and_return(scope)
+      result = double("result", rows: [["old-key-1"], ["old-key-2"]])
+      connection = double("connection")
+      allow(Pgbus::SemaphoreRecord).to receive(:connection).and_return(connection)
+      allow(connection).to receive(:exec_query).and_return(result)
 
       expired = described_class.expire_stale
 

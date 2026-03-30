@@ -4,6 +4,8 @@ module Pgbus
   class BatchRecord < ApplicationRecord
     self.table_name = "pgbus_batches"
 
+    COUNTER_COLUMNS = %w[completed_jobs discarded_jobs].freeze
+
     scope :finished, -> { where(status: "finished") }
     scope :stale, ->(before:) { finished.where("finished_at < ?", before) }
 
@@ -11,6 +13,8 @@ module Pgbus
     # batch to finish. Uses row-level locking to prevent duplicate callbacks.
     # Returns { just_finished:, record: } or nil if batch not found.
     def self.increment_counter!(batch_id, column)
+      raise ArgumentError, "Invalid column: #{column}" unless COUNTER_COLUMNS.include?(column)
+
       transaction do
         record = lock.find_by(batch_id: batch_id)
         return nil unless record

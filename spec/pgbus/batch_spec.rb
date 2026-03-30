@@ -4,11 +4,21 @@ require "spec_helper"
 require "active_job"
 
 RSpec.describe Pgbus::Batch do
-  let(:batch_record_double) { double("BatchRecord", id: 1, attributes: { "batch_id" => "abc" }) }
+  let(:batch_record_double) do
+    double(
+      "BatchRecord",
+      id: 1,
+      attributes: { "batch_id" => "abc" },
+      on_finish_class: nil,
+      on_success_class: nil,
+      on_discard_class: nil,
+      properties: "{}"
+    )
+  end
 
   before do
-    allow(Pgbus::BatchRecord).to receive(:create!).and_return(batch_record_double)
     allow(Pgbus::BatchRecord).to receive_message_chain(:where, :update_all).and_return(1) # rubocop:disable RSpec/MessageChain
+    allow(Pgbus::BatchRecord).to receive_messages(create!: batch_record_double, find_by: batch_record_double)
   end
 
   describe "#initialize" do

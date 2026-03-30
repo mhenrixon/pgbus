@@ -18,11 +18,14 @@ module Pgbus
 
         # Delete semaphores that have expired (safety net for crashed workers).
         # Returns an array of hashes with expired keys.
+        # Uses DELETE ... RETURNING for atomicity (no race between pluck and delete).
         def expire_stale
-          expired = SemaphoreRecord.expired(Time.now.utc)
-          keys = expired.pluck(:key)
-          expired.delete_all
-          keys.map { |k| { "key" => k } }
+          result = SemaphoreRecord.connection.exec_query(
+            "DELETE FROM pgbus_semaphores WHERE expires_at < $1 RETURNING key",
+            "Pgbus Semaphore Expire",
+            [Time.now.utc]
+          )
+          result.rows.map { |row| { "key" => row[0] } }
         end
 
         # Check current value for a key. Useful for testing/monitoring.
