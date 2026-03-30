@@ -52,6 +52,12 @@ RSpec/SpecFilePathFormat:
 RSpec/VerifiedDoubles:
   Enabled: false
 
+RSpec/MultipleMemoizedHelpers:
+  Enabled: false
+
+RSpec/AnyInstance:
+  Enabled: false
+
 RSpec/SubjectStub:
   Enabled: false
 
