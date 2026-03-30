@@ -33,24 +33,19 @@ module Pgbus
     end
 
     def show_status
-      if defined?(ActiveRecord::Base)
-        processes = ActiveRecord::Base.connection.execute(
-          "SELECT kind, hostname, pid, metadata, last_heartbeat_at FROM pgbus_processes ORDER BY kind, created_at"
-        )
+      processes = ProcessRecord.order(:kind, :created_at)
+                               .select(:kind, :hostname, :pid, :metadata, :last_heartbeat_at)
 
-        if processes.none?
-          puts "No Pgbus processes running."
-          return
-        end
+      if processes.none?
+        puts "No Pgbus processes running."
+        return
+      end
 
-        puts "KIND         HOST                 PID      HEARTBEAT                      METADATA"
-        puts "-" * 100
-        processes.each do |p|
-          puts format("%-12s %-20s %-8s %-30s %s",
-                      p["kind"], p["hostname"], p["pid"], p["last_heartbeat_at"], p["metadata"])
-        end
-      else
-        puts "ActiveRecord not available. Run from a Rails context."
+      puts "KIND         HOST                 PID      HEARTBEAT                      METADATA"
+      puts "-" * 100
+      processes.each do |p|
+        puts format("%-12s %-20s %-8s %-30s %s",
+                    p.kind, p.hostname, p.pid, p.last_heartbeat_at, p.metadata)
       end
     end
 

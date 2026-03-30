@@ -29,53 +29,37 @@ module Pgbus
       self
     end
 
-    # Record a completed job. Returns the batch status after update.
+    # Record a completed job. Returns the batch row after update.
     def self.job_completed(batch_id)
       update_counter(batch_id, "completed_jobs")
     end
 
-    # Record a discarded (dead-lettered) job. Returns the batch status after update.
+    # Record a discarded (dead-lettered) job. Returns the batch row after update.
     def self.job_discarded(batch_id)
       update_counter(batch_id, "discarded_jobs")
     end
 
     # Find a batch record by ID. Returns a hash or nil.
     def self.find(batch_id)
-      return nil unless defined?(ActiveRecord::Base)
-
-      result = ActiveRecord::Base.connection.exec_query(
-        "SELECT * FROM pgbus_batches WHERE batch_id = $1",
-        "Pgbus Batch Find",
-        [batch_id]
-      )
-      result.first
+      BatchRecord.find_by(batch_id: batch_id)&.attributes
     end
 
     # Delete finished batches older than the given threshold.
     def self.cleanup(older_than:)
-      return 0 unless defined?(ActiveRecord::Base)
-
-      result = ActiveRecord::Base.connection.exec_query(
-        "DELETE FROM pgbus_batches WHERE status = 'finished' AND finished_at < $1 RETURNING id",
-        "Pgbus Batch Cleanup",
-        [older_than]
-      )
-      result.to_a.size
+      BatchRecord.stale(before: older_than).delete_all
     end
 
     private
 
     def create_record
-      return unless defined?(ActiveRecord::Base)
-
-      ActiveRecord::Base.connection.exec_query(
-        <<~SQL,
-          INSERT INTO pgbus_batches
-            (batch_id, description, on_finish_class, on_success_class, on_discard_class, properties, status)
-          VALUES ($1, $2, $3, $4, $5, $6, 'pending')
-        SQL
-        "Pgbus Batch Create",
-        [batch_id, description, on_finish&.name, on_success&.name, on_discard&.name, JSON.generate(properties)]
+      BatchRecord.create!(
+        batch_id: batch_id,
+        description: description,
+        on_finish_class: on_finish&.name,
+        on_success_class: on_success&.name,
+        on_discard_class: on_discard&.name,
+        properties: JSON.generate(properties),
+        status: "pending"
       )
     end
 
@@ -92,46 +76,14 @@ module Pgbus
     end
 
     def update_total
-      return unless defined?(ActiveRecord::Base)
-
-      ActiveRecord::Base.connection.exec_query(
-        "UPDATE pgbus_batches SET total_jobs = $1, status = 'processing' WHERE batch_id = $2",
-        "Pgbus Batch Update Total",
-        [@job_count, batch_id]
-      )
+      BatchRecord.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
     end
 
     class << self
       private
 
       def update_counter(batch_id, column)
-        return nil unless defined?(ActiveRecord::Base)
-
-        # Use (completed_jobs + discarded_jobs = total_jobs) AS just_finished to detect
-        # whether THIS update caused the transition, avoiding duplicate callbacks when
-        # two workers complete the final jobs simultaneously.
-        result = ActiveRecord::Base.connection.exec_query(
-          <<~SQL,
-            UPDATE pgbus_batches
-            SET #{column} = #{column} + 1,
-                status = CASE
-                  WHEN completed_jobs + discarded_jobs + 1 = total_jobs THEN 'finished'
-                  ELSE status
-                END,
-                finished_at = CASE
-                  WHEN completed_jobs + discarded_jobs + 1 = total_jobs THEN NOW()
-                  ELSE finished_at
-                END
-            WHERE batch_id = $1
-            RETURNING status, total_jobs, completed_jobs, discarded_jobs,
-                      on_finish_class, on_success_class, on_discard_class, properties,
-                      (completed_jobs + discarded_jobs = total_jobs) AS just_finished
-          SQL
-          "Pgbus Batch Counter",
-          [batch_id]
-        )
-
-        row = result.first
+        row = BatchRecord.increment_counter!(batch_id, column)
         return nil unless row
 
         fire_callbacks(row) if row["just_finished"]

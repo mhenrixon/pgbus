@@ -16,6 +16,8 @@ module Pgbus
         loader = Zeitwerk::Loader.for_gem
         loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
         loader.ignore("#{__dir__}/generators")
+        models_dir = File.expand_path("../app/models", __dir__)
+        loader.push_dir(models_dir) if File.directory?(models_dir)
         loader
       end
     end

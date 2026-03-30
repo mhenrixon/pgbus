@@ -3,15 +3,9 @@
 require "spec_helper"
 
 RSpec.describe Pgbus::Concurrency::BlockedExecution do
-  let(:connection) { double("AR::Connection") }
-
-  before do
-    stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-  end
-
   describe ".insert" do
-    it "inserts a blocked execution row" do
-      allow(connection).to receive(:exec_query).and_return([])
+    it "creates a blocked execution record" do
+      allow(Pgbus::BlockedExecutionRecord).to receive(:create!).and_return(double("record"))
 
       described_class.insert(
         concurrency_key: "TestJob-42",
@@ -21,77 +15,39 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
         duration: 900
       )
 
-      expect(connection).to have_received(:exec_query).with(
-        a_string_matching(/INSERT INTO pgbus_blocked_executions/),
-        "Pgbus Blocked Insert",
-        array_including("TestJob-42", "default", a_string_matching(/"job_class"/), 0, an_instance_of(Time))
+      expect(Pgbus::BlockedExecutionRecord).to have_received(:create!).with(
+        hash_including(concurrency_key: "TestJob-42", queue_name: "default", priority: 0)
       )
     end
   end
 
   describe ".release_next" do
-    it "returns the next blocked execution and deletes it" do
-      row = { "queue_name" => "default", "payload" => '{"job_class":"TestJob","arguments":[42]}' }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query).and_return(result)
+    it "delegates to BlockedExecutionRecord.release_next!" do
+      released = { queue_name: "default", payload: { "job_class" => "TestJob" } }
+      allow(Pgbus::BlockedExecutionRecord).to receive(:release_next!).with("TestJob-42").and_return(released)
 
-      released = described_class.release_next("TestJob-42")
-      expect(released[:queue_name]).to eq("default")
-      expect(released[:payload]["job_class"]).to eq("TestJob")
+      result = described_class.release_next("TestJob-42")
+
+      expect(result).to eq(released)
     end
 
     it "returns nil when no blocked executions exist" do
-      result = double("Result", first: nil)
-      allow(connection).to receive(:exec_query).and_return(result)
+      allow(Pgbus::BlockedExecutionRecord).to receive(:release_next!).and_return(nil)
 
       expect(described_class.release_next("TestJob-42")).to be_nil
-    end
-
-    it "uses FOR UPDATE SKIP LOCKED to avoid contention" do
-      result = double("Result", first: nil)
-      allow(connection).to receive(:exec_query).and_return(result)
-
-      described_class.release_next("TestJob-42")
-      expect(connection).to have_received(:exec_query).with(
-        a_string_matching(/FOR UPDATE SKIP LOCKED/),
-        anything,
-        anything
-      )
-    end
-  end
-
-  describe ".expire_stale" do
-    it "deletes expired blocked executions" do
-      result = double("Result", to_a: [{ "id" => 1 }, { "id" => 2 }])
-      allow(connection).to receive(:exec_query).and_return(result)
-
-      count = described_class.expire_stale
-      expect(count).to eq(2)
-    end
-  end
-
-  describe ".count_for" do
-    it "returns the count of blocked executions for a key" do
-      result = double("Result", first: { "cnt" => "5" })
-      allow(connection).to receive(:exec_query).and_return(result)
-
-      expect(described_class.count_for("TestJob-42")).to eq(5)
     end
   end
 
   describe ".promote_next" do
     let(:mock_client) { build_mock_client }
-    let(:ar_base) { double("ActiveRecord::Base", connection: connection) }
 
     before do
-      stub_const("ActiveRecord::Base", ar_base)
-      allow(ar_base).to receive(:transaction).and_yield
+      allow(ActiveRecord::Base).to receive(:transaction).and_yield
     end
 
     it "deletes the blocked row and enqueues atomically, returning true" do
-      row = { "queue_name" => "default", "payload" => { "job_class" => "TestJob" } }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query).and_return(result)
+      released = { queue_name: "default", payload: { "job_class" => "TestJob" } }
+      allow(Pgbus::BlockedExecutionRecord).to receive(:release_next!).and_return(released)
       allow(mock_client).to receive(:send_message).and_return(42)
 
       promoted = described_class.promote_next("TestJob-42", client: mock_client)
@@ -101,8 +57,7 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     end
 
     it "returns false when no blocked executions exist" do
-      result = double("Result", first: nil)
-      allow(connection).to receive(:exec_query).and_return(result)
+      allow(Pgbus::BlockedExecutionRecord).to receive(:release_next!).and_return(nil)
 
       promoted = described_class.promote_next("TestJob-42", client: mock_client)
 
@@ -111,7 +66,7 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     end
 
     it "returns false and logs warning on error" do
-      allow(ar_base).to receive(:transaction).and_raise(StandardError, "db error")
+      allow(ActiveRecord::Base).to receive(:transaction).and_raise(StandardError, "db error")
 
       promoted = described_class.promote_next("TestJob-42", client: mock_client)
 
@@ -119,16 +74,23 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     end
   end
 
-  context "when ActiveRecord is not defined" do
-    before { hide_const("ActiveRecord") }
+  describe ".expire_stale" do
+    it "deletes expired blocked executions" do
+      scope = double("scope", delete_all: 2)
+      allow(Pgbus::BlockedExecutionRecord).to receive(:expired).and_return(scope)
 
-    it "release_next returns nil" do
-      expect(described_class.release_next("key")).to be_nil
+      count = described_class.expire_stale
+
+      expect(count).to eq(2)
     end
+  end
 
-    it "promote_next returns false" do
-      mock_client = build_mock_client
-      expect(described_class.promote_next("key", client: mock_client)).to be false
+  describe ".count_for" do
+    it "returns the count of blocked executions for a key" do
+      scope = double("scope", count: 5)
+      allow(Pgbus::BlockedExecutionRecord).to receive(:where).with(concurrency_key: "TestJob-42").and_return(scope)
+
+      expect(described_class.count_for("TestJob-42")).to eq(5)
     end
   end
 end

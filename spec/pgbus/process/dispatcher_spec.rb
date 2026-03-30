@@ -45,78 +45,48 @@ RSpec.describe Pgbus::Process::Dispatcher do
   end
 
   describe "#cleanup_processed_events (private)" do
-    context "when ActiveRecord is not defined" do
-      before { hide_const("ActiveRecord") }
+    it "deletes expired processed events" do
+      scope = double("scope", delete_all: 5)
+      allow(Pgbus::ProcessedEventRecord).to receive(:expired).and_return(scope)
 
-      it "returns early" do
-        expect(dispatcher.send(:cleanup_processed_events)).to be_nil
-      end
+      dispatcher.send(:cleanup_processed_events)
+
+      expect(Pgbus::ProcessedEventRecord).to have_received(:expired).with(an_instance_of(Time))
+      expect(scope).to have_received(:delete_all)
     end
 
-    context "when ActiveRecord is defined" do
-      let(:connection) { double("AR::Connection") }
+    it "returns early when idempotency_ttl is not set" do
+      original_ttl = dispatcher.config.idempotency_ttl
+      dispatcher.config.idempotency_ttl = nil
+      allow(Pgbus::ProcessedEventRecord).to receive(:expired)
 
-      before do
-        stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-      end
+      dispatcher.send(:cleanup_processed_events)
 
-      it "deletes expired processed events with bind params" do
-        allow(connection).to receive(:delete).and_return(5)
-        dispatcher.send(:cleanup_processed_events)
-        expect(connection).to have_received(:delete).with(
-          "DELETE FROM pgbus_processed_events WHERE processed_at < $1",
-          "Pgbus Idempotency Cleanup",
-          [an_instance_of(Time)]
-        )
-      end
+      expect(Pgbus::ProcessedEventRecord).not_to have_received(:expired)
+    ensure
+      dispatcher.config.idempotency_ttl = original_ttl
+    end
 
-      it "returns early when idempotency_ttl is not set" do
-        original_ttl = dispatcher.config.idempotency_ttl
-        dispatcher.config.idempotency_ttl = nil
-        allow(connection).to receive(:delete)
-        dispatcher.send(:cleanup_processed_events)
-        expect(connection).not_to have_received(:delete)
-      ensure
-        dispatcher.config.idempotency_ttl = original_ttl
-      end
-
-      it "rescues StandardError and logs a warning" do
-        allow(connection).to receive(:delete).and_raise(StandardError, "db error")
-        expect { dispatcher.send(:cleanup_processed_events) }.not_to raise_error
-      end
+    it "rescues StandardError and logs a warning" do
+      allow(Pgbus::ProcessedEventRecord).to receive(:expired).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:cleanup_processed_events) }.not_to raise_error
     end
   end
 
   describe "#reap_stale_processes (private)" do
-    context "when ActiveRecord is not defined" do
-      before { hide_const("ActiveRecord") }
+    it "deletes stale processes" do
+      scope = double("scope", delete_all: 2)
+      allow(Pgbus::ProcessRecord).to receive(:stale).and_return(scope)
 
-      it "returns early" do
-        expect(dispatcher.send(:reap_stale_processes)).to be_nil
-      end
+      dispatcher.send(:reap_stale_processes)
+
+      expect(Pgbus::ProcessRecord).to have_received(:stale).with(an_instance_of(Time))
+      expect(scope).to have_received(:delete_all)
     end
 
-    context "when ActiveRecord is defined" do
-      let(:connection) { double("AR::Connection") }
-
-      before do
-        stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-      end
-
-      it "deletes stale processes with bind params" do
-        allow(connection).to receive(:delete).and_return(2)
-        dispatcher.send(:reap_stale_processes)
-        expect(connection).to have_received(:delete).with(
-          "DELETE FROM pgbus_processes WHERE last_heartbeat_at < $1",
-          "Pgbus Stale Process Reap",
-          [an_instance_of(Time)]
-        )
-      end
-
-      it "rescues StandardError and logs a warning" do
-        allow(connection).to receive(:delete).and_raise(StandardError, "db error")
-        expect { dispatcher.send(:reap_stale_processes) }.not_to raise_error
-      end
+    it "rescues StandardError and logs a warning" do
+      allow(Pgbus::ProcessRecord).to receive(:stale).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:reap_stale_processes) }.not_to raise_error
     end
   end
 

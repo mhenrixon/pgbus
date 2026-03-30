@@ -52,23 +52,13 @@ module Pgbus
       end
 
       def already_processed?(event_id)
-        return false unless defined?(ActiveRecord::Base)
-
-        ActiveRecord::Base.connection.select_value(
-          "SELECT 1 FROM pgbus_processed_events WHERE event_id = $1 AND handler_class = $2",
-          "Pgbus Idempotency Check",
-          [event_id, self.class.name]
-        )
+        ProcessedEventRecord.exists?(event_id: event_id, handler_class: self.class.name)
       end
 
       def mark_processed!(event_id)
-        return unless defined?(ActiveRecord::Base)
-
-        ActiveRecord::Base.connection.exec_insert(
-          "INSERT INTO pgbus_processed_events (event_id, handler_class, processed_at) " \
-          "VALUES ($1, $2, $3) ON CONFLICT (event_id, handler_class) DO NOTHING",
-          "Pgbus Idempotency Mark",
-          [event_id, self.class.name, Time.now.utc]
+        ProcessedEventRecord.upsert(
+          { event_id: event_id, handler_class: self.class.name, processed_at: Time.now.utc },
+          unique_by: %i[event_id handler_class]
         )
       end
     end

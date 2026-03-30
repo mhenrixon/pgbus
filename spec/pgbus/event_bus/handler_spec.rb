@@ -124,7 +124,6 @@ RSpec.describe Pgbus::EventBus::Handler do
   end
 
   describe "idempotent handler" do
-    let(:connection) { double("AR::Connection") }
     let(:handler_class) do
       Class.new(described_class) do
         idempotent!
@@ -136,27 +135,25 @@ RSpec.describe Pgbus::EventBus::Handler do
     end
     let(:handler) { handler_class.new }
 
-    before do
-      stub_const("ActiveRecord::Base", double("AR::Base", connection: connection))
-      allow(connection).to receive_messages(select_value: nil, exec_insert: nil)
-    end
-
     it "returns :handled when event has not been processed" do
+      allow(Pgbus::ProcessedEventRecord).to receive(:exists?).and_return(false)
+      allow(Pgbus::ProcessedEventRecord).to receive(:upsert)
+
       result = handler.process(message)
 
       expect(result).to eq(:handled)
-      expect(connection).to have_received(:select_value)
-      expect(connection).to have_received(:exec_insert)
+      expect(Pgbus::ProcessedEventRecord).to have_received(:exists?)
+      expect(Pgbus::ProcessedEventRecord).to have_received(:upsert)
     end
 
     it "returns :skipped when event was already processed" do
-      allow(connection).to receive(:select_value).and_return(1)
+      allow(Pgbus::ProcessedEventRecord).to receive(:exists?).and_return(true)
+      allow(Pgbus::ProcessedEventRecord).to receive(:upsert)
 
       result = handler.process(message)
 
       expect(result).to eq(:skipped)
-      expect(connection).to have_received(:select_value)
-      expect(connection).not_to have_received(:exec_insert)
+      expect(Pgbus::ProcessedEventRecord).not_to have_received(:upsert)
     end
   end
 

@@ -28,13 +28,9 @@ module Pgbus
       end
 
       def beat
-        return unless @process_id && defined?(ActiveRecord::Base)
+        return unless @process_id
 
-        ActiveRecord::Base.connection.execute(
-          "UPDATE pgbus_processes SET last_heartbeat_at = NOW() WHERE id = $1",
-          "Pgbus Heartbeat",
-          [@process_id]
-        )
+        ProcessRecord.where(id: @process_id).update_all(last_heartbeat_at: Time.current)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }
       end
@@ -42,27 +38,22 @@ module Pgbus
       private
 
       def register_process
-        return unless defined?(ActiveRecord::Base)
-
-        result = ActiveRecord::Base.connection.exec_insert(
-          "INSERT INTO pgbus_processes (kind, hostname, pid, metadata, last_heartbeat_at, created_at, updated_at) " \
-          "VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW()) RETURNING id",
-          "Pgbus Register Process",
-          [@kind, Socket.gethostname, ::Process.pid, JSON.generate(@metadata)]
+        record = ProcessRecord.create!(
+          kind: @kind,
+          hostname: Socket.gethostname,
+          pid: ::Process.pid,
+          metadata: JSON.generate(@metadata),
+          last_heartbeat_at: Time.current
         )
-        @process_id = result.first["id"]
+        @process_id = record.id
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Process registration failed: #{e.message}" }
       end
 
       def deregister_process
-        return unless @process_id && defined?(ActiveRecord::Base)
+        return unless @process_id
 
-        ActiveRecord::Base.connection.execute(
-          "DELETE FROM pgbus_processes WHERE id = $1",
-          "Pgbus Deregister Process",
-          [@process_id]
-        )
+        ProcessRecord.where(id: @process_id).delete_all
       rescue StandardError
         # Best effort — process is exiting anyway
       end

@@ -4,11 +4,11 @@ require "spec_helper"
 require "active_job"
 
 RSpec.describe Pgbus::Batch do
-  let(:connection) { double("AR::Connection") }
+  let(:batch_record_double) { double("BatchRecord", id: 1, attributes: { "batch_id" => "abc" }) }
 
   before do
-    stub_const("ActiveRecord::Base", double("ActiveRecord::Base", connection: connection))
-    allow(connection).to receive(:exec_query).and_return([])
+    allow(Pgbus::BatchRecord).to receive(:create!).and_return(batch_record_double)
+    allow(Pgbus::BatchRecord).to receive_message_chain(:where, :update_all).and_return(1) # rubocop:disable RSpec/MessageChain
   end
 
   describe "#initialize" do
@@ -35,10 +35,8 @@ RSpec.describe Pgbus::Batch do
       batch = described_class.new(description: "test")
       batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
-      expect(connection).to have_received(:exec_query).with(
-        a_string_matching(/INSERT INTO pgbus_batches/),
-        "Pgbus Batch Create",
-        array_including(batch.batch_id, "test")
+      expect(Pgbus::BatchRecord).to have_received(:create!).with(
+        hash_including(batch_id: batch.batch_id, description: "test", status: "pending")
       )
     end
 
@@ -46,11 +44,7 @@ RSpec.describe Pgbus::Batch do
       batch = described_class.new
       batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
-      expect(connection).to have_received(:exec_query).with(
-        a_string_matching(/UPDATE pgbus_batches SET total_jobs/),
-        "Pgbus Batch Update Total",
-        anything
-      )
+      expect(Pgbus::BatchRecord).to have_received(:where).with(batch_id: batch.batch_id)
     end
 
     it "sets thread-local batch_id during block execution" do
@@ -74,18 +68,11 @@ RSpec.describe Pgbus::Batch do
         "completed_jobs" => "1",
         "discarded_jobs" => "0"
       }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/completed_jobs = completed_jobs \+ 1/), anything, anything)
-        .and_return(result)
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
 
       described_class.job_completed("batch-123")
 
-      expect(connection).to have_received(:exec_query).with(
-        a_string_matching(/UPDATE pgbus_batches/),
-        "Pgbus Batch Counter",
-        ["batch-123"]
-      )
+      expect(Pgbus::BatchRecord).to have_received(:increment_counter!).with("batch-123", "completed_jobs")
     end
 
     it "fires on_finish callback when batch finishes" do
@@ -100,10 +87,7 @@ RSpec.describe Pgbus::Batch do
         "properties" => '{"user_id":1}',
         "just_finished" => true
       }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
-        .and_return(result)
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
 
       callback_job = class_double("BatchCallbackJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("BatchCallbackJob", callback_job)
@@ -125,10 +109,7 @@ RSpec.describe Pgbus::Batch do
         "properties" => "{}",
         "just_finished" => true
       }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
-        .and_return(result)
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
 
       callback_job = class_double("SuccessJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("SuccessJob", callback_job)
@@ -150,10 +131,7 @@ RSpec.describe Pgbus::Batch do
         "properties" => "{}",
         "just_finished" => true
       }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/UPDATE pgbus_batches/), "Pgbus Batch Counter", anything)
-        .and_return(result)
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
 
       callback_job = class_double("DiscardJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("DiscardJob", callback_job)
@@ -164,51 +142,33 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "returns nil when batch not found" do
-      result = double("Result", first: nil)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/UPDATE pgbus_batches/), anything, anything)
-        .and_return(result)
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(nil)
 
       expect(described_class.job_completed("nonexistent")).to be_nil
     end
   end
 
   describe ".find" do
-    it "returns the batch record" do
-      row = { "batch_id" => "abc", "status" => "processing" }
-      result = double("Result", first: row)
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/SELECT .* FROM pgbus_batches/), anything, anything)
-        .and_return(result)
+    it "returns the batch record attributes" do
+      record = double("BatchRecord", attributes: { "batch_id" => "abc", "status" => "processing" })
+      allow(Pgbus::BatchRecord).to receive(:find_by).with(batch_id: "abc").and_return(record)
 
-      expect(described_class.find("abc")).to eq(row)
+      expect(described_class.find("abc")).to eq({ "batch_id" => "abc", "status" => "processing" })
+    end
+
+    it "returns nil when not found" do
+      allow(Pgbus::BatchRecord).to receive(:find_by).and_return(nil)
+
+      expect(described_class.find("missing")).to be_nil
     end
   end
 
   describe ".cleanup" do
     it "deletes finished batches older than threshold" do
-      result = double("Result", to_a: [{ "id" => 1 }])
-      allow(connection).to receive(:exec_query)
-        .with(a_string_matching(/DELETE FROM pgbus_batches/), anything, anything)
-        .and_return(result)
+      scope = double("scope", delete_all: 3)
+      allow(Pgbus::BatchRecord).to receive(:stale).and_return(scope)
 
-      expect(described_class.cleanup(older_than: Time.now - 86_400)).to eq(1)
-    end
-  end
-
-  context "when ActiveRecord is not defined" do
-    before { hide_const("ActiveRecord") }
-
-    it "job_completed returns nil" do
-      expect(described_class.job_completed("batch-123")).to be_nil
-    end
-
-    it "find returns nil" do
-      expect(described_class.find("batch-123")).to be_nil
-    end
-
-    it "cleanup returns 0" do
-      expect(described_class.cleanup(older_than: Time.now)).to eq(0)
+      expect(described_class.cleanup(older_than: Time.now - 86_400)).to eq(3)
     end
   end
 end
