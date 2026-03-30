@@ -7,31 +7,21 @@ module Pgbus
     scope :finished, -> { where(status: "finished") }
     scope :stale, ->(before:) { finished.where("finished_at < ?", before) }
 
-    # Atomic counter increment with transition detection.
-    # Returns the row hash (with "just_finished" flag) or nil.
+    # Atomically increment the counter and detect if this update caused the
+    # batch to finish. Uses row-level locking to prevent duplicate callbacks.
+    # Returns { just_finished:, record: } or nil if batch not found.
     def self.increment_counter!(batch_id, column)
-      result = connection.exec_query(
-        <<~SQL,
-          UPDATE pgbus_batches
-          SET #{column} = #{column} + 1,
-              status = CASE
-                WHEN completed_jobs + discarded_jobs + 1 = total_jobs THEN 'finished'
-                ELSE status
-              END,
-              finished_at = CASE
-                WHEN completed_jobs + discarded_jobs + 1 = total_jobs THEN NOW()
-                ELSE finished_at
-              END
-          WHERE batch_id = $1
-          RETURNING status, total_jobs, completed_jobs, discarded_jobs,
-                    on_finish_class, on_success_class, on_discard_class, properties,
-                    (completed_jobs + discarded_jobs = total_jobs) AS just_finished
-        SQL
-        "Pgbus Batch Counter",
-        [batch_id]
-      )
+      transaction do
+        record = lock.find_by(batch_id: batch_id)
+        return nil unless record
 
-      result.first
+        record.increment!(column)
+
+        just_finished = record.completed_jobs + record.discarded_jobs == record.total_jobs
+        record.update!(status: "finished", finished_at: Time.current) if just_finished && record.status != "finished"
+
+        { record: record, just_finished: just_finished && record.status == "finished" }
+      end
     end
   end
 end

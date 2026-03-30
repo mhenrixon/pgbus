@@ -61,14 +61,26 @@ RSpec.describe Pgbus::Batch do
   end
 
   describe ".job_completed" do
+    def build_batch_result(overrides = {})
+      attrs = {
+        status: "processing",
+        total_jobs: 3,
+        completed_jobs: 1,
+        discarded_jobs: 0,
+        on_finish_class: nil,
+        on_success_class: nil,
+        on_discard_class: nil,
+        properties: "{}"
+      }.merge(overrides)
+
+      record = double("BatchRecord", **attrs, presence: attrs[:properties])
+      allow(record).to receive(:properties).and_return(attrs[:properties])
+      { record: record, just_finished: overrides.fetch(:just_finished, false) }
+    end
+
     it "increments completed_jobs counter" do
-      row = {
-        "status" => "processing",
-        "total_jobs" => "3",
-        "completed_jobs" => "1",
-        "discarded_jobs" => "0"
-      }
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
+      result = build_batch_result
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
 
       described_class.job_completed("batch-123")
 
@@ -76,18 +88,12 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_finish callback when batch finishes" do
-      row = {
-        "status" => "finished",
-        "total_jobs" => "2",
-        "completed_jobs" => "2",
-        "discarded_jobs" => "0",
-        "on_finish_class" => "BatchCallbackJob",
-        "on_success_class" => nil,
-        "on_discard_class" => nil,
-        "properties" => '{"user_id":1}',
-        "just_finished" => true
-      }
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
+      result = build_batch_result(
+        status: "finished", total_jobs: 2, completed_jobs: 2,
+        on_finish_class: "BatchCallbackJob", properties: '{"user_id":1}',
+        just_finished: true
+      )
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("BatchCallbackJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("BatchCallbackJob", callback_job)
@@ -98,18 +104,12 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_success callback when all jobs succeed" do
-      row = {
-        "status" => "finished",
-        "total_jobs" => "1",
-        "completed_jobs" => "1",
-        "discarded_jobs" => "0",
-        "on_finish_class" => nil,
-        "on_success_class" => "SuccessJob",
-        "on_discard_class" => nil,
-        "properties" => "{}",
-        "just_finished" => true
-      }
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
+      result = build_batch_result(
+        status: "finished", total_jobs: 1, completed_jobs: 1,
+        on_success_class: "SuccessJob",
+        just_finished: true
+      )
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("SuccessJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("SuccessJob", callback_job)
@@ -120,18 +120,12 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "fires on_discard callback when some jobs were discarded" do
-      row = {
-        "status" => "finished",
-        "total_jobs" => "2",
-        "completed_jobs" => "1",
-        "discarded_jobs" => "1",
-        "on_finish_class" => nil,
-        "on_success_class" => nil,
-        "on_discard_class" => "DiscardJob",
-        "properties" => "{}",
-        "just_finished" => true
-      }
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(row)
+      result = build_batch_result(
+        status: "finished", total_jobs: 2, completed_jobs: 1, discarded_jobs: 1,
+        on_discard_class: "DiscardJob",
+        just_finished: true
+      )
+      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("DiscardJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("DiscardJob", callback_job)

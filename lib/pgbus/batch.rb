@@ -83,20 +83,20 @@ module Pgbus
       private
 
       def update_counter(batch_id, column)
-        row = BatchRecord.increment_counter!(batch_id, column)
-        return nil unless row
+        result = BatchRecord.increment_counter!(batch_id, column)
+        return nil unless result
 
-        fire_callbacks(row) if row["just_finished"]
-        row
+        fire_callbacks(result[:record]) if result[:just_finished]
+        result
       end
 
-      def fire_callbacks(row)
-        properties = JSON.parse(row["properties"] || "{}")
-        all_succeeded = row["discarded_jobs"].to_i.zero?
+      def fire_callbacks(record)
+        properties = JSON.parse(record.properties.presence || "{}")
+        all_succeeded = record.discarded_jobs.zero?
 
-        enqueue_callback(row["on_finish_class"], properties) if row["on_finish_class"]
-        enqueue_callback(row["on_success_class"], properties) if row["on_success_class"] && all_succeeded
-        enqueue_callback(row["on_discard_class"], properties) if row["on_discard_class"] && !all_succeeded
+        enqueue_callback(record.on_finish_class, properties) if record.on_finish_class
+        enqueue_callback(record.on_success_class, properties) if record.on_success_class && all_succeeded
+        enqueue_callback(record.on_discard_class, properties) if record.on_discard_class && !all_succeeded
       end
 
       def enqueue_callback(class_name, properties)
