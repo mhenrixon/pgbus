@@ -65,14 +65,28 @@ module Pgbus
         key = Concurrency.extract_key(payload)
         return unless key
 
-        Concurrency::Semaphore.release(key)
-
+        # Atomic permit handoff: try to promote a blocked job first.
+        # If promoted, the slot stays occupied (no release needed).
+        # Only release the semaphore if there's nothing to promote.
         released = Concurrency::BlockedExecution.release_next(key)
-        return unless released
 
-        client.send_message(released[:queue_name], released[:payload])
+        if released
+          delay = remaining_delay(released[:payload])
+          client.send_message(released[:queue_name], released[:payload], delay: delay)
+        else
+          Concurrency::Semaphore.release(key)
+        end
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Concurrency signal failed: #{e.message}" }
+      end
+
+      def remaining_delay(payload)
+        scheduled_at = payload["scheduled_at"]
+        return 0 unless scheduled_at
+
+        [Time.parse(scheduled_at).to_f - Time.now.to_f, 0].max.ceil
+      rescue StandardError
+        0
       end
 
       def handle_dead_letter(message, queue_name, payload)

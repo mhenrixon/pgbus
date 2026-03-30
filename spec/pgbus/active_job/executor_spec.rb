@@ -20,9 +20,6 @@ RSpec.describe Pgbus::ActiveJob::Executor do
   before do
     allow(ActiveSupport::Notifications).to receive(:instrument).and_call_original
     allow(ActiveJob::Base).to receive(:deserialize).with(job_payload).and_return(job_double)
-  end
-
-  before do
     # By default, no concurrency key in payloads
     allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
   end
@@ -118,14 +115,24 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(nil)
       end
 
-      it "signals semaphore on success" do
+      it "releases semaphore when no blocked jobs to promote" do
         executor.execute(message, queue_name)
 
-        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
         expect(Pgbus::Concurrency::BlockedExecution).to have_received(:release_next).with("TestJob-42")
+        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
       end
 
-      it "signals semaphore on dead letter" do
+      it "promotes blocked job without releasing semaphore (atomic handoff)" do
+        released = { queue_name: "default", payload: { "job_class" => "OtherJob" } }
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
+
+        executor.execute(message, queue_name)
+
+        expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "OtherJob" }, delay: 0)
+        expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
+      end
+
+      it "releases semaphore on dead letter when no blocked jobs" do
         dlq_message = build_message_double(msg_id: 21, message: message_json, read_ct: config.max_retries + 1)
 
         executor.execute(dlq_message, queue_name)
@@ -133,21 +140,13 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
       end
 
-      it "does not signal semaphore on transient failure" do
+      it "does not signal concurrency on transient failure" do
         allow(job_double).to receive(:perform_now).and_raise(StandardError, "transient")
 
         executor.execute(message, queue_name)
 
         expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
-      end
-
-      it "enqueues blocked execution when released" do
-        released = { queue_name: "default", payload: { "job_class" => "OtherJob" } }
-        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
-
-        executor.execute(message, queue_name)
-
-        expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "OtherJob" })
+        expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:release_next)
       end
     end
   end

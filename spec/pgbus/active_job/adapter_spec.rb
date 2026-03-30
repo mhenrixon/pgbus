@@ -69,17 +69,22 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
   end
 
   describe "#enqueue with concurrency" do
+    let(:concurrency_config) do
+      { limit: 1, duration: 900, on_conflict: :block, key: ->(*) { "TestJob-42" } }
+    end
+    let(:job_class_double) do
+      double("JobClass", pgbus_concurrency: concurrency_config, name: "TestJob").tap do |klass|
+        allow(klass).to receive(:respond_to?).and_return(false)
+        allow(klass).to receive(:respond_to?).with(:pgbus_concurrency).and_return(true)
+      end
+    end
     let(:concurrency_payload) do
       JSON.parse(serialized_json).merge("pgbus_concurrency_key" => "TestJob-42")
     end
 
     before do
-      allow(Pgbus::Concurrency).to receive(:inject_metadata).and_return(concurrency_payload)
-      allow(Pgbus::Concurrency).to receive(:extract_key).and_return("TestJob-42")
-      allow(job).to receive_message_chain(:class, :respond_to?).with(:pgbus_concurrency).and_return(true)
-      allow(job).to receive_message_chain(:class, :pgbus_concurrency).and_return(
-        { limit: 1, duration: 900, on_conflict: :block, key: ->(*) { "TestJob-42" } }
-      )
+      allow(Pgbus::Concurrency).to receive_messages(inject_metadata: concurrency_payload, extract_key: "TestJob-42")
+      allow(job).to receive(:class).and_return(job_class_double)
     end
 
     it "acquires semaphore and enqueues when under limit" do
@@ -111,10 +116,9 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
 
     it "discards when at concurrency limit with on_conflict: :discard" do
-      allow(job).to receive_message_chain(:class, :pgbus_concurrency).and_return(
-        { limit: 1, duration: 900, on_conflict: :discard, key: ->(*) { "TestJob-42" } }
+      allow(job_class_double).to receive(:pgbus_concurrency).and_return(
+        concurrency_config.merge(on_conflict: :discard)
       )
-      allow(job).to receive_message_chain(:class, :name).and_return("TestJob")
       allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
 
       adapter.enqueue(job)
@@ -123,8 +127,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
 
     it "raises when at concurrency limit with on_conflict: :raise" do
-      allow(job).to receive_message_chain(:class, :pgbus_concurrency).and_return(
-        { limit: 1, duration: 900, on_conflict: :raise, key: ->(*) { "TestJob-42" } }
+      allow(job_class_double).to receive(:pgbus_concurrency).and_return(
+        concurrency_config.merge(on_conflict: :raise)
       )
       allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
 

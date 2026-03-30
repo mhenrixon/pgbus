@@ -16,7 +16,7 @@ module Pgbus
               SET value = pgbus_semaphores.value + 1,
                   max_value = EXCLUDED.max_value,
                   expires_at = GREATEST(pgbus_semaphores.expires_at, EXCLUDED.expires_at)
-              WHERE pgbus_semaphores.value < pgbus_semaphores.max_value
+              WHERE pgbus_semaphores.value < EXCLUDED.max_value
             RETURNING value
           SQL
 

@@ -39,6 +39,7 @@ RSpec.describe Pgbus::Concurrency do
       expect do
         Class.new(ActiveJob::Base) do
           include Pgbus::Concurrency
+
           limits_concurrency to: 0, key: -> { "x" }
         end
       end.to raise_error(ArgumentError, /positive integer/)
@@ -48,14 +49,36 @@ RSpec.describe Pgbus::Concurrency do
       expect do
         Class.new(ActiveJob::Base) do
           include Pgbus::Concurrency
+
           limits_concurrency to: 1, on_conflict: :unknown
         end
       end.to raise_error(ArgumentError, /on_conflict/)
     end
 
+    it "validates duration is a positive number" do
+      expect do
+        Class.new(ActiveJob::Base) do
+          include Pgbus::Concurrency
+
+          limits_concurrency to: 1, duration: -5
+        end
+      end.to raise_error(ArgumentError, /duration/)
+    end
+
+    it "validates key is callable" do
+      expect do
+        Class.new(ActiveJob::Base) do
+          include Pgbus::Concurrency
+
+          limits_concurrency to: 1, key: "not_callable"
+        end
+      end.to raise_error(ArgumentError, /callable/)
+    end
+
     it "defaults key to class name" do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Concurrency
+
         limits_concurrency to: 1
 
         def perform; end

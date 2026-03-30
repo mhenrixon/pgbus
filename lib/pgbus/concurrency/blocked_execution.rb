@@ -22,11 +22,13 @@ module Pgbus
         def release_next(concurrency_key)
           return nil unless defined?(ActiveRecord::Base)
 
-          result = execute(<<~SQL, "Pgbus Blocked Release", [concurrency_key])
+          now = Time.now.utc
+          result = execute(<<~SQL, "Pgbus Blocked Release", [concurrency_key, now])
             DELETE FROM pgbus_blocked_executions
             WHERE id = (
               SELECT id FROM pgbus_blocked_executions
               WHERE concurrency_key = $1
+                AND expires_at >= $2
               ORDER BY priority ASC, created_at ASC
               LIMIT 1
               FOR UPDATE SKIP LOCKED
@@ -37,7 +39,11 @@ module Pgbus
           row = result.first
           return nil unless row
 
-          { queue_name: row["queue_name"], payload: JSON.parse(row["payload"]) }
+          # ActiveRecord auto-casts jsonb to Ruby Hash; handle both cases
+          payload = row["payload"]
+          payload = JSON.parse(payload) if payload.is_a?(String)
+
+          { queue_name: row["queue_name"], payload: payload }
         end
 
         # Delete blocked executions that have expired.

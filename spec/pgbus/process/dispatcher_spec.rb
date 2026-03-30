@@ -166,8 +166,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#cleanup_concurrency (private)" do
     it "expires stale semaphores and releases blocked executions" do
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
-      allow(Pgbus::Concurrency::BlockedExecution).to receive(:expire_stale).and_return(0)
-      allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(nil)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, release_next: nil)
 
       dispatcher.send(:cleanup_concurrency)
 
@@ -179,12 +178,11 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "enqueues released blocked executions" do
       released = { queue_name: "default", payload: { "job_class" => "TestJob" } }
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
-      allow(Pgbus::Concurrency::BlockedExecution).to receive(:expire_stale).and_return(0)
-      allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, release_next: released)
 
       dispatcher.send(:cleanup_concurrency)
 
-      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" })
+      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" }, delay: 0)
     end
 
     it "rescues errors gracefully" do

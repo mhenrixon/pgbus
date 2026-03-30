@@ -119,10 +119,20 @@ module Pgbus
         released = Concurrency::BlockedExecution.release_next(key)
         return unless released
 
-        Pgbus.client.send_message(released[:queue_name], released[:payload])
+        delay = remaining_delay(released[:payload])
+        Pgbus.client.send_message(released[:queue_name], released[:payload], delay: delay)
         Pgbus.logger.debug { "[Pgbus] Released blocked execution for key: #{key}" }
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Failed to release blocked execution for #{key}: #{e.message}" }
+      end
+
+      def remaining_delay(payload)
+        scheduled_at = payload["scheduled_at"]
+        return 0 unless scheduled_at
+
+        [Time.parse(scheduled_at).to_f - Time.now.to_f, 0].max.ceil
+      rescue StandardError
+        0
       end
 
       def start_heartbeat

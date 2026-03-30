@@ -22,6 +22,8 @@ module Pgbus
       def limits_concurrency(to:, key: nil, duration: 15 * 60, on_conflict: :block) # rubocop:disable Naming/MethodParameterName
         raise ArgumentError, "to: must be a positive integer" unless to.is_a?(Integer) && to.positive?
         raise ArgumentError, "on_conflict must be :block, :discard, or :raise" unless %i[block discard raise].include?(on_conflict)
+        raise ArgumentError, "duration must be a positive number" unless duration.is_a?(Numeric) && duration.positive?
+        raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
 
         @pgbus_concurrency = {
           limit: to,
