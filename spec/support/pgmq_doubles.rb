@@ -1,0 +1,75 @@
+# frozen_string_literal: true
+
+module PgmqDoubles
+  def build_mock_pgmq
+    double("PGMQ::Client").tap do |pgmq|
+      allow(pgmq).to receive_messages(
+        create: nil,
+        enable_notify_insert: nil,
+        produce: 1,
+        produce_batch: [1, 2],
+        read: nil,
+        read_batch: [],
+        read_with_poll: [],
+        delete: true,
+        archive: true,
+        set_vt: nil,
+        metrics: nil,
+        metrics_all: [],
+        list_queues: [],
+        purge_queue: nil,
+        bind_topic: nil,
+        produce_topic: nil,
+        close: nil
+      )
+      allow(pgmq).to receive(:transaction).and_yield(pgmq)
+    end
+  end
+
+  def build_mock_client(pgmq: nil)
+    pgmq ||= build_mock_pgmq
+    double("Pgbus::Client", pgmq: pgmq).tap do |client|
+      allow(client).to receive_messages(
+        ensure_queue: nil,
+        ensure_dead_letter_queue: nil,
+        send_message: 1,
+        send_batch: [1, 2],
+        read_message: nil,
+        read_batch: [],
+        delete_message: true,
+        archive_message: true,
+        extend_visibility: nil,
+        move_to_dead_letter: nil,
+        metrics: nil,
+        list_queues: [],
+        purge_queue: nil,
+        bind_topic: nil,
+        publish_to_topic: nil,
+        close: nil,
+        transaction: nil
+      )
+    end
+  end
+
+  def build_message_double(msg_id: 1, message: "{}", read_ct: 0, headers: nil)
+    double("PGMQ::Message", msg_id: msg_id, message: message, read_ct: read_ct, headers: headers)
+  end
+
+  def build_job_double(job_class: "TestJob", queue_name: "default", job_id: SecureRandom.uuid)
+    double("ActiveJob").tap do |job|
+      allow(job).to receive_messages(
+        queue_name: queue_name,
+        job_id: job_id,
+        scheduled_at: nil,
+        provider_job_id: nil,
+        serialize: { "job_class" => job_class, "job_id" => job_id, "queue_name" => queue_name, "arguments" => [] }
+      )
+      allow(job).to receive(:provider_job_id=)
+      allow(job).to receive(:perform_now)
+    end
+  end
+end
+
+RSpec.configure do |config|
+  config.include PgmqDoubles
+end

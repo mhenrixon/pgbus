@@ -1,0 +1,321 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+RSpec.describe Pgbus::Client do
+  # Stub pgmq-ruby so it never loads the real gem
+  subject(:client) do
+    allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+    described_class.new(config)
+  end
+
+  before do
+    allow_any_instance_of(described_class).to receive(:require).with("pgmq-ruby").and_return(true)
+    stub_const("PGMQ::Client", Class.new do
+      def initialize(*args, **kwargs); end
+    end)
+  end
+
+  let(:config) do
+    Pgbus.configuration.tap do |c|
+      c.database_url = "postgres://localhost/pgbus_test"
+    end
+  end
+  let(:mock_pgmq) { build_mock_pgmq }
+
+  describe "#ensure_queue" do
+    it "creates the queue with the prefixed name" do
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs")
+    end
+
+    it "enables LISTEN/NOTIFY when listen_notify is true" do
+      config.listen_notify = true
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: config.notify_throttle_ms)
+    end
+
+    it "skips LISTEN/NOTIFY when listen_notify is false" do
+      config.listen_notify = false
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).not_to have_received(:enable_notify_insert)
+    end
+
+    it "is idempotent — only creates the queue once" do
+      client.ensure_queue("jobs")
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").once
+    end
+
+    it "creates different queues independently" do
+      client.ensure_queue("jobs")
+      client.ensure_queue("events")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").once
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_events").once
+    end
+  end
+
+  describe "#ensure_dead_letter_queue" do
+    it "creates the DLQ with correct suffix" do
+      client.ensure_dead_letter_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs_dlq")
+    end
+
+    it "is idempotent — only creates the DLQ once" do
+      client.ensure_dead_letter_queue("jobs")
+      client.ensure_dead_letter_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs_dlq").once
+    end
+  end
+
+  describe "#send_message" do
+    it "ensures the queue exists before sending" do
+      client.send_message("default", { "type" => "test" })
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default")
+    end
+
+    it "produces a JSON-serialized message to the prefixed queue" do
+      client.send_message("default", { "key" => "value" })
+
+      expect(mock_pgmq).to have_received(:produce).with(
+        "pgbus_test_default",
+        '{"key":"value"}',
+        headers: nil,
+        delay: 0
+      )
+    end
+
+    it "passes headers and delay" do
+      client.send_message("default", "payload", headers: { "x" => 1 }, delay: 5)
+
+      expect(mock_pgmq).to have_received(:produce).with(
+        "pgbus_test_default",
+        "payload",
+        headers: '{"x":1}',
+        delay: 5
+      )
+    end
+
+    it "does not double-serialize a string payload" do
+      client.send_message("default", '{"already":"json"}')
+
+      expect(mock_pgmq).to have_received(:produce).with(
+        "pgbus_test_default",
+        '{"already":"json"}',
+        headers: nil,
+        delay: 0
+      )
+    end
+  end
+
+  describe "#send_batch" do
+    it "produces a batch of serialized messages" do
+      payloads = [{ "a" => 1 }, { "b" => 2 }]
+      client.send_batch("default", payloads)
+
+      expect(mock_pgmq).to have_received(:produce_batch).with(
+        "pgbus_test_default",
+        ['{"a":1}', '{"b":2}'],
+        headers: nil,
+        delay: 0
+      )
+    end
+
+    it "serializes headers when provided" do
+      client.send_batch("default", ["p1"], headers: [{ "h" => 1 }])
+
+      expect(mock_pgmq).to have_received(:produce_batch).with(
+        "pgbus_test_default",
+        ["p1"],
+        headers: ['{"h":1}'],
+        delay: 0
+      )
+    end
+  end
+
+  describe "#read_message" do
+    it "reads from the prefixed queue with default visibility timeout" do
+      client.read_message("default")
+
+      expect(mock_pgmq).to have_received(:read).with("pgbus_test_default", vt: config.visibility_timeout)
+    end
+
+    it "allows overriding the visibility timeout" do
+      client.read_message("default", vt: 60)
+
+      expect(mock_pgmq).to have_received(:read).with("pgbus_test_default", vt: 60)
+    end
+  end
+
+  describe "#read_batch" do
+    it "reads a batch from the prefixed queue" do
+      client.read_batch("default", qty: 10)
+
+      expect(mock_pgmq).to have_received(:read_batch).with("pgbus_test_default", vt: config.visibility_timeout, qty: 10)
+    end
+  end
+
+  describe "#read_with_poll" do
+    it "delegates to pgmq.read_with_poll with correct args" do
+      client.read_with_poll("default", qty: 5, max_poll_seconds: 2, poll_interval_ms: 50)
+
+      expect(mock_pgmq).to have_received(:read_with_poll).with(
+        "pgbus_test_default",
+        vt: config.visibility_timeout,
+        qty: 5,
+        max_poll_seconds: 2,
+        poll_interval_ms: 50
+      )
+    end
+  end
+
+  describe "#delete_message" do
+    it "deletes from the prefixed queue" do
+      client.delete_message("default", 42)
+
+      expect(mock_pgmq).to have_received(:delete).with("pgbus_test_default", 42)
+    end
+  end
+
+  describe "#archive_message" do
+    it "archives from the prefixed queue" do
+      client.archive_message("default", 7)
+
+      expect(mock_pgmq).to have_received(:archive).with("pgbus_test_default", 7)
+    end
+  end
+
+  describe "#extend_visibility" do
+    it "sets VT on the prefixed queue" do
+      client.extend_visibility("default", 5, vt: 120)
+
+      expect(mock_pgmq).to have_received(:set_vt).with("pgbus_test_default", 5, vt: 120)
+    end
+  end
+
+  describe "#set_visibility_timeout" do
+    it "passes the raw queue name directly to pgmq" do
+      client.set_visibility_timeout("raw_queue", 3, vt: 60)
+
+      expect(mock_pgmq).to have_received(:set_vt).with("raw_queue", 3, vt: 60)
+    end
+  end
+
+  describe "#delete_from_queue" do
+    it "passes the raw queue name directly to pgmq" do
+      client.delete_from_queue("raw_queue", 99)
+
+      expect(mock_pgmq).to have_received(:delete).with("raw_queue", 99)
+    end
+  end
+
+  describe "#transaction" do
+    it "delegates to pgmq.transaction" do
+      yielded = false
+      client.transaction { |_txn| yielded = true }
+
+      expect(yielded).to be true
+    end
+  end
+
+  describe "#move_to_dead_letter" do
+    it "ensures the DLQ exists" do
+      message = build_message_double(msg_id: 42, message: '{"data":"test"}', headers: nil)
+      client.move_to_dead_letter("default", message)
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default_dlq")
+    end
+
+    it "produces to DLQ and deletes from the original queue within a transaction" do
+      message = build_message_double(msg_id: 42, message: '{"data":"test"}', headers: nil)
+      client.move_to_dead_letter("default", message)
+
+      expect(mock_pgmq).to have_received(:transaction)
+      expect(mock_pgmq).to have_received(:produce).with("pgbus_test_default_dlq", '{"data":"test"}', headers: nil)
+      expect(mock_pgmq).to have_received(:delete).with("pgbus_test_default", 42)
+    end
+  end
+
+  describe "#metrics" do
+    context "with a queue_name" do
+      it "returns metrics for the prefixed queue" do
+        client.metrics("default")
+
+        expect(mock_pgmq).to have_received(:metrics).with("pgbus_test_default")
+      end
+    end
+
+    context "without a queue_name" do
+      it "returns all metrics" do
+        client.metrics
+
+        expect(mock_pgmq).to have_received(:metrics_all)
+      end
+    end
+  end
+
+  describe "#list_queues" do
+    it "delegates to pgmq.list_queues" do
+      client.list_queues
+
+      expect(mock_pgmq).to have_received(:list_queues)
+    end
+  end
+
+  describe "#purge_queue" do
+    it "purges the prefixed queue" do
+      client.purge_queue("default")
+
+      expect(mock_pgmq).to have_received(:purge_queue).with("pgbus_test_default")
+    end
+  end
+
+  describe "#bind_topic" do
+    it "ensures the queue and binds the pattern" do
+      client.bind_topic("orders.#", "events")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_events")
+      expect(mock_pgmq).to have_received(:bind_topic).with("orders.#", "pgbus_test_events")
+    end
+  end
+
+  describe "#publish_to_topic" do
+    it "publishes a serialized payload with the routing key" do
+      client.publish_to_topic("orders.created", { "id" => 1 })
+
+      expect(mock_pgmq).to have_received(:produce_topic).with(
+        "orders.created",
+        '{"id":1}',
+        headers: nil,
+        delay: 0
+      )
+    end
+
+    it "serializes headers when provided" do
+      client.publish_to_topic("orders.created", "body", headers: { "trace" => "abc" }, delay: 3)
+
+      expect(mock_pgmq).to have_received(:produce_topic).with(
+        "orders.created",
+        "body",
+        headers: '{"trace":"abc"}',
+        delay: 3
+      )
+    end
+  end
+
+  describe "#close" do
+    it "closes the pgmq connection" do
+      client.close
+
+      expect(mock_pgmq).to have_received(:close)
+    end
+  end
+end

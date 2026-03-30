@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Pgbus
   class Client
     attr_reader :pgmq, :config
