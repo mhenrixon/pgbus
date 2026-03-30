@@ -17,7 +17,7 @@ module Pgbus
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
 
     # Dispatcher settings
-    attr_accessor :dispatch_interval, :dispatch_batch_size
+    attr_accessor :dispatch_interval
 
     # Dead letter queue
     attr_accessor :max_retries, :dead_letter_queue_suffix
@@ -55,7 +55,6 @@ module Pgbus
       @max_worker_lifetime = nil
 
       @dispatch_interval = 1.0
-      @dispatch_batch_size = 500
 
       @max_retries = 5
       @dead_letter_queue_suffix = "_dlq"

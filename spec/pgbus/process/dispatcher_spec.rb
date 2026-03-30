@@ -12,6 +12,16 @@ RSpec.describe Pgbus::Process::Dispatcher do
     allow(Pgbus).to receive(:client).and_return(mock_client)
   end
 
+  describe "constants" do
+    it "has a cleanup interval of 1 hour" do
+      expect(described_class::CLEANUP_INTERVAL).to eq(3600)
+    end
+
+    it "has a reap interval of 5 minutes" do
+      expect(described_class::REAP_INTERVAL).to eq(300)
+    end
+  end
+
   describe "#graceful_shutdown" do
     it "sets shutting_down flag" do
       dispatcher.graceful_shutdown
@@ -103,14 +113,38 @@ RSpec.describe Pgbus::Process::Dispatcher do
   end
 
   describe "#run_maintenance (private)" do
-    it "calls cleanup_processed_events and reap_stale_processes" do
-      allow(dispatcher).to receive_messages(cleanup_processed_events: nil, reap_stale_processes: nil)
+    it "skips cleanup when interval not elapsed" do
+      allow(dispatcher).to receive(:cleanup_processed_events)
+      allow(dispatcher).to receive(:reap_stale_processes)
+
       dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).not_to have_received(:cleanup_processed_events)
+      expect(dispatcher).not_to have_received(:reap_stale_processes)
+    end
+
+    it "runs cleanup when cleanup interval has elapsed" do
+      allow(dispatcher).to receive(:cleanup_processed_events)
+      allow(dispatcher).to receive(:reap_stale_processes)
+
+      dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
+      dispatcher.send(:run_maintenance)
+
       expect(dispatcher).to have_received(:cleanup_processed_events)
+    end
+
+    it "runs reap when reap interval has elapsed" do
+      allow(dispatcher).to receive(:cleanup_processed_events)
+      allow(dispatcher).to receive(:reap_stale_processes)
+
+      dispatcher.instance_variable_set(:@last_reap_at, Time.now - described_class::REAP_INTERVAL - 1)
+      dispatcher.send(:run_maintenance)
+
       expect(dispatcher).to have_received(:reap_stale_processes)
     end
 
     it "rescues errors from maintenance methods" do
+      dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
       expect { dispatcher.send(:run_maintenance) }.not_to raise_error
     end

@@ -5,11 +5,17 @@ module Pgbus
     class Dispatcher
       include SignalHandler
 
+      # Maintenance runs on coarser intervals than the main loop
+      CLEANUP_INTERVAL = 3600       # Run idempotency cleanup every hour
+      REAP_INTERVAL = 300           # Run stale process reaping every 5 minutes
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
         @config = config
         @shutting_down = false
+        @last_cleanup_at = Time.now
+        @last_reap_at = Time.now
       end
 
       def run
@@ -23,7 +29,11 @@ module Pgbus
           break if @shutting_down
 
           process_signals
+          break if @shutting_down
+
           run_maintenance
+          break if @shutting_down
+
           sleep(config.dispatch_interval)
         end
 
@@ -41,8 +51,17 @@ module Pgbus
       private
 
       def run_maintenance
-        cleanup_processed_events
-        reap_stale_processes
+        now = Time.now
+
+        if now - @last_cleanup_at >= CLEANUP_INTERVAL
+          cleanup_processed_events
+          @last_cleanup_at = now
+        end
+
+        if now - @last_reap_at >= REAP_INTERVAL
+          reap_stale_processes
+          @last_reap_at = now
+        end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
       end

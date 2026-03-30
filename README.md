@@ -54,6 +54,9 @@ production:
       threads: 10
     - queues: [critical]
       threads: 5
+  event_consumers:
+    - queues: [orders, payments]
+      threads: 5
   max_jobs_per_worker: 10000
   max_memory_mb: 512
   max_worker_lifetime: 3600
@@ -156,7 +159,7 @@ bundle exec pgbus start
 
 This boots a supervisor that manages:
 - **Workers** -- process ActiveJob queues
-- **Dispatcher** -- move scheduled events to queues when they're due
+- **Dispatcher** -- runs maintenance tasks (idempotency cleanup, stale process reaping)
 - **Consumers** -- process event bus messages
 
 ### 5. Mount the dashboard
@@ -187,6 +190,7 @@ end
 | `default_queue` | `"default"` | Default queue for jobs without explicit queue |
 | `pool_size` | `5` | Connection pool size |
 | `workers` | `[{queues: ["default"], threads: 5}]` | Worker process definitions |
+| `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
 | `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |
 | `visibility_timeout` | `30` | Seconds before unacked message becomes visible again |
 | `max_retries` | `5` | Failed reads before routing to dead letter queue |
@@ -194,20 +198,19 @@ end
 | `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
 | `max_worker_lifetime` | `nil` | Recycle worker after N seconds |
 | `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
-| `dispatch_interval` | `1.0` | Seconds between scheduled event dispatch sweeps |
-| `dispatch_batch_size` | `500` | Max scheduled events to dispatch per sweep |
-| `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days) |
+| `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
+| `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
 
 ## Architecture
 
-```
+```text
 Supervisor (fork manager)
   ├── Worker 1        (queues: [default, mailers], threads: 10)
   ├── Worker 2        (queues: [critical], threads: 5)
-  ├── Dispatcher      (scheduled events -> queues)
+  ├── Dispatcher      (maintenance: idempotency cleanup, stale process reaping)
   └── Consumer        (event bus topics)
 
 PostgreSQL + PGMQ
@@ -272,7 +275,6 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `q_pgbus_*` | PGMQ job queues (managed by PGMQ) |
 | `a_pgbus_*` | PGMQ archive tables (managed by PGMQ) |
 | `pgbus_processes` | Heartbeat tracking for workers/dispatcher/consumers |
-| `pgbus_scheduled_events` | Events scheduled for future dispatch |
 | `pgbus_failed_events` | Failed event dispatch records |
 | `pgbus_processed_events` | Idempotency deduplication (event_id, handler_class) |
 
