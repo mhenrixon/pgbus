@@ -121,8 +121,12 @@ module Pgbus
         event = failed_event(id)
         return false unless event
 
+        payload = JSON.parse(event["payload"])
+        headers = event["headers"]
+        headers = JSON.parse(headers) if headers.is_a?(String)
+
         connection.transaction do
-          @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
+          @client.send_message(event["queue_name"], payload, headers: headers)
           connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
         end
         true
@@ -142,8 +146,12 @@ module Pgbus
       def retry_all_failed
         count = 0
         connection.select_all("SELECT * FROM pgbus_failed_events").each do |event|
+          payload = JSON.parse(event["payload"])
+          headers = event["headers"]
+          headers = JSON.parse(headers) if headers.is_a?(String)
+
           connection.transaction do
-            @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
+            @client.send_message(event["queue_name"], payload, headers: headers)
             connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{event["id"].to_i}")
           end
           count += 1
@@ -209,7 +217,7 @@ module Pgbus
         return false unless row
 
         @client.transaction do |txn|
-          txn.produce(original_queue, row["message"])
+          txn.produce(original_queue, row["message"], headers: row["headers"])
           txn.delete(queue_name, msg_id.to_i)
         end
         true
