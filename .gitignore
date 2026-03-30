@@ -9,3 +9,4 @@
 *.gem
 Gemfile.lock
 .rspec_status
+.claude/settings.local.json
