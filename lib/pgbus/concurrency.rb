@@ -30,7 +30,7 @@ module Pgbus
           key: key || ->(*) { name },
           duration: duration,
           on_conflict: on_conflict
-        }
+        }.freeze
       end
 
       def pgbus_concurrency
@@ -47,7 +47,13 @@ module Pgbus
         config = active_job.class.pgbus_concurrency
         return nil unless config
 
-        config[:key].call(*active_job.arguments)
+        args = active_job.arguments
+        last = args.last
+        if last.is_a?(Hash) && last.each_key.all?(Symbol)
+          config[:key].call(*args[...-1], **last)
+        else
+          config[:key].call(*args)
+        end
       end
 
       # Inject the resolved concurrency key into the job's serialized payload.

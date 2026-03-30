@@ -164,25 +164,24 @@ RSpec.describe Pgbus::Process::Dispatcher do
   end
 
   describe "#cleanup_concurrency (private)" do
-    it "expires stale semaphores and releases blocked executions" do
+    it "expires stale semaphores and promotes blocked executions" do
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
-      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, release_next: nil)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, promote_next: false)
 
       dispatcher.send(:cleanup_concurrency)
 
       expect(Pgbus::Concurrency::Semaphore).to have_received(:expire_stale)
-      expect(Pgbus::Concurrency::BlockedExecution).to have_received(:release_next).with("TestJob-42")
+      expect(Pgbus::Concurrency::BlockedExecution).to have_received(:promote_next).with("TestJob-42", client: mock_client)
       expect(Pgbus::Concurrency::BlockedExecution).to have_received(:expire_stale)
     end
 
-    it "enqueues released blocked executions" do
-      released = { queue_name: "default", payload: { "job_class" => "TestJob" } }
+    it "promotes blocked executions atomically" do
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
-      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, release_next: released)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive_messages(expire_stale: 0, promote_next: true)
 
       dispatcher.send(:cleanup_concurrency)
 
-      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" }, delay: 0)
+      expect(Pgbus::Concurrency::BlockedExecution).to have_received(:promote_next).with("TestJob-42", client: mock_client)
     end
 
     it "rescues errors gracefully" do

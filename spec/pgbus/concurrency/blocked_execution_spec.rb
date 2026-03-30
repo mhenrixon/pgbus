@@ -79,11 +79,56 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     end
   end
 
+  describe ".promote_next" do
+    let(:mock_client) { build_mock_client }
+    let(:ar_base) { double("ActiveRecord::Base", connection: connection) }
+
+    before do
+      stub_const("ActiveRecord::Base", ar_base)
+      allow(ar_base).to receive(:transaction).and_yield
+    end
+
+    it "deletes the blocked row and enqueues atomically, returning true" do
+      row = { "queue_name" => "default", "payload" => { "job_class" => "TestJob" } }
+      result = double("Result", first: row)
+      allow(connection).to receive(:exec_query).and_return(result)
+      allow(mock_client).to receive(:send_message).and_return(42)
+
+      promoted = described_class.promote_next("TestJob-42", client: mock_client)
+
+      expect(promoted).to be true
+      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" }, delay: 0)
+    end
+
+    it "returns false when no blocked executions exist" do
+      result = double("Result", first: nil)
+      allow(connection).to receive(:exec_query).and_return(result)
+
+      promoted = described_class.promote_next("TestJob-42", client: mock_client)
+
+      expect(promoted).to be false
+      expect(mock_client).not_to have_received(:send_message)
+    end
+
+    it "returns false and logs warning on error" do
+      allow(ar_base).to receive(:transaction).and_raise(StandardError, "db error")
+
+      promoted = described_class.promote_next("TestJob-42", client: mock_client)
+
+      expect(promoted).to be false
+    end
+  end
+
   context "when ActiveRecord is not defined" do
     before { hide_const("ActiveRecord") }
 
     it "release_next returns nil" do
       expect(described_class.release_next("key")).to be_nil
+    end
+
+    it "promote_next returns false" do
+      mock_client = build_mock_client
+      expect(described_class.promote_next("key", client: mock_client)).to be false
     end
   end
 end

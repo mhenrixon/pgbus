@@ -46,6 +46,27 @@ module Pgbus
           { queue_name: row["queue_name"], payload: payload }
         end
 
+        # Atomically promote the next blocked execution: delete the row and enqueue
+        # the job in a single transaction. Returns true if a job was promoted, false
+        # otherwise. This avoids losing a blocked row if enqueue fails.
+        def promote_next(concurrency_key, client:, delay: 0)
+          return false unless defined?(ActiveRecord::Base)
+
+          released = nil
+          ActiveRecord::Base.transaction do
+            released = release_next(concurrency_key)
+            raise ActiveRecord::Rollback unless released
+
+            actual_delay = resolve_delay(released[:payload], delay)
+            client.send_message(released[:queue_name], released[:payload], delay: actual_delay)
+          end
+
+          !!released
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Promote blocked execution failed for #{concurrency_key}: #{e.message}" }
+          false
+        end
+
         # Delete blocked executions that have expired.
         # Returns the count of deleted rows.
         def expire_stale
@@ -68,6 +89,15 @@ module Pgbus
         end
 
         private
+
+        def resolve_delay(payload, default_delay)
+          scheduled_at = payload["scheduled_at"]
+          return default_delay unless scheduled_at
+
+          [Time.parse(scheduled_at).to_f - Time.now.to_f, 0].max.ceil
+        rescue StandardError
+          default_delay
+        end
 
         def execute(sql, name, binds)
           return [] unless defined?(ActiveRecord::Base)

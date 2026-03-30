@@ -66,27 +66,13 @@ module Pgbus
         return unless key
 
         # Atomic permit handoff: try to promote a blocked job first.
+        # promote_next wraps delete + enqueue in a transaction so neither is lost.
         # If promoted, the slot stays occupied (no release needed).
         # Only release the semaphore if there's nothing to promote.
-        released = Concurrency::BlockedExecution.release_next(key)
-
-        if released
-          delay = remaining_delay(released[:payload])
-          client.send_message(released[:queue_name], released[:payload], delay: delay)
-        else
-          Concurrency::Semaphore.release(key)
-        end
+        promoted = Concurrency::BlockedExecution.promote_next(key, client: client)
+        Concurrency::Semaphore.release(key) unless promoted
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Concurrency signal failed: #{e.message}" }
-      end
-
-      def remaining_delay(payload)
-        scheduled_at = payload["scheduled_at"]
-        return 0 unless scheduled_at
-
-        [Time.parse(scheduled_at).to_f - Time.now.to_f, 0].max.ceil
-      rescue StandardError
-        0
       end
 
       def handle_dead_letter(message, queue_name, payload)

@@ -112,23 +112,22 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         allow(Pgbus::Concurrency).to receive(:extract_key).and_call_original
         allow(ActiveJob::Base).to receive(:deserialize).with(concurrency_payload).and_return(job_double)
         allow(Pgbus::Concurrency::Semaphore).to receive(:release)
-        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(nil)
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:promote_next).and_return(false)
       end
 
       it "releases semaphore when no blocked jobs to promote" do
         executor.execute(message, queue_name)
 
-        expect(Pgbus::Concurrency::BlockedExecution).to have_received(:release_next).with("TestJob-42")
+        expect(Pgbus::Concurrency::BlockedExecution).to have_received(:promote_next).with("TestJob-42", client: mock_client)
         expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
       end
 
-      it "promotes blocked job without releasing semaphore (atomic handoff)" do
-        released = { queue_name: "default", payload: { "job_class" => "OtherJob" } }
-        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
+      it "skips semaphore release when promote_next succeeds (atomic handoff)" do
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:promote_next).and_return(true)
 
         executor.execute(message, queue_name)
 
-        expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "OtherJob" }, delay: 0)
+        expect(Pgbus::Concurrency::BlockedExecution).to have_received(:promote_next).with("TestJob-42", client: mock_client)
         expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
       end
 
@@ -146,7 +145,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         executor.execute(message, queue_name)
 
         expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
-        expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:release_next)
+        expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:promote_next)
       end
     end
   end

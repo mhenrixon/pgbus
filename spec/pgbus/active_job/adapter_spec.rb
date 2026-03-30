@@ -94,7 +94,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       adapter.enqueue(job)
 
       expect(Pgbus::Concurrency::Semaphore).to have_received(:acquire).with("TestJob-42", 1, 900)
-      expect(mock_client).to have_received(:send_message)
+      expect(mock_client).to have_received(:send_message).with("default", concurrency_payload, delay: 0)
       expect(job).to have_received(:provider_job_id=).with(42)
     end
 

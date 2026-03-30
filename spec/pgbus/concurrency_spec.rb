@@ -95,6 +95,22 @@ RSpec.describe Pgbus::Concurrency do
       expect(described_class.resolve_key(job)).to eq("TestJob-42")
     end
 
+    it "forwards keyword arguments to the key lambda" do
+      kw_job_class = Class.new(ActiveJob::Base) do
+        include Pgbus::Concurrency
+
+        self.queue_adapter = :test
+
+        limits_concurrency to: 1,
+                           key: ->(user_id:) { "KWJob-#{user_id}" }
+
+        def perform(user_id:); end
+      end
+
+      job = kw_job_class.new(user_id: 99)
+      expect(described_class.resolve_key(job)).to eq("KWJob-99")
+    end
+
     it "returns nil for jobs without concurrency" do
       job = no_concurrency_job_class.new
       expect(described_class.resolve_key(job)).to be_nil
