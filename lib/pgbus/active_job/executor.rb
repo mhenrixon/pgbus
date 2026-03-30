@@ -53,6 +53,8 @@ module Pgbus
         return unless defined?(ActiveSupport::Notifications)
 
         ActiveSupport::Notifications.instrument(event_name, payload)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Notification failure #{event_name}: #{e.class}: #{e.message}" }
       end
 
       def handle_dead_letter(message, queue_name, payload)
