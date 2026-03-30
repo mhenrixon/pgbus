@@ -3,7 +3,11 @@
 module Pgbus
   class JobsController < ApplicationController
     def index
-      @jobs = data_source.jobs(queue_name: params[:queue], page: page_param, per_page: per_page)
+      @jobs = if params[:status] == "failed"
+                []
+              else
+                data_source.jobs(queue_name: params[:queue], page: page_param, per_page: per_page)
+              end
       @failed = data_source.failed_events(page: page_param, per_page: per_page)
     end
 

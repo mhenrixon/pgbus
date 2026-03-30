@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module Pgbus
   module Web
     class DataSource
@@ -71,7 +73,6 @@ module Pgbus
 
       def retry_job(queue_name, msg_id)
         full_name = Pgbus.configuration.queue_name(queue_name)
-        # Reset visibility so it gets picked up again
         @client.pgmq.set_vt(full_name, msg_id.to_i, vt: 0)
       end
 
@@ -113,8 +114,10 @@ module Pgbus
         event = failed_event(id)
         return false unless event
 
-        @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
-        connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
+        connection.transaction do
+          @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
+          connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
+        end
         true
       rescue StandardError
         false
@@ -128,14 +131,17 @@ module Pgbus
       end
 
       def retry_all_failed
-        events = connection.select_all("SELECT * FROM pgbus_failed_events")
-        events.each do |event|
-          @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
+        count = 0
+        connection.select_all("SELECT * FROM pgbus_failed_events").each do |event|
+          connection.transaction do
+            @client.send_message(event["queue_name"], JSON.parse(event["payload"]))
+            connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{event["id"].to_i}")
+          end
+          count += 1
+        rescue StandardError => e
+          Pgbus.logger.error { "[Pgbus::Web] Failed to retry event #{event["id"]}: #{e.message}" }
         end
-        connection.execute("TRUNCATE pgbus_failed_events")
-        events.count
-      rescue StandardError
-        0
+        count
       end
 
       def discard_all_failed
@@ -146,12 +152,14 @@ module Pgbus
       end
 
       # Dead letter queue
+      # Note: DLQ queue names from queues_with_metrics are already fully qualified
+      # (e.g., "pgbus_default_dlq"), so we use them directly without re-prefixing.
       def dlq_messages(page: 1, per_page: 25)
         queues = queues_with_metrics.select { |q| q[:name].end_with?("_dlq") }
         offset = (page - 1) * per_page
 
         messages = queues.flat_map do |q|
-          query_queue_messages_raw(q[:name], 100, 0)
+          query_queue_messages_raw(q[:name], per_page + offset, 0)
         end
 
         messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, per_page) || []
@@ -159,32 +167,70 @@ module Pgbus
         []
       end
 
-      def retry_dlq_message(queue_name, msg_id)
-        full_dlq = Pgbus.configuration.queue_name(queue_name)
-        original_queue = full_dlq.delete_suffix(Pgbus.configuration.dead_letter_queue_suffix)
+      def dlq_message_detail(msg_id)
+        queues = queues_with_metrics.select { |q| q[:name].end_with?("_dlq") }
+        queues.each do |q|
+          row = connection.select_one(
+            "SELECT * FROM pgmq.q_#{sanitize_name(q[:name])} WHERE msg_id = $1",
+            "Pgbus DLQ Detail",
+            [msg_id.to_i]
+          )
+          return format_message(row, q[:name]) if row
+        end
+        nil
+      rescue StandardError
+        nil
+      end
 
-        # Read the message from DLQ
+      def retry_dlq_message(queue_name, msg_id)
+        # queue_name here is the full DLQ name (already prefixed)
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        original_queue = queue_name.delete_suffix(dlq_suffix)
+
         row = connection.select_one(
-          "SELECT * FROM pgmq.q_#{sanitize_name(full_dlq)} WHERE msg_id = $1",
+          "SELECT * FROM pgmq.q_#{sanitize_name(queue_name)} WHERE msg_id = $1",
           "Pgbus DLQ Read",
           [msg_id.to_i]
         )
         return false unless row
 
-        # Send back to original queue and delete from DLQ
-        @client.pgmq.produce(original_queue, row["message"])
-        @client.pgmq.delete(full_dlq, msg_id.to_i)
+        @client.pgmq.transaction do |txn|
+          txn.produce(original_queue, row["message"])
+          txn.delete(queue_name, msg_id.to_i)
+        end
         true
       rescue StandardError
         false
       end
 
       def discard_dlq_message(queue_name, msg_id)
-        full_name = Pgbus.configuration.queue_name(queue_name)
-        @client.pgmq.delete(full_name, msg_id.to_i)
+        # queue_name here is the full DLQ name (already prefixed)
+        @client.pgmq.delete(queue_name, msg_id.to_i)
         true
       rescue StandardError
         false
+      end
+
+      def retry_all_dlq
+        messages = dlq_messages(page: 1, per_page: 1000)
+        count = 0
+        messages.each do |m|
+          retry_dlq_message(m[:queue_name], m[:msg_id]) && count += 1
+        rescue StandardError
+          next
+        end
+        count
+      end
+
+      def discard_all_dlq
+        messages = dlq_messages(page: 1, per_page: 1000)
+        count = 0
+        messages.each do |m|
+          discard_dlq_message(m[:queue_name], m[:msg_id]) && count += 1
+        rescue StandardError
+          next
+        end
+        count
       end
 
       # Processes
@@ -210,11 +256,32 @@ module Pgbus
         []
       end
 
+      def processed_event(id)
+        connection.select_one(
+          "SELECT * FROM pgbus_processed_events WHERE id = $1",
+          "Pgbus Processed Event",
+          [id.to_i]
+        )
+      rescue StandardError
+        nil
+      end
+
       def processed_events_count
         result = connection.select_value("SELECT COUNT(*) FROM pgbus_processed_events")
         result.to_i
       rescue StandardError
         0
+      end
+
+      def replay_event(event)
+        # Re-publish the event payload to all matching subscribers
+        routing_key = event["routing_key"] || event["handler_class"]
+        return false unless routing_key
+
+        @client.publish_to_topic(routing_key, event["payload"] || "{}")
+        true
+      rescue StandardError
+        false
       end
 
       # Subscriber registry
@@ -251,7 +318,7 @@ module Pgbus
       def all_queue_messages(limit, offset)
         queues = queues_with_metrics.reject { |q| q[:name].end_with?("_dlq") }
         messages = queues.flat_map do |q|
-          query_queue_messages_raw(q[:name], 100, 0)
+          query_queue_messages_raw(q[:name], limit + offset, 0)
         end
         messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, limit) || []
       end

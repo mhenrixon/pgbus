@@ -8,6 +8,8 @@ module Pgbus
 
     def show
       @queue = data_source.queue_detail(params[:name])
+      redirect_to queues_path, alert: "Queue not found." and return unless @queue
+
       @messages = data_source.jobs(queue_name: params[:name], page: page_param, per_page: per_page)
     end
 

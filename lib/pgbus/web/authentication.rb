@@ -15,7 +15,9 @@ module Pgbus
         auth_block = Pgbus.configuration.web_auth
         return if auth_block.nil?
 
-        head :unauthorized unless auth_block.call(request)
+        return if auth_block.respond_to?(:call) && auth_block.call(request)
+
+        head :unauthorized
       end
     end
   end

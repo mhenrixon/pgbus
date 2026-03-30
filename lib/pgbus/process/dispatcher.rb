@@ -44,7 +44,11 @@ module Pgbus
         return 0 unless defined?(ActiveRecord::Base)
 
         result = fetch_due_events
-        result.each { |row| enqueue_event(row) }
+        result.each do |row|
+          enqueue_event(row)
+        rescue StandardError => e
+          Pgbus.logger.error { "[Pgbus] Failed to dispatch event: #{e.message}" }
+        end
 
         count = result.count
         Pgbus.logger.debug { "[Pgbus] Dispatched #{count} scheduled events" } if count.positive?

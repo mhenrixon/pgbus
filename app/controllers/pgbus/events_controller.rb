@@ -8,16 +8,15 @@ module Pgbus
     end
 
     def show
-      @event = data_source.processed_events(page: 1, per_page: 1).first
+      @event = data_source.processed_event(params[:id])
     end
 
     def replay
-      # Re-publish the event through the event bus
-      event = data_source.processed_events(page: 1, per_page: 1).first
-      if event
+      event = data_source.processed_event(params[:id])
+      if event && data_source.replay_event(event)
         redirect_to events_path, notice: "Event replayed."
       else
-        redirect_to events_path, alert: "Event not found."
+        redirect_to events_path, alert: "Event not found or could not be replayed."
       end
     end
   end

@@ -7,7 +7,7 @@ module Pgbus
     end
 
     def show
-      @message = data_source.dlq_messages(page: 1, per_page: 1).find { |m| m[:msg_id] == params[:id].to_i }
+      @message = data_source.dlq_message_detail(params[:id].to_i)
     end
 
     def retry
@@ -29,11 +29,13 @@ module Pgbus
     end
 
     def retry_all
-      redirect_to dead_letter_index_path, notice: "All DLQ messages re-enqueued."
+      count = data_source.retry_all_dlq
+      redirect_to dead_letter_index_path, notice: "Re-enqueued #{count} DLQ messages."
     end
 
     def discard_all
-      redirect_to dead_letter_index_path, notice: "All DLQ messages discarded."
+      count = data_source.discard_all_dlq
+      redirect_to dead_letter_index_path, notice: "Discarded #{count} DLQ messages."
     end
   end
 end

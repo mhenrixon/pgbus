@@ -4,6 +4,8 @@ module Pgbus
   class ApplicationController < ActionController::Base
     include Web::Authentication
 
+    protect_from_forgery with: :exception
+
     layout "pgbus/application"
 
     helper Pgbus::ApplicationHelper
