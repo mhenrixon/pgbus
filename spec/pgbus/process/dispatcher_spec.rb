@@ -20,6 +20,10 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "has a reap interval of 5 minutes" do
       expect(described_class::REAP_INTERVAL).to eq(300)
     end
+
+    it "has a concurrency interval of 5 minutes" do
+      expect(described_class::CONCURRENCY_INTERVAL).to eq(300)
+    end
   end
 
   describe "#graceful_shutdown" do
@@ -143,10 +147,49 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect(dispatcher).to have_received(:reap_stale_processes)
     end
 
+    it "runs concurrency cleanup when concurrency interval has elapsed" do
+      allow(dispatcher).to receive(:cleanup_concurrency)
+
+      dispatcher.instance_variable_set(:@last_concurrency_at, Time.now - described_class::CONCURRENCY_INTERVAL - 1)
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:cleanup_concurrency)
+    end
+
     it "rescues errors from maintenance methods" do
       dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
       expect { dispatcher.send(:run_maintenance) }.not_to raise_error
+    end
+  end
+
+  describe "#cleanup_concurrency (private)" do
+    it "expires stale semaphores and releases blocked executions" do
+      allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
+      allow(Pgbus::Concurrency::BlockedExecution).to receive(:expire_stale).and_return(0)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(nil)
+
+      dispatcher.send(:cleanup_concurrency)
+
+      expect(Pgbus::Concurrency::Semaphore).to have_received(:expire_stale)
+      expect(Pgbus::Concurrency::BlockedExecution).to have_received(:release_next).with("TestJob-42")
+      expect(Pgbus::Concurrency::BlockedExecution).to have_received(:expire_stale)
+    end
+
+    it "enqueues released blocked executions" do
+      released = { queue_name: "default", payload: { "job_class" => "TestJob" } }
+      allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_return([{ "key" => "TestJob-42" }])
+      allow(Pgbus::Concurrency::BlockedExecution).to receive(:expire_stale).and_return(0)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
+
+      dispatcher.send(:cleanup_concurrency)
+
+      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" })
+    end
+
+    it "rescues errors gracefully" do
+      allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:cleanup_concurrency) }.not_to raise_error
     end
   end
 

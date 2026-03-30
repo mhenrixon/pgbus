@@ -12,6 +12,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Concurrency controls](#concurrency-controls)
 - [Configuration reference](#configuration-reference)
 - [Architecture](#architecture)
 - [CLI](#cli)
@@ -196,6 +197,48 @@ Pgbus.configure do |config|
 end
 ```
 
+## Concurrency controls
+
+Limit how many jobs with the same key can run concurrently:
+
+```ruby
+class ProcessOrderJob < ApplicationJob
+  include Pgbus::Concurrency
+
+  limits_concurrency to: 1,
+                     key: ->(order_id) { "ProcessOrder-#{order_id}" },
+                     duration: 15.minutes,
+                     on_conflict: :block
+
+  def perform(order_id)
+    # Only one job per order_id runs at a time
+  end
+end
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `to:` | (required) | Maximum concurrent jobs for the same key |
+| `key:` | Job class name | Proc receiving job arguments, returns a string key |
+| `duration:` | `15.minutes` | Safety expiry for the semaphore (crashed worker recovery) |
+| `on_conflict:` | `:block` | What to do when the limit is reached |
+
+### Conflict strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `:block` | Hold the job in a blocked queue. It is automatically released when a slot opens or the semaphore expires. |
+| `:discard` | Silently drop the job. |
+| `:raise` | Raise `Pgbus::ConcurrencyLimitExceeded` so the caller can handle it. |
+
+### How it works
+
+1. **Enqueue**: The adapter checks a semaphore table for the concurrency key. If under the limit, it increments the counter and sends the job to PGMQ. If at the limit, it applies the `on_conflict` strategy.
+2. **Complete**: After a job succeeds or is dead-lettered, the executor decrements the semaphore and releases the next blocked job (if any).
+3. **Safety net**: The dispatcher periodically cleans up expired semaphores and orphaned blocked executions to recover from crashed workers.
+
 ## Configuration reference
 
 | Option | Default | Description |
@@ -292,6 +335,8 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_processes` | Heartbeat tracking for workers/dispatcher/consumers |
 | `pgbus_failed_events` | Failed event dispatch records |
 | `pgbus_processed_events` | Idempotency deduplication (event_id, handler_class) |
+| `pgbus_semaphores` | Concurrency control counting semaphores |
+| `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
 
 ## Switching from another backend
 

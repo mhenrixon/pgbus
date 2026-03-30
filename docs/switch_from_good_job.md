@@ -127,10 +127,17 @@ class ProcessOrderJob < ApplicationJob
 end
 ```
 
-> Pgbus plans to add concurrency controls. For now, use row-level locking for mutual exclusion:
+> Pgbus supports concurrency controls via `Pgbus::Concurrency`:
 > ```ruby
-> def perform(order)
->   order.with_lock { process(order) }  # SELECT ... FOR UPDATE
+> class ProcessOrderJob < ApplicationJob
+>   include Pgbus::Concurrency
+>   limits_concurrency to: 1,
+>                      key: -> { "ProcessOrder-#{arguments.first.id}" },
+>                      duration: 15.minutes,
+>                      on_conflict: :block
+>   def perform(order)
+>     # ...
+>   end
 > end
 > ```
 
@@ -251,7 +258,7 @@ end
 
 | GoodJob feature | Status in Pgbus |
 |-----------------|-----------------|
-| Concurrency controls (`good_job_control_concurrency_with`) | Planned |
+| Concurrency controls (`good_job_control_concurrency_with`) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
 | Throttling (`enqueue_throttle`, `perform_throttle`) | Planned |
 | Batches (`GoodJob::Batch`) | Planned |
 | Cron / recurring jobs | Planned |

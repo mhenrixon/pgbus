@@ -119,7 +119,19 @@ class ProcessOrderJob < ApplicationJob
 end
 ```
 
-> Pgbus plans to add concurrency controls. In the meantime, use PostgreSQL advisory locks (`with_advisory_lock` gem) for critical sections that need mutual exclusion.
+> Pgbus supports concurrency controls via `Pgbus::Concurrency`:
+> ```ruby
+> class ProcessOrderJob < ApplicationJob
+>   include Pgbus::Concurrency
+>   limits_concurrency to: 1,
+>                      key: ->(order) { order.account_id },
+>                      duration: 15.minutes,
+>                      on_conflict: :block
+>   def perform(order)
+>     # ...
+>   end
+> end
+> ```
 
 ## Step 5: Migrate recurring tasks
 
@@ -213,7 +225,7 @@ end
 
 | SolidQueue feature | Status in Pgbus |
 |--------------------|-----------------|
-| `limits_concurrency` | Planned |
+| `limits_concurrency` | `Pgbus::Concurrency` with `limits_concurrency` DSL |
 | `config/recurring.yml` | Planned |
 | Queue pausing (`SolidQueue::Queue.pause`) | Planned |
 | Separate queue database | Not planned (PGMQ lives in your primary DB) |

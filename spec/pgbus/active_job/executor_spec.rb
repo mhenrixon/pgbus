@@ -2,7 +2,7 @@
 
 require "spec_helper"
 require "json"
-require "active_job/base"
+require "active_job"
 
 RSpec.describe Pgbus::ActiveJob::Executor do
   subject(:executor) { described_class.new(client: mock_client, config: config) }
@@ -20,6 +20,11 @@ RSpec.describe Pgbus::ActiveJob::Executor do
   before do
     allow(ActiveSupport::Notifications).to receive(:instrument).and_call_original
     allow(ActiveJob::Base).to receive(:deserialize).with(job_payload).and_return(job_double)
+  end
+
+  before do
+    # By default, no concurrency key in payloads
+    allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
   end
 
   describe "#execute" do
@@ -98,6 +103,51 @@ RSpec.describe Pgbus::ActiveJob::Executor do
 
         expect(mock_client).to have_received(:archive_message).with(queue_name, 11)
         expect(result).to eq(:success)
+      end
+    end
+
+    context "with concurrency key in payload" do
+      let(:concurrency_payload) { job_payload.merge("pgbus_concurrency_key" => "TestJob-42") }
+      let(:message_json) { JSON.generate(concurrency_payload) }
+      let(:message) { build_message_double(msg_id: 20, message: message_json, read_ct: 1) }
+
+      before do
+        allow(Pgbus::Concurrency).to receive(:extract_key).and_call_original
+        allow(ActiveJob::Base).to receive(:deserialize).with(concurrency_payload).and_return(job_double)
+        allow(Pgbus::Concurrency::Semaphore).to receive(:release)
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(nil)
+      end
+
+      it "signals semaphore on success" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
+        expect(Pgbus::Concurrency::BlockedExecution).to have_received(:release_next).with("TestJob-42")
+      end
+
+      it "signals semaphore on dead letter" do
+        dlq_message = build_message_double(msg_id: 21, message: message_json, read_ct: config.max_retries + 1)
+
+        executor.execute(dlq_message, queue_name)
+
+        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
+      end
+
+      it "does not signal semaphore on transient failure" do
+        allow(job_double).to receive(:perform_now).and_raise(StandardError, "transient")
+
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
+      end
+
+      it "enqueues blocked execution when released" do
+        released = { queue_name: "default", payload: { "job_class" => "OtherJob" } }
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:release_next).and_return(released)
+
+        executor.execute(message, queue_name)
+
+        expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "OtherJob" })
       end
     end
   end

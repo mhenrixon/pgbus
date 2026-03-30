@@ -44,6 +44,33 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
     add_index :pgbus_failed_events, :queue_name, name: "idx_pgbus_failed_events_queue"
     add_index :pgbus_failed_events, :failed_at, name: "idx_pgbus_failed_events_time"
 
+    # Concurrency semaphores (counting locks for job concurrency limits)
+    create_table :pgbus_semaphores do |t|
+      t.string :key, null: false
+      t.integer :value, null: false, default: 0
+      t.integer :max_value, null: false, default: 1
+      t.datetime :expires_at, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_semaphores, :key,
+      unique: true, name: "idx_pgbus_semaphores_key"
+    add_index :pgbus_semaphores, :expires_at,
+      name: "idx_pgbus_semaphores_expired"
+
+    # Blocked executions (jobs waiting for a concurrency semaphore)
+    create_table :pgbus_blocked_executions do |t|
+      t.string :concurrency_key, null: false
+      t.string :queue_name, null: false
+      t.jsonb :payload, null: false
+      t.integer :priority, null: false, default: 0
+      t.datetime :expires_at, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_blocked_executions, [:concurrency_key, :priority, :created_at],
+      name: "idx_pgbus_blocked_release_order"
+
     # Create default queues via PGMQ
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
@@ -53,6 +80,8 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
     execute "SELECT pgmq.drop_queue('pgbus_default_dlq')"
     execute "SELECT pgmq.drop_queue('pgbus_default')"
 
+    drop_table :pgbus_blocked_executions
+    drop_table :pgbus_semaphores
     drop_table :pgbus_failed_events
     drop_table :pgbus_processes
     drop_table :pgbus_processed_events
