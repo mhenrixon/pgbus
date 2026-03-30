@@ -97,7 +97,8 @@ RSpec.describe Pgbus::Batch do
         "on_finish_class" => "BatchCallbackJob",
         "on_success_class" => nil,
         "on_discard_class" => nil,
-        "properties" => '{"user_id":1}'
+        "properties" => '{"user_id":1}',
+        "just_finished" => true
       }
       result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
@@ -121,7 +122,8 @@ RSpec.describe Pgbus::Batch do
         "on_finish_class" => nil,
         "on_success_class" => "SuccessJob",
         "on_discard_class" => nil,
-        "properties" => "{}"
+        "properties" => "{}",
+        "just_finished" => true
       }
       result = double("Result", first: row)
       allow(connection).to receive(:exec_query)
@@ -145,7 +147,8 @@ RSpec.describe Pgbus::Batch do
         "on_finish_class" => nil,
         "on_success_class" => nil,
         "on_discard_class" => "DiscardJob",
-        "properties" => "{}"
+        "properties" => "{}",
+        "just_finished" => true
       }
       result = double("Result", first: row)
       allow(connection).to receive(:exec_query)

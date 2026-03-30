@@ -107,6 +107,9 @@ module Pgbus
       def update_counter(batch_id, column)
         return nil unless defined?(ActiveRecord::Base)
 
+        # Use (completed_jobs + discarded_jobs = total_jobs) AS just_finished to detect
+        # whether THIS update caused the transition, avoiding duplicate callbacks when
+        # two workers complete the final jobs simultaneously.
         result = ActiveRecord::Base.connection.exec_query(
           <<~SQL,
             UPDATE pgbus_batches
@@ -120,7 +123,9 @@ module Pgbus
                   ELSE finished_at
                 END
             WHERE batch_id = $1
-            RETURNING status, total_jobs, completed_jobs, discarded_jobs, on_finish_class, on_success_class, on_discard_class, properties
+            RETURNING status, total_jobs, completed_jobs, discarded_jobs,
+                      on_finish_class, on_success_class, on_discard_class, properties,
+                      (completed_jobs + discarded_jobs = total_jobs) AS just_finished
           SQL
           "Pgbus Batch Counter",
           [batch_id]
@@ -129,7 +134,7 @@ module Pgbus
         row = result.first
         return nil unless row
 
-        fire_callbacks(row) if row["status"] == "finished"
+        fire_callbacks(row) if row["just_finished"]
         row
       end
 
