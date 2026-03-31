@@ -85,7 +85,7 @@ RSpec.describe Pgbus::Process::Consumer do
     end
 
     it "parses routing_key, finds handlers, processes, and archives" do
-      consumer.send(:handle_message, message)
+      consumer.send(:handle_message, message, "q_orders")
 
       expect(registry).to have_received(:handlers_for).with("orders.created")
       expect(handler_instance).to have_received(:process).with(message)
@@ -95,7 +95,7 @@ RSpec.describe Pgbus::Process::Consumer do
     it "rescues errors gracefully and logs them" do
       allow(registry).to receive(:handlers_for).and_raise(StandardError.new("boom"))
 
-      expect { consumer.send(:handle_message, message) }.not_to raise_error
+      expect { consumer.send(:handle_message, message, "q_orders") }.not_to raise_error
     end
   end
 

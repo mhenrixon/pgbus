@@ -58,27 +58,29 @@ module Pgbus
         idle = @pool.max_length - @pool.queue_length
         return interruptible_sleep(config.polling_interval) if idle <= 0
 
-        messages = fetch_messages(idle)
+        tagged_messages = fetch_messages(idle)
 
-        if messages.empty?
+        if tagged_messages.empty?
           interruptible_sleep(config.polling_interval)
           return
         end
 
-        messages.each do |message|
-          queue_name = message.respond_to?(:queue_name) ? message.queue_name : queues.first
+        tagged_messages.each do |queue_name, message|
           @pool.post { process_message(message, queue_name) }
         end
       end
 
+      # Returns an array of [queue_name, message] pairs so we always know
+      # which queue each message came from (PGMQ messages don't carry this).
       def fetch_messages(qty)
         if queues.size == 1
-          Pgbus.client.read_batch(queues.first, qty: qty) || []
+          queue = queues.first
+          messages = Pgbus.client.read_batch(queue, qty: qty) || []
+          messages.map { |m| [queue, m] }
         else
-          # Multi-queue read: read from each queue proportionally
           per_queue = [(qty / queues.size.to_f).ceil, 1].max
           queues.flat_map do |q|
-            Pgbus.client.read_batch(q, qty: per_queue) || []
+            (Pgbus.client.read_batch(q, qty: per_queue) || []).map { |m| [q, m] }
           end.first(qty)
         end
       rescue StandardError => e
