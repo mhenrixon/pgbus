@@ -9,7 +9,7 @@ module Pgbus
       INTERVAL = 60 # seconds
       ALIVE_THRESHOLD = 300 # 5 minutes
 
-      attr_reader :process_record
+      attr_reader :process_entry
 
       def initialize(kind:, metadata: {})
         @kind = kind
@@ -31,7 +31,7 @@ module Pgbus
       def beat
         return unless @process_id
 
-        ProcessRecord.where(id: @process_id).update_all(last_heartbeat_at: Time.current)
+        ProcessEntry.where(id: @process_id).update_all(last_heartbeat_at: Time.current)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }
       end
@@ -39,7 +39,7 @@ module Pgbus
       private
 
       def register_process
-        record = ProcessRecord.create!(
+        record = ProcessEntry.create!(
           kind: @kind,
           hostname: Socket.gethostname,
           pid: ::Process.pid,
@@ -54,7 +54,7 @@ module Pgbus
       def deregister_process
         return unless @process_id
 
-        ProcessRecord.where(id: @process_id).delete_all
+        ProcessEntry.where(id: @process_id).delete_all
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Process deregistration failed: #{e.message}" }
       end

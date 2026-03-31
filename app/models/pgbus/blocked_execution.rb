@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class BlockedExecutionRecord < ApplicationRecord
+  class BlockedExecution < ApplicationRecord
     self.table_name = "pgbus_blocked_executions"
 
     scope :for_key, ->(key) { where(concurrency_key: key) }

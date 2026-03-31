@@ -8,7 +8,7 @@ module Pgbus
       class << self
         # Insert a blocked execution for a job that hit the concurrency limit.
         def insert(concurrency_key:, queue_name:, payload:, duration:, priority: 0)
-          BlockedExecutionRecord.create!(
+          Pgbus::BlockedExecution.create!(
             concurrency_key: concurrency_key,
             queue_name: queue_name,
             payload: JSON.generate(payload),
@@ -20,7 +20,7 @@ module Pgbus
         # Release the next blocked execution for a given concurrency key.
         # Returns the released row (queue_name, payload) or nil if none.
         def release_next(concurrency_key)
-          BlockedExecutionRecord.release_next!(concurrency_key)
+          Pgbus::BlockedExecution.release_next!(concurrency_key)
         end
 
         # Atomically promote the next blocked execution: delete the row and enqueue
@@ -28,7 +28,7 @@ module Pgbus
         # otherwise. This avoids losing a blocked row if enqueue fails.
         def promote_next(concurrency_key, client:, delay: 0)
           released = nil
-          ActiveRecord::Base.transaction do
+          Pgbus::BlockedExecution.transaction do
             released = release_next(concurrency_key)
             raise ActiveRecord::Rollback unless released
 
@@ -45,12 +45,12 @@ module Pgbus
         # Delete blocked executions that have expired.
         # Returns the count of deleted rows.
         def expire_stale
-          BlockedExecutionRecord.expired(Time.now.utc).delete_all
+          Pgbus::BlockedExecution.expired(Time.now.utc).delete_all
         end
 
         # Count blocked executions for a given key. Useful for testing/monitoring.
         def count_for(concurrency_key)
-          BlockedExecutionRecord.where(concurrency_key: concurrency_key).count
+          Pgbus::BlockedExecution.where(concurrency_key: concurrency_key).count
         end
 
         private

@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe Pgbus::RecurringExecutionRecord do
+RSpec.describe Pgbus::RecurringExecution do
   describe ".record" do
     it "creates a record and yields" do
       yielded = false

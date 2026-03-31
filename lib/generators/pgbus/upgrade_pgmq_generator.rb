@@ -12,8 +12,19 @@ module Pgbus
 
       desc "Upgrade PGMQ schema to the latest vendored version"
 
+      class_option :database,
+                   type: :string,
+                   default: nil,
+                   desc: "Use a separate database for pgbus tables (e.g. --database=pgbus)"
+
       def create_migration
-        migration_template "upgrade_pgmq.rb.erb", "db/migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
+        if separate_database?
+          migration_template "upgrade_pgmq.rb.erb",
+                             "db/pgbus_migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
+        else
+          migration_template "upgrade_pgmq.rb.erb",
+                             "db/migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
+        end
       end
 
       def display_post_upgrade
@@ -22,8 +33,8 @@ module Pgbus
         say "  Target version: #{target_version}", :yellow
         say ""
         say "Next steps:"
-        say "  1. Review the migration in db/migrate/"
-        say "  2. Run: rails db:migrate"
+        say "  1. Review the migration in db/#{separate_database? ? "pgbus_migrate" : "migrate"}/"
+        say "  2. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
         say ""
       end
 
@@ -39,6 +50,10 @@ module Pgbus
 
       def target_version_slug
         target_version.tr(".", "_")
+      end
+
+      def separate_database?
+        options[:database].present?
       end
     end
   end

@@ -19,6 +19,12 @@ module Pgbus
       end
     end
 
+    initializer "pgbus.db" do
+      ActiveSupport.on_load(:active_record) do
+        Pgbus::ApplicationRecord.connects_to(**Pgbus.configuration.connects_to) if Pgbus.configuration.connects_to
+      end
+    end
+
     initializer "pgbus.active_job" do
       ActiveSupport.on_load(:active_job) do
         include Pgbus::Concurrency

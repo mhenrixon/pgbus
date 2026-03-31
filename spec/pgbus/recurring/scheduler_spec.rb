@@ -30,7 +30,7 @@ RSpec.describe Pgbus::Recurring::Scheduler do
     it "enqueues due tasks" do
       scheduler = described_class.new(config: config)
 
-      allow(Pgbus::RecurringExecutionRecord).to receive(:record) do |_key, _time, &block|
+      allow(Pgbus::RecurringExecution).to receive(:record) do |_key, _time, &block|
         block&.call
       end
 
@@ -69,7 +69,7 @@ RSpec.describe Pgbus::Recurring::Scheduler do
 
     it "tracks last_run_at per task" do
       scheduler = described_class.new(config: config)
-      allow(Pgbus::RecurringExecutionRecord).to receive(:record) do |_key, _time, &block|
+      allow(Pgbus::RecurringExecution).to receive(:record) do |_key, _time, &block|
         block&.call
       end
 

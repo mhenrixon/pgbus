@@ -4,9 +4,9 @@ require "spec_helper"
 require "active_job"
 
 RSpec.describe Pgbus::Batch do
-  let(:batch_record_double) do
+  let(:batch_entry_double) do
     double(
-      "BatchRecord",
+      "BatchEntry",
       id: 1,
       attributes: { "batch_id" => "abc" },
       on_finish_class: nil,
@@ -17,8 +17,8 @@ RSpec.describe Pgbus::Batch do
   end
 
   before do
-    allow(Pgbus::BatchRecord).to receive_message_chain(:where, :update_all).and_return(1) # rubocop:disable RSpec/MessageChain
-    allow(Pgbus::BatchRecord).to receive_messages(create!: batch_record_double, find_by: batch_record_double)
+    allow(Pgbus::BatchEntry).to receive_message_chain(:where, :update_all).and_return(1) # rubocop:disable RSpec/MessageChain
+    allow(Pgbus::BatchEntry).to receive_messages(create!: batch_entry_double, find_by: batch_entry_double)
   end
 
   describe "#initialize" do
@@ -45,7 +45,7 @@ RSpec.describe Pgbus::Batch do
       batch = described_class.new(description: "test")
       batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
-      expect(Pgbus::BatchRecord).to have_received(:create!).with(
+      expect(Pgbus::BatchEntry).to have_received(:create!).with(
         hash_including(batch_id: batch.batch_id, description: "test", status: "pending")
       )
     end
@@ -54,7 +54,7 @@ RSpec.describe Pgbus::Batch do
       batch = described_class.new
       batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
-      expect(Pgbus::BatchRecord).to have_received(:where).with(batch_id: batch.batch_id)
+      expect(Pgbus::BatchEntry).to have_received(:where).with(batch_id: batch.batch_id)
     end
 
     it "sets thread-local batch_id during block execution" do
@@ -83,18 +83,18 @@ RSpec.describe Pgbus::Batch do
         properties: "{}"
       }.merge(overrides)
 
-      record = double("BatchRecord", **attrs, presence: attrs[:properties])
+      record = double("BatchEntry", **attrs, presence: attrs[:properties])
       allow(record).to receive(:properties).and_return(attrs[:properties])
       { record: record, just_finished: overrides.fetch(:just_finished, false) }
     end
 
     it "increments completed_jobs counter" do
       result = build_batch_result
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
       described_class.job_completed("batch-123")
 
-      expect(Pgbus::BatchRecord).to have_received(:increment_counter!).with("batch-123", "completed_jobs")
+      expect(Pgbus::BatchEntry).to have_received(:increment_counter!).with("batch-123", "completed_jobs")
     end
 
     it "fires on_finish callback when batch finishes" do
@@ -103,7 +103,7 @@ RSpec.describe Pgbus::Batch do
         on_finish_class: "BatchCallbackJob", properties: '{"user_id":1}',
         just_finished: true
       )
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("BatchCallbackJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("BatchCallbackJob", callback_job)
@@ -119,7 +119,7 @@ RSpec.describe Pgbus::Batch do
         on_success_class: "SuccessJob",
         just_finished: true
       )
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("SuccessJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("SuccessJob", callback_job)
@@ -135,7 +135,7 @@ RSpec.describe Pgbus::Batch do
         on_discard_class: "DiscardJob",
         just_finished: true
       )
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(result)
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
       callback_job = class_double("DiscardJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
       stub_const("DiscardJob", callback_job)
@@ -146,7 +146,7 @@ RSpec.describe Pgbus::Batch do
     end
 
     it "returns nil when batch not found" do
-      allow(Pgbus::BatchRecord).to receive(:increment_counter!).and_return(nil)
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(nil)
 
       expect(described_class.job_completed("nonexistent")).to be_nil
     end
@@ -154,14 +154,14 @@ RSpec.describe Pgbus::Batch do
 
   describe ".find" do
     it "returns the batch record attributes" do
-      record = double("BatchRecord", attributes: { "batch_id" => "abc", "status" => "processing" })
-      allow(Pgbus::BatchRecord).to receive(:find_by).with(batch_id: "abc").and_return(record)
+      record = double("BatchEntry", attributes: { "batch_id" => "abc", "status" => "processing" })
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "abc").and_return(record)
 
       expect(described_class.find("abc")).to eq({ "batch_id" => "abc", "status" => "processing" })
     end
 
     it "returns nil when not found" do
-      allow(Pgbus::BatchRecord).to receive(:find_by).and_return(nil)
+      allow(Pgbus::BatchEntry).to receive(:find_by).and_return(nil)
 
       expect(described_class.find("missing")).to be_nil
     end
@@ -170,7 +170,7 @@ RSpec.describe Pgbus::Batch do
   describe ".cleanup" do
     it "deletes finished batches older than threshold" do
       scope = double("scope", delete_all: 3)
-      allow(Pgbus::BatchRecord).to receive(:stale).and_return(scope)
+      allow(Pgbus::BatchEntry).to receive(:stale).and_return(scope)
 
       expect(described_class.cleanup(older_than: Time.now - 86_400)).to eq(3)
     end

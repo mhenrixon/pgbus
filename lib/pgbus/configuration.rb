@@ -41,6 +41,11 @@ module Pgbus
     attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file,
                   :skip_recurring, :recurring_execution_retention
 
+    # Multi-database support (optional separate database for pgbus tables)
+    # Set to { database: { writing: :pgbus, reading: :pgbus } } to use a separate database.
+    # Requires a matching entry in config/database.yml under the "pgbus" key.
+    attr_accessor :connects_to
+
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
 
@@ -82,6 +87,8 @@ module Pgbus
       @recurring_tasks_file = nil
       @skip_recurring = false
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
+
+      @connects_to = nil
 
       @web_auth = nil
       @web_refresh_interval = 5000

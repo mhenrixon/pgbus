@@ -20,6 +20,7 @@ PostgreSQL-native job processing and event bus for Rails, built on PGMQ.
 4. **NO `Marshal.load`** — JSON serialization only
 5. **NO unsynchronized shared state** — use Mutex or Concurrent primitives
 6. **NO swallowing errors** — log via `Pgbus.logger`, track in `pgbus_failed_events`
+7. **NO `Record` suffix on model classes** — see Model Naming below
 
 ### Always Do
 1. **TDD**: Write tests BEFORE implementation
@@ -58,6 +59,50 @@ Layer 3: Event Bus       lib/pgbus/event_bus/ (publisher, subscriber, registry, 
 Layer 2: ActiveJob       lib/pgbus/active_job/ (adapter, executor)
 Layer 1: Client          lib/pgbus/client.rb (PGMQ wrapper)
 Layer 0: Config          lib/pgbus/configuration.rb, config_loader.rb
+```
+
+## Model Naming
+
+ActiveRecord models live in `app/models/pgbus/` and inherit from `Pgbus::ApplicationRecord`.
+**Never use a `Record` suffix.** Resolve naming conflicts as follows:
+
+| Model Class | Table | Why not the obvious name |
+|---|---|---|
+| `Pgbus::ApplicationRecord` | (abstract) | Standard Rails base model convention |
+| `Pgbus::BatchEntry` | `pgbus_batches` | `Pgbus::Batch` is the batch API class |
+| `Pgbus::BlockedExecution` | `pgbus_blocked_executions` | — |
+| `Pgbus::ProcessEntry` | `pgbus_processes` | `Process` conflicts with Ruby's `Process` module |
+| `Pgbus::ProcessedEvent` | `pgbus_processed_events` | — |
+| `Pgbus::RecurringExecution` | `pgbus_recurring_executions` | — |
+| `Pgbus::RecurringTask` | `pgbus_recurring_tasks` | `Pgbus::Recurring::Task` is a different namespace |
+| `Pgbus::Semaphore` | `pgbus_semaphores` | `Pgbus::Concurrency::Semaphore` is a different namespace |
+
+When a model name collides with a service/module name, prefer `Entry` suffix or a descriptive alternative over `Record`.
+
+## Separate Database Support
+
+Pgbus supports running in the primary database or a dedicated database (like SolidQueue).
+
+**Configuration** (`config.connects_to`):
+- `nil` (default) — uses the primary Rails database
+- `{ database: { writing: :pgbus } }` — uses a separate database
+
+**Generator flags**:
+- `rails generate pgbus:install --database=pgbus` — migrations go to `db/pgbus_migrate/`
+- `rails generate pgbus:add_recurring --database=pgbus` — recurring migrations also go to `db/pgbus_migrate/`
+- `rails generate pgbus:upgrade_pgmq --database=pgbus` — upgrade migrations also go to `db/pgbus_migrate/`
+- Without `--database` — migrations go to `db/migrate/` (default)
+
+**database.yml example**:
+```yaml
+production:
+  primary:
+    <<: *default
+    database: myapp_production
+  pgbus:
+    <<: *default
+    database: myapp_pgbus_production
+    migrations_paths: db/pgbus_migrate
 ```
 
 ## Key Design Decisions

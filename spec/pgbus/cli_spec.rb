@@ -31,12 +31,12 @@ RSpec.describe Pgbus::CLI do
 
   describe ".show_status" do
     it "prints processes table when processes exist" do
-      process = double("ProcessRecord",
+      process = double("ProcessEntry",
                        kind: "supervisor", hostname: "web-1", pid: "100",
                        last_heartbeat_at: "2026-01-01 00:00:00", metadata: "{}")
       scope = double("scope", none?: false, each: nil)
       allow(scope).to receive(:each).and_yield(process)
-      allow(Pgbus::ProcessRecord).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
+      allow(Pgbus::ProcessEntry).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
 
       output = capture_stdout { described_class.show_status }
 
@@ -47,7 +47,7 @@ RSpec.describe Pgbus::CLI do
 
     it "prints 'no processes' when result is empty" do
       scope = double("scope", none?: true)
-      allow(Pgbus::ProcessRecord).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
+      allow(Pgbus::ProcessEntry).to receive_message_chain(:order, :select).and_return(scope) # rubocop:disable RSpec/MessageChain
 
       output = capture_stdout { described_class.show_status }
 

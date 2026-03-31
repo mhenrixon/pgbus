@@ -6,7 +6,7 @@ require "socket"
 
 RSpec.describe Pgbus::Process::Heartbeat do
   let(:timer) { instance_double(Concurrent::TimerTask, execute: true, shutdown: true) }
-  let(:process_record) { double("ProcessRecord", id: 42) }
+  let(:process_record) { double("ProcessEntry", id: 42) }
   let(:heartbeat) { described_class.new(kind: "worker", metadata: { queues: %w[default] }) }
 
   before do
@@ -15,13 +15,13 @@ RSpec.describe Pgbus::Process::Heartbeat do
 
   describe "#start" do
     before do
-      allow(Pgbus::ProcessRecord).to receive(:create!).and_return(process_record)
+      allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
     end
 
-    it "registers the process via ProcessRecord" do
+    it "registers the process via ProcessEntry" do
       heartbeat.start
 
-      expect(Pgbus::ProcessRecord).to have_received(:create!).with(
+      expect(Pgbus::ProcessEntry).to have_received(:create!).with(
         hash_including(kind: "worker", pid: Process.pid)
       )
     end
@@ -39,8 +39,8 @@ RSpec.describe Pgbus::Process::Heartbeat do
       let(:scope) { double("scope", update_all: 1) }
 
       before do
-        allow(Pgbus::ProcessRecord).to receive(:create!).and_return(process_record)
-        allow(Pgbus::ProcessRecord).to receive(:where).with(id: 42).and_return(scope)
+        allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(scope)
         heartbeat.start
       end
 
@@ -59,8 +59,8 @@ RSpec.describe Pgbus::Process::Heartbeat do
 
     context "when update raises an error" do
       before do
-        allow(Pgbus::ProcessRecord).to receive(:create!).and_return(process_record)
-        allow(Pgbus::ProcessRecord).to receive(:where).and_raise(StandardError, "connection lost")
+        allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
+        allow(Pgbus::ProcessEntry).to receive(:where).and_raise(StandardError, "connection lost")
         heartbeat.start
       end
 
@@ -74,8 +74,8 @@ RSpec.describe Pgbus::Process::Heartbeat do
     let(:scope) { double("scope", delete_all: 1) }
 
     before do
-      allow(Pgbus::ProcessRecord).to receive(:create!).and_return(process_record)
-      allow(Pgbus::ProcessRecord).to receive(:where).with(id: 42).and_return(scope)
+      allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
+      allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(scope)
       heartbeat.start
     end
 
