@@ -56,12 +56,12 @@ module Pgbus
 
       def claim_and_execute
         idle = @pool.max_length - @pool.queue_length
-        return sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(config.polling_interval) if idle <= 0
 
         messages = fetch_messages(idle)
 
         if messages.empty?
-          sleep(config.polling_interval)
+          interruptible_sleep(config.polling_interval)
           return
         end
 

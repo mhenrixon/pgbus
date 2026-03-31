@@ -54,14 +54,14 @@ module Pgbus
 
       def consume
         idle = @pool.max_length - @pool.queue_length
-        return sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(config.polling_interval) if idle <= 0
 
         messages = @queue_names.flat_map do |queue_name|
           Pgbus.client.read_batch(queue_name, qty: idle) || []
         end.first(idle)
 
         if messages.empty?
-          sleep(config.polling_interval)
+          interruptible_sleep(config.polling_interval)
           return
         end
 

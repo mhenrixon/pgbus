@@ -38,7 +38,7 @@ module Pgbus
           run_maintenance
           break if @shutting_down
 
-          sleep(config.dispatch_interval)
+          interruptible_sleep(config.dispatch_interval)
         end
 
         shutdown
