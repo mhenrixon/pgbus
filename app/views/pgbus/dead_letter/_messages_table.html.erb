@@ -4,30 +4,64 @@
       <thead class="bg-gray-50">
         <tr>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">ID</th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Job Class</th>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source Queue</th>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Enqueued</th>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Reads</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Payload</th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100">
         <% @messages.each do |m| %>
-          <tr class="hover:bg-gray-50">
-            <td class="px-4 py-3 text-sm font-mono text-gray-900"><%= m[:msg_id] %></td>
-            <td class="px-4 py-3 text-sm text-gray-700"><%= m[:queue_name] %></td>
-            <td class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(m[:enqueued_at]) %></td>
-            <td class="px-4 py-3 text-sm text-gray-500"><%= m[:read_ct] %></td>
-            <td class="px-4 py-3 text-sm text-gray-600 font-mono text-xs max-w-md truncate">
-              <%= pgbus_json_preview(m[:message]) %>
-            </td>
-            <td class="px-4 py-3 text-sm text-right space-x-2">
-              <%= button_to "Retry", pgbus.retry_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
-                    class: "text-xs text-indigo-600 hover:text-indigo-800 font-medium",
-                    data: { turbo_frame: "_top" } %>
-              <%= button_to "Discard", pgbus.discard_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
-                    class: "text-xs text-red-600 hover:text-red-800 font-medium",
-                    data: { turbo_confirm: "Permanently discard?", turbo_frame: "_top" } %>
+          <% payload = pgbus_parse_message(m[:message]) %>
+          <tr>
+            <td colspan="6" class="p-0">
+              <details class="group">
+                <summary class="grid grid-cols-[4rem_1fr_10rem_6rem_4rem_10rem] items-center cursor-pointer hover:bg-gray-50 list-none">
+                  <span class="px-4 py-3 text-sm font-mono text-gray-900"><%= m[:msg_id] %></span>
+                  <span class="px-4 py-3 text-sm font-medium text-gray-900"><%= payload["job_class"] || "—" %></span>
+                  <span class="px-4 py-3 text-sm text-gray-700"><%= m[:queue_name] %></span>
+                  <span class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(m[:enqueued_at]) %></span>
+                  <span class="px-4 py-3 text-sm text-gray-500"><%= m[:read_ct] %></span>
+                  <span class="px-4 py-3 text-sm text-right space-x-2">
+                    <%= button_to "Retry", pgbus.retry_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
+                          class: "text-xs text-indigo-600 hover:text-indigo-800 font-medium",
+                          data: { turbo_frame: "_top" } %>
+                    <%= button_to "Discard", pgbus.discard_dead_letter_path(m[:msg_id], queue_name: m[:queue_name]), method: :post,
+                          class: "text-xs text-red-600 hover:text-red-800 font-medium",
+                          data: { turbo_confirm: "Permanently discard?", turbo_frame: "_top" } %>
+                  </span>
+                </summary>
+                <div class="px-4 pb-4 bg-gray-50 border-t border-gray-100">
+                  <div class="grid grid-cols-2 gap-4 mb-3 mt-3">
+                    <div>
+                      <span class="text-xs font-medium text-gray-500">Arguments</span>
+                      <pre class="text-xs text-gray-700 bg-white rounded p-2 mt-1 overflow-x-auto max-h-40"><%= JSON.pretty_generate(payload["arguments"] || []) rescue "—" %></pre>
+                    </div>
+                    <div>
+                      <span class="text-xs font-medium text-gray-500">Metadata</span>
+                      <div class="text-xs text-gray-600 bg-white rounded p-2 mt-1 space-y-1">
+                        <% if payload["job_id"] %><p><strong>Job ID:</strong> <span class="font-mono"><%= payload["job_id"] %></span></p><% end %>
+                        <% if payload["queue_name"] %><p><strong>Queue:</strong> <%= payload["queue_name"] %></p><% end %>
+                        <% if payload["priority"] %><p><strong>Priority:</strong> <%= payload["priority"] %></p><% end %>
+                        <% if payload["executions"] %><p><strong>Executions:</strong> <%= payload["executions"] %></p><% end %>
+                        <% if m[:vt] %><p><strong>Visible at:</strong> <%= m[:vt] %></p><% end %>
+                        <% if m[:last_read_at] %><p><strong>Last read:</strong> <%= m[:last_read_at] %></p><% end %>
+                      </div>
+                    </div>
+                  </div>
+                  <details class="mt-2">
+                    <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">Full JSON payload</summary>
+                    <pre class="text-xs text-gray-600 bg-white rounded p-2 mt-1 overflow-x-auto max-h-96"><%= JSON.pretty_generate(payload) rescue m[:message] %></pre>
+                  </details>
+                  <% if m[:headers] %>
+                    <details class="mt-2">
+                      <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">Headers</summary>
+                      <pre class="text-xs text-gray-600 bg-white rounded p-2 mt-1 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(m[:headers])) rescue m[:headers] %></pre>
+                    </details>
+                  <% end %>
+                </div>
+              </details>
             </td>
           </tr>
         <% end %>
