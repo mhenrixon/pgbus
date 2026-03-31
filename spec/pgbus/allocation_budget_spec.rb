@@ -7,12 +7,17 @@ RSpec.describe Pgbus::Client do
   include PgmqDoubles
 
   let(:mock_pgmq) { build_mock_pgmq }
+  let(:all_queues_created) do
+    Concurrent::Map.new.tap do |m|
+      full = Pgbus.configuration.queue_name("default")
+      m[full] = true
+    end
+  end
   let(:client) do
     described_class.allocate.tap do |c|
       c.instance_variable_set(:@pgmq, mock_pgmq)
       c.instance_variable_set(:@config, Pgbus.configuration)
-      c.instance_variable_set(:@queues_created, Hash.new(true))
-      c.instance_variable_set(:@mutex, Mutex.new)
+      c.instance_variable_set(:@queues_created, all_queues_created)
     end
   end
 
@@ -92,8 +97,7 @@ RSpec.describe Pgbus::Client do
       described_class.allocate.tap do |c|
         c.instance_variable_set(:@pgmq, plain_pgmq)
         c.instance_variable_set(:@config, Pgbus.configuration)
-        c.instance_variable_set(:@queues_created, Hash.new(true))
-        c.instance_variable_set(:@mutex, Mutex.new)
+        c.instance_variable_set(:@queues_created, all_queues_created)
       end
     end
 

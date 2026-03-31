@@ -8,11 +8,11 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
   let(:mock_client) { build_mock_client }
   let(:job_id) { SecureRandom.uuid }
   let(:job) { build_job_double(job_class: "TestJob", queue_name: "default", job_id: job_id) }
-  let(:serialized_json) { "{\"job_class\":\"TestJob\",\"job_id\":\"#{job_id}\",\"queue_name\":\"default\",\"arguments\":[]}" }
+  let(:serialized_hash) { { "job_class" => "TestJob", "job_id" => job_id, "queue_name" => "default", "arguments" => [] } }
 
   before do
     allow(Pgbus).to receive(:client).and_return(mock_client)
-    allow(Pgbus::Serializer).to receive(:serialize_job).and_return(serialized_json)
+    allow(Pgbus::Serializer).to receive(:serialize_job_hash).and_return(serialized_hash)
   end
 
   describe "#enqueue" do
@@ -21,8 +21,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       result = adapter.enqueue(job)
 
-      expect(Pgbus::Serializer).to have_received(:serialize_job).with(job)
-      expect(mock_client).to have_received(:send_message).with("default", JSON.parse(serialized_json), delay: 0)
+      expect(Pgbus::Serializer).to have_received(:serialize_job_hash).with(job)
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0)
       expect(job).to have_received(:provider_job_id=).with(42)
       expect(result).to eq(job)
     end
@@ -51,7 +51,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       result = adapter.enqueue_at(job, future_time)
 
-      expect(mock_client).to have_received(:send_message).with("default", JSON.parse(serialized_json), delay: a_value_between(59, 61))
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value_between(59, 61))
       expect(job).to have_received(:provider_job_id=).with(99)
       expect(result).to eq(job)
     end
@@ -63,7 +63,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         adapter.enqueue_at(job, past_time)
 
-        expect(mock_client).to have_received(:send_message).with("default", JSON.parse(serialized_json), delay: 0)
+        expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0)
       end
     end
   end
@@ -79,7 +79,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       end
     end
     let(:concurrency_payload) do
-      JSON.parse(serialized_json).merge("pgbus_concurrency_key" => "TestJob-42")
+      serialized_hash.merge("pgbus_concurrency_key" => "TestJob-42")
     end
 
     before do
@@ -139,15 +139,15 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
   describe "#enqueue_all" do
     let(:second_job_id) { SecureRandom.uuid }
     let(:job2) { build_job_double(job_class: "OtherJob", queue_name: "default", job_id: second_job_id) }
-    let(:second_serialized_json) do
-      "{\"job_class\":\"OtherJob\",\"job_id\":\"#{second_job_id}\",\"queue_name\":\"default\",\"arguments\":[]}"
+    let(:second_serialized_hash) do
+      { "job_class" => "OtherJob", "job_id" => second_job_id, "queue_name" => "default", "arguments" => [] }
     end
 
     before do
       allow(job).to receive(:scheduled_at).and_return(nil)
       allow(job2).to receive(:scheduled_at).and_return(nil)
-      allow(Pgbus::Serializer).to receive(:serialize_job).with(job).and_return(serialized_json)
-      allow(Pgbus::Serializer).to receive(:serialize_job).with(job2).and_return(second_serialized_json)
+      allow(Pgbus::Serializer).to receive(:serialize_job_hash).with(job).and_return(serialized_hash)
+      allow(Pgbus::Serializer).to receive(:serialize_job_hash).with(job2).and_return(second_serialized_hash)
     end
 
     it "batches immediate jobs via send_batch" do
@@ -155,7 +155,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       result = adapter.enqueue_all([job, job2])
 
-      expect(mock_client).to have_received(:send_batch).with("default", [JSON.parse(serialized_json), JSON.parse(second_serialized_json)])
+      expect(mock_client).to have_received(:send_batch).with("default", [serialized_hash, second_serialized_hash])
       expect(job).to have_received(:provider_job_id=).with(1)
       expect(job2).to have_received(:provider_job_id=).with(2)
       expect(result).to eq(2)
@@ -172,8 +172,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       adapter.enqueue_all([job, job2])
 
-      expect(mock_client).to have_received(:send_message).with("default", JSON.parse(serialized_json), delay: a_value > 0)
-      expect(mock_client).to have_received(:send_batch).with("default", [JSON.parse(second_serialized_json)])
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value > 0)
+      expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash])
     end
 
     context "when batch response size mismatches" do

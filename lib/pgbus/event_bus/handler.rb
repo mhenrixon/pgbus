@@ -17,11 +17,7 @@ module Pgbus
         raw = JSON.parse(message.message)
         event = build_event(raw)
 
-        if self.class.idempotent?
-          return :skipped if already_processed?(event.event_id)
-
-          mark_processed!(event.event_id)
-        end
+        return :skipped if self.class.idempotent? && !claim_idempotency?(event.event_id)
 
         handle(event)
         instrument("pgbus.event_processed", event_id: event.event_id, handler: self.class.name)
@@ -51,15 +47,16 @@ module Pgbus
         ActiveSupport::Notifications.instrument(event_name, payload)
       end
 
-      def already_processed?(event_id)
-        ProcessedEvent.exists?(event_id: event_id, handler_class: self.class.name)
-      end
-
-      def mark_processed!(event_id)
-        ProcessedEvent.upsert(
+      # Atomically claim idempotency: INSERT ... ON CONFLICT DO NOTHING.
+      # Returns true if this handler claimed the event (row was inserted),
+      # false if another handler already processed it (conflict, no insert).
+      def claim_idempotency?(event_id)
+        result = ProcessedEvent.insert(
           { event_id: event_id, handler_class: self.class.name, processed_at: Time.now.utc },
           unique_by: %i[event_id handler_class]
         )
+        # insert returns an InsertAll::Result; inserted row count > 0 means we claimed it
+        result.rows.any?
       end
     end
   end

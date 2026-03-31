@@ -116,6 +116,21 @@ module Pgbus
       @pgmq_schema_mode = mode
     end
 
+    def validate!
+      raise ArgumentError, "pool_size must be > 0" unless pool_size.is_a?(Numeric) && pool_size.positive?
+      raise ArgumentError, "pool_timeout must be > 0" unless pool_timeout.is_a?(Numeric) && pool_timeout.positive?
+      raise ArgumentError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
+      raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
+      raise ArgumentError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
+
+      workers.each do |w|
+        threads = w[:threads] || w["threads"] || 5
+        raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
+      end
+
+      self
+    end
+
     def connection_options
       if database_url
         database_url

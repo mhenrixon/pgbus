@@ -24,28 +24,27 @@ module Pgbus
         pool_size: config.pool_size,
         pool_timeout: config.pool_timeout
       )
-      @queues_created = {}
-      @mutex = Mutex.new
+      @queues_created = Concurrent::Map.new
     end
 
     def ensure_queue(name)
       full_name = config.queue_name(name)
-      @mutex.synchronize do
-        return if @queues_created[full_name]
+      return if @queues_created[full_name]
 
+      @queues_created.compute_if_absent(full_name) do
         @pgmq.create(full_name)
         @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
-        @queues_created[full_name] = true
+        true
       end
     end
 
     def ensure_dead_letter_queue(name)
       dlq_name = config.dead_letter_queue_name(name)
-      @mutex.synchronize do
-        return if @queues_created[dlq_name]
+      return if @queues_created[dlq_name]
 
+      @queues_created.compute_if_absent(dlq_name) do
         @pgmq.create(dlq_name)
-        @queues_created[dlq_name] = true
+        true
       end
     end
 

@@ -32,11 +32,12 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} pid=#{::Process.pid}" }
 
         loop do
-          break if @shutting_down
-          break if recycle_needed?
-
           process_signals
-          claim_and_execute
+          break if @shutting_down && @pool.queue_length.zero?
+          break if recycle_needed? && @pool.queue_length.zero?
+
+          claim_and_execute unless @shutting_down || recycle_needed?
+          interruptible_sleep(config.polling_interval) if (@shutting_down || recycle_needed?) && !@pool.queue_length.zero?
         end
 
         shutdown

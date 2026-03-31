@@ -69,8 +69,15 @@ module Pgbus
           worker.run
         end
 
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork worker for queues=#{queues.join(",")}" }
+          return
+        end
+
         @forks[pid] = { type: :worker, config: worker_config }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for worker: #{e.message}" }
       end
 
       def fork_dispatcher
@@ -82,8 +89,15 @@ module Pgbus
           dispatcher.run
         end
 
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork dispatcher" }
+          return
+        end
+
         @forks[pid] = { type: :dispatcher }
         Pgbus.logger.info { "[Pgbus] Forked dispatcher pid=#{pid}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for dispatcher: #{e.message}" }
       end
 
       def boot_scheduler
@@ -103,8 +117,15 @@ module Pgbus
           scheduler.run
         end
 
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork scheduler" }
+          return
+        end
+
         @forks[pid] = { type: :scheduler }
         Pgbus.logger.info { "[Pgbus] Forked scheduler pid=#{pid}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for scheduler: #{e.message}" }
       end
 
       def recurring_tasks_configured?
@@ -150,8 +171,15 @@ module Pgbus
           consumer.run
         end
 
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork consumer for topics=#{topics.join(",")}" }
+          return
+        end
+
         @forks[pid] = { type: :consumer, config: consumer_config }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for consumer: #{e.message}" }
       end
 
       def monitor_loop

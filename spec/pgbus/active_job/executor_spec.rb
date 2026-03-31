@@ -178,13 +178,13 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:promote_next)
       end
 
-      it "still signals concurrency if archive_message raises after job succeeds" do
+      it "does not signal concurrency if archive_message fails (message will be retried)" do
         allow(mock_client).to receive(:archive_message).and_raise(StandardError, "DB gone")
 
         executor.execute(message, queue_name)
 
-        expect(Pgbus::Concurrency::BlockedExecution).to have_received(:promote_next).with("TestJob-42", client: mock_client)
-        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("TestJob-42")
+        expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
+        expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:promote_next)
       end
     end
   end

@@ -15,6 +15,12 @@ module Pgbus
       end
     end
 
+    def serialize_job_hash(active_job)
+      Instrumentation.instrument("pgbus.serializer.serialize", kind: :job) do
+        active_job.serialize
+      end
+    end
+
     def deserialize_job(json_string)
       Instrumentation.instrument("pgbus.serializer.deserialize", kind: :job) do
         data = JSON.parse(json_string)
