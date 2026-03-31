@@ -58,6 +58,9 @@ task :release, [:version] do |_t, args|
   new_version = args[:version]
   abort "Usage: rake release[X.Y.Z] or rake release[pre]" unless new_version
 
+  dirty = `git status --porcelain`.strip
+  abort "Aborting: working directory is not clean.\n#{dirty}" unless dirty.empty?
+
   current = Pgbus::VERSION
   prerelease = new_version.match?(/alpha|beta|rc|pre/) || new_version == "pre"
 
