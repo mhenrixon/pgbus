@@ -5,24 +5,27 @@ require "spec_helper"
 require_relative "../../../lib/pgbus/web/data_source"
 
 RSpec.describe Pgbus::Web::DataSource do
-  # Stub the Client class to avoid loading pgmq-ruby
   subject(:data_source) { described_class.new(client: mock_client) }
 
   let(:mock_client) { double("Pgbus::Client", pgmq: double("pgmq")) }
+  let(:mock_connection) { double("ActiveRecord::Connection") }
+
+  before do
+    allow(ActiveRecord::Base).to receive(:connection).and_return(mock_connection)
+  end
 
   describe "#queues_with_metrics" do
-    it "returns formatted metrics" do
-      metrics = [
-        double(
-          queue_name: "pgbus_default",
-          queue_length: "5",
-          queue_visible_length: "3",
-          oldest_msg_age_sec: "120",
-          newest_msg_age_sec: "10",
-          total_messages: "1000"
-        )
-      ]
-      allow(mock_client).to receive(:metrics).with(no_args).and_return(metrics)
+    it "returns formatted metrics via SQL" do
+      allow(mock_connection).to receive(:select_values).and_return(["pgbus_default"])
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Queue Metrics")
+        .and_return({
+                      "queue_length" => 5,
+                      "queue_visible_length" => 3,
+                      "oldest_msg_age_sec" => 120,
+                      "newest_msg_age_sec" => 10,
+                      "total_messages" => 1000
+                    })
 
       result = data_source.queues_with_metrics
       expect(result.size).to eq(1)
@@ -33,7 +36,7 @@ RSpec.describe Pgbus::Web::DataSource do
     end
 
     it "returns empty array on error" do
-      allow(mock_client).to receive(:metrics).with(no_args).and_raise(StandardError)
+      allow(mock_connection).to receive(:select_values).and_raise(StandardError)
 
       expect(data_source.queues_with_metrics).to eq([])
     end
@@ -41,23 +44,25 @@ RSpec.describe Pgbus::Web::DataSource do
 
   describe "#queue_detail" do
     it "returns formatted metrics for a single queue" do
-      metric = double(
-        queue_name: "pgbus_critical",
-        queue_length: "10",
-        queue_visible_length: "8",
-        oldest_msg_age_sec: "60",
-        newest_msg_age_sec: "5",
-        total_messages: "500"
-      )
-      allow(mock_client).to receive(:metrics).with("critical").and_return(metric)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Queue Metrics")
+        .and_return({
+                      "queue_length" => 10,
+                      "queue_visible_length" => 8,
+                      "oldest_msg_age_sec" => 60,
+                      "newest_msg_age_sec" => 5,
+                      "total_messages" => 500
+                    })
 
-      result = data_source.queue_detail("critical")
+      result = data_source.queue_detail("pgbus_critical")
       expect(result[:name]).to eq("pgbus_critical")
       expect(result[:queue_length]).to eq(10)
     end
 
-    it "returns nil when queue not found" do
-      allow(mock_client).to receive(:metrics).with("missing").and_return(nil)
+    it "returns nil when metrics query returns nil" do
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Queue Metrics")
+        .and_return(nil)
 
       expect(data_source.queue_detail("missing")).to be_nil
     end
@@ -65,13 +70,15 @@ RSpec.describe Pgbus::Web::DataSource do
 
   describe "#summary_stats" do
     it "computes aggregate stats" do
-      metrics = [
-        double(queue_name: "pgbus_default", queue_length: "10", queue_visible_length: "8",
-               oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "100"),
-        double(queue_name: "pgbus_default_dlq", queue_length: "2", queue_visible_length: "2",
-               oldest_msg_age_sec: nil, newest_msg_age_sec: nil, total_messages: "5")
-      ]
-      allow(mock_client).to receive(:metrics).with(no_args).and_return(metrics)
+      allow(mock_connection).to receive(:select_values).and_return(%w[pgbus_default pgbus_default_dlq])
+
+      allow(mock_connection).to receive(:select_one).with(anything, "Pgbus Queue Metrics").and_return(
+        { "queue_length" => 10, "queue_visible_length" => 8,
+          "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 100 },
+        { "queue_length" => 2, "queue_visible_length" => 2,
+          "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 5 }
+      )
+
       allow(data_source).to receive_messages(failed_events_count: 3, processes: [{ id: 1 }, { id: 2 }])
 
       stats = data_source.summary_stats

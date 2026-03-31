@@ -13,7 +13,7 @@ module Pgbus
 
     initializer "pgbus.active_job" do
       ActiveSupport.on_load(:active_job) do
-        require "pgbus/active_job/adapter"
+        include Pgbus::Concurrency
       end
     end
 
@@ -24,7 +24,7 @@ module Pgbus
     end
 
     rake_tasks do
-      load File.expand_path("../../tasks/pgbus_pgmq.rake", __dir__)
+      load File.expand_path("../tasks/pgbus_pgmq.rake", __dir__)
     end
 
     initializer "pgbus.web" do

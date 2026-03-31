@@ -19,7 +19,7 @@ module Pgbus
                          "extension (require ext), embedded (no ext)"
 
       def create_migration
-        migration_template "migration.rb.erb", "db/migrate/install_pgbus.rb"
+        migration_template "migration.rb.erb", "db/migrate/create_pgbus_tables.rb"
       end
 
       def create_config_file

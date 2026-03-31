@@ -28,6 +28,7 @@ module Pgbus
       def run
         setup_signals
         start_heartbeat
+        resolve_wildcard_queues
         Pgbus.logger.info { "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} pid=#{::Process.pid}" }
 
         loop do
@@ -56,29 +57,31 @@ module Pgbus
 
       def claim_and_execute
         idle = @pool.max_length - @pool.queue_length
-        return sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(config.polling_interval) if idle <= 0
 
-        messages = fetch_messages(idle)
+        tagged_messages = fetch_messages(idle)
 
-        if messages.empty?
-          sleep(config.polling_interval)
+        if tagged_messages.empty?
+          interruptible_sleep(config.polling_interval)
           return
         end
 
-        messages.each do |message|
-          queue_name = message.respond_to?(:queue_name) ? message.queue_name : queues.first
+        tagged_messages.each do |queue_name, message|
           @pool.post { process_message(message, queue_name) }
         end
       end
 
+      # Returns an array of [queue_name, message] pairs so we always know
+      # which queue each message came from (PGMQ messages don't carry this).
       def fetch_messages(qty)
         if queues.size == 1
-          Pgbus.client.read_batch(queues.first, qty: qty) || []
+          queue = queues.first
+          messages = Pgbus.client.read_batch(queue, qty: qty) || []
+          messages.map { |m| [queue, m] }
         else
-          # Multi-queue read: read from each queue proportionally
           per_queue = [(qty / queues.size.to_f).ceil, 1].max
           queues.flat_map do |q|
-            Pgbus.client.read_batch(q, qty: per_queue) || []
+            (Pgbus.client.read_batch(q, qty: per_queue) || []).map { |m| [q, m] }
           end.first(qty)
         end
       rescue StandardError => e
@@ -93,6 +96,31 @@ module Pgbus
       rescue StandardError => e
         @jobs_failed.increment
         Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
+      end
+
+      # Resolve "*" to all non-DLQ queues from pgmq.meta, stripping the prefix.
+      # Called once at startup. If no wildcard, this is a no-op.
+      def resolve_wildcard_queues
+        return unless @queues.include?("*")
+
+        dlq_suffix = config.dead_letter_queue_suffix
+        prefix = "#{config.queue_prefix}_"
+
+        all_queues = ActiveRecord::Base.connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        resolved = all_queues
+                   .reject { |q| q.end_with?(dlq_suffix) }
+                   .map { |q| q.delete_prefix(prefix) }
+
+        if resolved.empty?
+          Pgbus.logger.warn { "[Pgbus] Wildcard queue '*' resolved to no queues — falling back to default" }
+          @queues = [config.default_queue]
+        else
+          @queues = resolved
+          Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" }
+        end
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
+        @queues = [config.default_queue]
       end
 
       def recycle_needed?

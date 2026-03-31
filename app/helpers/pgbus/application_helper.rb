@@ -45,6 +45,18 @@ module Pgbus
       end
     end
 
+    def pgbus_parse_message(message)
+      return {} unless message
+
+      case message
+      when Hash then message
+      when String then JSON.parse(message)
+      else {}
+      end
+    rescue JSON::ParserError
+      {}
+    end
+
     def pgbus_json_preview(json_string, max_length: 120)
       return "—" unless json_string
 

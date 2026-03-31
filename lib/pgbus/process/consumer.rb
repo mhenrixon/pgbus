@@ -54,23 +54,23 @@ module Pgbus
 
       def consume
         idle = @pool.max_length - @pool.queue_length
-        return sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(config.polling_interval) if idle <= 0
 
-        messages = @queue_names.flat_map do |queue_name|
-          Pgbus.client.read_batch(queue_name, qty: idle) || []
+        tagged_messages = @queue_names.flat_map do |queue_name|
+          (Pgbus.client.read_batch(queue_name, qty: idle) || []).map { |m| [queue_name, m] }
         end.first(idle)
 
-        if messages.empty?
-          sleep(config.polling_interval)
+        if tagged_messages.empty?
+          interruptible_sleep(config.polling_interval)
           return
         end
 
-        messages.each do |message|
-          @pool.post { handle_message(message) }
+        tagged_messages.each do |queue_name, message|
+          @pool.post { handle_message(message, queue_name) }
         end
       end
 
-      def handle_message(message)
+      def handle_message(message, queue_name)
         raw = JSON.parse(message.message)
         routing_key = raw.dig("headers", "routing_key") || raw["routing_key"]
 
@@ -80,7 +80,6 @@ module Pgbus
           handler.process(message)
         end
 
-        queue_name = message.respond_to?(:queue_name) ? message.queue_name : @queue_names.first
         Pgbus.client.archive_message(queue_name, message.msg_id.to_i)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Consumer error: #{e.class}: #{e.message}" }

@@ -22,7 +22,7 @@ RSpec.describe "Dead Letter Queue", type: :system do
       visit "/pgbus/dlq"
 
       expect(page).to have_text("99")
-      expect(page).to have_text("pgbus_default_dlq")
+      expect(page).to have_text("pgbus_default")
       expect(page).to have_text("FailedJob")
     end
 

@@ -113,7 +113,7 @@ module Pgbus
 
           process_signals
           reap_children
-          sleep(FORK_WAIT)
+          interruptible_sleep(FORK_WAIT)
         end
       end
 
@@ -183,7 +183,7 @@ module Pgbus
 
         until @forks.empty? || Time.now > deadline
           reap_children
-          sleep(0.5)
+          interruptible_sleep(0.5)
         end
 
         # Force kill any remaining

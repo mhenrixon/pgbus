@@ -6,8 +6,18 @@ module Pgbus
   class Client
     attr_reader :pgmq, :config
 
+    PGMQ_REQUIRE_MUTEX = Mutex.new
+    private_constant :PGMQ_REQUIRE_MUTEX
+
     def initialize(config = Pgbus.configuration)
-      require "pgmq-ruby"
+      # Define the PGMQ module before requiring the gem so that Zeitwerk's
+      # eager_load (called inside pgmq.rb) can resolve the constant.
+      # Without this, Ruby 4.0 + Zeitwerk 2.7.5 raises NameError because
+      # eager_load runs const_get(:Client) on PGMQ before the module is defined.
+      PGMQ_REQUIRE_MUTEX.synchronize do
+        Object.const_set(:PGMQ, Module.new) unless defined?(::PGMQ)
+        require "pgmq"
+      end
       @config = config
       @pgmq = PGMQ::Client.new(
         config.connection_options,

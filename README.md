@@ -204,8 +204,6 @@ Limit how many jobs with the same key can run concurrently:
 
 ```ruby
 class ProcessOrderJob < ApplicationJob
-  include Pgbus::Concurrency
-
   limits_concurrency to: 1,
                      key: ->(order_id) { "ProcessOrder-#{order_id}" },
                      duration: 15.minutes,
@@ -237,8 +235,44 @@ end
 ### How it works
 
 1. **Enqueue**: The adapter checks a semaphore table for the concurrency key. If under the limit, it increments the counter and sends the job to PGMQ. If at the limit, it applies the `on_conflict` strategy.
-2. **Complete**: After a job succeeds or is dead-lettered, the executor decrements the semaphore and releases the next blocked job (if any).
+2. **Complete**: After a job succeeds or is dead-lettered, the executor signals the concurrency system via an `ensure` block (guaranteeing the signal fires even if the archive step fails). It first tries to promote a blocked job (atomic delete + enqueue in a single transaction). If nothing to promote, it releases the semaphore slot.
 3. **Safety net**: The dispatcher periodically cleans up expired semaphores and orphaned blocked executions to recover from crashed workers.
+
+### Concurrency compared to other backends
+
+Pgbus, SolidQueue, GoodJob, and Sidekiq all offer concurrency controls, but with fundamentally different locking strategies and trade-offs.
+
+#### Architecture comparison
+
+| | **Pgbus** | **SolidQueue** | **GoodJob** | **Sidekiq Enterprise** |
+|---|---|---|---|---|
+| **Lock backend** | PostgreSQL rows (`pgbus_semaphores` table) | PostgreSQL rows (`solid_queue_semaphores`) | PostgreSQL advisory locks (`pg_advisory_xact_lock`) | Redis sorted sets (lease-based) |
+| **Lock granularity** | Counting semaphore (allows N concurrent) | Counting semaphore (allows N concurrent) | Count query under advisory lock | Sorted set entries with TTL |
+| **Acquire mechanism** | Atomic `INSERT ... ON CONFLICT DO UPDATE WHERE value < max` (single SQL) | `UPDATE ... SET value = value + 1 WHERE value < limit` | `pg_advisory_xact_lock` then `SELECT COUNT(*)` in rolled-back txn | Redis Lua script (atomic check-and-add) |
+| **At-limit behavior** | `:block` (hold in queue), `:discard`, or `:raise` | Blocks in `solid_queue_blocked_executions` | Enqueue: silently dropped. Perform: retry with backoff (forever) | Reschedule with backoff (raises `OverLimit`, middleware re-enqueues) |
+| **Blocked job storage** | `pgbus_blocked_executions` table with priority ordering | `solid_queue_blocked_executions` table | No blocked queue — retries via ActiveJob retry mechanism | No blocked queue — job returns to Redis queue with delay |
+| **Release on completion** | `ensure` block: promote next blocked job or decrement semaphore | Inline after `finished`/`failed_with` (inside same transaction as of PR #689) | Release advisory lock via `pg_advisory_unlock` | Lease auto-expires from sorted set |
+| **Crash recovery** | Semaphore `expires_at` + dispatcher `expire_stale` cleanup | Semaphore `expires_at` + concurrency maintenance task | Advisory locks auto-release on session disconnect | TTL-based lease expiry (default 5 min) |
+| **Message lifecycle** | PGMQ visibility timeout (`FOR UPDATE SKIP LOCKED`) — message stays in queue until archived | AR-backed `claimed_executions` table | AR-backed `good_jobs` table with advisory lock per row | Redis list + sorted set |
+
+#### Key design differences
+
+**Pgbus** uses PGMQ's native `FOR UPDATE SKIP LOCKED` for message claiming and a separate semaphore table for concurrency control. This two-layer approach means the message queue and concurrency system are independent — PGMQ handles exactly-once delivery, the semaphore handles admission control. The semaphore acquire is a single atomic SQL (`INSERT ... ON CONFLICT DO UPDATE WHERE value < max`), avoiding the need for explicit row locks.
+
+**SolidQueue** uses AR models for everything — jobs, claimed executions, and semaphores all live in PostgreSQL tables. This means the entire lifecycle can be wrapped in AR transactions. However, as documented in [rails/solid_queue#689](https://github.com/rails/solid_queue/pull/689), this model is vulnerable to race conditions when semaphore expiry, job completion, and blocked-job release interleave across transactions. Pgbus avoids several of these by design: PGMQ's visibility timeout handles message recovery without a `claimed_executions` table, and there is no "release during shutdown" codepath.
+
+**GoodJob** takes a different approach entirely: advisory locks. Each job dequeue acquires a session-level advisory lock on the job row, and concurrency checks use transaction-scoped advisory locks on the concurrency key. This means the check and the perform are serialized at the database level. The downside is that advisory locks are session-scoped — if a connection is returned to the pool without unlocking, the lock persists. GoodJob handles this by auto-releasing on session disconnect, but connection pool sharing between web and worker can cause surprising behavior.
+
+**Sidekiq Enterprise** uses Redis sorted sets with TTL-based leases. Each concurrent slot is a sorted set entry with an expiry timestamp. This is fast and simple but has no durability guarantee — Redis failover can lose leases, temporarily allowing over-limit execution. The `sidekiq-unique-jobs` gem (open-source) uses a similar Lua-script approach but with more lock strategies (`:until_executing`, `:while_executing`, `:until_and_while_executing`) and configurable conflict handlers (`:reject`, `:reschedule`, `:replace`, `:raise`).
+
+#### Race condition resilience
+
+| Scenario | Pgbus | SolidQueue | GoodJob | Sidekiq |
+|---|---|---|---|---|
+| **Worker crash mid-execution** | PGMQ visibility timeout expires → message re-read. Semaphore expires via `expire_stale`. | `claimed_execution` survives → supervisor's process pruning calls `fail_all_with`. | Advisory lock released on session disconnect. | Lease TTL expires in Redis. |
+| **Blocked job released while original still executing** | Not possible — promote only happens in `signal_concurrency`, which only runs after job success/DLQ. | Fixed in PR #689 — now checks for claimed executions before releasing. | N/A — no blocked queue; retries independently. | N/A — no blocked queue. |
+| **Archive succeeds but signal fails** | `ensure` block guarantees signal fires even if archive raises. For SIGKILL: semaphore expires via dispatcher. | Fixed in PR #689 — `unblock_next_job` moved inside same transaction as `finished`. | Advisory lock released by session disconnect. | Lease auto-expires. |
+| **Concurrent enqueue and signal race** | Semaphore acquire is a single atomic SQL — no read-then-write gap. | Fixed in PR #689 — `FOR UPDATE` lock on semaphore row serializes enqueue with signal. | `pg_advisory_xact_lock` serializes the concurrency check. | Redis Lua script is atomic. |
 
 ## Batches
 

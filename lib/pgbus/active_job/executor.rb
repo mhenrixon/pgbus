@@ -23,12 +23,13 @@ module Pgbus
 
         job_class = payload["job_class"]
 
+        job_succeeded = false
+
         Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
           job = ::ActiveJob::Base.deserialize(payload)
           execute_job(job)
+          job_succeeded = true
           client.archive_message(queue_name, message.msg_id.to_i)
-          signal_concurrency(payload)
-          signal_batch_completed(payload)
         end
 
         instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
@@ -39,6 +40,15 @@ module Pgbus
         # Don't signal concurrency on transient failure — the job will be retried.
         # Semaphore is released only on success or dead-lettering.
         :failed
+      ensure
+        # Signal concurrency and batch AFTER archive, in an ensure block so they
+        # fire even if archive_message raises. This prevents the semaphore slot
+        # from being stuck until expiry when the archive DB call fails after the
+        # job has already completed successfully.
+        if job_succeeded
+          signal_concurrency(payload)
+          signal_batch_completed(payload)
+        end
       end
 
       private

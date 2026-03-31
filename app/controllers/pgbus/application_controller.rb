@@ -10,6 +10,14 @@ module Pgbus
 
     helper Pgbus::ApplicationHelper
 
+    # Make `pgbus` route proxy available in views (e.g. pgbus.root_path).
+    # With isolate_namespace, the non-prefixed helpers (root_path) work inside
+    # the engine, but the views use the pgbus.* proxy form for clarity.
+    def pgbus
+      @pgbus ||= Pgbus::Engine.routes.url_helpers
+    end
+    helper_method :pgbus
+
     private
 
     def data_source
