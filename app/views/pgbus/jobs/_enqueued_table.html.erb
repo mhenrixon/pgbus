@@ -10,25 +10,26 @@
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Enqueued</th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Reads</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Job ID</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
           <% @jobs.each do |j| %>
             <% payload = pgbus_parse_message(j[:message]) %>
             <tr>
-              <td colspan="6" class="p-0">
+              <td colspan="5" class="p-0">
                 <details class="group">
-                  <summary class="grid grid-cols-[4rem_1fr_10rem_6rem_4rem_1fr] items-center cursor-pointer hover:bg-gray-50 list-none">
-                    <span class="px-4 py-3 text-sm font-mono text-gray-900"><%= j[:msg_id] %></span>
-                    <span class="px-4 py-3 text-sm font-medium text-gray-900"><%= payload["job_class"] || "—" %></span>
-                    <span class="px-4 py-3 text-sm text-gray-700"><%= j[:queue_name] %></span>
-                    <span class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(j[:enqueued_at]) %></span>
-                    <span class="px-4 py-3 text-sm text-gray-500"><%= j[:read_ct] %></span>
-                    <span class="px-4 py-3 text-sm text-gray-400 font-mono text-xs truncate"><%= payload["job_id"] || "—" %></span>
+                  <summary class="flex cursor-pointer hover:bg-gray-50 list-none">
+                    <span class="w-16 shrink-0 px-4 py-3 text-sm font-mono text-gray-900"><%= j[:msg_id] %></span>
+                    <span class="flex-1 px-4 py-3 text-sm font-medium text-gray-900"><%= payload["job_class"] || "—" %></span>
+                    <span class="w-40 shrink-0 px-4 py-3 text-sm text-gray-700"><%= j[:queue_name] %></span>
+                    <span class="w-28 shrink-0 px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(j[:enqueued_at]) %></span>
+                    <span class="w-16 shrink-0 px-4 py-3 text-sm text-gray-500"><%= j[:read_ct] %></span>
                   </summary>
                   <div class="px-4 pb-4 bg-gray-50 border-t border-gray-100">
-                    <div class="grid grid-cols-2 gap-4 mb-3 mt-3">
+                    <div class="flex items-center mt-3 mb-3">
+                      <span class="text-xs font-mono text-gray-400">Job ID: <%= payload["job_id"] %></span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 mb-3">
                       <div>
                         <span class="text-xs font-medium text-gray-500">Arguments</span>
                         <pre class="text-xs text-gray-700 bg-white rounded p-2 mt-1 overflow-x-auto max-h-40"><%= JSON.pretty_generate(payload["arguments"] || []) rescue "—" %></pre>
@@ -62,7 +63,7 @@
             </tr>
           <% end %>
           <% if @jobs.empty? %>
-            <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No enqueued jobs</td></tr>
+            <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400">No enqueued jobs</td></tr>
           <% end %>
         </tbody>
       </table>

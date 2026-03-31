@@ -28,6 +28,7 @@ module Pgbus
       def run
         setup_signals
         start_heartbeat
+        resolve_wildcard_queues
         Pgbus.logger.info { "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} pid=#{::Process.pid}" }
 
         loop do
@@ -95,6 +96,31 @@ module Pgbus
       rescue StandardError => e
         @jobs_failed.increment
         Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
+      end
+
+      # Resolve "*" to all non-DLQ queues from pgmq.meta, stripping the prefix.
+      # Called once at startup. If no wildcard, this is a no-op.
+      def resolve_wildcard_queues
+        return unless @queues.include?("*")
+
+        dlq_suffix = config.dead_letter_queue_suffix
+        prefix = "#{config.queue_prefix}_"
+
+        all_queues = ActiveRecord::Base.connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        resolved = all_queues
+                   .reject { |q| q.end_with?(dlq_suffix) }
+                   .map { |q| q.delete_prefix(prefix) }
+
+        if resolved.empty?
+          Pgbus.logger.warn { "[Pgbus] Wildcard queue '*' resolved to no queues — falling back to default" }
+          @queues = [config.default_queue]
+        else
+          @queues = resolved
+          Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" }
+        end
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
+        @queues = [config.default_queue]
       end
 
       def recycle_needed?
