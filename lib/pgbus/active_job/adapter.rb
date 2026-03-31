@@ -7,7 +7,7 @@ module Pgbus
     class Adapter
       def enqueue(active_job)
         queue = active_job.queue_name || Pgbus.configuration.default_queue
-        payload_hash = JSON.parse(Serializer.serialize_job(active_job))
+        payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
 
@@ -16,7 +16,7 @@ module Pgbus
 
       def enqueue_at(active_job, timestamp)
         queue = active_job.queue_name || Pgbus.configuration.default_queue
-        payload_hash = JSON.parse(Serializer.serialize_job(active_job))
+        payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.now.to_f).ceil, 0].max
@@ -88,7 +88,7 @@ module Pgbus
       def enqueue_immediate(queue, jobs)
         return if jobs.empty?
 
-        payloads = jobs.map { |j| JSON.parse(Serializer.serialize_job(j)) }
+        payloads = jobs.map { |j| Serializer.serialize_job_hash(j) }
         msg_ids = Pgbus.client.send_batch(queue, payloads)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
