@@ -1,7 +1,29 @@
 class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
   def up
-    # Install PGMQ extension
-    enable_extension "pgmq"
+    # Install PGMQ schema based on pgmq_schema_mode configuration.
+    #
+    # Modes:
+    #   :auto      - Try extension first, fall back to embedded SQL (default)
+    #   :extension - Require the pgmq PostgreSQL extension
+    #   :embedded  - Use vendored SQL, no extension needed
+    pgmq_schema_mode = :<%= pgmq_schema_mode %>
+
+    case pgmq_schema_mode
+    when :extension
+      enable_extension "pgmq"
+      execute Pgbus::PgmqSchema.version_tracking_extension_sql
+    when :embedded
+      execute Pgbus::PgmqSchema.install_sql
+      execute Pgbus::PgmqSchema.version_tracking_sql
+    when :auto
+      if extension_available?("pgmq")
+        enable_extension "pgmq"
+        execute Pgbus::PgmqSchema.version_tracking_extension_sql
+      else
+        execute Pgbus::PgmqSchema.install_sql
+        execute Pgbus::PgmqSchema.version_tracking_sql
+      end
+    end
 
     # Idempotent event processing deduplication
     create_table :pgbus_processed_events do |t|
@@ -108,7 +130,21 @@ class InstallPgbus < ActiveRecord::Migration<%= migration_version %>
     drop_table :pgbus_failed_events
     drop_table :pgbus_processes
     drop_table :pgbus_processed_events
+    drop_table :pgbus_pgmq_schema_versions
 
-    disable_extension "pgmq"
+    # Drop PGMQ schema (functions, types, tables)
+    execute "DROP SCHEMA IF EXISTS pgmq CASCADE"
+
+    # Also try to disable extension in case it was installed that way
+    disable_extension "pgmq" if extension_available?("pgmq")
+  end
+
+  private
+
+  def extension_available?(name)
+    result = execute("SELECT 1 FROM pg_available_extensions WHERE name = '#{name}' LIMIT 1")
+    result.any?
+  rescue ActiveRecord::StatementInvalid
+    false
   end
 end

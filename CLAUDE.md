@@ -5,7 +5,7 @@ PostgreSQL-native job processing and event bus for Rails, built on PGMQ.
 ## Tech Stack
 
 - **Ruby**: >= 3.3 | **Rails**: >= 7.1
-- **Transport**: pgmq-ruby (PGMQ PostgreSQL extension)
+- **Transport**: pgmq-ruby (PGMQ — extension or embedded SQL)
 - **Concurrency**: concurrent-ruby
 - **Autoloading**: zeitwerk
 - **Testing**: RSpec
@@ -67,6 +67,26 @@ Layer 0: Config          lib/pgbus/configuration.rb, config_loader.rb
 - Dead letter queues: after `max_retries` failed reads (tracked by PGMQ's `read_ct`), move to `_dlq` queue
 - Idempotent events: `pgbus_processed_events` table with (event_id, handler_class) unique index
 - Dashboard via Tailwind CDN + Turbo CDN — zero npm dependency
+- PGMQ schema install: extension-first with embedded SQL fallback (`pgmq_schema_mode: :auto | :extension | :embedded`)
+
+## PGMQ Schema Management
+
+PGMQ can be installed via PostgreSQL extension or embedded SQL (no extension required).
+
+**Configuration** (`config.pgmq_schema_mode`):
+- `:auto` (default) — tries extension, falls back to embedded SQL
+- `:extension` — requires the pgmq PostgreSQL extension
+- `:embedded` — uses vendored SQL, no extension needed
+
+**Generators**:
+- `rails generate pgbus:install --pgmq-schema-mode=auto` — initial setup
+- `rails generate pgbus:upgrade_pgmq` — upgrade PGMQ schema to latest vendored version
+
+**Rake tasks**:
+- `rake pgbus:pgmq:status` — show installed vs available PGMQ version
+- `rake pgbus:pgmq:versions` — list vendored PGMQ versions
+
+**Key files**: `lib/pgbus/pgmq_schema.rb`, `lib/pgbus/pgmq_schema/pgmq_v*.sql`
 
 ## Queue Naming
 

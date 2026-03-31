@@ -23,6 +23,10 @@ module Pgbus
       end
     end
 
+    rake_tasks do
+      load File.expand_path("../../tasks/pgbus_pgmq.rake", __dir__)
+    end
+
     initializer "pgbus.web" do
       require "pgbus/web/authentication"
       require "pgbus/web/data_source"

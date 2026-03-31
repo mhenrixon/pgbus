@@ -31,6 +31,9 @@ module Pgbus
     # LISTEN/NOTIFY
     attr_accessor :listen_notify, :notify_throttle_ms
 
+    # PGMQ schema installation mode (:auto, :extension, :embedded)
+    attr_reader :pgmq_schema_mode
+
     # Event consumers
     attr_accessor :event_consumers
 
@@ -66,6 +69,8 @@ module Pgbus
       @listen_notify = true
       @notify_throttle_ms = 250
 
+      @pgmq_schema_mode = :auto
+
       @event_consumers = nil
 
       @web_auth = nil
@@ -81,6 +86,17 @@ module Pgbus
 
     def dead_letter_queue_name(name)
       "#{queue_name(name)}#{dead_letter_queue_suffix}"
+    end
+
+    VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
+
+    def pgmq_schema_mode=(mode)
+      mode = mode.to_sym
+      unless VALID_PGMQ_SCHEMA_MODES.include?(mode)
+        raise ArgumentError, "Invalid pgmq_schema_mode: #{mode}. Must be one of: #{VALID_PGMQ_SCHEMA_MODES.join(", ")}"
+      end
+
+      @pgmq_schema_mode = mode
     end
 
     def connection_options

@@ -1,0 +1,30 @@
+class UpgradePgmqToV<%= target_version_slug.camelize %> < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Drop existing PGMQ functions and types so they can be re-created
+    # at the new version. Tables (pgmq.meta, queue tables) are preserved.
+    execute Pgbus::PgmqSchema.drop_pgmq_functions_sql
+
+    # Re-create all PGMQ functions and types at the new version.
+    # This uses the vendored SQL which doesn't require the pgmq extension.
+    execute Pgbus::PgmqSchema.install_sql("<%= target_version %>")
+
+    # Record the upgrade
+    execute <<~SQL
+      CREATE TABLE IF NOT EXISTS pgbus_pgmq_schema_versions (
+        id SERIAL PRIMARY KEY,
+        version VARCHAR NOT NULL,
+        installed_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+        install_method VARCHAR NOT NULL DEFAULT 'embedded'
+      );
+
+      INSERT INTO pgbus_pgmq_schema_versions (version, install_method)
+      VALUES ('<%= target_version %>', 'upgrade');
+    SQL
+  end
+
+  def down
+    raise ActiveRecord::IrreversibleMigration,
+      "PGMQ schema downgrade is not supported. " \
+      "Restore from a database backup if needed."
+  end
+end
