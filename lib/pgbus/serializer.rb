@@ -7,15 +7,19 @@ module Pgbus
     module_function
 
     def serialize_job(active_job)
-      data = active_job.serialize
-      # GlobalID is handled by ActiveJob's serialize — it converts AR objects
-      # to GlobalID URIs automatically. We just JSON-encode the result.
-      JSON.generate(data)
+      Instrumentation.instrument("pgbus.serializer.serialize", kind: :job) do
+        data = active_job.serialize
+        # GlobalID is handled by ActiveJob's serialize — it converts AR objects
+        # to GlobalID URIs automatically. We just JSON-encode the result.
+        JSON.generate(data)
+      end
     end
 
     def deserialize_job(json_string)
-      data = JSON.parse(json_string)
-      ActiveJob::Base.deserialize(data)
+      Instrumentation.instrument("pgbus.serializer.deserialize", kind: :job) do
+        data = JSON.parse(json_string)
+        ActiveJob::Base.deserialize(data)
+      end
     end
 
     def serialize_event(event)

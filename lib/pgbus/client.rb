@@ -42,25 +42,33 @@ module Pgbus
     def send_message(queue_name, payload, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
       ensure_queue(queue_name)
-      @pgmq.produce(full_name, serialize(payload), headers: headers && serialize(headers), delay: delay)
+      Instrumentation.instrument("pgbus.client.send_message", queue: full_name) do
+        @pgmq.produce(full_name, serialize(payload), headers: headers && serialize(headers), delay: delay)
+      end
     end
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
       ensure_queue(queue_name)
-      serialized = payloads.map { |p| serialize(p) }
-      serialized_headers = headers&.map { |h| serialize(h) }
-      @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay)
+      Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
+        serialized = payloads.map { |p| serialize(p) }
+        serialized_headers = headers&.map { |h| serialize(h) }
+        @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay)
+      end
     end
 
     def read_message(queue_name, vt: nil)
       full_name = config.queue_name(queue_name)
-      @pgmq.read(full_name, vt: vt || config.visibility_timeout)
+      Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
+        @pgmq.read(full_name, vt: vt || config.visibility_timeout)
+      end
     end
 
     def read_batch(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty)
+      Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
+        @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty)
+      end
     end
 
     def read_with_poll(queue_name, qty:, vt: nil, max_poll_seconds: 5, poll_interval_ms: 100)
