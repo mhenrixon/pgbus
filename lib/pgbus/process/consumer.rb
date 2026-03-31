@@ -71,6 +71,12 @@ module Pgbus
       end
 
       def handle_message(message, queue_name)
+        if message.read_ct.to_i > config.max_retries
+          Pgbus.logger.warn { "[Pgbus] Consumer moving message #{message.msg_id} to DLQ after #{message.read_ct} reads" }
+          Pgbus.client.move_to_dead_letter(queue_name, message)
+          return
+        end
+
         raw = JSON.parse(message.message)
         routing_key = raw.dig("headers", "routing_key") || raw["routing_key"]
 
@@ -83,6 +89,9 @@ module Pgbus
         Pgbus.client.archive_message(queue_name, message.msg_id.to_i)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Consumer error: #{e.class}: #{e.message}" }
+        # Message stays in queue; VT will expire and it becomes available again.
+        # read_ct tracks delivery attempts — when it exceeds max_retries,
+        # the next read will route to DLQ above.
       end
 
       def pattern_overlaps?(topic_filter, subscription_pattern)

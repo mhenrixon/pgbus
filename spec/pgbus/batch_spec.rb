@@ -105,8 +105,9 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = class_double("BatchCallbackJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
       stub_const("BatchCallbackJob", callback_job)
+      allow(callback_job).to receive(:perform_later)
 
       described_class.job_completed("batch-123")
 
@@ -121,8 +122,9 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = class_double("SuccessJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
       stub_const("SuccessJob", callback_job)
+      allow(callback_job).to receive(:perform_later)
 
       described_class.job_completed("batch-123")
 
@@ -137,8 +139,9 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = class_double("DiscardJob", perform_later: nil) # rubocop:disable RSpec/VerifiedDoubleReference
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
       stub_const("DiscardJob", callback_job)
+      allow(callback_job).to receive(:perform_later)
 
       described_class.job_discarded("batch-123")
 

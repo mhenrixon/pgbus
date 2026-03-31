@@ -134,26 +134,27 @@ RSpec.describe Pgbus::EventBus::Handler do
       end
     end
     let(:handler) { handler_class.new }
+    let(:insert_result) { double("InsertAll::Result", rows: [[1]]) }
+    let(:empty_result) { double("InsertAll::Result", rows: []) }
 
-    it "returns :handled when event has not been processed" do
-      allow(Pgbus::ProcessedEvent).to receive(:exists?).and_return(false)
-      allow(Pgbus::ProcessedEvent).to receive(:upsert)
+    it "returns :handled when event was atomically claimed" do
+      allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
 
       result = handler.process(message)
 
       expect(result).to eq(:handled)
-      expect(Pgbus::ProcessedEvent).to have_received(:exists?)
-      expect(Pgbus::ProcessedEvent).to have_received(:upsert)
+      expect(Pgbus::ProcessedEvent).to have_received(:insert).with(
+        hash_including(event_id: event_id, handler_class: handler_class.name),
+        unique_by: %i[event_id handler_class]
+      )
     end
 
-    it "returns :skipped when event was already processed" do
-      allow(Pgbus::ProcessedEvent).to receive(:exists?).and_return(true)
-      allow(Pgbus::ProcessedEvent).to receive(:upsert)
+    it "returns :skipped when event was already claimed by another handler" do
+      allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(empty_result)
 
       result = handler.process(message)
 
       expect(result).to eq(:skipped)
-      expect(Pgbus::ProcessedEvent).not_to have_received(:upsert)
     end
   end
 

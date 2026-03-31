@@ -134,10 +134,12 @@ module Pgbus
       end
 
       def enqueue_callback(class_name, properties)
-        job_class = class_name.constantize
+        job_class = class_name.safe_constantize
+        unless job_class && job_class < ::ActiveJob::Base
+          Pgbus.logger.error { "[Pgbus] Batch callback class invalid or not an ActiveJob: #{class_name}" }
+          return
+        end
         job_class.perform_later(properties)
-      rescue NameError => e
-        Pgbus.logger.error { "[Pgbus] Batch callback class not found: #{class_name}: #{e.message}" }
       end
     end
   end
