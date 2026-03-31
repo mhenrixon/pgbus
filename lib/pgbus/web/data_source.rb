@@ -451,7 +451,7 @@ module Pgbus
       private
 
       def connection
-        ActiveRecord::Base.connection
+        Pgbus::ApplicationRecord.connection
       end
 
       # name is the full PGMQ queue name (already prefixed)

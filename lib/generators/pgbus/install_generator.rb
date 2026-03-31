@@ -73,7 +73,7 @@ module Pgbus
         say db_config, :cyan
         say ""
         say "Then add to config/application.rb or an initializer:", :yellow
-        say "  Pgbus.configure { |c| c.connects_to = { database: { writing: :pgbus } } }", :cyan
+        say "  Pgbus.configure { |c| c.connects_to = { database: { writing: :#{database_name} } } }", :cyan
         say ""
       end
 

@@ -28,7 +28,7 @@ module Pgbus
         # otherwise. This avoids losing a blocked row if enqueue fails.
         def promote_next(concurrency_key, client:, delay: 0)
           released = nil
-          ActiveRecord::Base.transaction do
+          Pgbus::BlockedExecution.transaction do
             released = release_next(concurrency_key)
             raise ActiveRecord::Rollback unless released
 

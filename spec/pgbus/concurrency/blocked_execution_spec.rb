@@ -42,7 +42,7 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     let(:mock_client) { build_mock_client }
 
     before do
-      allow(ActiveRecord::Base).to receive(:transaction).and_yield
+      allow(Pgbus::BlockedExecution).to receive(:transaction).and_yield
     end
 
     it "deletes the blocked row and enqueues atomically, returning true" do
@@ -66,7 +66,7 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
     end
 
     it "returns false and logs warning on error" do
-      allow(ActiveRecord::Base).to receive(:transaction).and_raise(StandardError, "db error")
+      allow(Pgbus::BlockedExecution).to receive(:transaction).and_raise(StandardError, "db error")
 
       promoted = described_class.promote_next("TestJob-42", client: mock_client)
 

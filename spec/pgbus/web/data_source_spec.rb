@@ -11,7 +11,7 @@ RSpec.describe Pgbus::Web::DataSource do
   let(:mock_connection) { double("ActiveRecord::Connection") }
 
   before do
-    allow(ActiveRecord::Base).to receive(:connection).and_return(mock_connection)
+    allow(Pgbus::ApplicationRecord).to receive(:connection).and_return(mock_connection)
   end
 
   describe "#queues_with_metrics" do

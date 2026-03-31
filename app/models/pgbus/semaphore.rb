@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class Semaphore < BaseModel
+  class Semaphore < ApplicationRecord
     self.table_name = "pgbus_semaphores"
 
     scope :expired, ->(now = Time.current) { where("expires_at < ? OR value <= 0", now) }

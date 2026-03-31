@@ -42,7 +42,7 @@ module Pgbus
                   :skip_recurring, :recurring_execution_retention
 
     # Multi-database support (optional separate database for pgbus tables)
-    # Set to { writing: :pgbus, reading: :pgbus } to use a separate database.
+    # Set to { database: { writing: :pgbus, reading: :pgbus } } to use a separate database.
     # Requires a matching entry in config/database.yml under the "pgbus" key.
     attr_accessor :connects_to
 

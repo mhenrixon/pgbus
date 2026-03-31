@@ -63,12 +63,12 @@ Layer 0: Config          lib/pgbus/configuration.rb, config_loader.rb
 
 ## Model Naming
 
-ActiveRecord models live in `app/models/pgbus/` and inherit from `Pgbus::BaseModel`.
+ActiveRecord models live in `app/models/pgbus/` and inherit from `Pgbus::ApplicationRecord`.
 **Never use a `Record` suffix.** Resolve naming conflicts as follows:
 
 | Model Class | Table | Why not the obvious name |
 |---|---|---|
-| `Pgbus::BaseModel` | (abstract) | Avoids conflict with Rails `ApplicationRecord` |
+| `Pgbus::ApplicationRecord` | (abstract) | Standard Rails base model convention |
 | `Pgbus::BatchEntry` | `pgbus_batches` | `Pgbus::Batch` is the batch API class |
 | `Pgbus::BlockedExecution` | `pgbus_blocked_executions` | — |
 | `Pgbus::ProcessEntry` | `pgbus_processes` | `Process` conflicts with Ruby's `Process` module |
@@ -89,6 +89,8 @@ Pgbus supports running in the primary database or a dedicated database (like Sol
 
 **Generator flags**:
 - `rails generate pgbus:install --database=pgbus` — migrations go to `db/pgbus_migrate/`
+- `rails generate pgbus:add_recurring --database=pgbus` — recurring migrations also go to `db/pgbus_migrate/`
+- `rails generate pgbus:upgrade_pgmq --database=pgbus` — upgrade migrations also go to `db/pgbus_migrate/`
 - Without `--database` — migrations go to `db/migrate/` (default)
 
 **database.yml example**:
