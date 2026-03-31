@@ -7,6 +7,11 @@ module Pgbus
     attr_reader :pgmq, :config
 
     def initialize(config = Pgbus.configuration)
+      # Define the PGMQ module before requiring the gem so that Zeitwerk's
+      # eager_load (called inside pgmq.rb) can resolve the constant.
+      # Without this, Ruby 4.0 + Zeitwerk 2.7.5 raises NameError because
+      # eager_load runs const_get(:Client) on PGMQ before the module is defined.
+      Object.const_set(:PGMQ, Module.new) unless defined?(::PGMQ)
       require "pgmq"
       @config = config
       @pgmq = PGMQ::Client.new(
