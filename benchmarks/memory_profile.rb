@@ -67,11 +67,15 @@ if report.total_retained.zero?
 else
   puts "\nWARNING: #{report.total_retained} retained objects (#{report.total_retained_memsize} bytes)"
   puts "Retained by gem:"
+  report.retained_objects_by_gem.each do |stat|
+    puts "  #{stat[:data]}: #{stat[:count]} objects"
+  end
+  puts "\nRetained memory by gem:"
   report.retained_memory_by_gem.each do |stat|
-    puts "  #{stat[:data]}: #{stat[:count]} objects, #{stat[:memory]} bytes"
+    puts "  #{stat[:data]}: #{stat[:count]} bytes"
   end
   puts "\nRetained by location:"
-  report.retained_memory_by_location.first(10).each do |stat|
-    puts "  #{stat[:data]}: #{stat[:count]} objects, #{stat[:memory]} bytes"
+  report.retained_objects_by_location.first(10).each do |stat|
+    puts "  #{stat[:data]}: #{stat[:count]} objects"
   end
 end
