@@ -10,7 +10,7 @@ RSpec.describe Pgbus::Client do
   end
 
   before do
-    allow_any_instance_of(described_class).to receive(:require).with("pgmq-ruby").and_return(true)
+    allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)

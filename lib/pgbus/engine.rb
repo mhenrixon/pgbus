@@ -24,7 +24,7 @@ module Pgbus
     end
 
     rake_tasks do
-      load File.expand_path("../../tasks/pgbus_pgmq.rake", __dir__)
+      load File.expand_path("../tasks/pgbus_pgmq.rake", __dir__)
     end
 
     initializer "pgbus.web" do

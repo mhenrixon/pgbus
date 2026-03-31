@@ -7,7 +7,7 @@ module Pgbus
     attr_reader :pgmq, :config
 
     def initialize(config = Pgbus.configuration)
-      require "pgmq-ruby"
+      require "pgmq"
       @config = config
       @pgmq = PGMQ::Client.new(
         config.connection_options,
