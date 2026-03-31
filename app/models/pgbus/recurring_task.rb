@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class RecurringTaskRecord < ApplicationRecord
+  class RecurringTask < BaseModel
     self.table_name = "pgbus_recurring_tasks"
 
     validates :key, presence: true, uniqueness: true

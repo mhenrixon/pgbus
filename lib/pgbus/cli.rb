@@ -33,8 +33,8 @@ module Pgbus
     end
 
     def show_status
-      processes = ProcessRecord.order(:kind, :created_at)
-                               .select(:kind, :hostname, :pid, :metadata, :last_heartbeat_at)
+      processes = ProcessEntry.order(:kind, :created_at)
+                              .select(:kind, :hostname, :pid, :metadata, :last_heartbeat_at)
 
       if processes.none?
         puts "No Pgbus processes running."

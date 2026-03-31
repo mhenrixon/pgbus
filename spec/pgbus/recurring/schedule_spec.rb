@@ -86,7 +86,7 @@ RSpec.describe Pgbus::Recurring::Schedule do
 
     before do
       # Mock the RecurringExecution to allow recording
-      allow(Pgbus::RecurringExecutionRecord).to receive(:record).and_yield
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
     end
 
     it "sends a message through the client" do
@@ -122,18 +122,18 @@ RSpec.describe Pgbus::Recurring::Schedule do
     end
 
     it "records the execution for deduplication" do
-      allow(Pgbus::RecurringExecutionRecord).to receive(:record)
+      allow(Pgbus::RecurringExecution).to receive(:record)
         .with("daily_cleanup", run_at)
         .and_yield
 
       schedule.enqueue_task(task, run_at: run_at)
 
-      expect(Pgbus::RecurringExecutionRecord).to have_received(:record)
+      expect(Pgbus::RecurringExecution).to have_received(:record)
         .with("daily_cleanup", run_at)
     end
 
     it "does not enqueue when execution already recorded" do
-      allow(Pgbus::RecurringExecutionRecord).to receive(:record)
+      allow(Pgbus::RecurringExecution).to receive(:record)
         .and_raise(Pgbus::Recurring::AlreadyRecorded)
 
       schedule.enqueue_task(task, run_at: run_at)

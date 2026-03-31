@@ -41,18 +41,18 @@ module Pgbus
 
     # Find a batch record by ID. Returns a hash or nil.
     def self.find(batch_id)
-      BatchRecord.find_by(batch_id: batch_id)&.attributes
+      BatchEntry.find_by(batch_id: batch_id)&.attributes
     end
 
     # Delete finished batches older than the given threshold.
     def self.cleanup(older_than:)
-      BatchRecord.stale(before: older_than).delete_all
+      BatchEntry.stale(before: older_than).delete_all
     end
 
     private
 
     def create_record
-      BatchRecord.create!(
+      BatchEntry.create!(
         batch_id: batch_id,
         description: description,
         on_finish_class: on_finish&.name,
@@ -81,19 +81,19 @@ module Pgbus
     def update_total
       if @job_count.zero?
         # Finish empty batches immediately — no jobs to signal completion
-        BatchRecord.where(batch_id: batch_id).update_all(
+        BatchEntry.where(batch_id: batch_id).update_all(
           total_jobs: 0,
           status: "finished",
           finished_at: Time.current
         )
         fire_empty_batch_callbacks
       else
-        BatchRecord.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
+        BatchEntry.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
       end
     end
 
     def fire_empty_batch_callbacks
-      record = BatchRecord.find_by(batch_id: batch_id)
+      record = BatchEntry.find_by(batch_id: batch_id)
       return unless record
 
       properties = parse_properties(record.properties)
@@ -112,7 +112,7 @@ module Pgbus
       private
 
       def update_counter(batch_id, column)
-        result = BatchRecord.increment_counter!(batch_id, column)
+        result = BatchEntry.increment_counter!(batch_id, column)
         return nil unless result
 
         fire_callbacks(result[:record]) if result[:just_finished]

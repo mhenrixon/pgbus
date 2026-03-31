@@ -319,8 +319,8 @@ module Pgbus
 
       # Recurring tasks
       def recurring_tasks
-        records = RecurringTaskRecord.order(:key).to_a
-        last_runs = RecurringExecutionRecord
+        records = RecurringTask.order(:key).to_a
+        last_runs = RecurringExecution
                     .where(task_key: records.map(&:key))
                     .select("task_key, MAX(run_at) AS run_at")
                     .group(:task_key)
@@ -361,7 +361,7 @@ module Pgbus
       end
 
       def recurring_task(id)
-        record = RecurringTaskRecord.find_by(id: id)
+        record = RecurringTask.find_by(id: id)
         return nil unless record
 
         task = Recurring::Task.from_configuration(record.key,
@@ -373,7 +373,7 @@ module Pgbus
                                                   priority: record.priority,
                                                   description: record.description)
 
-        executions = RecurringExecutionRecord.for_task(record.key).recent(25).map do |exec|
+        executions = RecurringExecution.for_task(record.key).recent(25).map do |exec|
           { run_at: exec.run_at, created_at: exec.created_at }
         end
 
@@ -401,7 +401,7 @@ module Pgbus
       end
 
       def toggle_recurring_task(id)
-        record = RecurringTaskRecord.find_by(id: id)
+        record = RecurringTask.find_by(id: id)
         return false unless record
 
         record.update!(enabled: !record.enabled)
@@ -412,7 +412,7 @@ module Pgbus
       end
 
       def enqueue_recurring_task_now(id)
-        record = RecurringTaskRecord.find_by(id: id)
+        record = RecurringTask.find_by(id: id)
         return false unless record
 
         task = Recurring::Task.from_configuration(record.key,
@@ -432,7 +432,7 @@ module Pgbus
       end
 
       def recurring_tasks_count
-        RecurringTaskRecord.count
+        RecurringTask.count
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error counting recurring tasks: #{e.message}" }
         0

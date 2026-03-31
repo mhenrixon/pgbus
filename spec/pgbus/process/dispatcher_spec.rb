@@ -51,28 +51,28 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#cleanup_processed_events (private)" do
     it "deletes expired processed events" do
       scope = double("scope", delete_all: 5)
-      allow(Pgbus::ProcessedEventRecord).to receive(:expired).and_return(scope)
+      allow(Pgbus::ProcessedEvent).to receive(:expired).and_return(scope)
 
       dispatcher.send(:cleanup_processed_events)
 
-      expect(Pgbus::ProcessedEventRecord).to have_received(:expired).with(an_instance_of(Time))
+      expect(Pgbus::ProcessedEvent).to have_received(:expired).with(an_instance_of(Time))
       expect(scope).to have_received(:delete_all)
     end
 
     it "returns early when idempotency_ttl is not set" do
       original_ttl = dispatcher.config.idempotency_ttl
       dispatcher.config.idempotency_ttl = nil
-      allow(Pgbus::ProcessedEventRecord).to receive(:expired)
+      allow(Pgbus::ProcessedEvent).to receive(:expired)
 
       dispatcher.send(:cleanup_processed_events)
 
-      expect(Pgbus::ProcessedEventRecord).not_to have_received(:expired)
+      expect(Pgbus::ProcessedEvent).not_to have_received(:expired)
     ensure
       dispatcher.config.idempotency_ttl = original_ttl
     end
 
     it "rescues StandardError and logs a warning" do
-      allow(Pgbus::ProcessedEventRecord).to receive(:expired).and_raise(StandardError, "db error")
+      allow(Pgbus::ProcessedEvent).to receive(:expired).and_raise(StandardError, "db error")
       expect { dispatcher.send(:cleanup_processed_events) }.not_to raise_error
     end
   end
@@ -80,16 +80,16 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#reap_stale_processes (private)" do
     it "deletes stale processes" do
       scope = double("scope", delete_all: 2)
-      allow(Pgbus::ProcessRecord).to receive(:stale).and_return(scope)
+      allow(Pgbus::ProcessEntry).to receive(:stale).and_return(scope)
 
       dispatcher.send(:reap_stale_processes)
 
-      expect(Pgbus::ProcessRecord).to have_received(:stale).with(an_instance_of(Time))
+      expect(Pgbus::ProcessEntry).to have_received(:stale).with(an_instance_of(Time))
       expect(scope).to have_received(:delete_all)
     end
 
     it "rescues StandardError and logs a warning" do
-      allow(Pgbus::ProcessRecord).to receive(:stale).and_raise(StandardError, "db error")
+      allow(Pgbus::ProcessEntry).to receive(:stale).and_raise(StandardError, "db error")
       expect { dispatcher.send(:reap_stale_processes) }.not_to raise_error
     end
   end
@@ -195,26 +195,26 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#cleanup_recurring_executions (private)" do
     it "deletes old recurring execution records" do
       relation = instance_double(ActiveRecord::Relation, delete_all: 5)
-      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than).and_return(relation)
+      allow(Pgbus::RecurringExecution).to receive(:older_than).and_return(relation)
 
       dispatcher.send(:cleanup_recurring_executions)
 
-      expect(Pgbus::RecurringExecutionRecord).to have_received(:older_than).with(an_instance_of(Time))
+      expect(Pgbus::RecurringExecution).to have_received(:older_than).with(an_instance_of(Time))
       expect(relation).to have_received(:delete_all)
     end
 
     it "rescues errors gracefully" do
-      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than).and_raise(StandardError, "db error")
+      allow(Pgbus::RecurringExecution).to receive(:older_than).and_raise(StandardError, "db error")
       expect { dispatcher.send(:cleanup_recurring_executions) }.not_to raise_error
     end
 
     it "skips when retention is not positive" do
       allow(Pgbus.configuration).to receive(:recurring_execution_retention).and_return(0)
-      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than)
+      allow(Pgbus::RecurringExecution).to receive(:older_than)
 
       dispatcher.send(:cleanup_recurring_executions)
 
-      expect(Pgbus::RecurringExecutionRecord).not_to have_received(:older_than)
+      expect(Pgbus::RecurringExecution).not_to have_received(:older_than)
     end
   end
 

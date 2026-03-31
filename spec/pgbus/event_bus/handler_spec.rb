@@ -136,24 +136,24 @@ RSpec.describe Pgbus::EventBus::Handler do
     let(:handler) { handler_class.new }
 
     it "returns :handled when event has not been processed" do
-      allow(Pgbus::ProcessedEventRecord).to receive(:exists?).and_return(false)
-      allow(Pgbus::ProcessedEventRecord).to receive(:upsert)
+      allow(Pgbus::ProcessedEvent).to receive(:exists?).and_return(false)
+      allow(Pgbus::ProcessedEvent).to receive(:upsert)
 
       result = handler.process(message)
 
       expect(result).to eq(:handled)
-      expect(Pgbus::ProcessedEventRecord).to have_received(:exists?)
-      expect(Pgbus::ProcessedEventRecord).to have_received(:upsert)
+      expect(Pgbus::ProcessedEvent).to have_received(:exists?)
+      expect(Pgbus::ProcessedEvent).to have_received(:upsert)
     end
 
     it "returns :skipped when event was already processed" do
-      allow(Pgbus::ProcessedEventRecord).to receive(:exists?).and_return(true)
-      allow(Pgbus::ProcessedEventRecord).to receive(:upsert)
+      allow(Pgbus::ProcessedEvent).to receive(:exists?).and_return(true)
+      allow(Pgbus::ProcessedEvent).to receive(:upsert)
 
       result = handler.process(message)
 
       expect(result).to eq(:skipped)
-      expect(Pgbus::ProcessedEventRecord).not_to have_received(:upsert)
+      expect(Pgbus::ProcessedEvent).not_to have_received(:upsert)
     end
   end
 

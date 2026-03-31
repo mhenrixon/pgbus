@@ -91,7 +91,7 @@ module Pgbus
         ttl = config.idempotency_ttl
         return unless ttl&.positive?
 
-        deleted = ProcessedEventRecord.expired(Time.now.utc - ttl).delete_all
+        deleted = ProcessedEvent.expired(Time.now.utc - ttl).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
@@ -99,7 +99,7 @@ module Pgbus
 
       def reap_stale_processes
         threshold = Heartbeat::ALIVE_THRESHOLD
-        deleted = ProcessRecord.stale(Time.now.utc - threshold).delete_all
+        deleted = ProcessEntry.stale(Time.now.utc - threshold).delete_all
         Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
@@ -135,7 +135,7 @@ module Pgbus
         retention = config.recurring_execution_retention
         return unless retention&.positive?
 
-        deleted = RecurringExecutionRecord.older_than(Time.now.utc - retention).delete_all
+        deleted = RecurringExecution.older_than(Time.now.utc - retention).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old recurring executions" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Recurring execution cleanup failed: #{e.message}" }

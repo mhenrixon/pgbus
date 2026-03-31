@@ -17,7 +17,7 @@ module Pgbus
       def enqueue_task(task, run_at:)
         queue = resolve_queue(task)
 
-        RecurringExecutionRecord.record(task.key, run_at) do
+        RecurringExecution.record(task.key, run_at) do
           payload = build_payload(task)
           headers = build_headers(task, run_at)
 

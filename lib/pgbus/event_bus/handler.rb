@@ -52,11 +52,11 @@ module Pgbus
       end
 
       def already_processed?(event_id)
-        ProcessedEventRecord.exists?(event_id: event_id, handler_class: self.class.name)
+        ProcessedEvent.exists?(event_id: event_id, handler_class: self.class.name)
       end
 
       def mark_processed!(event_id)
-        ProcessedEventRecord.upsert(
+        ProcessedEvent.upsert(
           { event_id: event_id, handler_class: self.class.name, processed_at: Time.now.utc },
           unique_by: %i[event_id handler_class]
         )
