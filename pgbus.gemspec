@@ -24,11 +24,10 @@ Gem::Specification.new do |spec|
   spec.metadata["changelog_uri"] = "https://github.com/mhenrixon/pgbus/blob/main/CHANGELOG.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  gemspec = File.basename(__FILE__)
   spec.files = IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
-    ls.readlines("\x0", chomp: true).reject do |f|
-      (f == gemspec) ||
-        f.start_with?(*%w[bin/ Gemfile .gitignore .rspec spec/ .github/ .rubocop.yml])
+    ls.readlines("\x0", chomp: true).select do |f|
+      f.start_with?("app/", "config/", "exe/", "lib/") ||
+        f == "CHANGELOG.md" || f == "LICENSE.txt" || f == "README.md" || f == "Rakefile"
     end
   end
   spec.bindir = "exe"

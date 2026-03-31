@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "bundler/gem_tasks"
 require "rspec/core/rake_task"
 
 RSpec::Core::RakeTask.new(:spec) do |t|
@@ -53,7 +52,7 @@ end
 
 desc "Release a new version (rake release[1.2.3] or rake release[pre])"
 task :release, [:version] do |_t, args|
-  require "pgbus/version"
+  require_relative "lib/pgbus/version"
 
   new_version = args[:version]
   abort "Usage: rake release[X.Y.Z] or rake release[pre]" unless new_version
