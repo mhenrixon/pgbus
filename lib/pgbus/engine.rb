@@ -11,6 +11,14 @@ module Pgbus
       Pgbus::ConfigLoader.load(config_path) if config_path.exist?
     end
 
+    initializer "pgbus.recurring" do |app|
+      recurring_path = app.root.join("config", "recurring.yml")
+      if recurring_path.exist? && !Pgbus.configuration.recurring_tasks
+        Pgbus.configuration.recurring_tasks = Pgbus::Recurring::ConfigLoader.load(recurring_path)
+        Pgbus.configuration.recurring_tasks_file ||= recurring_path.to_s
+      end
+    end
+
     initializer "pgbus.active_job" do
       ActiveSupport.on_load(:active_job) do
         include Pgbus::Concurrency

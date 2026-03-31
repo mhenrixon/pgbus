@@ -1,0 +1,40 @@
+# Pgbus Recurring Tasks Configuration
+#
+# Compatible with Solid Queue's recurring.yml format for easy migration.
+# Supports environment-scoped or flat configuration.
+#
+# Format:
+#   task_key:
+#     class: JobClassName      # ActiveJob class to run (or use command:)
+#     schedule: "0 * * * *"    # Cron expression or natural language
+#     queue: default           # Optional: queue name (default: pgbus default queue)
+#     args: [arg1, arg2]       # Optional: job arguments
+#     priority: 0              # Optional: numeric priority
+#     description: "text"      # Optional: human-readable description
+#
+# Schedule examples:
+#   "0 2 * * *"           → Every day at 2:00 AM
+#   "*/5 * * * *"         → Every 5 minutes
+#   "every hour"          → Every hour at :00
+#   "every day at 2am"    → Daily at 2:00 AM
+#   "@daily"              → Daily at midnight
+#   "0 9 * * mon-fri"     → Weekdays at 9:00 AM
+#
+# Command-based tasks (no job class needed):
+#   cleanup_old_records:
+#     command: "OldRecord.where('created_at < ?', 30.days.ago).delete_all"
+#     schedule: every day at 3am
+#
+# Examples:
+#
+# production:
+#   periodic_cleanup:
+#     class: CleanupJob
+#     queue: maintenance
+#     args: [1000, { batch_size: 500 }]
+#     schedule: every hour
+#
+#   daily_report:
+#     class: DailyReportJob
+#     schedule: "0 8 * * mon-fri"
+#     description: Generate daily business report

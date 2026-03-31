@@ -20,6 +20,13 @@ Pgbus::Engine.routes.draw do
     end
   end
 
+  resources :recurring_tasks, only: %i[index show] do
+    member do
+      post :toggle
+      post :enqueue
+    end
+  end
+
   resources :processes, only: [:index]
 
   resources :events, only: %i[index show] do

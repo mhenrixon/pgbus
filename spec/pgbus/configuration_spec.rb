@@ -39,6 +39,22 @@ RSpec.describe Pgbus::Configuration do
       expect(config.max_memory_mb).to be_nil
       expect(config.max_worker_lifetime).to be_nil
     end
+
+    it "has default recurring schedule interval" do
+      expect(config.recurring_schedule_interval).to eq(1.0)
+    end
+
+    it "has no recurring tasks by default" do
+      expect(config.recurring_tasks).to be_nil
+    end
+
+    it "does not skip recurring by default" do
+      expect(config.skip_recurring).to be false
+    end
+
+    it "has default recurring execution retention of 7 days" do
+      expect(config.recurring_execution_retention).to eq(7 * 24 * 3600)
+    end
   end
 
   describe "#queue_name" do

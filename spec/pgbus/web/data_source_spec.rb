@@ -105,4 +105,65 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result.first[:handler_class]).to eq("MyHandler")
     end
   end
+
+  describe "#recurring_tasks" do
+    it "returns formatted recurring tasks" do
+      mock_record = double("RecurringTaskRecord",
+                           id: 1, key: "daily_cleanup", class_name: "CleanupJob",
+                           command: nil, schedule: "0 2 * * *", queue_name: "maintenance",
+                           arguments: nil, priority: 0, description: "Cleanup",
+                           enabled: true, static: true,
+                           created_at: Time.now, updated_at: Time.now)
+
+      relation = double("relation", to_a: [mock_record])
+      allow(Pgbus::RecurringTaskRecord).to receive(:order).with(:key).and_return(relation)
+
+      # Mock the aggregate query for last runs
+      empty_scope = double("scope")
+      allow(Pgbus::RecurringExecutionRecord).to receive(:where).and_return(empty_scope)
+      allow(empty_scope).to receive_messages(select: empty_scope, group: empty_scope, index_by: {})
+
+      result = data_source.recurring_tasks
+      expect(result.size).to eq(1)
+      expect(result.first[:key]).to eq("daily_cleanup")
+      expect(result.first[:class_name]).to eq("CleanupJob")
+      expect(result.first[:enabled]).to be true
+    end
+
+    it "returns empty array on error" do
+      allow(Pgbus::RecurringTaskRecord).to receive(:order).and_raise(StandardError)
+
+      expect(data_source.recurring_tasks).to eq([])
+    end
+  end
+
+  describe "#recurring_tasks_count" do
+    it "returns the count of recurring tasks" do
+      allow(Pgbus::RecurringTaskRecord).to receive(:count).and_return(5)
+
+      expect(data_source.recurring_tasks_count).to eq(5)
+    end
+
+    it "returns 0 on error" do
+      allow(Pgbus::RecurringTaskRecord).to receive(:count).and_raise(StandardError)
+
+      expect(data_source.recurring_tasks_count).to eq(0)
+    end
+  end
+
+  describe "#toggle_recurring_task" do
+    it "toggles the enabled state" do
+      mock_record = double("RecurringTaskRecord", enabled: true)
+      allow(Pgbus::RecurringTaskRecord).to receive(:find_by).with(id: 1).and_return(mock_record)
+      allow(mock_record).to receive(:update!).with(enabled: false).and_return(true)
+
+      expect(data_source.toggle_recurring_task(1)).to be true
+    end
+
+    it "returns false when task not found" do
+      allow(Pgbus::RecurringTaskRecord).to receive(:find_by).with(id: 99).and_return(nil)
+
+      expect(data_source.toggle_recurring_task(99)).to be false
+    end
+  end
 end

@@ -1,0 +1,31 @@
+class AddPgbusRecurringTables < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_recurring_tasks do |t|
+      t.string :key, null: false
+      t.string :class_name
+      t.string :command, limit: 2048
+      t.string :schedule, null: false
+      t.text :arguments
+      t.string :queue_name
+      t.integer :priority, default: 0
+      t.boolean :static, null: false, default: true
+      t.boolean :enabled, null: false, default: true
+      t.text :description
+      t.timestamps
+    end
+
+    add_index :pgbus_recurring_tasks, :key,
+      unique: true, name: "idx_pgbus_recurring_tasks_key"
+
+    create_table :pgbus_recurring_executions do |t|
+      t.string :task_key, null: false
+      t.datetime :run_at, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_recurring_executions, [:task_key, :run_at],
+      unique: true, name: "idx_pgbus_recurring_executions_dedup"
+    add_index :pgbus_recurring_executions, :run_at,
+      name: "idx_pgbus_recurring_executions_cleanup"
+  end
+end

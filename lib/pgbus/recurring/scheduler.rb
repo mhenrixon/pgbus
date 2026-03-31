@@ -1,0 +1,102 @@
+# frozen_string_literal: true
+
+module Pgbus
+  module Recurring
+    class Scheduler
+      include Process::SignalHandler
+
+      attr_reader :schedule, :config
+
+      def initialize(config: Pgbus.configuration)
+        @config = config
+        @schedule = Schedule.new(config: config)
+        @shutting_down = false
+        @last_runs = {}
+      end
+
+      def run
+        setup_signals
+        start_heartbeat
+
+        Pgbus.logger.info do
+          "[Pgbus] Scheduler started: #{schedule.tasks.size} recurring tasks, " \
+            "interval=#{config.recurring_schedule_interval}s"
+        end
+
+        loop do
+          break if @shutting_down
+
+          process_signals
+          break if @shutting_down
+
+          tick(Time.now)
+          break if @shutting_down
+
+          interruptible_sleep(config.recurring_schedule_interval)
+        end
+
+        shutdown
+      end
+
+      def tick(now)
+        schedule.due_tasks(now).each do |task|
+          run_at = task.previous_time(now)
+          next unless run_at
+
+          schedule.enqueue_task(task, run_at: run_at)
+          @last_runs[task.key] = now
+        rescue StandardError => e
+          Pgbus.logger.error do
+            "[Pgbus] Error scheduling recurring task #{task.key}: #{e.class}: #{e.message}"
+          end
+        end
+      end
+
+      def last_run_at(key)
+        @last_runs[key]
+      end
+
+      def task_statuses
+        schedule.tasks.map do |task|
+          {
+            key: task.key,
+            class_name: task.class_name,
+            command: task.command,
+            schedule: task.schedule,
+            human_schedule: task.human_schedule,
+            queue_name: task.queue_name,
+            arguments: task.arguments,
+            priority: task.priority,
+            description: task.description,
+            next_run_at: task.next_time,
+            last_run_at: @last_runs[task.key]
+          }
+        end
+      end
+
+      def graceful_shutdown
+        @shutting_down = true
+      end
+
+      def immediate_shutdown
+        @shutting_down = true
+      end
+
+      private
+
+      def start_heartbeat
+        @heartbeat = Process::Heartbeat.new(
+          kind: "scheduler",
+          metadata: { pid: ::Process.pid, tasks: schedule.tasks.size }
+        )
+        @heartbeat.start
+      end
+
+      def shutdown
+        @heartbeat&.stop
+        restore_signals
+        Pgbus.logger.info { "[Pgbus] Scheduler stopped" }
+      end
+    end
+  end
+end

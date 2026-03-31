@@ -1,0 +1,6 @@
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-900">Recurring Tasks</h1>
+  <span class="text-sm text-gray-500"><%= @recurring_tasks.size %> task(s) configured</span>
+</div>
+
+<%= render "pgbus/recurring_tasks/tasks_table" %>

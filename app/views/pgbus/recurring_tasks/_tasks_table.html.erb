@@ -1,0 +1,79 @@
+<turbo-frame id="recurring-tasks" data-auto-refresh src="<%= pgbus.recurring_tasks_path(frame: 'recurring_tasks') %>">
+  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200">
+    <% if @recurring_tasks.empty? %>
+      <div class="p-8 text-center text-gray-500">
+        <p class="text-lg font-medium">No recurring tasks configured</p>
+        <p class="mt-1 text-sm">Add tasks to <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">config/recurring.yml</code></p>
+      </div>
+    <% else %>
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Schedule</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Queue</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Run</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Next Run</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          <% @recurring_tasks.each do |task| %>
+            <tr class="hover:bg-gray-50">
+              <td class="px-4 py-3">
+                <div>
+                  <%= link_to task[:key], pgbus.recurring_task_path(task[:id]),
+                      class: "text-sm font-medium text-blue-600 hover:text-blue-800" %>
+                </div>
+                <div class="text-xs text-gray-500"><%= task[:class_name] || task[:command]&.truncate(40) %></div>
+                <% if task[:description] %>
+                  <div class="text-xs text-gray-400 mt-0.5"><%= task[:description] %></div>
+                <% end %>
+              </td>
+              <td class="px-4 py-3">
+                <div class="text-sm text-gray-900"><%= task[:schedule] %></div>
+                <% if task[:human_schedule] && task[:human_schedule] != task[:schedule] %>
+                  <div class="text-xs text-gray-400"><%= task[:human_schedule] %></div>
+                <% end %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                <%= task[:queue_name] || "default" %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                <%= task[:last_run_at] ? pgbus_time_ago(task[:last_run_at]) : "Never" %>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                <% if task[:enabled] && task[:next_run_at] %>
+                  <%= pgbus_time_ago_future(task[:next_run_at]) %>
+                <% else %>
+                  <span class="text-gray-400">—</span>
+                <% end %>
+              </td>
+              <td class="px-4 py-3">
+                <% if task[:enabled] %>
+                  <%= pgbus_recurring_health_badge(task) %>
+                <% else %>
+                  <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                    Disabled
+                  </span>
+                <% end %>
+              </td>
+              <td class="px-4 py-3 text-right space-x-1">
+                <%= button_to task[:enabled] ? "Disable" : "Enable",
+                    pgbus.toggle_recurring_task_path(task[:id]),
+                    class: "inline-flex items-center rounded px-2 py-1 text-xs font-medium " \
+                           "#{task[:enabled] ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}" %>
+                <% if task[:enabled] %>
+                  <%= button_to "Run Now",
+                      pgbus.enqueue_recurring_task_path(task[:id]),
+                      class: "inline-flex items-center rounded bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-200" %>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% end %>
+  </div>
+</turbo-frame>

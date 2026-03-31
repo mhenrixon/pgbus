@@ -37,6 +37,10 @@ module Pgbus
     # Event consumers
     attr_accessor :event_consumers
 
+    # Recurring jobs
+    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file,
+                  :skip_recurring, :recurring_execution_retention
+
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
 
@@ -72,6 +76,12 @@ module Pgbus
       @pgmq_schema_mode = :auto
 
       @event_consumers = nil
+
+      @recurring_tasks = nil
+      @recurring_schedule_interval = 1.0
+      @recurring_tasks_file = nil
+      @skip_recurring = false
+      @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
       @web_auth = nil
       @web_refresh_interval = 5000

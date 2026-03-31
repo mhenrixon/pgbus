@@ -116,5 +116,29 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
       expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:consumer)
     end
+
+    it "routes :scheduler to fork_scheduler" do
+      info = { type: :scheduler }
+      supervisor.send(:restart_child, info)
+
+      expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
+      expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:scheduler)
+    end
+  end
+
+  describe "recurring_tasks_configured? (private)" do
+    let(:supervisor) { described_class.new }
+
+    it "returns true when recurring_tasks are set in config" do
+      config.recurring_tasks = { "task1" => { "class" => "MyJob", "schedule" => "0 * * * *" } }
+      expect(supervisor.send(:recurring_tasks_configured?)).to be true
+      config.recurring_tasks = nil
+    end
+
+    it "returns false when nothing is configured" do
+      config.recurring_tasks = nil
+      config.recurring_tasks_file = nil
+      expect(supervisor.send(:recurring_tasks_configured?)).to be false
+    end
   end
 end
