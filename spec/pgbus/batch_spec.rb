@@ -105,7 +105,7 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end }
       stub_const("BatchCallbackJob", callback_job)
       allow(callback_job).to receive(:perform_later)
 
@@ -122,7 +122,7 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end }
       stub_const("SuccessJob", callback_job)
       allow(callback_job).to receive(:perform_later)
 
@@ -139,7 +139,7 @@ RSpec.describe Pgbus::Batch do
       )
       allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(result)
 
-      callback_job = Class.new(ActiveJob::Base) { def perform(*); end } # rubocop:disable Lint/EmptyBlock
+      callback_job = Class.new(ActiveJob::Base) { def perform(*); end }
       stub_const("DiscardJob", callback_job)
       allow(callback_job).to receive(:perform_later)
 
