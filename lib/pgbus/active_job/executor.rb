@@ -21,12 +21,17 @@ module Pgbus
           return :dead_lettered
         end
 
-        job = ::ActiveJob::Base.deserialize(payload)
-        execute_job(job)
-        client.archive_message(queue_name, message.msg_id.to_i)
-        signal_concurrency(payload)
-        signal_batch_completed(payload)
-        instrument("pgbus.job_completed", queue: queue_name, job_class: payload["job_class"])
+        job_class = payload["job_class"]
+
+        Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
+          job = ::ActiveJob::Base.deserialize(payload)
+          execute_job(job)
+          client.archive_message(queue_name, message.msg_id.to_i)
+          signal_concurrency(payload)
+          signal_batch_completed(payload)
+        end
+
+        instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
         :success
       rescue StandardError => e
         handle_failure(message, queue_name, e)

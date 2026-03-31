@@ -21,6 +21,10 @@ group :test do
   gem "capybara-playwright-driver", require: false
   gem "puma"
   gem "sqlite3"
+
+  # Performance & memory profiling
+  gem "benchmark-ips", "~> 2.13"
+  gem "memory_profiler", "~> 1.1"
 end
 
 group :development, :test do
