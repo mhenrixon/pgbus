@@ -16,6 +16,7 @@ module Pgbus
         loader = Zeitwerk::Loader.for_gem
         loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
         loader.ignore("#{__dir__}/generators")
+        loader.ignore("#{__dir__}/active_job")
         # Register app/models for non-Rails usage (specs, standalone).
         # When Rails is running, the Engine handles autoloading app/models.
         unless defined?(Rails::Engine)
@@ -52,4 +53,5 @@ module Pgbus
   loader.setup
 end
 
+require "active_job/queue_adapters/pgbus_adapter" if defined?(ActiveJob)
 require "pgbus/engine" if defined?(Rails::Engine)

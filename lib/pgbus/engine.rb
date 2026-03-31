@@ -13,7 +13,7 @@ module Pgbus
 
     initializer "pgbus.active_job" do
       ActiveSupport.on_load(:active_job) do
-        require "pgbus/active_job/adapter"
+        include Pgbus::Concurrency
       end
     end
 
