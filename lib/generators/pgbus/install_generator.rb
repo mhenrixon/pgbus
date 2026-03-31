@@ -12,6 +12,12 @@ module Pgbus
 
       desc "Install Pgbus: create migration, config file, and binstub"
 
+      class_option :pgmq_schema_mode,
+                   type: :string,
+                   default: "auto",
+                   desc: "PGMQ install mode: auto (try extension, fallback embedded), " \
+                         "extension (require ext), embedded (no ext)"
+
       def create_migration
         migration_template "migration.rb.erb", "db/migrate/install_pgbus.rb"
       end
@@ -39,6 +45,19 @@ module Pgbus
         say ""
         say "Pgbus installed successfully!", :green
         say ""
+        say "PGMQ schema mode: #{pgmq_schema_mode}", :yellow
+        case pgmq_schema_mode
+        when "auto"
+          say "  The migration will try the pgmq extension first."
+          say "  If unavailable, it falls back to embedded SQL (no extension needed)."
+        when "extension"
+          say "  The migration requires the pgmq PostgreSQL extension."
+          say "  Install it: CREATE EXTENSION pgmq;"
+        when "embedded"
+          say "  The migration uses embedded SQL — no pgmq extension needed."
+          say "  PGMQ #{Pgbus::PgmqSchema.latest_version} schema will be created directly."
+        end
+        say ""
         say "Next steps:"
         say "  1. Run: rails db:migrate"
         say "  2. Edit config/pgbus.yml to configure workers"
@@ -50,6 +69,10 @@ module Pgbus
 
       def migration_version
         "[#{ActiveRecord::Migration.current_version}]"
+      end
+
+      def pgmq_schema_mode
+        options[:pgmq_schema_mode]
       end
     end
   end
