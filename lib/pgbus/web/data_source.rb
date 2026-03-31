@@ -27,20 +27,22 @@ module Pgbus
         }
       end
 
-      # Queues
+      # Queues — query via ActiveRecord for reliability in web processes
+      # (avoids PGMQ client connection issues when the web server uses a
+      # different connection lifecycle than the worker processes).
       def queues_with_metrics
-        metrics = @client.metrics || []
-        Array(metrics).map { |m| format_metrics(m) }
+        queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        queue_names.map { |name| queue_metrics_via_sql(name) }.compact
       rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus::Web] Error fetching queue metrics: #{e.message}" }
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching queue metrics: #{e.class}: #{e.message}" }
         []
       end
 
       def queue_detail(name)
-        m = @client.metrics(name)
-        m ? format_metrics(m) : nil
+        full_name = Pgbus.configuration.queue_name(name)
+        queue_metrics_via_sql(full_name)
       rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus::Web] Error fetching queue detail for #{name}: #{e.message}" }
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching queue detail for #{name}: #{e.class}: #{e.message}" }
         nil
       end
 
@@ -357,15 +359,45 @@ module Pgbus
         messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, limit) || []
       end
 
-      def format_metrics(m)
+      def queue_metrics_via_sql(queue_name)
+        qtable = "q_#{sanitize_name(queue_name)}"
+        seq_name = "#{qtable}_msg_id_seq"
+
+        row = connection.select_one(<<~SQL, "Pgbus Queue Metrics")
+          WITH q_summary AS (
+            SELECT
+              count(*) AS queue_length,
+              count(CASE WHEN vt <= NOW() THEN 1 END) AS queue_visible_length,
+              EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int AS newest_msg_age_sec,
+              EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int AS oldest_msg_age_sec
+            FROM pgmq.#{qtable}
+          ),
+          all_metrics AS (
+            SELECT CASE WHEN is_called THEN last_value ELSE 0 END AS total_messages
+            FROM pgmq.#{seq_name}
+          )
+          SELECT
+            q_summary.queue_length,
+            q_summary.queue_visible_length,
+            q_summary.newest_msg_age_sec,
+            q_summary.oldest_msg_age_sec,
+            all_metrics.total_messages
+          FROM q_summary, all_metrics
+        SQL
+
+        return nil unless row
+
         {
-          name: m.queue_name.to_s,
-          queue_length: m.queue_length.to_i,
-          queue_visible_length: m.queue_visible_length.to_i,
-          oldest_msg_age_sec: m.oldest_msg_age_sec&.to_i,
-          newest_msg_age_sec: m.newest_msg_age_sec&.to_i,
-          total_messages: m.total_messages.to_i
+          name: queue_name,
+          queue_length: row["queue_length"].to_i,
+          queue_visible_length: row["queue_visible_length"].to_i,
+          oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
+          newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
+          total_messages: row["total_messages"].to_i
         }
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching metrics for #{queue_name}: #{e.class}: #{e.message}" }
+        nil
       end
 
       def format_message(row, queue_name)
