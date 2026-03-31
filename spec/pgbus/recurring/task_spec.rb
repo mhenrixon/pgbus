@@ -100,6 +100,16 @@ RSpec.describe Pgbus::Recurring::Task do
       expect(task.errors).to include(/class.*command/i)
     end
 
+    it "is invalid with blank class and command" do
+      task = described_class.from_configuration("t1",
+                                                class: "  ",
+                                                command: "",
+                                                schedule: "0 * * * *")
+
+      expect(task).not_to be_valid
+      expect(task.errors).to include(/class.*command/i)
+    end
+
     it "is invalid with unparseable schedule" do
       task = described_class.from_configuration("t1",
                                                 class: "MyJob",

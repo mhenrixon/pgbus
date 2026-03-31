@@ -8,8 +8,6 @@ module Pgbus
     # NOTE: Only use this with trusted commands from config/recurring.yml.
     # Never expose this to user input.
     class CommandJob < ::ActiveJob::Base
-      queue_as :pgbus_recurring
-
       def perform(command)
         eval(command) # rubocop:disable Security/Eval
       end

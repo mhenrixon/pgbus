@@ -91,7 +91,7 @@ module Pgbus
           return
         end
 
-        @errors << "Either class or command is required" if class_name.nil? && command.nil?
+        @errors << "Either class or command is required" if class_name.to_s.strip.empty? && command.to_s.strip.empty?
 
         return if parsed_schedule.is_a?(Fugit::Cron)
 

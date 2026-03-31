@@ -8,8 +8,8 @@ RSpec.describe Pgbus::Recurring::CommandJob do
     expect(described_class.ancestors).to include(ActiveJob::Base)
   end
 
-  it "has pgbus_recurring as the default queue" do
+  it "uses the default ActiveJob queue (no hardcoded queue)" do
     job = described_class.new("1 + 1")
-    expect(job.queue_name).to eq("pgbus_recurring")
+    expect(job.queue_name).to eq("default")
   end
 end

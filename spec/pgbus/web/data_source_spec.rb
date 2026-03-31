@@ -115,10 +115,13 @@ RSpec.describe Pgbus::Web::DataSource do
                            enabled: true, static: true,
                            created_at: Time.now, updated_at: Time.now)
 
-      allow(Pgbus::RecurringTaskRecord).to receive(:order).with(:key)
-                                                          .and_return([mock_record])
-      allow(Pgbus::RecurringExecutionRecord).to receive(:last_execution)
-        .with("daily_cleanup").and_return(nil)
+      relation = double("relation", to_a: [mock_record])
+      allow(Pgbus::RecurringTaskRecord).to receive(:order).with(:key).and_return(relation)
+
+      # Mock the aggregate query for last runs
+      empty_scope = double("scope")
+      allow(Pgbus::RecurringExecutionRecord).to receive(:where).and_return(empty_scope)
+      allow(empty_scope).to receive_messages(select: empty_scope, group: empty_scope, index_by: {})
 
       result = data_source.recurring_tasks
       expect(result.size).to eq(1)

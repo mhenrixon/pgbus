@@ -319,8 +319,15 @@ module Pgbus
 
       # Recurring tasks
       def recurring_tasks
-        RecurringTaskRecord.order(:key).map do |record|
-          last_exec = RecurringExecutionRecord.last_execution(record.key)
+        records = RecurringTaskRecord.order(:key).to_a
+        last_runs = RecurringExecutionRecord
+                    .where(task_key: records.map(&:key))
+                    .select("task_key, MAX(run_at) AS run_at")
+                    .group(:task_key)
+                    .index_by(&:task_key)
+
+        records.map do |record|
+          last_exec = last_runs[record.key]
           task = Recurring::Task.from_configuration(record.key,
                                                     class: record.class_name,
                                                     command: record.command,
@@ -555,7 +562,8 @@ module Pgbus
         when NilClass then []
         else Array(args)
         end
-      rescue JSON::ParserError
+      rescue JSON::ParserError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Invalid recurring task arguments JSON: #{e.message}" }
         []
       end
     end
