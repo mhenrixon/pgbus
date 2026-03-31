@@ -23,7 +23,8 @@ module Pgbus
           total_visible: total_visible,
           active_processes: processes.count,
           failed_count: failed_events_count,
-          dlq_depth: dlq_depth
+          dlq_depth: dlq_depth,
+          recurring_count: recurring_tasks_count
         }
       end
 
@@ -316,6 +317,120 @@ module Pgbus
         false
       end
 
+      # Recurring tasks
+      def recurring_tasks
+        RecurringTaskRecord.order(:key).map do |record|
+          last_exec = RecurringExecutionRecord.last_execution(record.key)
+          task = Recurring::Task.from_configuration(record.key,
+                                                    class: record.class_name,
+                                                    command: record.command,
+                                                    schedule: record.schedule,
+                                                    queue: record.queue_name,
+                                                    args: parse_arguments(record.arguments),
+                                                    priority: record.priority,
+                                                    description: record.description)
+
+          {
+            id: record.id,
+            key: record.key,
+            class_name: record.class_name,
+            command: record.command,
+            schedule: record.schedule,
+            human_schedule: task.human_schedule,
+            queue_name: record.queue_name,
+            priority: record.priority,
+            description: record.description,
+            enabled: record.enabled,
+            static: record.static,
+            next_run_at: task.next_time,
+            last_run_at: last_exec&.run_at,
+            created_at: record.created_at,
+            updated_at: record.updated_at
+          }
+        end
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching recurring tasks: #{e.class}: #{e.message}" }
+        []
+      end
+
+      def recurring_task(id)
+        record = RecurringTaskRecord.find_by(id: id)
+        return nil unless record
+
+        task = Recurring::Task.from_configuration(record.key,
+                                                  class: record.class_name,
+                                                  command: record.command,
+                                                  schedule: record.schedule,
+                                                  queue: record.queue_name,
+                                                  args: parse_arguments(record.arguments),
+                                                  priority: record.priority,
+                                                  description: record.description)
+
+        executions = RecurringExecutionRecord.for_task(record.key).recent(25).map do |exec|
+          { run_at: exec.run_at, created_at: exec.created_at }
+        end
+
+        {
+          id: record.id,
+          key: record.key,
+          class_name: record.class_name,
+          command: record.command,
+          schedule: record.schedule,
+          human_schedule: task.human_schedule,
+          queue_name: record.queue_name,
+          arguments: parse_arguments(record.arguments),
+          priority: record.priority,
+          description: record.description,
+          enabled: record.enabled,
+          static: record.static,
+          next_run_at: task.next_time,
+          executions: executions,
+          created_at: record.created_at,
+          updated_at: record.updated_at
+        }
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching recurring task #{id}: #{e.class}: #{e.message}" }
+        nil
+      end
+
+      def toggle_recurring_task(id)
+        record = RecurringTaskRecord.find_by(id: id)
+        return false unless record
+
+        record.update!(enabled: !record.enabled)
+        true
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error toggling recurring task #{id}: #{e.message}" }
+        false
+      end
+
+      def enqueue_recurring_task_now(id)
+        record = RecurringTaskRecord.find_by(id: id)
+        return false unless record
+
+        task = Recurring::Task.from_configuration(record.key,
+                                                  class: record.class_name,
+                                                  command: record.command,
+                                                  schedule: record.schedule,
+                                                  queue: record.queue_name,
+                                                  args: parse_arguments(record.arguments),
+                                                  priority: record.priority)
+
+        schedule = Recurring::Schedule.new(config: Pgbus.configuration)
+        schedule.enqueue_task(task, run_at: Time.now.utc)
+        true
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error enqueuing recurring task #{id}: #{e.message}" }
+        false
+      end
+
+      def recurring_tasks_count
+        RecurringTaskRecord.count
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error counting recurring tasks: #{e.message}" }
+        0
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|
@@ -431,6 +546,17 @@ module Pgbus
 
       def sanitize_name(name)
         name.gsub(/[^a-zA-Z0-9_]/, "")
+      end
+
+      def parse_arguments(args)
+        case args
+        when Array then args
+        when String then JSON.parse(args)
+        when NilClass then []
+        else Array(args)
+        end
+      rescue JSON::ParserError
+        []
       end
     end
   end

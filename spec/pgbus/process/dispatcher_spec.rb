@@ -28,6 +28,10 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "has a batch cleanup interval of 1 hour" do
       expect(described_class::BATCH_CLEANUP_INTERVAL).to eq(3600)
     end
+
+    it "has a recurring cleanup interval of 1 hour" do
+      expect(described_class::RECURRING_CLEANUP_INTERVAL).to eq(3600)
+    end
   end
 
   describe "#graceful_shutdown" do
@@ -185,6 +189,32 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "rescues errors gracefully" do
       allow(Pgbus::Batch).to receive(:cleanup).and_raise(StandardError, "db error")
       expect { dispatcher.send(:cleanup_batches) }.not_to raise_error
+    end
+  end
+
+  describe "#cleanup_recurring_executions (private)" do
+    it "deletes old recurring execution records" do
+      relation = instance_double(ActiveRecord::Relation, delete_all: 5)
+      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than).and_return(relation)
+
+      dispatcher.send(:cleanup_recurring_executions)
+
+      expect(Pgbus::RecurringExecutionRecord).to have_received(:older_than).with(an_instance_of(Time))
+      expect(relation).to have_received(:delete_all)
+    end
+
+    it "rescues errors gracefully" do
+      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:cleanup_recurring_executions) }.not_to raise_error
+    end
+
+    it "skips when retention is not positive" do
+      allow(Pgbus.configuration).to receive(:recurring_execution_retention).and_return(0)
+      allow(Pgbus::RecurringExecutionRecord).to receive(:older_than)
+
+      dispatcher.send(:cleanup_recurring_executions)
+
+      expect(Pgbus::RecurringExecutionRecord).not_to have_received(:older_than)
     end
   end
 

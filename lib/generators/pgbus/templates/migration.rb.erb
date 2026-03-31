@@ -115,6 +115,36 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     add_index :pgbus_batches, :status,
       name: "idx_pgbus_batches_status"
 
+    # Recurring task definitions (synced from config/recurring.yml)
+    create_table :pgbus_recurring_tasks do |t|
+      t.string :key, null: false
+      t.string :class_name
+      t.string :command, limit: 2048
+      t.string :schedule, null: false
+      t.text :arguments
+      t.string :queue_name
+      t.integer :priority, default: 0
+      t.boolean :static, null: false, default: true
+      t.boolean :enabled, null: false, default: true
+      t.text :description
+      t.timestamps
+    end
+
+    add_index :pgbus_recurring_tasks, :key,
+      unique: true, name: "idx_pgbus_recurring_tasks_key"
+
+    # Recurring execution deduplication (prevents double-enqueue)
+    create_table :pgbus_recurring_executions do |t|
+      t.string :task_key, null: false
+      t.datetime :run_at, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_recurring_executions, [:task_key, :run_at],
+      unique: true, name: "idx_pgbus_recurring_executions_dedup"
+    add_index :pgbus_recurring_executions, :run_at,
+      name: "idx_pgbus_recurring_executions_cleanup"
+
     # Create default queues via PGMQ
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
@@ -124,6 +154,8 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     execute "SELECT pgmq.drop_queue('pgbus_default_dlq')"
     execute "SELECT pgmq.drop_queue('pgbus_default')"
 
+    drop_table :pgbus_recurring_executions
+    drop_table :pgbus_recurring_tasks
     drop_table :pgbus_batches
     drop_table :pgbus_blocked_executions
     drop_table :pgbus_semaphores

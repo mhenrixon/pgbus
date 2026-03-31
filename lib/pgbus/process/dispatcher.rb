@@ -6,10 +6,11 @@ module Pgbus
       include SignalHandler
 
       # Maintenance runs on coarser intervals than the main loop
-      CLEANUP_INTERVAL = 3600       # Run idempotency cleanup every hour
-      REAP_INTERVAL = 300           # Run stale process reaping every 5 minutes
-      CONCURRENCY_INTERVAL = 300    # Run concurrency cleanup every 5 minutes
-      BATCH_CLEANUP_INTERVAL = 3600 # Run batch cleanup every hour
+      CLEANUP_INTERVAL = 3600               # Run idempotency cleanup every hour
+      REAP_INTERVAL = 300                   # Run stale process reaping every 5 minutes
+      CONCURRENCY_INTERVAL = 300            # Run concurrency cleanup every 5 minutes
+      BATCH_CLEANUP_INTERVAL = 3600         # Run batch cleanup every hour
+      RECURRING_CLEANUP_INTERVAL = 3600     # Run recurring execution cleanup every hour
 
       attr_reader :config
 
@@ -20,6 +21,7 @@ module Pgbus
         @last_reap_at = Time.now
         @last_concurrency_at = Time.now
         @last_batch_cleanup_at = Time.now
+        @last_recurring_cleanup_at = Time.now
       end
 
       def run
@@ -76,6 +78,11 @@ module Pgbus
           cleanup_batches
           @last_batch_cleanup_at = now
         end
+
+        if now - @last_recurring_cleanup_at >= RECURRING_CLEANUP_INTERVAL
+          cleanup_recurring_executions
+          @last_recurring_cleanup_at = now
+        end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
       end
@@ -122,6 +129,16 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
+      end
+
+      def cleanup_recurring_executions
+        retention = config.recurring_execution_retention
+        return unless retention&.positive?
+
+        deleted = RecurringExecutionRecord.older_than(Time.now.utc - retention).delete_all
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old recurring executions" } if deleted.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Recurring execution cleanup failed: #{e.message}" }
       end
 
       def start_heartbeat

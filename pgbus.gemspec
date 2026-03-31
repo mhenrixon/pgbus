@@ -36,6 +36,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "concurrent-ruby", "~> 1.2"
+  spec.add_dependency "fugit", "~> 1.11"
   spec.add_dependency "pgmq-ruby", "~> 0.5"
   spec.add_dependency "railties", ">= 7.1", "< 9.0"
   spec.add_dependency "zeitwerk", "~> 2.6"

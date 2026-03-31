@@ -50,6 +50,9 @@ module Pgbus
         # Boot dispatcher
         fork_dispatcher
 
+        # Boot recurring scheduler if configured
+        boot_scheduler
+
         # Boot event consumers if configured
         boot_consumers
       end
@@ -81,6 +84,50 @@ module Pgbus
 
         @forks[pid] = { type: :dispatcher }
         Pgbus.logger.info { "[Pgbus] Forked dispatcher pid=#{pid}" }
+      end
+
+      def boot_scheduler
+        return if config.skip_recurring
+        return unless recurring_tasks_configured?
+
+        fork_scheduler
+      end
+
+      def fork_scheduler
+        pid = fork do
+          restore_signals
+          setup_child_signals
+          load_rails_app
+          load_recurring_config
+          scheduler = Recurring::Scheduler.new(config: config)
+          scheduler.run
+        end
+
+        @forks[pid] = { type: :scheduler }
+        Pgbus.logger.info { "[Pgbus] Forked scheduler pid=#{pid}" }
+      end
+
+      def recurring_tasks_configured?
+        return true if config.recurring_tasks&.any?
+        return true if config.recurring_tasks_file && File.exist?(config.recurring_tasks_file.to_s)
+
+        # Check default location
+        if defined?(Rails)
+          default_path = Rails.root.join("config", "recurring.yml")
+          return File.exist?(default_path.to_s)
+        end
+
+        false
+      end
+
+      def load_recurring_config
+        return if config.recurring_tasks&.any?
+
+        path = config.recurring_tasks_file
+        path ||= defined?(Rails) ? Rails.root.join("config", "recurring.yml") : nil
+        return unless path && File.exist?(path.to_s)
+
+        config.recurring_tasks = Recurring::ConfigLoader.load(path)
       end
 
       def boot_consumers
@@ -144,6 +191,8 @@ module Pgbus
           fork_worker(info[:config])
         when :dispatcher
           fork_dispatcher
+        when :scheduler
+          fork_scheduler
         when :consumer
           fork_consumer(info[:config])
         end

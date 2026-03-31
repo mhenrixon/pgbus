@@ -68,6 +68,35 @@ module Pgbus
       Pgbus.configuration.web_refresh_interval
     end
 
+    def pgbus_time_ago_future(time)
+      return "—" unless time
+
+      time = Time.parse(time) if time.is_a?(String)
+      seconds = (time - Time.now).to_i
+
+      if seconds <= 0
+        "now"
+      elsif seconds < 60
+        "in #{seconds}s"
+      elsif seconds < 3600
+        "in #{seconds / 60}m"
+      elsif seconds < 86_400
+        "in #{seconds / 3600}h"
+      else
+        "in #{seconds / 86_400}d"
+      end
+    end
+
+    def pgbus_recurring_health_badge(task)
+      if task[:last_run_at].nil?
+        tag.span("Pending",
+                 class: "inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800")
+      else
+        tag.span("Active",
+                 class: "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800")
+      end
+    end
+
     def pgbus_nav_link(label, path)
       active = request.path == path || (path != pgbus.root_path && request.path.start_with?(path))
       css = if active
