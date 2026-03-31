@@ -54,9 +54,8 @@ RSpec.describe Pgbus::Web::DataSource do
                       "total_messages" => 500
                     })
 
-      result = data_source.queue_detail("critical")
-      expected_name = Pgbus.configuration.queue_name("critical")
-      expect(result[:name]).to eq(expected_name)
+      result = data_source.queue_detail("pgbus_critical")
+      expect(result[:name]).to eq("pgbus_critical")
       expect(result[:queue_length]).to eq(10)
     end
 

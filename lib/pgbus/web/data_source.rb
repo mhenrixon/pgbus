@@ -38,9 +38,10 @@ module Pgbus
         []
       end
 
+      # name is the full PGMQ queue name (e.g. "pgbus_default") as returned
+      # by queues_with_metrics. No prefix is added.
       def queue_detail(name)
-        full_name = Pgbus.configuration.queue_name(name)
-        queue_metrics_via_sql(full_name)
+        queue_metrics_via_sql(name)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error fetching queue detail for #{name}: #{e.class}: #{e.message}" }
         nil
@@ -65,9 +66,8 @@ module Pgbus
       end
 
       def job_detail(queue_name, msg_id)
-        full_name = Pgbus.configuration.queue_name(queue_name)
         row = connection.select_one(
-          "SELECT * FROM pgmq.q_#{sanitize_name(full_name)} WHERE msg_id = $1",
+          "SELECT * FROM pgmq.q_#{sanitize_name(queue_name)} WHERE msg_id = $1",
           "Pgbus Job Detail",
           [msg_id.to_i]
         )
@@ -78,8 +78,7 @@ module Pgbus
       end
 
       def retry_job(queue_name, msg_id)
-        full_name = Pgbus.configuration.queue_name(queue_name)
-        @client.set_visibility_timeout(full_name, msg_id.to_i, vt: 0)
+        @client.set_visibility_timeout(queue_name, msg_id.to_i, vt: 0)
       end
 
       def discard_job(queue_name, msg_id)
@@ -333,9 +332,9 @@ module Pgbus
         ActiveRecord::Base.connection
       end
 
+      # name is the full PGMQ queue name (already prefixed)
       def query_queue_messages(name, limit, offset)
-        full_name = Pgbus.configuration.queue_name(name)
-        query_queue_messages_raw(full_name, limit, offset).map { |m| m.merge(queue: name) }
+        query_queue_messages_raw(name, limit, offset).map { |m| m.merge(queue: name) }
       end
 
       def query_queue_messages_raw(full_name, limit, offset)
