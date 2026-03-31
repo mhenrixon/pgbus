@@ -20,7 +20,7 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.3.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/mhenrixon/pgbus"
+  spec.metadata["source_code_uri"] = "https://github.com/mhenrixon/pgbus/tree/main"
   spec.metadata["changelog_uri"] = "https://github.com/mhenrixon/pgbus/blob/main/CHANGELOG.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 
