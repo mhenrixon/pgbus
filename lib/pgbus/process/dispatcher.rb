@@ -59,30 +59,20 @@ module Pgbus
       def run_maintenance
         now = Time.now
 
-        if now - @last_cleanup_at >= CLEANUP_INTERVAL
-          cleanup_processed_events
-          @last_cleanup_at = now
-        end
+        run_if_due(now, :@last_cleanup_at, CLEANUP_INTERVAL) { cleanup_processed_events }
+        run_if_due(now, :@last_reap_at, REAP_INTERVAL) { reap_stale_processes }
+        run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
+        run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
+        run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
+      end
 
-        if now - @last_reap_at >= REAP_INTERVAL
-          reap_stale_processes
-          @last_reap_at = now
-        end
+      # Only update the timestamp when the block succeeds.
+      # On failure, the next tick retries instead of waiting the full interval.
+      def run_if_due(now, ivar, interval)
+        return unless now - instance_variable_get(ivar) >= interval
 
-        if now - @last_concurrency_at >= CONCURRENCY_INTERVAL
-          cleanup_concurrency
-          @last_concurrency_at = now
-        end
-
-        if now - @last_batch_cleanup_at >= BATCH_CLEANUP_INTERVAL
-          cleanup_batches
-          @last_batch_cleanup_at = now
-        end
-
-        if now - @last_recurring_cleanup_at >= RECURRING_CLEANUP_INTERVAL
-          cleanup_recurring_executions
-          @last_recurring_cleanup_at = now
-        end
+        yield
+        instance_variable_set(ivar, now)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
       end

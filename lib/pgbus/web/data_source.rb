@@ -129,7 +129,9 @@ module Pgbus
 
         connection.transaction do
           @client.send_message(event["queue_name"], payload, headers: headers)
-          connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
+          connection.exec_delete(
+            "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
+          )
         end
         true
       rescue StandardError => e
@@ -138,7 +140,9 @@ module Pgbus
       end
 
       def discard_failed_event(id)
-        connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{id.to_i}")
+        connection.exec_delete(
+          "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
+        )
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error discarding failed event #{id}: #{e.message}" }
@@ -147,18 +151,27 @@ module Pgbus
 
       def retry_all_failed
         count = 0
-        connection.select_all("SELECT * FROM pgbus_failed_events").each do |event|
-          payload = JSON.parse(event["payload"])
-          headers = event["headers"]
-          headers = JSON.parse(headers) if headers.is_a?(String)
+        loop do
+          batch = connection.select_all(
+            "SELECT * FROM pgbus_failed_events ORDER BY id LIMIT 100", "Pgbus Retry Batch"
+          ).to_a
+          break if batch.empty?
 
-          connection.transaction do
-            @client.send_message(event["queue_name"], payload, headers: headers)
-            connection.execute("DELETE FROM pgbus_failed_events WHERE id = #{event["id"].to_i}")
+          batch.each do |event|
+            payload = JSON.parse(event["payload"])
+            headers = event["headers"]
+            headers = JSON.parse(headers) if headers.is_a?(String)
+
+            connection.transaction do
+              @client.send_message(event["queue_name"], payload, headers: headers)
+              connection.exec_delete(
+                "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [event["id"].to_i]
+              )
+            end
+            count += 1
+          rescue StandardError => e
+            Pgbus.logger.error { "[Pgbus::Web] Failed to retry event #{event["id"]}: #{e.message}" }
           end
-          count += 1
-        rescue StandardError => e
-          Pgbus.logger.error { "[Pgbus::Web] Failed to retry event #{event["id"]}: #{e.message}" }
         end
         count
       end
@@ -552,7 +565,10 @@ module Pgbus
       end
 
       def sanitize_name(name)
-        name.gsub(/[^a-zA-Z0-9_]/, "")
+        sanitized = name.gsub(/[^a-zA-Z0-9_]/, "")
+        raise ArgumentError, "Invalid queue name: #{name.inspect}" if sanitized.empty?
+
+        sanitized
       end
 
       def parse_arguments(args)
