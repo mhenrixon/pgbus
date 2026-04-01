@@ -1,0 +1,144 @@
+<div class="mb-6">
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Insights</h1>
+  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Job performance metrics for the last hour</p>
+</div>
+
+<!-- Summary cards -->
+<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6 mb-8">
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Total Jobs</dt>
+    <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_number(@summary[:total]) %></dd>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Succeeded</dt>
+    <dd class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400"><%= pgbus_number(@summary[:success]) %></dd>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Failed</dt>
+    <dd class="mt-1 text-2xl font-semibold text-red-600 dark:text-red-400"><%= pgbus_number(@summary[:failed]) %></dd>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Dead Lettered</dt>
+    <dd class="mt-1 text-2xl font-semibold text-orange-600 dark:text-orange-400"><%= pgbus_number(@summary[:dead_lettered]) %></dd>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Avg Duration</dt>
+    <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_ms_duration(@summary[:avg_duration_ms]) %></dd>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Max Duration</dt>
+    <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_ms_duration(@summary[:max_duration_ms]) %></dd>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Throughput (jobs/min)</h3>
+    <div id="throughput-chart" style="height: 280px;"></div>
+  </div>
+  <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Status Distribution</h3>
+    <div id="status-chart" style="height: 280px;"></div>
+  </div>
+</div>
+
+<!-- Slowest job classes -->
+<div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+  <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Slowest Job Classes (avg duration)</h3>
+  </div>
+  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+    <thead class="bg-gray-50 dark:bg-gray-900">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Job Class</th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Count</th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Avg</th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Max</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+      <% @slowest.each do |row| %>
+        <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+          <td class="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300"><%= row[:job_class] %></td>
+          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_number(row[:count]) %></td>
+          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:avg_ms]) %></td>
+          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:max_ms]) %></td>
+        </tr>
+      <% end %>
+      <% if @slowest.empty? %>
+        <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No job stats yet</td></tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@4"></script>
+<script>
+  const isDark = document.documentElement.classList.contains('dark');
+  const textColor = isDark ? '#9ca3af' : '#6b7280';
+  const gridColor = isDark ? '#374151' : '#e5e7eb';
+
+  // Fetch chart data from API
+  fetch('<%= pgbus.api_insights_path %>')
+    .then(r => r.json())
+    .then(data => {
+      // Throughput chart
+      const throughputData = data.throughput.map(p => ({
+        x: new Date(p.time).getTime(),
+        y: p.count
+      }));
+
+      new ApexCharts(document.querySelector('#throughput-chart'), {
+        series: [{ name: 'Jobs/min', data: throughputData }],
+        chart: {
+          type: 'area',
+          height: 280,
+          toolbar: { show: false },
+          background: 'transparent',
+          foreColor: textColor
+        },
+        stroke: { curve: 'smooth', width: 2 },
+        fill: {
+          type: 'gradient',
+          gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] }
+        },
+        colors: ['#6366f1'],
+        xaxis: { type: 'datetime', labels: { style: { colors: textColor } } },
+        yaxis: { labels: { style: { colors: textColor } } },
+        grid: { borderColor: gridColor },
+        tooltip: { theme: isDark ? 'dark' : 'light' },
+        dataLabels: { enabled: false }
+      }).render();
+
+      // Status distribution chart
+      const statusLabels = Object.keys(data.status_counts);
+      const statusValues = Object.values(data.status_counts);
+      const statusColors = statusLabels.map(s => {
+        if (s === 'success') return '#10b981';
+        if (s === 'failed') return '#ef4444';
+        if (s === 'dead_lettered') return '#f97316';
+        return '#6b7280';
+      });
+
+      if (statusLabels.length > 0) {
+        new ApexCharts(document.querySelector('#status-chart'), {
+          series: statusValues,
+          labels: statusLabels,
+          chart: { type: 'donut', height: 280, background: 'transparent', foreColor: textColor },
+          colors: statusColors,
+          legend: { position: 'bottom', labels: { colors: textColor } },
+          plotOptions: { pie: { donut: { size: '60%' } } },
+          dataLabels: { style: { colors: [isDark ? '#fff' : '#000'] } },
+          tooltip: { theme: isDark ? 'dark' : 'light' }
+        }).render();
+      } else {
+        document.querySelector('#status-chart').innerHTML =
+          '<p class="text-center text-sm text-gray-400 pt-24">No data yet</p>';
+      }
+    })
+    .catch(() => {
+      document.querySelector('#throughput-chart').innerHTML =
+        '<p class="text-center text-sm text-gray-400 pt-24">Failed to load chart data</p>';
+    });
+</script>
