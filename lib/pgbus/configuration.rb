@@ -137,7 +137,11 @@ module Pgbus
       elsif connection_params
         connection_params
       elsif defined?(ActiveRecord::Base)
-        -> { ActiveRecord::Base.connection.raw_connection }
+        if connects_to
+          -> { Pgbus::ApplicationRecord.connection.raw_connection }
+        else
+          -> { ActiveRecord::Base.connection.raw_connection }
+        end
       else
         raise ConfigurationError, "No database connection configured. " \
                                   "Set Pgbus.configuration.database_url, connection_params, or use with Rails."

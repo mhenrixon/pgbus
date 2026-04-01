@@ -12,8 +12,10 @@ namespace :pgbus do
       latest = Pgbus::PgmqSchema.latest_version
       puts "Vendored version:  #{latest}"
 
-      if ActiveRecord::Base.connection.table_exists?("pgbus_pgmq_schema_versions")
-        row = ActiveRecord::Base.connection.select_one(
+      conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+
+      if conn.table_exists?("pgbus_pgmq_schema_versions")
+        row = conn.select_one(
           "SELECT version, install_method, installed_at FROM pgbus_pgmq_schema_versions ORDER BY installed_at DESC LIMIT 1"
         )
         if row
@@ -32,7 +34,7 @@ namespace :pgbus do
         end
       else
         # Check if pgmq schema exists at all
-        schema_exists = ActiveRecord::Base.connection.select_value(
+        schema_exists = conn.select_value(
           "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'"
         )
         if schema_exists

@@ -6,6 +6,12 @@ module Pgbus
   class Engine < ::Rails::Engine
     isolate_namespace Pgbus
 
+    # When pgbus was loaded before Rails, a separate Zeitwerk loader manages
+    # app/models. Tear it down before Rails' autoloader claims the same paths.
+    initializer "pgbus.release_models_loader", before: :set_autoload_paths do
+      Pgbus.teardown_models_loader!
+    end
+
     initializer "pgbus.configure" do |app|
       config_path = app.root.join("config", "pgbus.yml")
       Pgbus::ConfigLoader.load(config_path) if config_path.exist?

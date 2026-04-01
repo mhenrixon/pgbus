@@ -171,7 +171,7 @@ RSpec.describe Pgbus::Recurring::Task do
                                                 schedule: "0 12 * * *")
 
       from = Time.utc(2026, 1, 1, 0, 0, 0)
-      next_time = task.next_time(from)
+      next_time = task.next_time(from).utc
       expect(next_time.hour).to eq(12)
       expect(next_time.day).to eq(1)
     end
