@@ -47,7 +47,9 @@ RSpec.describe Pgbus::Process::Heartbeat do
       it "updates the heartbeat timestamp" do
         heartbeat.beat
 
-        expect(scope).to have_received(:update_all).with(last_heartbeat_at: an_instance_of(Time))
+        expect(scope).to have_received(:update_all) do |args|
+          expect(args[:last_heartbeat_at]).to be_a(Time)
+        end
       end
     end
 
