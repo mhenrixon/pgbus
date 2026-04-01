@@ -48,6 +48,7 @@ module Pgbus
     def pgbus_duration(seconds)
       return "—" unless seconds
 
+      seconds = seconds.to_i
       if seconds < 60
         "#{seconds}s"
       elsif seconds < 3600

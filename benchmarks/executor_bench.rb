@@ -49,17 +49,20 @@ Benchmark.ips do |x|
 end
 
 puts "\n--- Executor#execute throughput (stats enabled) ---"
-Pgbus.configuration.stats_enabled = true
-Benchmark.ips do |x|
-  x.config(time: 5, warmup: 2)
+begin
+  Pgbus.configuration.stats_enabled = true
+  Benchmark.ips do |x|
+    x.config(time: 5, warmup: 2)
 
-  x.report("execute + stat recording") do
-    executor.execute(msg, "default")
+    x.report("execute + stat recording") do
+      executor.execute(msg, "default")
+    end
+
+    x.compare!
   end
-
-  x.compare!
+ensure
+  Pgbus.configuration.stats_enabled = false
 end
-Pgbus.configuration.stats_enabled = false
 
 puts "\n--- Memory: execute (1000 jobs) ---"
 report = MemoryProfiler.report { 1000.times { executor.execute(msg, "default") } }

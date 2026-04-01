@@ -89,6 +89,18 @@ RSpec.describe Pgbus::ApplicationHelper do
     it "formats minutes" do
       expect(helper.pgbus_ms_duration(120_000)).to eq("2.0m")
     end
+
+    it "formats exact second boundary" do
+      expect(helper.pgbus_ms_duration(1000)).to eq("1.0s")
+    end
+
+    it "formats exact minute boundary" do
+      expect(helper.pgbus_ms_duration(60_000)).to eq("1.0m")
+    end
+
+    it "rounds just below minute boundary" do
+      expect(helper.pgbus_ms_duration(59_950)).to eq("60.0s")
+    end
   end
 
   describe "#pgbus_json_preview" do
