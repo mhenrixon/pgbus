@@ -54,6 +54,9 @@ module Pgbus
         end
 
         active_job
+      rescue Pgbus::SchemaNotReady => e
+        Pgbus.logger.error { "[Pgbus] #{e.message}" }
+        raise
       end
 
       def concurrency_config(active_job)

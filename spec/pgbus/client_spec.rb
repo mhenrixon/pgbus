@@ -59,6 +59,19 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").once
       expect(mock_pgmq).to have_received(:create).with("pgbus_test_events").once
     end
+
+    it "raises SchemaNotReady when PGMQ schema is missing" do
+      # PGMQ is lazy-loaded by the client, so define the error class if not yet available
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+
+      allow(mock_pgmq).to receive(:create).and_raise(
+        PGMQ::Errors::ConnectionError.new('Database connection error: ERROR:  relation "pgmq.meta" does not exist')
+      )
+
+      expect { client.ensure_queue("jobs") }.to raise_error(
+        Pgbus::SchemaNotReady, /PGMQ schema is not available/
+      )
+    end
   end
 
   describe "#ensure_dead_letter_queue" do

@@ -9,6 +9,7 @@ module Pgbus
   class QueueNotFoundError < Error; end
   class DeadLetterError < Error; end
   class ConcurrencyLimitExceeded < Error; end
+  class SchemaNotReady < Error; end
 
   class << self
     def loader
