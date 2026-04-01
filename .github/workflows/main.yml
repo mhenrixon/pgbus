@@ -143,6 +143,8 @@ jobs:
                 lock_key VARCHAR NOT NULL,
                 job_class VARCHAR NOT NULL,
                 job_id VARCHAR,
+                state VARCHAR NOT NULL DEFAULT 'queued',
+                owner_pid INTEGER,
                 locked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL
               );
@@ -150,6 +152,8 @@ jobs:
                 ON pgbus_job_locks (lock_key);
               CREATE INDEX IF NOT EXISTS idx_pgbus_job_locks_expires
                 ON pgbus_job_locks (expires_at);
+              CREATE INDEX IF NOT EXISTS idx_pgbus_job_locks_reaper
+                ON pgbus_job_locks (state, owner_pid);
             SQL
             conn.close
           "

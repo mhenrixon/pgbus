@@ -131,8 +131,15 @@ module Pgbus
       end
 
       def cleanup_job_locks
-        deleted = JobLock.cleanup_expired!
-        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired job locks" } if deleted.positive?
+        # Primary: reap orphaned locks whose owner worker is no longer alive.
+        # Cross-references owner_pid against pgbus_processes heartbeats.
+        reaped = JobLock.reap_orphaned!
+        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned job locks" } if reaped.positive?
+
+        # Last resort: clean up locks with expired TTL (handles case where
+        # even the reaper/supervisor is dead and locks are truly abandoned).
+        expired = JobLock.cleanup_expired!
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{expired} expired job locks" } if expired.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Job lock cleanup failed: #{e.message}" }
       end

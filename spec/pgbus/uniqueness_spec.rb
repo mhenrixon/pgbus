@@ -24,7 +24,7 @@ RSpec.describe Pgbus::Uniqueness do
       expect(config[:lock_ttl]).to eq(600)
     end
 
-    it "defaults to :until_executed strategy" do
+    it "defaults to :until_executed strategy with 24h TTL" do
       job_class = Class.new do
         include Pgbus::Uniqueness
 
@@ -32,6 +32,7 @@ RSpec.describe Pgbus::Uniqueness do
       end
 
       expect(job_class.pgbus_uniqueness[:strategy]).to eq(:until_executed)
+      expect(job_class.pgbus_uniqueness[:lock_ttl]).to eq(24 * 60 * 60)
     end
 
     it "rejects invalid strategies" do
@@ -122,7 +123,9 @@ RSpec.describe Pgbus::Uniqueness do
 
       result = described_class.acquire_enqueue_lock("test-key", job)
       expect(result).to eq(:acquired)
-      expect(Pgbus::JobLock).to have_received(:acquire!).with("test-key", job_class: "LockJob", job_id: job.job_id, ttl: 600)
+      expect(Pgbus::JobLock).to have_received(:acquire!).with(
+        "test-key", job_class: "LockJob", job_id: job.job_id, state: "queued", ttl: 600
+      )
     end
 
     it "skips lock for :while_executing strategy" do

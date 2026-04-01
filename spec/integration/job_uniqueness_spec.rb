@@ -5,44 +5,111 @@ require_relative "../integration_helper"
 RSpec.describe "Job uniqueness (integration)", :integration do
   before do
     Pgbus::JobLock.delete_all
+    Pgbus::ProcessEntry.delete_all
   end
 
   describe ":until_executed strategy" do
     it "prevents duplicate enqueue when lock is held" do
-      acquired = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", ttl: 300)
+      acquired = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", ttl: 86_400)
       expect(acquired).to be true
 
-      # Second acquire should fail
-      duplicate = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j2", ttl: 300)
+      duplicate = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j2", ttl: 86_400)
       expect(duplicate).to be false
     end
 
     it "allows enqueue after lock is released" do
-      Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", ttl: 300)
+      Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", ttl: 86_400)
       Pgbus::JobLock.release!("unique-order-42")
 
-      acquired = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j3", ttl: 300)
+      acquired = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j3", ttl: 86_400)
       expect(acquired).to be true
     end
 
-    it "allows enqueue after lock expires" do
-      Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", ttl: -1)
+    it "transitions from queued to executing on claim" do
+      Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", state: "queued", ttl: 86_400)
 
-      # Expired locks are cleaned up
-      Pgbus::JobLock.cleanup_expired!
+      Pgbus::JobLock.claim_for_execution!("unique-order-42", owner_pid: 12_345, ttl: 86_400)
 
-      acquired = Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j4", ttl: 300)
-      expect(acquired).to be true
+      lock = Pgbus::JobLock.find_by(lock_key: "unique-order-42")
+      expect(lock.state).to eq("executing")
+      expect(lock.owner_pid).to eq(12_345)
+    end
+  end
+
+  describe "reaper" do
+    it "releases locks whose owner worker is no longer alive" do
+      # Create a lock owned by PID 99999 (not in pgbus_processes)
+      Pgbus::JobLock.acquire!(
+        "orphaned-lock", job_class: "CrashedJob", job_id: "j1",
+                         state: "executing", owner_pid: 99_999, ttl: 86_400
+      )
+
+      reaped = Pgbus::JobLock.reap_orphaned!
+      expect(reaped).to eq(1)
+      expect(Pgbus::JobLock.locked?("orphaned-lock")).to be false
     end
 
-    it "reports locked? correctly" do
-      expect(Pgbus::JobLock.locked?("unique-order-99")).to be false
+    it "keeps locks whose owner worker is still alive" do
+      # Register a healthy worker process
+      Pgbus::ProcessEntry.create!(
+        kind: "worker", pid: 12_345, hostname: "test",
+        last_heartbeat_at: Time.current
+      )
 
-      Pgbus::JobLock.acquire!("unique-order-99", job_class: "Test", ttl: 300)
-      expect(Pgbus::JobLock.locked?("unique-order-99")).to be true
+      # Create a lock owned by that worker
+      Pgbus::JobLock.acquire!(
+        "active-lock", job_class: "RunningJob", job_id: "j1",
+                       state: "executing", owner_pid: 12_345, ttl: 86_400
+      )
 
-      Pgbus::JobLock.release!("unique-order-99")
-      expect(Pgbus::JobLock.locked?("unique-order-99")).to be false
+      reaped = Pgbus::JobLock.reap_orphaned!
+      expect(reaped).to eq(0)
+      expect(Pgbus::JobLock.locked?("active-lock")).to be true
+    end
+
+    it "releases locks whose owner worker has stale heartbeat" do
+      # Register a stale worker process (heartbeat too old)
+      Pgbus::ProcessEntry.create!(
+        kind: "worker", pid: 12_345, hostname: "test",
+        last_heartbeat_at: Time.current - 600 # 10 minutes ago
+      )
+
+      Pgbus::JobLock.acquire!(
+        "stale-lock", job_class: "StaleJob", job_id: "j1",
+                      state: "executing", owner_pid: 12_345, ttl: 86_400
+      )
+
+      reaped = Pgbus::JobLock.reap_orphaned!
+      expect(reaped).to eq(1)
+      expect(Pgbus::JobLock.locked?("stale-lock")).to be false
+    end
+
+    it "does not reap queued locks (they have no owner)" do
+      Pgbus::JobLock.acquire!(
+        "queued-lock", job_class: "WaitingJob", job_id: "j1",
+                       state: "queued", ttl: 86_400
+      )
+
+      reaped = Pgbus::JobLock.reap_orphaned!
+      expect(reaped).to eq(0)
+      expect(Pgbus::JobLock.locked?("queued-lock")).to be true
+    end
+  end
+
+  describe "last-resort TTL" do
+    it "cleans up locks whose TTL has expired" do
+      Pgbus::JobLock.acquire!("expired-lock", job_class: "OldJob", ttl: -1)
+
+      deleted = Pgbus::JobLock.cleanup_expired!
+      expect(deleted).to eq(1)
+    end
+
+    it "does not clean up locks with valid TTL" do
+      Pgbus::JobLock.acquire!("valid-lock", job_class: "NewJob", ttl: 86_400)
+
+      deleted = Pgbus::JobLock.cleanup_expired!
+      expect(deleted).to eq(0)
+      expect(Pgbus::JobLock.locked?("valid-lock")).to be true
     end
   end
 
@@ -58,7 +125,7 @@ RSpec.describe "Job uniqueness (integration)", :integration do
             "race-key",
             job_class: "RaceJob",
             job_id: "thread-#{i}",
-            ttl: 300
+            ttl: 86_400
           )
           results << acquired
         end
@@ -71,23 +138,6 @@ RSpec.describe "Job uniqueness (integration)", :integration do
 
       expect(winners).to eq(1)
       expect(losers).to eq(4)
-    end
-  end
-
-  describe "lock cleanup" do
-    it "cleans up expired locks" do
-      # Create some expired locks
-      3.times do |i|
-        Pgbus::JobLock.acquire!("expired-#{i}", job_class: "OldJob", ttl: -1)
-      end
-      # Create a valid lock
-      Pgbus::JobLock.acquire!("valid-lock", job_class: "NewJob", ttl: 300)
-
-      deleted = Pgbus::JobLock.cleanup_expired!
-      expect(deleted).to eq(3)
-
-      # Valid lock should still exist
-      expect(Pgbus::JobLock.locked?("valid-lock")).to be true
     end
   end
 end

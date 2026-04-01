@@ -24,14 +24,24 @@ module Pgbus
 
         job_class = payload["job_class"]
         uniqueness_key = Uniqueness.extract_key(payload)
+        uniqueness_strategy = Uniqueness.extract_strategy(payload)
+        uniqueness_ttl = payload[Uniqueness::TTL_KEY] || Uniqueness::DEFAULT_LOCK_TTL
 
-        # For :while_executing strategy, acquire the lock now (at execution time).
-        # If another worker is already executing this job, skip it — VT will expire
-        # and it'll be retried later when the lock is released.
-        if uniqueness_key && Uniqueness.extract_strategy(payload) == :while_executing && !Uniqueness.acquire_execution_lock(uniqueness_key,
-                                                                                                                            payload)
-          Pgbus.logger.info { "[Pgbus] Skipping duplicate execution for #{job_class}: #{uniqueness_key}" }
-          return :skipped
+        if uniqueness_key
+          case uniqueness_strategy
+          when :until_executed
+            # Transition the queued lock to executing state with our PID.
+            # The lock was acquired at enqueue time — now we claim ownership
+            # so the reaper can correlate it with our heartbeat.
+            Uniqueness.claim_for_execution!(uniqueness_key, ttl: uniqueness_ttl)
+          when :while_executing
+            # Acquire the lock now. If another worker is already executing
+            # this job, skip it — VT will expire and it'll be retried.
+            unless Uniqueness.acquire_execution_lock(uniqueness_key, payload)
+              Pgbus.logger.info { "[Pgbus] Skipping duplicate execution for #{job_class}" }
+              return :skipped
+            end
+          end
         end
 
         job_succeeded = false
