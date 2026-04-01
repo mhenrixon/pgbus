@@ -14,6 +14,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Quick start](#quick-start)
 - [Concurrency controls](#concurrency-controls)
 - [Batches](#batches)
+- [Job uniqueness](#job-uniqueness)
 - [Priority queues](#priority-queues)
 - [Single active consumer](#single-active-consumer)
 - [Consumer priority](#consumer-priority)
@@ -48,6 +49,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - **Transactional outbox** -- publish events atomically inside database transactions
 - **Single active consumer** -- advisory-lock-based exclusive queue processing for strict ordering
 - **Consumer priority** -- higher-priority workers get first dibs, lower-priority workers back off
+- **Job uniqueness** -- prevent duplicate jobs with reaper-based crash recovery, no TTL-driven expiry
 
 ## Requirements
 
@@ -340,6 +342,96 @@ end
 4. When `completed_jobs + discarded_jobs == total_jobs`, the batch status flips to `"finished"` and callback jobs are enqueued
 5. The dispatcher cleans up finished batches older than 7 days
 
+## Job uniqueness
+
+Prevent duplicate jobs from running. Unlike `limits_concurrency` (which controls *how many* jobs with the same key run), uniqueness guarantees *at most one* job with a given key exists in the system at any time.
+
+```ruby
+class ImportOrderJob < ApplicationJob
+  ensures_uniqueness strategy: :until_executed,
+                     key: ->(order_id) { "import-order-#{order_id}" },
+                     on_conflict: :reject
+
+  def perform(order_id)
+    # Only ONE instance per order_id can exist — from enqueue through completion.
+    # If another ImportOrderJob for this order_id is already enqueued or running,
+    # the duplicate is rejected immediately.
+  end
+end
+```
+
+### Strategies
+
+| Strategy | Lock acquired | Lock released | Prevents |
+|----------|--------------|---------------|----------|
+| `:until_executed` | At enqueue | On completion or DLQ | Duplicate enqueue AND execution |
+| `:while_executing` | At execution start | On completion or DLQ | Duplicate execution only |
+
+### Conflict policies
+
+| Policy | Behavior |
+|--------|----------|
+| `:reject` | Raise `Pgbus::JobNotUnique` (default) |
+| `:discard` | Silently drop the duplicate |
+| `:log` | Log a warning and drop |
+
+### Lock lifecycle
+
+The lock is **never released by a timer**. It is held as long as the job exists in the system:
+
+```text
+Enqueue ──→ pgbus_job_locks (state: queued, owner_pid: nil)
+                  │
+  Worker picks up job
+                  │
+                  ▼
+           claim_for_execution! (state: executing, owner_pid: PID)
+                  │
+          ┌───────┴───────┐
+          ▼               ▼
+      Success           Crash
+      release!        (lock orphaned)
+      (row deleted)       │
+                          ▼
+                    Reaper checks:
+                    Is owner_pid in pgbus_processes
+                    with fresh heartbeat?
+                          │
+                    ┌─────┴─────┐
+                    No          Yes
+                    ▼            ▼
+                release!      (keep lock,
+                (orphaned)     job is running)
+```
+
+**Crash recovery** works through the reaper (runs every 5 minutes in the dispatcher). It cross-references `owner_pid` in `pgbus_job_locks` against `pgbus_processes` heartbeats. If the owning worker has no fresh heartbeat, the lock is orphaned and released — the PGMQ message's visibility timeout will expire and the job will be retried by another worker.
+
+A last-resort TTL (default 24 hours) handles the case where the entire pgbus supervisor is dead and the reaper itself can't run.
+
+### Uniqueness vs concurrency controls
+
+| | `ensures_uniqueness` | `limits_concurrency` |
+|---|---|---|
+| **Purpose** | Prevent duplicate jobs | Limit concurrent execution slots |
+| **Lock type** | Binary lock (one or none) | Counting semaphore (up to N) |
+| **At enqueue** | `:until_executed` blocks duplicates | Checks semaphore, blocks/discards/raises |
+| **At execution** | `:while_executing` blocks duplicate runs | Not checked (semaphore acquired at enqueue) |
+| **Duplicate in queue** | `:until_executed`: impossible. `:while_executing`: allowed, only one runs | Allowed up to N, rest blocked |
+| **Crash recovery** | Reaper checks heartbeats | Semaphore `expires_at` + dispatcher cleanup |
+| **Use when** | "This exact job must not run twice" | "At most N of these can run at once" |
+
+**When to use which:**
+- Payment processing, order import, unique email sends → `ensures_uniqueness`
+- Rate-limited API calls, resource-constrained tasks → `limits_concurrency`
+- Both at once → combine them (they use separate tables, no conflicts)
+
+### Setup
+
+```bash
+rails generate pgbus:add_job_locks                  # Add the migration
+rails generate pgbus:add_job_locks --database=pgbus # For separate database
+```
+
 ## Priority queues
 
 Route jobs to priority sub-queues so high-priority work is processed first:
@@ -615,6 +707,7 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_semaphores` | Concurrency control counting semaphores |
 | `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
 | `pgbus_batches` | Batch tracking with job counters and callback config |
+| `pgbus_job_locks` | Job uniqueness locks (state, owner_pid, reaper correlation) |
 | `pgbus_queue_states` | Queue pause/resume and circuit breaker state |
 | `pgbus_outbox_entries` | Transactional outbox entries pending publication |
 | `pgbus_recurring_tasks` | Recurring job definitions |
