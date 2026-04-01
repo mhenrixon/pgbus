@@ -359,7 +359,7 @@ RSpec.describe Pgbus::Client do
       it "stops when qty is filled" do
         client.ensure_queue("default")
 
-        msgs = 3.times.map { |i| build_message_double(msg_id: i, message: '{}') }
+        msgs = 3.times.map { |i| build_message_double(msg_id: i, message: "{}") }
         allow(mock_pgmq).to receive(:read_batch)
           .with("pgbus_test_default_p0", anything).and_return(msgs)
 

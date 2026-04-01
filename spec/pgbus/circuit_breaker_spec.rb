@@ -20,13 +20,10 @@ RSpec.describe Pgbus::CircuitBreaker do
 
   before do
     queue_state_class
-    allow(Pgbus::QueueState).to receive(:find_by).and_return(nil)
-    allow(Pgbus::QueueState).to receive(:paused?).and_return(false)
     allow(Pgbus::QueueState).to receive(:pause!)
     allow(Pgbus::QueueState).to receive(:resume!)
-    allow(Pgbus::QueueState).to receive(:find_or_initialize_by).and_return(
-      double("QueueState", update!: true, circuit_breaker_trip_count: 0)
-    )
+    allow(Pgbus::QueueState).to receive_messages(find_by: nil, paused?: false,
+                                                 find_or_initialize_by: double("QueueState", update!: true, circuit_breaker_trip_count: 0))
   end
 
   describe "#record_success" do

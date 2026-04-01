@@ -108,7 +108,7 @@ RSpec.describe Pgbus::Process::Lifecycle do
       lifecycle.on(:any) { |old, new_state| states << [old, new_state] }
       lifecycle.transition_to!(:running)
       lifecycle.transition_to!(:draining)
-      expect(states).to eq([[:starting, :running], [:running, :draining]])
+      expect(states).to eq([%i[starting running], %i[running draining]])
     end
 
     it "does not fire callbacks on failed transitions" do

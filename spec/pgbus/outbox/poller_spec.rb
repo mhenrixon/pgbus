@@ -26,9 +26,7 @@ RSpec.describe Pgbus::Outbox::Poller do
     before do
       outbox_entry_class
       allow(Pgbus::OutboxEntry).to receive(:unpublished).and_return(relation)
-      allow(relation).to receive(:order).and_return(relation)
-      allow(relation).to receive(:limit).and_return(relation)
-      allow(relation).to receive(:lock).and_return(relation)
+      allow(relation).to receive_messages(order: relation, limit: relation, lock: relation)
     end
 
     it "publishes entries to PGMQ via queue_name" do
