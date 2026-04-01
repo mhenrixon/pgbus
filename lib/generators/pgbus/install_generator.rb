@@ -24,7 +24,7 @@ module Pgbus
                    desc: "Use a separate database for pgbus tables (e.g. --database=pgbus). " \
                          "Migrations go to db/pgbus_migrate/ and schema to db/pgbus_schema.rb"
 
-      def create_migration
+      def create_migration_file
         if separate_database?
           migration_template "migration.rb.erb",
                              "db/pgbus_migrate/create_pgbus_tables.rb"
