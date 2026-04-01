@@ -4,6 +4,7 @@ require "benchmark/ips"
 require "memory_profiler"
 require "json"
 require "securerandom"
+require "concurrent"
 require "pgbus"
 
 # Suppress logging during benchmarks
