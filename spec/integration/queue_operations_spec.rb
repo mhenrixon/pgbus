@@ -9,12 +9,16 @@ RSpec.describe "Queue operations (integration)", :integration do
     it "creates a queue idempotently" do
       client.ensure_queue("ops_test")
       client.ensure_queue("ops_test") # second call should not raise
-      expect(client.list_queues.map(&:to_s)).to include("pgbus_int_ops_test")
+
+      queues = client.list_queues.map { |q| q.respond_to?(:queue_name) ? q.queue_name : q.to_s }
+      expect(queues).to include("pgbus_int_ops_test")
     end
 
     it "creates a dead letter queue" do
       client.ensure_dead_letter_queue("ops_test")
-      expect(client.list_queues.map(&:to_s)).to include("pgbus_int_ops_test_dlq")
+
+      queues = client.list_queues.map { |q| q.respond_to?(:queue_name) ? q.queue_name : q.to_s }
+      expect(queues).to include("pgbus_int_ops_test_dlq")
     end
   end
 
@@ -25,9 +29,10 @@ RSpec.describe "Queue operations (integration)", :integration do
       payloads = 5.times.map { |i| { "index" => i, "job_class" => "BatchJob" } }
       msg_ids = client.send_batch("batch_test", payloads)
 
+      expect(msg_ids).to be_an(Array)
       expect(msg_ids.size).to eq(5)
 
-      messages = client.read_batch("batch_test", qty: 10)
+      messages = client.read_batch("batch_test", qty: 10, vt: 0)
       expect(messages.size).to eq(5)
 
       indices = messages.map { |m| JSON.parse(m.message)["index"] }
@@ -37,7 +42,7 @@ RSpec.describe "Queue operations (integration)", :integration do
     it "respects qty limit on read" do
       5.times { |i| client.send_message("batch_test", { "index" => i }) }
 
-      messages = client.read_batch("batch_test", qty: 2)
+      messages = client.read_batch("batch_test", qty: 2, vt: 0)
       expect(messages.size).to eq(2)
     end
   end
@@ -61,11 +66,9 @@ RSpec.describe "Queue operations (integration)", :integration do
     it "makes message invisible for the specified duration" do
       client.send_message("vt_test", { "vt" => true })
 
-      # Read with VT=30s
       messages = client.read_batch("vt_test", qty: 1, vt: 30)
       expect(messages.size).to eq(1)
 
-      # Immediately re-read — should be empty (VT hasn't expired)
       again = client.read_batch("vt_test", qty: 1, vt: 30)
       expect(again || []).to be_empty
     end
@@ -74,10 +77,8 @@ RSpec.describe "Queue operations (integration)", :integration do
       msg_id = client.send_message("vt_test", { "extend" => true })
       client.read_batch("vt_test", qty: 1, vt: 5)
 
-      # Extend VT to 60s
       client.extend_visibility("vt_test", msg_id, vt: 60)
 
-      # Should still be invisible
       messages = client.read_batch("vt_test", qty: 1, vt: 5)
       expect(messages || []).to be_empty
     end
@@ -89,7 +90,6 @@ RSpec.describe "Queue operations (integration)", :integration do
     it "sends a message with a delay" do
       client.send_message("delay_test", { "delayed" => true }, delay: 60)
 
-      # Should not be visible yet (60s delay)
       messages = client.read_batch("delay_test", qty: 1)
       expect(messages || []).to be_empty
     end

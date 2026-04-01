@@ -34,6 +34,7 @@ RSpec.configure do |config|
     c.default_queue = "default"
     c.logger = Logger.new(IO::NULL)
     c.pgmq_schema_mode = :embedded
+    c.listen_notify = false
   end
 
   # Clean up queues and tables between tests

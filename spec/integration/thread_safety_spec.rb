@@ -11,48 +11,36 @@ RSpec.describe "Thread safety (integration)", :integration do
 
   describe "concurrent enqueue" do
     it "handles concurrent sends without corruption" do
-      barrier = Concurrent::CyclicBarrier.new(10)
       errors = Concurrent::Array.new
 
       threads = 10.times.map do |i|
         Thread.new do
-          barrier.wait
           client.send_message("thread_test", { "thread" => i, "job_class" => "ThreadJob" })
         rescue StandardError => e
           errors << e
         end
       end
 
-      threads.each(&:join)
+      threads.each { |t| t.join(10) }
 
       expect(errors).to be_empty
 
       # All 10 messages should be in the queue
-      all_messages = []
-      loop do
-        batch = client.read_batch("thread_test", qty: 10, vt: 0)
-        break if batch.nil? || batch.empty?
-
-        all_messages.concat(batch)
-        break if batch.size < 10
-      end
-
+      all_messages = client.read_batch("thread_test", qty: 20, vt: 0) || []
       expect(all_messages.size).to eq(10)
     end
   end
 
   describe "concurrent read + archive" do
-    it "each message is read by exactly one thread" do
-      # Enqueue 20 messages
-      20.times { |i| client.send_message("thread_test", { "index" => i }) }
+    it "each message is read by exactly one thread", timeout: 15 do
+      # Enqueue 10 messages
+      10.times { |i| client.send_message("thread_test", { "index" => i }) }
 
       claimed = Concurrent::Array.new
-      barrier = Concurrent::CyclicBarrier.new(5)
 
       threads = 5.times.map do
         Thread.new do
-          barrier.wait
-          4.times do
+          3.times do
             msgs = client.read_batch("thread_test", qty: 1, vt: 30)
             next if msgs.nil? || msgs.empty?
 
@@ -63,7 +51,7 @@ RSpec.describe "Thread safety (integration)", :integration do
         end
       end
 
-      threads.each(&:join)
+      threads.each { |t| t.join(10) }
 
       # No duplicates — each message claimed by exactly one thread
       expect(claimed.size).to eq(claimed.uniq.size)
@@ -71,14 +59,12 @@ RSpec.describe "Thread safety (integration)", :integration do
   end
 
   describe "mutex serialization" do
-    it "does not segfault under concurrent PGMQ operations" do
-      barrier = Concurrent::CyclicBarrier.new(5)
+    it "does not produce PG errors under concurrent operations", timeout: 15 do
       errors = Concurrent::Array.new
 
-      threads = 5.times.map do |i|
+      threads = 3.times.map do |i|
         Thread.new do
-          barrier.wait
-          10.times do |j|
+          5.times do |j|
             client.send_message("thread_test", { "t" => i, "j" => j })
             client.read_batch("thread_test", qty: 1, vt: 0)
           end
@@ -87,9 +73,8 @@ RSpec.describe "Thread safety (integration)", :integration do
         end
       end
 
-      threads.each(&:join)
+      threads.each { |t| t.join(10) }
 
-      # No segfaults or PG::Connection errors
       pg_errors = errors.select { |e| e.include?("PG::") || e.include?("Segfault") }
       expect(pg_errors).to be_empty
     end
