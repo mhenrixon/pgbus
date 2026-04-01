@@ -64,7 +64,7 @@ RSpec.describe Pgbus::Outbox::Poller do
 
       result = poller.poll_and_publish
 
-      expect(mock_client).to have_received(:publish_to_topic).with("orders.created", { "event" => "data" }, headers: { "trace" => "id" })
+      expect(mock_client).to have_received(:publish_to_topic).with("orders.created", { "event" => "data" }, headers: { "trace" => "id" }, delay: 0)
       expect(result).to eq(1)
     end
 

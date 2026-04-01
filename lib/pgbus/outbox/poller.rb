@@ -79,7 +79,8 @@ module Pgbus
           Pgbus.client.publish_to_topic(
             entry.routing_key,
             entry.payload,
-            headers: entry.headers
+            headers: entry.headers,
+            delay: entry.delay || 0
           )
         else
           Pgbus.client.send_message(
