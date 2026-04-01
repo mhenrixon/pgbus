@@ -33,7 +33,13 @@ module Pgbus
       def enqueue_all(active_jobs)
         # Jobs with uniqueness must go through individual enqueue to acquire locks
         unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
-        unique.each { |j| enqueue(j) }
+        unique.each do |j|
+          if j.scheduled_at && j.scheduled_at > Time.now
+            enqueue_at(j, j.scheduled_at.to_f)
+          else
+            enqueue(j)
+          end
+        end
 
         bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
           enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.now })
@@ -66,14 +72,18 @@ module Pgbus
 
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
-      rescue StandardError
+      rescue StandardError => e
         # Roll back the uniqueness lock if enqueue failed
         rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
         if rollback_key
-          Uniqueness.release_lock(rollback_key)
+          begin
+            Uniqueness.release_lock(rollback_key)
+          rescue StandardError => rollback_error
+            Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{rollback_error.message}" }
+          end
           Thread.current[:pgbus_acquired_uniqueness_key] = nil
         end
-        raise
+        raise e
       end
 
       def concurrency_config(active_job)
@@ -102,6 +112,9 @@ module Pgbus
         return false unless uniqueness_key
 
         result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job)
+
+        # :no_lock means no enqueue-time lock needed (e.g. :while_executing strategy)
+        return false if result == :no_lock
 
         # Store the acquired key so we can release it if enqueue fails
         Thread.current[:pgbus_acquired_uniqueness_key] = uniqueness_key if result == :acquired

@@ -128,7 +128,7 @@ RSpec.describe Pgbus::Uniqueness do
       )
     end
 
-    it "skips lock for :while_executing strategy" do
+    it "returns :no_lock for :while_executing strategy" do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
 
@@ -137,7 +137,7 @@ RSpec.describe Pgbus::Uniqueness do
       job = job_class.new
 
       result = described_class.acquire_enqueue_lock("test-key", job)
-      expect(result).to eq(:acquired)
+      expect(result).to eq(:no_lock)
       expect(Pgbus::JobLock).not_to have_received(:acquire!)
     end
 

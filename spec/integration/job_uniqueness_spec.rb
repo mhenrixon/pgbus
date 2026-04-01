@@ -28,11 +28,12 @@ RSpec.describe "Job uniqueness (integration)", :integration do
     it "transitions from queued to executing on claim" do
       Pgbus::JobLock.acquire!("unique-order-42", job_class: "ImportJob", job_id: "j1", state: "queued", ttl: 86_400)
 
-      Pgbus::JobLock.claim_for_execution!("unique-order-42", owner_pid: 12_345, ttl: 86_400)
+      Pgbus::JobLock.claim_for_execution!("unique-order-42", owner_pid: 12_345, owner_hostname: "test-host", ttl: 86_400)
 
       lock = Pgbus::JobLock.find_by(lock_key: "unique-order-42")
       expect(lock.state).to eq("executing")
       expect(lock.owner_pid).to eq(12_345)
+      expect(lock.owner_hostname).to eq("test-host")
     end
   end
 
@@ -41,7 +42,7 @@ RSpec.describe "Job uniqueness (integration)", :integration do
       # Create a lock owned by PID 99999 (not in pgbus_processes)
       Pgbus::JobLock.acquire!(
         "orphaned-lock", job_class: "CrashedJob", job_id: "j1",
-                         state: "executing", owner_pid: 99_999, ttl: 86_400
+                         state: "executing", owner_pid: 99_999, owner_hostname: "dead-host", ttl: 86_400
       )
 
       reaped = Pgbus::JobLock.reap_orphaned!
@@ -52,14 +53,14 @@ RSpec.describe "Job uniqueness (integration)", :integration do
     it "keeps locks whose owner worker is still alive" do
       # Register a healthy worker process
       Pgbus::ProcessEntry.create!(
-        kind: "worker", pid: 12_345, hostname: "test",
+        kind: "worker", pid: 12_345, hostname: "test-host",
         last_heartbeat_at: Time.current
       )
 
-      # Create a lock owned by that worker
+      # Create a lock owned by that worker (same pid AND hostname)
       Pgbus::JobLock.acquire!(
         "active-lock", job_class: "RunningJob", job_id: "j1",
-                       state: "executing", owner_pid: 12_345, ttl: 86_400
+                       state: "executing", owner_pid: 12_345, owner_hostname: "test-host", ttl: 86_400
       )
 
       reaped = Pgbus::JobLock.reap_orphaned!
@@ -70,13 +71,13 @@ RSpec.describe "Job uniqueness (integration)", :integration do
     it "releases locks whose owner worker has stale heartbeat" do
       # Register a stale worker process (heartbeat too old)
       Pgbus::ProcessEntry.create!(
-        kind: "worker", pid: 12_345, hostname: "test",
+        kind: "worker", pid: 12_345, hostname: "stale-host",
         last_heartbeat_at: Time.current - 600 # 10 minutes ago
       )
 
       Pgbus::JobLock.acquire!(
         "stale-lock", job_class: "StaleJob", job_id: "j1",
-                      state: "executing", owner_pid: 12_345, ttl: 86_400
+                      state: "executing", owner_pid: 12_345, owner_hostname: "stale-host", ttl: 86_400
       )
 
       reaped = Pgbus::JobLock.reap_orphaned!

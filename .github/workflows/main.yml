@@ -151,6 +151,7 @@ jobs:
                 job_id VARCHAR,
                 state VARCHAR NOT NULL DEFAULT 'queued',
                 owner_pid INTEGER,
+                owner_hostname VARCHAR,
                 locked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL
               );

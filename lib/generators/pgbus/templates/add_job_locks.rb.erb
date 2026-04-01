@@ -6,6 +6,7 @@ class AddPgbusJobLocks < ActiveRecord::Migration<%= migration_version %>
       t.string :job_id
       t.string :state, null: false, default: "queued"
       t.integer :owner_pid
+      t.string :owner_hostname
       t.datetime :locked_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
       t.datetime :expires_at, null: false
     end

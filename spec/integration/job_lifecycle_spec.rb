@@ -53,6 +53,7 @@ RSpec.describe "Job lifecycle (integration)", :integration do
     it "moves a message to DLQ" do
       client.send_message("default", { "dlq_test" => true })
       messages = client.read_batch("default", qty: 1)
+      expect(messages).not_to be_empty
 
       client.move_to_dead_letter("default", messages.first)
 

@@ -132,7 +132,7 @@ module Pgbus
 
       def cleanup_job_locks
         # Primary: reap orphaned locks whose owner worker is no longer alive.
-        # Cross-references owner_pid against pgbus_processes heartbeats.
+        # Cross-references (owner_pid, owner_hostname) against pgbus_processes heartbeats.
         reaped = JobLock.reap_orphaned!
         Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned job locks" } if reaped.positive?
 
@@ -140,8 +140,7 @@ module Pgbus
         # even the reaper/supervisor is dead and locks are truly abandoned).
         expired = JobLock.cleanup_expired!
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{expired} expired job locks" } if expired.positive?
-      rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Job lock cleanup failed: #{e.message}" }
+        # No rescue here — let run_if_due handle the error and retry next tick
       end
 
       def cleanup_outbox

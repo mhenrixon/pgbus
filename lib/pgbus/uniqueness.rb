@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_support/concern"
+require "socket"
 
 module Pgbus
   # Job uniqueness guarantees: prevent duplicate jobs from running concurrently.
@@ -53,7 +54,9 @@ module Pgbus
       def ensures_uniqueness(strategy: :until_executed, key: nil, lock_ttl: DEFAULT_LOCK_TTL, on_conflict: :reject)
         raise ArgumentError, "strategy must be one of: #{VALID_STRATEGIES.join(", ")}" unless VALID_STRATEGIES.include?(strategy)
         raise ArgumentError, "on_conflict must be one of: #{VALID_CONFLICTS.join(", ")}" unless VALID_CONFLICTS.include?(on_conflict)
-        raise ArgumentError, "lock_ttl must be a positive number" unless lock_ttl.is_a?(Numeric) && lock_ttl.positive?
+
+        valid_ttl = lock_ttl.is_a?(Numeric) || (defined?(ActiveSupport::Duration) && lock_ttl.is_a?(ActiveSupport::Duration))
+        raise ArgumentError, "lock_ttl must be a positive number or Duration" unless valid_ttl && lock_ttl.positive?
         raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
 
         @pgbus_uniqueness = {
@@ -116,8 +119,8 @@ module Pgbus
       # Returns :acquired or :locked.
       def acquire_enqueue_lock(key, active_job)
         config = uniqueness_config(active_job)
-        return :acquired unless config
-        return :acquired unless config[:strategy] == :until_executed
+        return :no_lock unless config
+        return :no_lock unless config[:strategy] == :until_executed
 
         acquired = JobLock.acquire!(
           key,
@@ -132,7 +135,7 @@ module Pgbus
       # Transition a queued lock to executing state when the worker picks it up.
       # Called for :until_executed jobs at execution start.
       def claim_for_execution!(key, ttl:)
-        JobLock.claim_for_execution!(key, owner_pid: ::Process.pid, ttl: ttl)
+        JobLock.claim_for_execution!(key, owner_pid: ::Process.pid, owner_hostname: Socket.gethostname, ttl: ttl)
       end
 
       # Acquire the uniqueness lock at execution time (:while_executing only).
@@ -150,6 +153,7 @@ module Pgbus
           job_id: payload["job_id"],
           state: "executing",
           owner_pid: ::Process.pid,
+          owner_hostname: Socket.gethostname,
           ttl: ttl
         )
       end
