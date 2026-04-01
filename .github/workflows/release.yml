@@ -111,6 +111,8 @@ jobs:
     environment: rubygems
     permissions:
       id-token: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/download-artifact@v8
