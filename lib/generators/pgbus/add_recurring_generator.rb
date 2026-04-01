@@ -17,7 +17,7 @@ module Pgbus
                    default: nil,
                    desc: "Use a separate database for pgbus tables (e.g. --database=pgbus)"
 
-      def create_migration
+      def create_migration_file
         if separate_database?
           migration_template "add_recurring_tables.rb.erb",
                              "db/pgbus_migrate/add_pgbus_recurring_tables.rb"

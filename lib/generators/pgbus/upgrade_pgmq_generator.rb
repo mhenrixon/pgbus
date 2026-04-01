@@ -17,7 +17,7 @@ module Pgbus
                    default: nil,
                    desc: "Use a separate database for pgbus tables (e.g. --database=pgbus)"
 
-      def create_migration
+      def create_migration_file
         if separate_database?
           migration_template "upgrade_pgmq.rb.erb",
                              "db/pgbus_migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
