@@ -152,10 +152,10 @@
       document.querySelector('#status-chart').innerHTML = msg;
     });
 
-  // Re-render charts when dark mode toggles
-  const origToggle = window.toggleDarkMode;
-  window.toggleDarkMode = function() {
-    origToggle();
+  // Re-render charts when dark mode toggles.
+  // Listen for class changes on <html> instead of wrapping the toggle function,
+  // so it works regardless of script loading order.
+  new MutationObserver(function() {
     if (chartData) renderCharts(chartData);
-  };
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 </script>

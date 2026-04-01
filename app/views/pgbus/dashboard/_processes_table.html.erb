@@ -1,9 +1,9 @@
 <turbo-frame id="dashboard-processes" data-auto-refresh src="<%= pgbus.root_path(frame: 'processes') %>">
   <div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-3">Active Processes</h2>
-    <div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Active Processes</h2>
+    <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Kind</th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Host</th>
@@ -11,10 +11,10 @@
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
           <% @processes.each do |p| %>
             <tr>
-              <td class="px-4 py-3 text-sm font-medium text-gray-900"><%= p[:kind] %></td>
+              <td class="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white"><%= p[:kind] %></td>
               <td class="px-4 py-3 text-sm text-gray-500"><%= p[:hostname] %></td>
               <td class="px-4 py-3 text-sm text-gray-500"><%= p[:pid] %></td>
               <td class="px-4 py-3 text-sm"><%= pgbus_status_badge(p[:healthy]) %></td>

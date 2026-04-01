@@ -3,17 +3,17 @@
 </div>
 
 <% if @job %>
-  <h1 class="text-2xl font-bold text-gray-900 mb-6">Failed Job #<%= @job["id"] %></h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Failed Job #<%= @job["id"] %></h1>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div>
         <dt class="text-sm font-medium text-gray-500">Queue</dt>
-        <dd class="text-sm text-gray-900"><%= @job["queue_name"] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @job["queue_name"] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Failed At</dt>
-        <dd class="text-sm text-gray-900"><%= @job["failed_at"] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @job["failed_at"] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Error Class</dt>
@@ -21,26 +21,26 @@
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Retry Count</dt>
-        <dd class="text-sm text-gray-900"><%= @job["retry_count"] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @job["retry_count"] %></dd>
       </div>
     </dl>
   </div>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <h2 class="text-sm font-medium text-gray-500 mb-2">Error Message</h2>
     <p class="text-sm text-red-700"><%= @job["error_message"] %></p>
   </div>
 
   <% if @job["backtrace"].present? %>
-    <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+    <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
       <h2 class="text-sm font-medium text-gray-500 mb-2">Backtrace</h2>
-      <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto max-h-96"><%= @job["backtrace"] %></pre>
+      <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto max-h-96"><%= @job["backtrace"] %></pre>
     </div>
   <% end %>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <h2 class="text-sm font-medium text-gray-500 mb-2">Payload</h2>
-    <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@job["payload"])) rescue @job["payload"] %></pre>
+    <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@job["payload"])) rescue @job["payload"] %></pre>
   </div>
 
   <div class="flex space-x-2">

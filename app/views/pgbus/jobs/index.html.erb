@@ -1,5 +1,5 @@
 <div class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-gray-900">Jobs</h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Jobs</h1>
   <% if @failed.any? %>
     <div class="flex space-x-2">
       <%= button_to "Retry All", pgbus.retry_all_jobs_path, method: :post,

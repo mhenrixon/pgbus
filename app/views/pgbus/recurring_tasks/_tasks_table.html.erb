@@ -1,13 +1,13 @@
 <turbo-frame id="recurring-tasks" data-auto-refresh src="<%= pgbus.recurring_tasks_path(frame: 'recurring_tasks') %>">
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
     <% if @recurring_tasks.empty? %>
       <div class="p-8 text-center text-gray-500">
         <p class="text-lg font-medium">No recurring tasks configured</p>
         <p class="mt-1 text-sm">Add tasks to <code class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">config/recurring.yml</code></p>
       </div>
     <% else %>
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Task</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Schedule</th>
@@ -18,9 +18,9 @@
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
           <% @recurring_tasks.each do |task| %>
-            <tr class="hover:bg-gray-50">
+            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900">
               <td class="px-4 py-3">
                 <div>
                   <%= link_to task[:key], pgbus.recurring_task_path(task[:id]),
@@ -32,7 +32,7 @@
                 <% end %>
               </td>
               <td class="px-4 py-3">
-                <div class="text-sm text-gray-900"><%= task[:schedule] %></div>
+                <div class="text-sm text-gray-900 dark:text-white"><%= task[:schedule] %></div>
                 <% if task[:human_schedule] && task[:human_schedule] != task[:schedule] %>
                   <div class="text-xs text-gray-400"><%= task[:human_schedule] %></div>
                 <% end %>

@@ -3,21 +3,21 @@
 </div>
 
 <% if @event %>
-  <h1 class="text-2xl font-bold text-gray-900 mb-6">Event <%= @event["event_id"] %></h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Event <%= @event["event_id"] %></h1>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6">
     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div>
         <dt class="text-sm font-medium text-gray-500">Event ID</dt>
-        <dd class="text-sm font-mono text-gray-900"><%= @event["event_id"] %></dd>
+        <dd class="text-sm font-mono text-gray-900 dark:text-white"><%= @event["event_id"] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Handler</dt>
-        <dd class="text-sm text-gray-900"><%= @event["handler_class"] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @event["handler_class"] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Processed At</dt>
-        <dd class="text-sm text-gray-900"><%= @event["processed_at"] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @event["processed_at"] %></dd>
       </div>
     </dl>
   </div>

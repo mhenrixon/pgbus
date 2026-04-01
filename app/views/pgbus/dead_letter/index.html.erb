@@ -1,5 +1,5 @@
 <div class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-gray-900">Dead Letter Queue</h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Dead Letter Queue</h1>
   <% if @messages.any? %>
     <div class="flex space-x-2">
       <%= button_to "Retry All", pgbus.retry_all_dead_letter_index_path, method: :post,

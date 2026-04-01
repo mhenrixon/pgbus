@@ -3,38 +3,38 @@
 </div>
 
 <% if @message %>
-  <h1 class="text-2xl font-bold text-gray-900 mb-6">DLQ Message #<%= @message[:msg_id] %></h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">DLQ Message #<%= @message[:msg_id] %></h1>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div>
         <dt class="text-sm font-medium text-gray-500">Source Queue</dt>
-        <dd class="text-sm text-gray-900"><%= @message[:queue_name] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:queue_name] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Enqueued At</dt>
-        <dd class="text-sm text-gray-900"><%= @message[:enqueued_at] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:enqueued_at] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Read Count</dt>
-        <dd class="text-sm text-gray-900"><%= @message[:read_ct] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:read_ct] %></dd>
       </div>
       <div>
         <dt class="text-sm font-medium text-gray-500">Visibility Timeout</dt>
-        <dd class="text-sm text-gray-900"><%= @message[:vt] %></dd>
+        <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:vt] %></dd>
       </div>
     </dl>
   </div>
 
-  <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <h2 class="text-sm font-medium text-gray-500 mb-2">Payload</h2>
-    <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:message])) rescue @message[:message] %></pre>
+    <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:message])) rescue @message[:message] %></pre>
   </div>
 
   <% if @message[:headers] %>
-    <div class="rounded-lg bg-white shadow ring-1 ring-gray-200 p-6 mb-6">
+    <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
       <h2 class="text-sm font-medium text-gray-500 mb-2">Headers</h2>
-      <pre class="text-xs text-gray-600 bg-gray-50 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:headers])) rescue @message[:headers] %></pre>
+      <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:headers])) rescue @message[:headers] %></pre>
     </div>
   <% end %>
 

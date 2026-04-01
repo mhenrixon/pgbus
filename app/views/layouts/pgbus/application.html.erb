@@ -12,6 +12,11 @@
         (!localStorage.getItem('pgbus-dark') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       document.documentElement.classList.add('dark');
     }
+    // Dark mode toggle — must be in non-module script for onclick access
+    function toggleDarkMode() {
+      var isDark = document.documentElement.classList.toggle('dark');
+      localStorage.setItem('pgbus-dark', isDark);
+    }
   </script>
   <script type="module">
     import * as Turbo from "https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017.esm.js";
@@ -31,12 +36,6 @@
       start();
     }
     <% end %>
-
-    // Dark mode toggle
-    window.toggleDarkMode = function() {
-      const isDark = document.documentElement.classList.toggle('dark');
-      localStorage.setItem('pgbus-dark', isDark);
-    };
   </script>
 </head>
 <body class="h-full bg-gray-50 dark:bg-gray-950 transition-colors">

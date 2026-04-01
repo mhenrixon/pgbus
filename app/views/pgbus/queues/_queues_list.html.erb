@@ -1,7 +1,7 @@
 <turbo-frame id="queues-list" data-auto-refresh src="<%= pgbus.queues_path(frame: 'list') %>">
-  <div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
+  <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+      <thead class="bg-gray-50 dark:bg-gray-900">
         <tr>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Depth</th>
@@ -12,9 +12,9 @@
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-gray-100">
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
         <% @queues.each do |q| %>
-          <tr class="hover:bg-gray-50">
+          <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900">
             <td class="px-4 py-3 text-sm">
               <%= link_to q[:name], pgbus.queue_path(name: q[:name]), class: "font-medium text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
               <%= pgbus_queue_badge(q[:name]) %>

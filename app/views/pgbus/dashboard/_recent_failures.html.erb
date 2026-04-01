@@ -1,21 +1,21 @@
 <turbo-frame id="dashboard-failures" data-auto-refresh src="<%= pgbus.root_path(frame: 'failures') %>">
   <div>
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-semibold text-gray-900">Recent Failures</h2>
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Recent Failures</h2>
       <% if @recent_failures.any? %>
         <%= link_to "View all", pgbus.jobs_path(status: "failed"), class: "text-sm text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
       <% end %>
     </div>
-    <div class="overflow-hidden rounded-lg bg-white shadow ring-1 ring-gray-200">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+    <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+        <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Error</th>
             <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">When</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-100">
+        <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
           <% @recent_failures.each do |f| %>
             <tr>
               <td class="px-4 py-3 text-sm text-gray-700"><%= f["queue_name"] %></td>
