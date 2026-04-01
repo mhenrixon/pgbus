@@ -63,12 +63,17 @@ module Pgbus
       def fork_worker(worker_config)
         queues = worker_config[:queues] || worker_config["queues"] || [config.default_queue]
         threads = worker_config[:threads] || worker_config["threads"] || 5
+        single_active = worker_config[:single_active_consumer] || worker_config["single_active_consumer"] || false
+        priority = worker_config[:consumer_priority] || worker_config["consumer_priority"] || 0
 
         pid = fork do
           restore_signals
           setup_child_process
           load_rails_app
-          worker = Worker.new(queues: queues, threads: threads, config: config)
+          worker = Worker.new(
+            queues: queues, threads: threads, config: config,
+            single_active_consumer: single_active, consumer_priority: priority
+          )
           worker.run
         end
 

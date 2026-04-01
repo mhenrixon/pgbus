@@ -9,10 +9,13 @@ module Pgbus
 
       attr_reader :queues, :threads, :config
 
-      def initialize(queues:, threads: 5, config: Pgbus.configuration)
+      def initialize(queues:, threads: 5, config: Pgbus.configuration,
+                     single_active_consumer: false, consumer_priority: 0)
         @queues = Array(queues)
         @threads = threads
         @config = config
+        @single_active_consumer = single_active_consumer
+        @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
@@ -22,6 +25,7 @@ module Pgbus
         @executor = Pgbus::ActiveJob::Executor.new
         @pool = Concurrent::FixedThreadPool.new(threads)
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
+        @queue_lock = QueueLock.new if @single_active_consumer
       end
 
       def stats
@@ -30,6 +34,9 @@ module Pgbus
           jobs_failed: @jobs_failed.value,
           in_flight: @in_flight.value,
           state: @lifecycle.state,
+          consumer_priority: @consumer_priority,
+          single_active_consumer: @single_active_consumer,
+          locked_queues: @queue_lock&.held_queues || [],
           rates: @rate_counter.rates,
           started_at: @started_at
         }
@@ -70,12 +77,14 @@ module Pgbus
       private
 
       def claim_and_execute
+        poll_interval = effective_polling_interval
+
         idle = @pool.max_length - @pool.queue_length
-        return interruptible_sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(poll_interval) if idle <= 0
 
         if config.prefetch_limit
           available = config.prefetch_limit - @in_flight.value
-          return interruptible_sleep(config.polling_interval) if available <= 0
+          return interruptible_sleep(poll_interval) if available <= 0
 
           idle = [idle, available].min
         end
@@ -83,7 +92,7 @@ module Pgbus
         tagged_messages = fetch_messages(idle)
 
         if tagged_messages.empty?
-          interruptible_sleep(config.polling_interval)
+          interruptible_sleep(poll_interval)
           return
         end
 
@@ -98,6 +107,7 @@ module Pgbus
       # which queue each message came from (PGMQ messages don't carry this).
       def fetch_messages(qty)
         active_queues = queues.reject { |q| @circuit_breaker.paused?(q) }
+        active_queues = active_queues.select { |q| @queue_lock.try_lock(q) } if @single_active_consumer
         return [] if active_queues.empty?
 
         if priority_enabled?
@@ -227,10 +237,25 @@ module Pgbus
         end
       end
 
+      def effective_polling_interval
+        return config.polling_interval if @consumer_priority.zero?
+
+        ConsumerPriority.effective_polling_interval(
+          base_interval: config.polling_interval,
+          my_priority: @consumer_priority,
+          max_priority: ConsumerPriority.max_active_priority(queues, ::Process.pid)
+        )
+      rescue StandardError
+        config.polling_interval
+      end
+
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "worker",
-          metadata: { queues: queues, threads: threads, pid: ::Process.pid },
+          metadata: {
+            queues: queues, threads: threads, pid: ::Process.pid,
+            consumer_priority: @consumer_priority
+          },
           on_beat: -> { @rate_counter.snapshot! }
         )
         @heartbeat.start
@@ -240,6 +265,7 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
         @pool.shutdown
         @pool.wait_for_termination(30)
+        @queue_lock&.unlock_all
         @heartbeat&.stop
         restore_signals
         Pgbus.logger.info { "[Pgbus] Worker stopped. Processed: #{@jobs_processed.value}, Failed: #{@jobs_failed.value}" }
