@@ -42,6 +42,12 @@ module Pgbus
             "PGMQ schema is not available (#{e.message}). Run `rails db:migrate` for the pgbus database."
     end
 
+    def ensure_all_queues
+      queue_names = collect_configured_queues
+      Pgbus.logger.info { "[Pgbus] Bootstrapping #{queue_names.size} queue(s): #{queue_names.join(", ")}" }
+      queue_names.each { |name| ensure_queue(name) }
+    end
+
     def ensure_dead_letter_queue(name)
       dlq_name = config.dead_letter_queue_name(name)
       return if @queues_created[dlq_name]
@@ -227,6 +233,26 @@ module Pgbus
     end
 
     private
+
+    def collect_configured_queues
+      queues = Set.new
+      queues << config.default_queue
+
+      # Queues from worker configs
+      (config.workers || []).each do |w|
+        worker_queues = w[:queues] || w["queues"] || [config.default_queue]
+        worker_queues.each { |q| queues << q unless q == "*" }
+      end
+
+      # Queues from recurring tasks
+      (config.recurring_tasks || {}).each_value do |opts|
+        opts = opts.transform_keys(&:to_s) if opts.is_a?(Hash)
+        queue = opts["queue"] || opts[:queue]
+        queues << queue if queue
+      end
+
+      queues.to_a
+    end
 
     def ensure_single_queue(full_name)
       return if @queues_created[full_name]

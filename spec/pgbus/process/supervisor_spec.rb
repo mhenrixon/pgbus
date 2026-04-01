@@ -126,6 +126,31 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  describe "boot_processes (private)" do
+    let(:supervisor) { described_class.new }
+    let(:mock_client) { build_mock_client }
+
+    before do
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive(:ensure_all_queues)
+      allow(supervisor).to receive(:fork).and_return(6001)
+    end
+
+    it "bootstraps queues before forking workers" do
+      call_order = []
+      allow(mock_client).to receive(:ensure_all_queues) { call_order << :ensure_all_queues }
+      allow(supervisor).to receive(:fork) do
+        call_order << :fork
+        6001
+      end
+
+      supervisor.send(:boot_processes)
+
+      expect(call_order.first).to eq(:ensure_all_queues)
+      expect(mock_client).to have_received(:ensure_all_queues).once
+    end
+  end
+
   describe "recurring_tasks_configured? (private)" do
     let(:supervisor) { described_class.new }
 

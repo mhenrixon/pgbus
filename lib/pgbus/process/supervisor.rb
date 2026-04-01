@@ -42,6 +42,11 @@ module Pgbus
       private
 
       def boot_processes
+        # Bootstrap all configured queues before forking workers.
+        # Without this, workers start reading from non-existent queues
+        # and recurring task enqueues fail.
+        bootstrap_queues
+
         # Boot workers
         config.workers.each do |worker_config|
           fork_worker(worker_config)
@@ -278,6 +283,12 @@ module Pgbus
         %w[INT TERM QUIT].each do |sig|
           trap(sig) { @shutting_down = true }
         end
+      end
+
+      def bootstrap_queues
+        Pgbus.client.ensure_all_queues
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to bootstrap queues: #{e.message}" }
       end
 
       def load_rails_app
