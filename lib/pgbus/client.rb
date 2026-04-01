@@ -33,13 +33,12 @@ module Pgbus
       @pgmq_mutex = Mutex.new
       @queues_created = Concurrent::Map.new
       @queue_strategy = QueueFactory.for(config)
+      @schema_ensured = false
     end
 
     def ensure_queue(name)
+      ensure_pgmq_schema
       @queue_strategy.physical_queue_names(name).each { |pq| ensure_single_queue(pq) }
-    rescue PGMQ::Errors::ConnectionError => e
-      raise Pgbus::SchemaNotReady,
-            "PGMQ schema is not available (#{e.message}). Run `rails db:migrate` for the pgbus database."
     end
 
     def ensure_all_queues
@@ -201,7 +200,7 @@ module Pgbus
 
       loop do
         deleted = synchronized do
-          @pgmq.pool.with { |conn| conn.exec_params(sql, [older_than, batch_size]).cmd_tuples }
+          resolve_raw_connection.exec_params(sql, [older_than, batch_size]).cmd_tuples
         end
         total += deleted
         break if deleted < batch_size
@@ -252,6 +251,36 @@ module Pgbus
       end
 
       queues.to_a
+    end
+
+    def ensure_pgmq_schema
+      return if @schema_ensured
+
+      synchronized do
+        return if @schema_ensured
+
+        raw_conn = resolve_raw_connection
+        exists = raw_conn.exec("SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1")
+        if exists.ntuples.zero?
+          Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing embedded SQL" }
+          raw_conn.exec(PgmqSchema.install_sql)
+        end
+        @schema_ensured = true
+      end
+    end
+
+    def resolve_raw_connection
+      opts = config.connection_options
+      case opts
+      when Proc
+        opts.call
+      when String
+        PG.connect(opts)
+      when Hash
+        PG.connect(**opts)
+      else
+        raise ConfigurationError, "Cannot resolve raw PG connection from #{opts.class}"
+      end
     end
 
     def ensure_single_queue(full_name)

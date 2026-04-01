@@ -6,7 +6,11 @@ RSpec.describe Pgbus::Client do
   # Stub pgmq-ruby so it never loads the real gem
   subject(:client) do
     allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-    described_class.new(config)
+    c = described_class.new(config)
+    # Pre-mark PGMQ schema as ensured for most tests.
+    # Schema installation tests override this.
+    c.instance_variable_set(:@schema_ensured, true)
+    c
   end
 
   before do
@@ -23,6 +27,44 @@ RSpec.describe Pgbus::Client do
     end
   end
   let(:mock_pgmq) { build_mock_pgmq }
+
+  describe "#ensure_pgmq_schema (via ensure_queue)" do
+    let(:raw_conn) { double("raw_conn") }
+
+    before do
+      client.instance_variable_set(:@schema_ensured, false)
+      allow(client).to receive(:resolve_raw_connection).and_return(raw_conn)
+    end
+
+    it "installs PGMQ schema when pgmq.meta table does not exist" do
+      result = double("result", ntuples: 0)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+      allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
+    end
+
+    it "skips installation when pgmq.meta already exists" do
+      result = double("result", ntuples: 1)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).not_to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
+    end
+
+    it "only checks once per client instance" do
+      result = double("result", ntuples: 1)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+
+      client.ensure_queue("jobs")
+      client.ensure_queue("events")
+
+      expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).once
+    end
+  end
 
   describe "#ensure_queue" do
     it "creates the queue with the prefixed name" do
@@ -60,17 +102,14 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:create).with("pgbus_test_events").once
     end
 
-    it "raises SchemaNotReady when PGMQ schema is missing" do
-      # PGMQ is lazy-loaded by the client, so define the error class if not yet available
+    it "propagates PGMQ connection errors when queue creation fails" do
       stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
 
       allow(mock_pgmq).to receive(:create).and_raise(
-        PGMQ::Errors::ConnectionError.new('Database connection error: ERROR:  relation "pgmq.meta" does not exist')
+        PGMQ::Errors::ConnectionError.new("Database connection error: connection refused")
       )
 
-      expect { client.ensure_queue("jobs") }.to raise_error(
-        Pgbus::SchemaNotReady, /PGMQ schema is not available/
-      )
+      expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError)
     end
   end
 
@@ -293,13 +332,11 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#purge_archive" do
-    let(:pool) { double("pool") }
     let(:conn) { double("conn") }
     let(:result) { double("result", cmd_tuples: 50) }
 
     before do
-      allow(mock_pgmq).to receive(:pool).and_return(pool)
-      allow(pool).to receive(:with).and_yield(conn)
+      allow(client).to receive(:resolve_raw_connection).and_return(conn)
       allow(conn).to receive(:exec_params).and_return(result)
     end
 
