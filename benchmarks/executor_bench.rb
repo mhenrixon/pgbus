@@ -16,6 +16,16 @@ class BenchJob < ActiveJob::Base
   end
 end
 
+# Stub JobStat so it doesn't hit the DB
+stub_job_stat = Class.new do
+  def self.record!(**) = nil
+end
+Object.const_set(:PGBUS_BENCH_JOB_STAT_STUB, true) unless defined?(PGBUS_BENCH_JOB_STAT_STUB)
+
+# Replace JobStat with stub for benchmarks
+Pgbus.send(:remove_const, :JobStat) if defined?(Pgbus::JobStat)
+Pgbus.const_set(:JobStat, stub_job_stat)
+
 client = BenchStubs.build_mock_client
 executor = Pgbus::ActiveJob::Executor.new(client: client, config: Pgbus.configuration)
 
@@ -37,6 +47,19 @@ Benchmark.ips do |x|
 
   x.compare!
 end
+
+puts "\n--- Executor#execute throughput (stats enabled) ---"
+Pgbus.configuration.stats_enabled = true
+Benchmark.ips do |x|
+  x.config(time: 5, warmup: 2)
+
+  x.report("execute + stat recording") do
+    executor.execute(msg, "default")
+  end
+
+  x.compare!
+end
+Pgbus.configuration.stats_enabled = false
 
 puts "\n--- Memory: execute (1000 jobs) ---"
 report = MemoryProfiler.report { 1000.times { executor.execute(msg, "default") } }

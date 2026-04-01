@@ -11,6 +11,7 @@ Pgbus.configure do |c|
   c.logger = Logger.new(IO::NULL)
   c.queue_prefix = "pgbus_bench"
   c.default_queue = "default"
+  c.stats_enabled = false # Don't record stats during benchmarks
 end
 
 # Stub PGMQ to isolate Pgbus overhead from database I/O.
@@ -25,8 +26,9 @@ module BenchStubs
     Pgbus::Client.allocate.tap do |client|
       client.instance_variable_set(:@pgmq, pgmq)
       client.instance_variable_set(:@config, Pgbus.configuration)
-      client.instance_variable_set(:@queues_created, Hash.new(true))
-      client.instance_variable_set(:@mutex, Mutex.new)
+      client.instance_variable_set(:@pgmq_mutex, Mutex.new)
+      client.instance_variable_set(:@queues_created, Concurrent::Map.new.tap { |m| m["pgbus_bench_default"] = true })
+      client.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
     end
   end
 
