@@ -238,4 +238,47 @@ RSpec.describe Pgbus::Process::Worker do
       end
     end
   end
+
+  describe "single active consumer" do
+    let(:queue_lock) { instance_double(Pgbus::Process::QueueLock, unlock_all: nil, held_queues: []) }
+    let(:worker) { described_class.new(queues: %w[default events], threads: 4, single_active_consumer: true) }
+
+    before do
+      allow(Pgbus::Process::QueueLock).to receive(:new).and_return(queue_lock)
+      allow(worker).to receive(:interruptible_sleep)
+    end
+
+    it "only reads from queues where advisory lock is held" do
+      allow(queue_lock).to receive(:try_lock).with("default").and_return(true)
+      allow(queue_lock).to receive(:try_lock).with("events").and_return(false)
+      allow(mock_client).to receive(:read_batch).and_return([])
+
+      worker.send(:claim_and_execute)
+      expect(mock_client).to have_received(:read_batch).with("default", qty: 5)
+      expect(mock_client).not_to have_received(:read_batch).with("events", anything)
+    end
+
+    it "skips all queues when no locks acquired" do
+      allow(queue_lock).to receive(:try_lock).and_return(false)
+      allow(mock_client).to receive(:read_batch)
+
+      worker.send(:claim_and_execute)
+      expect(mock_client).not_to have_received(:read_batch)
+    end
+
+    it "exposes single_active_consumer in stats" do
+      expect(worker.stats[:single_active_consumer]).to be true
+    end
+  end
+
+  describe "consumer priority" do
+    it "defaults to 0" do
+      expect(worker.stats[:consumer_priority]).to eq(0)
+    end
+
+    it "accepts a custom priority" do
+      priority_worker = described_class.new(queues: %w[default], threads: 5, consumer_priority: 10)
+      expect(priority_worker.stats[:consumer_priority]).to eq(10)
+    end
+  end
 end

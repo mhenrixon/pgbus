@@ -14,6 +14,13 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Quick start](#quick-start)
 - [Concurrency controls](#concurrency-controls)
 - [Batches](#batches)
+- [Priority queues](#priority-queues)
+- [Single active consumer](#single-active-consumer)
+- [Consumer priority](#consumer-priority)
+- [Circuit breaker and queue pause/resume](#circuit-breaker-and-queue-pauseresume)
+- [Prefetch flow control](#prefetch-flow-control)
+- [Transactional outbox](#transactional-outbox)
+- [Archive compaction](#archive-compaction)
 - [Configuration reference](#configuration-reference)
 - [Architecture](#architecture)
 - [CLI](#cli)
@@ -30,9 +37,17 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - **Dead letter queues** -- automatic DLQ routing after configurable retries
 - **Worker recycling** -- memory, job count, and lifetime limits prevent runaway processes
 - **LISTEN/NOTIFY** -- instant wake-up, polling as fallback only
-- **Idempotent events** -- deduplication via `(event_id, handler_class)` unique index
-- **Live dashboard** -- Turbo Frames auto-refresh, no ActionCable required
-- **Supervisor/worker model** -- forked processes with heartbeat monitoring
+- **Idempotent events** -- deduplication via `(event_id, handler_class)` unique index with in-memory cache
+- **Live dashboard** -- Turbo Frames auto-refresh with throughput rate, no ActionCable required
+- **Supervisor/worker model** -- forked processes with heartbeat monitoring and lifecycle state machine
+- **Priority queues** -- route jobs to priority sub-queues, highest-priority-first processing
+- **Circuit breaker** -- auto-pause queues after consecutive failures, exponential backoff
+- **Queue pause/resume** -- manual or automatic via dashboard
+- **Prefetch flow control** -- cap in-flight messages per worker to prevent overload
+- **Archive compaction** -- automatic purge of old archived messages
+- **Transactional outbox** -- publish events atomically inside database transactions
+- **Single active consumer** -- advisory-lock-based exclusive queue processing for strict ordering
+- **Consumer priority** -- higher-priority workers get first dibs, lower-priority workers back off
 
 ## Requirements
 
@@ -66,11 +81,17 @@ production:
   default_queue: default
   pool_size: 10
   max_retries: 5
+  prefetch_limit: 20
   workers:
     - queues: [default, mailers]
       threads: 10
+      consumer_priority: 10
     - queues: [critical]
       threads: 5
+      single_active_consumer: true
+    - queues: [default, mailers]
+      threads: 5
+      consumer_priority: 0    # fallback worker
   event_consumers:
     - queues: [orders, payments]
       threads: 5
@@ -319,6 +340,165 @@ end
 4. When `completed_jobs + discarded_jobs == total_jobs`, the batch status flips to `"finished"` and callback jobs are enqueued
 5. The dispatcher cleans up finished batches older than 7 days
 
+## Priority queues
+
+Route jobs to priority sub-queues so high-priority work is processed first:
+
+```ruby
+Pgbus.configure do |config|
+  config.priority_levels = 3    # Creates _p0, _p1, _p2 sub-queues per logical queue
+  config.default_priority = 1   # Jobs without explicit priority go to _p1
+end
+```
+
+Workers read from `_p0` (highest) first, then `_p1`, then `_p2`. Only when higher-priority sub-queues are empty does the worker read from lower ones.
+
+Use ActiveJob's built-in `priority` attribute:
+
+```ruby
+class CriticalAlertJob < ApplicationJob
+  queue_as :default
+  queue_with_priority 0  # Highest priority
+
+  def perform(alert_id)
+    # ...
+  end
+end
+
+class ReportJob < ApplicationJob
+  queue_as :default
+  queue_with_priority 2  # Lowest priority
+
+  def perform(report_id)
+    # ...
+  end
+end
+```
+
+When `priority_levels` is `nil` (default), priority queues are disabled and all jobs go to a single queue per logical name.
+
+## Single active consumer
+
+For queues that require strict ordering, enable single active consumer mode. Only one worker process can read from a queue at a time -- others skip it and process other queues.
+
+```yaml
+# config/pgbus.yml
+production:
+  workers:
+    - queues: [ordered_events]
+      threads: 1
+      single_active_consumer: true
+    - queues: [ordered_events]
+      threads: 1
+      single_active_consumer: true  # Standby — takes over if the first worker dies
+```
+
+Uses PostgreSQL session-level advisory locks (`pg_try_advisory_lock`). The lock is non-blocking -- workers that can't acquire it simply skip the queue. Locks auto-release on connection close (including crashes), so failover is automatic.
+
+## Consumer priority
+
+When multiple workers subscribe to the same queues, higher-priority workers process messages first. Lower-priority workers back off (3x polling interval) when a higher-priority worker is active.
+
+```yaml
+# config/pgbus.yml
+production:
+  workers:
+    - queues: [default]
+      threads: 10
+      consumer_priority: 10     # Primary — polls at base interval
+    - queues: [default]
+      threads: 5
+      consumer_priority: 0      # Fallback — polls at 3x interval when primary is healthy
+```
+
+Priority is stored in heartbeat metadata. Workers check the `pgbus_processes` table to discover higher-priority peers. When a high-priority worker goes stale (no heartbeat for 5 minutes), lower-priority workers automatically resume normal polling.
+
+## Circuit breaker and queue pause/resume
+
+Pgbus automatically pauses queues that fail repeatedly, preventing cascading failures.
+
+```ruby
+Pgbus.configure do |config|
+  config.circuit_breaker_enabled = true   # default
+  config.circuit_breaker_threshold = 5    # consecutive failures before tripping
+  config.circuit_breaker_base_backoff = 30  # seconds (doubles per trip)
+  config.circuit_breaker_max_backoff = 600  # 10 minute cap
+end
+```
+
+When a queue hits the failure threshold:
+1. The circuit breaker **auto-pauses** the queue with exponential backoff
+2. After the backoff expires, the queue **auto-resumes** and the trip counter resets
+3. If failures continue, each trip doubles the backoff (capped at `max_backoff`)
+
+You can also **manually pause/resume** queues from the dashboard. The pause state is stored in the `pgbus_queue_states` table and survives restarts.
+
+```bash
+rails generate pgbus:add_queue_states           # Add the queue_states migration
+rails generate pgbus:add_queue_states --database=pgbus  # For separate database
+```
+
+## Prefetch flow control
+
+Cap the number of in-flight (claimed but unfinished) messages per worker:
+
+```ruby
+Pgbus.configure do |config|
+  config.prefetch_limit = 20  # nil = unlimited (default)
+end
+```
+
+The worker tracks in-flight messages with an atomic counter and only fetches `min(idle_threads, prefetch_available)` messages per cycle. The counter is decremented in an `ensure` block so it never gets stuck.
+
+## Transactional outbox
+
+Publish events atomically inside your database transactions. A background poller moves outbox entries to PGMQ.
+
+```bash
+rails generate pgbus:add_outbox                  # Add the outbox migration
+rails generate pgbus:add_outbox --database=pgbus # For separate database
+```
+
+```ruby
+Pgbus.configure do |config|
+  config.outbox_enabled = true
+  config.outbox_poll_interval = 1.0  # seconds
+  config.outbox_batch_size = 100
+  config.outbox_retention = 24 * 3600  # keep published entries for 24h
+end
+```
+
+Usage:
+
+```ruby
+ActiveRecord::Base.transaction do
+  order = Order.create!(params)
+
+  # Published atomically with the order — if the transaction rolls back,
+  # the outbox entry is also rolled back. No lost or phantom events.
+  Pgbus::Outbox.publish("default", { order_id: order.id })
+
+  # For topic-based event bus:
+  Pgbus::Outbox.publish_event("orders.created", { order_id: order.id })
+end
+```
+
+The outbox poller uses `FOR UPDATE SKIP LOCKED` inside a transaction to claim entries, publishes them to PGMQ, and marks them as published. Failed entries are skipped and retried next cycle.
+
+## Archive compaction
+
+PGMQ archive tables grow unbounded. Pgbus automatically purges old entries:
+
+```ruby
+Pgbus.configure do |config|
+  config.archive_retention = 7 * 24 * 3600       # 7 days (default)
+  config.archive_compaction_interval = 3600       # run every hour (default)
+  config.archive_compaction_batch_size = 1000     # delete in batches (default)
+end
+```
+
+The dispatcher runs archive compaction as part of its maintenance loop, deleting archived messages older than `archive_retention` in batches to avoid long-running transactions.
+
 ## Configuration reference
 
 | Option | Default | Description |
@@ -336,7 +516,21 @@ end
 | `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
 | `max_worker_lifetime` | `nil` | Recycle worker after N seconds |
 | `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
+| `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
 | `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
+| `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures |
+| `circuit_breaker_threshold` | `5` | Consecutive failures before tripping |
+| `circuit_breaker_base_backoff` | `30` | Base backoff seconds (doubles per trip) |
+| `circuit_breaker_max_backoff` | `600` | Max backoff cap in seconds |
+| `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
+| `default_priority` | `1` | Default priority for jobs without explicit priority |
+| `archive_retention` | `604800` | Seconds to keep archived messages (7 days) |
+| `archive_compaction_interval` | `3600` | Seconds between archive cleanup runs |
+| `archive_compaction_batch_size` | `1000` | Rows deleted per batch during compaction |
+| `outbox_enabled` | `false` | Enable transactional outbox poller process |
+| `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
+| `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
+| `outbox_retention` | `86400` | Seconds to keep published outbox entries (1 day) |
 | `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
@@ -346,17 +540,20 @@ end
 
 ```text
 Supervisor (fork manager)
-  ├── Worker 1        (queues: [default, mailers], threads: 10)
-  ├── Worker 2        (queues: [critical], threads: 5)
-  ├── Dispatcher      (maintenance: idempotency cleanup, stale process reaping)
-  └── Consumer        (event bus topics)
+  ├── Worker 1        (queues: [default, mailers], threads: 10, priority: 10)
+  ├── Worker 2        (queues: [critical], threads: 5, single_active_consumer: true)
+  ├── Dispatcher      (maintenance: cleanup, compaction, reaping, circuit breaker)
+  ├── Scheduler       (recurring tasks via cron)
+  ├── Consumer        (event bus topics)
+  └── Outbox Poller   (transactional outbox → PGMQ, when enabled)
 
 PostgreSQL + PGMQ
   ├── pgbus_default          (job queue)
   ├── pgbus_default_dlq      (dead letter queue)
   ├── pgbus_critical         (job queue)
   ├── pgbus_critical_dlq     (dead letter queue)
-  └── pgbus_mailers          (job queue)
+  ├── pgbus_mailers          (job queue)
+  └── pgbus_queue_states     (pause/resume + circuit breaker state)
 ```
 
 ### How it works
@@ -411,13 +608,17 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | Table | Purpose |
 |-------|---------|
 | `q_pgbus_*` | PGMQ job queues (managed by PGMQ) |
-| `a_pgbus_*` | PGMQ archive tables (managed by PGMQ) |
+| `a_pgbus_*` | PGMQ archive tables (managed by PGMQ, compacted by dispatcher) |
 | `pgbus_processes` | Heartbeat tracking for workers/dispatcher/consumers |
 | `pgbus_failed_events` | Failed event dispatch records |
 | `pgbus_processed_events` | Idempotency deduplication (event_id, handler_class) |
 | `pgbus_semaphores` | Concurrency control counting semaphores |
 | `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
 | `pgbus_batches` | Batch tracking with job counters and callback config |
+| `pgbus_queue_states` | Queue pause/resume and circuit breaker state |
+| `pgbus_outbox_entries` | Transactional outbox entries pending publication |
+| `pgbus_recurring_tasks` | Recurring job definitions |
+| `pgbus_recurring_executions` | Recurring job execution history |
 
 ## Switching from another backend
 
