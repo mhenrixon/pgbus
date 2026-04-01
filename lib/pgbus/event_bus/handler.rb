@@ -11,6 +11,10 @@ module Pgbus
         def idempotent?
           @idempotent == true
         end
+
+        def dedup_cache
+          @dedup_cache ||= DedupCache.new
+        end
       end
 
       def process(message)
@@ -50,13 +54,20 @@ module Pgbus
       # Atomically claim idempotency: INSERT ... ON CONFLICT DO NOTHING.
       # Returns true if this handler claimed the event (row was inserted),
       # false if another handler already processed it (conflict, no insert).
+      #
+      # Uses an in-memory dedup cache to skip the DB for recently-seen events.
       def claim_idempotency?(event_id)
+        cache_key = "#{event_id}:#{self.class.name}"
+        return false if self.class.dedup_cache.seen?(cache_key)
+
         result = ProcessedEvent.insert(
           { event_id: event_id, handler_class: self.class.name, processed_at: Time.now.utc },
           unique_by: %i[event_id handler_class]
         )
-        # insert returns an InsertAll::Result; inserted row count > 0 means we claimed it
-        result.rows.any?
+
+        claimed = result.rows.any?
+        self.class.dedup_cache.mark!(cache_key)
+        claimed
       end
     end
   end

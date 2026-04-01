@@ -7,6 +7,8 @@ module Pgbus
     class DataSource
       def initialize(client: Pgbus.client)
         @client = client
+        @last_throughput_snapshot = nil
+        @last_throughput_at = nil
       end
 
       # Dashboard summary
@@ -17,6 +19,8 @@ module Pgbus
         dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
         dlq_depth = queues.select { |q| q[:name].end_with?(dlq_suffix) }.sum { |q| q[:queue_length] }
 
+        throughput = compute_throughput(queues)
+
         {
           total_queues: queues.size,
           total_depth: total_depth,
@@ -24,7 +28,8 @@ module Pgbus
           active_processes: processes.count,
           failed_count: failed_events_count,
           dlq_depth: dlq_depth,
-          recurring_count: recurring_tasks_count
+          recurring_count: recurring_tasks_count,
+          throughput_rate: throughput
         }
       end
 
@@ -33,7 +38,10 @@ module Pgbus
       # different connection lifecycle than the worker processes).
       def queues_with_metrics
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        queue_names.map { |name| queue_metrics_via_sql(name) }.compact
+        paused_queues = paused_queue_names
+        queue_names.map { |name| queue_metrics_via_sql(name) }.compact.map do |q|
+          q.merge(paused: paused_queues.include?(logical_queue_name(q[:name])))
+        end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error fetching queue metrics: #{e.class}: #{e.message}" }
         []
@@ -50,6 +58,24 @@ module Pgbus
 
       def purge_queue(name)
         @client.purge_queue(name)
+      end
+
+      def pause_queue(name, reason: nil)
+        QueueState.pause!(logical_queue_name(name), reason: reason)
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error pausing queue #{name}: #{e.message}" }
+      end
+
+      def resume_queue(name)
+        QueueState.resume!(logical_queue_name(name))
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error resuming queue #{name}: #{e.message}" }
+      end
+
+      def queue_paused?(name)
+        QueueState.paused?(logical_queue_name(name))
+      rescue StandardError
+        false
       end
 
       # Jobs (messages in queue tables)
@@ -451,6 +477,26 @@ module Pgbus
         0
       end
 
+      # Outbox
+      def outbox_stats
+        {
+          unpublished: OutboxEntry.unpublished.count,
+          total: OutboxEntry.count,
+          oldest_unpublished_age: oldest_unpublished_age
+        }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching outbox stats: #{e.message}" }
+        { unpublished: 0, total: 0, oldest_unpublished_age: nil }
+      end
+
+      def outbox_entries(page: 1, per_page: 25)
+        offset = (page - 1) * per_page
+        OutboxEntry.order(id: :desc).limit(per_page).offset(offset).to_a
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching outbox entries: #{e.message}" }
+        []
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|
@@ -569,6 +615,45 @@ module Pgbus
         raise ArgumentError, "Invalid queue name: #{name.inspect}" if sanitized.empty?
 
         sanitized
+      end
+
+      def compute_throughput(queues)
+        current_totals = queues.sum { |q| q[:total_messages] }
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        if @last_throughput_snapshot && @last_throughput_at
+          elapsed = now - @last_throughput_at
+          delta = current_totals - @last_throughput_snapshot
+          rate = elapsed.positive? ? (delta / elapsed).round(1) : 0.0
+        end
+
+        @last_throughput_snapshot = current_totals
+        @last_throughput_at = now
+
+        rate || 0.0
+      rescue StandardError
+        0.0
+      end
+
+      def logical_queue_name(name)
+        name
+          .delete_prefix("#{Pgbus.configuration.queue_prefix}_")
+          .sub(/_p\d+\z/, "")
+      end
+
+      def paused_queue_names
+        QueueState.paused.pluck(:queue_name)
+      rescue StandardError
+        []
+      end
+
+      def oldest_unpublished_age
+        oldest = OutboxEntry.unpublished.order(:id).pick(:created_at)
+        return nil unless oldest
+
+        (Time.now - oldest).to_i
+      rescue StandardError
+        nil
       end
 
       def parse_arguments(args)

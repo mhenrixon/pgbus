@@ -1,0 +1,16 @@
+class AddPgbusQueueStates < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_queue_states do |t|
+      t.string :queue_name, null: false
+      t.boolean :paused, null: false, default: false
+      t.string :paused_reason
+      t.datetime :paused_at
+      t.integer :circuit_breaker_trip_count, default: 0
+      t.datetime :circuit_breaker_resume_at
+      t.timestamps
+    end
+
+    add_index :pgbus_queue_states, :queue_name,
+      unique: true, name: "idx_pgbus_queue_states_queue_name"
+  end
+end

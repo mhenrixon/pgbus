@@ -1,0 +1,25 @@
+class AddPgbusOutbox < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_outbox_entries do |t|
+      t.string :queue_name
+      t.string :routing_key
+      t.jsonb :payload, null: false
+      t.jsonb :headers
+      t.integer :priority, default: 0
+      t.integer :delay, default: 0
+      t.datetime :published_at
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_check_constraint :pgbus_outbox_entries,
+      "(queue_name IS NOT NULL) <> (routing_key IS NOT NULL)",
+      name: "chk_pgbus_outbox_destination"
+
+    add_index :pgbus_outbox_entries, :published_at,
+      where: "published_at IS NULL",
+      name: "idx_pgbus_outbox_unpublished"
+    add_index :pgbus_outbox_entries, :published_at,
+      where: "published_at IS NOT NULL",
+      name: "idx_pgbus_outbox_cleanup"
+  end
+end

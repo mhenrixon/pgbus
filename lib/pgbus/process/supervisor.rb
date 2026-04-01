@@ -55,6 +55,9 @@ module Pgbus
 
         # Boot event consumers if configured
         boot_consumers
+
+        # Boot outbox poller if configured
+        boot_outbox_poller
       end
 
       def fork_worker(worker_config)
@@ -63,7 +66,7 @@ module Pgbus
 
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           worker = Worker.new(queues: queues, threads: threads, config: config)
           worker.run
@@ -83,7 +86,7 @@ module Pgbus
       def fork_dispatcher
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           dispatcher = Dispatcher.new(config: config)
           dispatcher.run
@@ -110,7 +113,7 @@ module Pgbus
       def fork_scheduler
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           load_recurring_config
           scheduler = Recurring::Scheduler.new(config: config)
@@ -165,7 +168,7 @@ module Pgbus
 
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           consumer = Consumer.new(topics: topics, threads: threads, config: config)
           consumer.run
@@ -180,6 +183,32 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         Pgbus.logger.error { "[Pgbus] Fork failed for consumer: #{e.message}" }
+      end
+
+      def boot_outbox_poller
+        return unless config.outbox_enabled
+
+        fork_outbox_poller
+      end
+
+      def fork_outbox_poller
+        pid = fork do
+          restore_signals
+          setup_child_process
+          load_rails_app
+          poller = Outbox::Poller.new(config: config)
+          poller.run
+        end
+
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork outbox poller" }
+          return
+        end
+
+        @forks[pid] = { type: :outbox_poller }
+        Pgbus.logger.info { "[Pgbus] Forked outbox poller pid=#{pid}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for outbox poller: #{e.message}" }
       end
 
       def monitor_loop
@@ -223,6 +252,8 @@ module Pgbus
           fork_scheduler
         when :consumer
           fork_consumer(info[:config])
+        when :outbox_poller
+          fork_outbox_poller
         end
       end
 
@@ -234,7 +265,11 @@ module Pgbus
         end
       end
 
-      def setup_child_signals
+      def setup_child_process
+        # Reset the PGMQ client so this forked process gets a fresh
+        # PG::Connection instead of inheriting the parent's (which is
+        # in undefined state post-fork and not thread-safe to share).
+        Pgbus.reset_client!
         %w[INT TERM QUIT].each do |sig|
           trap(sig) { @shutting_down = true }
         end

@@ -11,9 +11,10 @@ module Pgbus
 
       attr_reader :process_entry
 
-      def initialize(kind:, metadata: {})
+      def initialize(kind:, metadata: {}, on_beat: nil)
         @kind = kind
         @metadata = metadata
+        @on_beat = on_beat
         @timer = nil
       end
 
@@ -31,6 +32,7 @@ module Pgbus
       def beat
         return unless @process_id
 
+        @on_beat&.call
         ProcessEntry.where(id: @process_id).update_all(last_heartbeat_at: Time.current)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }

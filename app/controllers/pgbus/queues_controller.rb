@@ -17,5 +17,15 @@ module Pgbus
       data_source.purge_queue(params[:name])
       redirect_to queue_path(name: params[:name]), notice: "Queue purged."
     end
+
+    def pause
+      data_source.pause_queue(params[:name], reason: params[:reason])
+      redirect_to queue_path(name: params[:name]), notice: "Queue paused."
+    end
+
+    def resume
+      data_source.resume_queue(params[:name])
+      redirect_to queue_path(name: params[:name]), notice: "Queue resumed."
+    end
   end
 end

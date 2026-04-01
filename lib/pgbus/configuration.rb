@@ -11,7 +11,7 @@ module Pgbus
     attr_accessor :default_queue, :queue_prefix
 
     # Worker settings
-    attr_accessor :workers, :polling_interval, :visibility_timeout
+    attr_accessor :workers, :polling_interval, :visibility_timeout, :prefetch_limit
 
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
@@ -19,8 +19,21 @@ module Pgbus
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
+    # Circuit breaker
+    attr_accessor :circuit_breaker_enabled, :circuit_breaker_threshold,
+                  :circuit_breaker_base_backoff, :circuit_breaker_max_backoff
+
     # Dead letter queue
     attr_accessor :max_retries, :dead_letter_queue_suffix
+
+    # Priority queues
+    attr_accessor :priority_levels, :default_priority
+
+    # Archive compaction
+    attr_accessor :archive_retention, :archive_compaction_interval, :archive_compaction_batch_size
+
+    # Transactional outbox
+    attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size, :outbox_retention
 
     # Event bus
     attr_accessor :idempotency_ttl
@@ -62,14 +75,33 @@ module Pgbus
       @polling_interval = 0.1
       @visibility_timeout = 30
 
+      @prefetch_limit = nil
+
       @max_jobs_per_worker = nil
       @max_memory_mb = nil
       @max_worker_lifetime = nil
 
       @dispatch_interval = 1.0
 
+      @circuit_breaker_enabled = true
+      @circuit_breaker_threshold = 5
+      @circuit_breaker_base_backoff = 30
+      @circuit_breaker_max_backoff = 600
+
       @max_retries = 5
       @dead_letter_queue_suffix = "_dlq"
+
+      @priority_levels = nil
+      @default_priority = 1
+
+      @archive_retention = 7 * 24 * 3600 # 7 days
+      @archive_compaction_interval = 3600
+      @archive_compaction_batch_size = 1000
+
+      @outbox_enabled = false
+      @outbox_poll_interval = 1.0
+      @outbox_batch_size = 100
+      @outbox_retention = 24 * 3600 # 1 day
 
       @idempotency_ttl = 7 * 24 * 3600 # 7 days
 
@@ -105,6 +137,16 @@ module Pgbus
       "#{queue_name(name)}#{dead_letter_queue_suffix}"
     end
 
+    def priority_queue_name(name, priority)
+      "#{queue_name(name)}_p#{priority}"
+    end
+
+    def priority_queue_names(name)
+      return [queue_name(name)] unless priority_levels && priority_levels > 1
+
+      (0...priority_levels).map { |p| priority_queue_name(name, p) }
+    end
+
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
 
     def pgmq_schema_mode=(mode)
@@ -126,6 +168,12 @@ module Pgbus
       workers.each do |w|
         threads = w[:threads] || w["threads"] || 5
         raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
+      end
+
+      raise ArgumentError, "prefetch_limit must be > 0" if prefetch_limit && !(prefetch_limit.is_a?(Integer) && prefetch_limit.positive?)
+
+      if priority_levels && !(priority_levels.is_a?(Integer) && priority_levels >= 1 && priority_levels <= 10)
+        raise ArgumentError, "priority_levels must be an integer between 1 and 10"
       end
 
       self

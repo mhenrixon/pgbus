@@ -1,5 +1,5 @@
 <turbo-frame id="dashboard-stats" data-auto-refresh src="<%= pgbus.root_path(frame: 'stats') %>">
-  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 mb-8">
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6 mb-8">
     <div class="rounded-lg bg-white p-5 shadow ring-1 ring-gray-200">
       <p class="text-sm font-medium text-gray-500">Queues</p>
       <p class="mt-1 text-3xl font-semibold text-gray-900"><%= @stats[:total_queues] %></p>
@@ -31,6 +31,12 @@
       <p class="mt-1 text-3xl font-semibold <%= (@stats[:failed_count] + @stats[:dlq_depth]) > 0 ? 'text-red-600' : 'text-gray-900' %>">
         <%= @stats[:failed_count] %> / <%= @stats[:dlq_depth] %>
       </p>
+    </div>
+
+    <div class="rounded-lg bg-white p-5 shadow ring-1 ring-gray-200">
+      <p class="text-sm font-medium text-gray-500">Throughput</p>
+      <p class="mt-1 text-3xl font-semibold text-gray-900"><%= @stats[:throughput_rate] %></p>
+      <p class="text-xs text-gray-400">msgs/s</p>
     </div>
   </div>
 </turbo-frame>

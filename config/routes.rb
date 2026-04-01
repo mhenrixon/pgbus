@@ -6,6 +6,8 @@ Pgbus::Engine.routes.draw do
   resources :queues, only: %i[index show], param: :name do
     member do
       post :purge
+      post :pause
+      post :resume
     end
   end
 
@@ -45,6 +47,8 @@ Pgbus::Engine.routes.draw do
       post :discard_all
     end
   end
+
+  resources :outbox, only: [:index], controller: "outbox"
 
   namespace :api do
     get :stats, to: "stats#show"

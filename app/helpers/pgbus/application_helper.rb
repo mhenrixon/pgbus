@@ -45,6 +45,12 @@ module Pgbus
       end
     end
 
+    def pgbus_paused_badge(paused)
+      return unless paused
+
+      tag.span("Paused", class: "inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800")
+    end
+
     def pgbus_parse_message(message)
       return {} unless message
 
