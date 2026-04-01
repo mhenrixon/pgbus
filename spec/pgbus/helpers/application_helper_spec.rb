@@ -51,6 +51,46 @@ RSpec.describe Pgbus::ApplicationHelper do
     end
   end
 
+  describe "#pgbus_duration" do
+    it "returns dash for nil" do
+      expect(helper.pgbus_duration(nil)).to eq("—")
+    end
+
+    it "formats seconds" do
+      expect(helper.pgbus_duration(45)).to eq("45s")
+    end
+
+    it "formats minutes and seconds" do
+      expect(helper.pgbus_duration(125)).to eq("2m 5s")
+    end
+
+    it "formats hours and minutes" do
+      expect(helper.pgbus_duration(3725)).to eq("1h 2m")
+    end
+
+    it "formats days and hours" do
+      expect(helper.pgbus_duration(90_000)).to eq("1d 1h")
+    end
+  end
+
+  describe "#pgbus_ms_duration" do
+    it "returns dash for nil" do
+      expect(helper.pgbus_ms_duration(nil)).to eq("—")
+    end
+
+    it "formats milliseconds" do
+      expect(helper.pgbus_ms_duration(42)).to eq("42ms")
+    end
+
+    it "formats seconds" do
+      expect(helper.pgbus_ms_duration(1500)).to eq("1.5s")
+    end
+
+    it "formats minutes" do
+      expect(helper.pgbus_ms_duration(120_000)).to eq("2.0m")
+    end
+  end
+
   describe "#pgbus_json_preview" do
     it "returns dash for nil" do
       expect(helper.pgbus_json_preview(nil)).to eq("—")

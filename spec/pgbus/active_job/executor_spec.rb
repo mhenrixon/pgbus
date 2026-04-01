@@ -22,6 +22,9 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     allow(ActiveJob::Base).to receive(:deserialize).with(job_payload).and_return(job_double)
     # By default, no concurrency key in payloads
     allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
+    # Stub stat recording
+    stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+    allow(Pgbus::JobStat).to receive(:record!)
   end
 
   describe "#execute" do
@@ -185,6 +188,57 @@ RSpec.describe Pgbus::ActiveJob::Executor do
 
         expect(Pgbus::Concurrency::Semaphore).not_to have_received(:release)
         expect(Pgbus::Concurrency::BlockedExecution).not_to have_received(:promote_next)
+      end
+    end
+
+    context "with job stat recording" do
+      let(:message) { build_message_double(msg_id: 1, message: message_json, read_ct: 1) }
+
+      it "records a success stat after successful execution" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          job_class: "TestJob",
+          queue_name: queue_name,
+          status: "success",
+          duration_ms: an_instance_of(Integer)
+        )
+      end
+
+      it "records a failed stat when job raises" do
+        allow(job_double).to receive(:perform_now).and_raise(StandardError, "boom")
+
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          job_class: "TestJob",
+          queue_name: queue_name,
+          status: "failed",
+          duration_ms: an_instance_of(Integer)
+        )
+      end
+
+      it "records a dead_lettered stat for DLQ routing" do
+        dlq_message = build_message_double(msg_id: 99, message: message_json, read_ct: config.max_retries + 1)
+
+        executor.execute(dlq_message, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          job_class: "TestJob",
+          queue_name: queue_name,
+          status: "dead_lettered",
+          duration_ms: an_instance_of(Integer)
+        )
+      end
+
+      it "does not record stats when stats_enabled is false" do
+        config.stats_enabled = false
+
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::JobStat).not_to have_received(:record!)
+      ensure
+        config.stats_enabled = true
       end
     end
   end
