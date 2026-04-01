@@ -49,6 +49,112 @@ jobs:
       - name: Run unit tests
         run: bundle exec rspec spec/pgbus/
 
+  integration:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: pgbus
+          POSTGRES_PASSWORD: pgbus
+          POSTGRES_DB: pgbus_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGBUS_DATABASE_URL: postgres://pgbus:pgbus@localhost:5432/pgbus_test
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: Set up PGMQ schema
+        run: |
+          PGPASSWORD=pgbus psql -h localhost -U pgbus -d pgbus_test -c "CREATE SCHEMA IF NOT EXISTS pgmq"
+          bundle exec ruby -e "
+            require 'pgbus'
+            Pgbus.configure { |c| c.database_url = ENV['PGBUS_DATABASE_URL'] }
+            conn = PG.connect(ENV['PGBUS_DATABASE_URL'])
+            conn.exec(Pgbus::PgmqSchema.install_sql)
+            conn.exec(Pgbus::PgmqSchema.version_tracking_sql)
+            conn.close
+          "
+      - name: Set up pgbus tables
+        run: |
+          bundle exec ruby -e "
+            require 'pg'
+            conn = PG.connect(ENV['PGBUS_DATABASE_URL'])
+            # Create all pgbus tables
+            conn.exec(<<~SQL)
+              CREATE TABLE IF NOT EXISTS pgbus_processed_events (
+                id BIGSERIAL PRIMARY KEY,
+                event_id VARCHAR NOT NULL,
+                handler_class VARCHAR NOT NULL,
+                processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_processed_events_unique
+                ON pgbus_processed_events (event_id, handler_class);
+
+              CREATE TABLE IF NOT EXISTS pgbus_processes (
+                id BIGSERIAL PRIMARY KEY,
+                kind VARCHAR NOT NULL,
+                hostname VARCHAR,
+                pid INTEGER,
+                metadata JSONB DEFAULT '{}',
+                last_heartbeat_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+
+              CREATE TABLE IF NOT EXISTS pgbus_semaphores (
+                id BIGSERIAL PRIMARY KEY,
+                key VARCHAR NOT NULL,
+                value INTEGER NOT NULL DEFAULT 0,
+                max_value INTEGER NOT NULL DEFAULT 1,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_semaphores_key
+                ON pgbus_semaphores (key);
+
+              CREATE TABLE IF NOT EXISTS pgbus_blocked_executions (
+                id BIGSERIAL PRIMARY KEY,
+                concurrency_key VARCHAR NOT NULL,
+                queue_name VARCHAR NOT NULL,
+                payload JSONB NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 0,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+
+              CREATE TABLE IF NOT EXISTS pgbus_job_locks (
+                id BIGSERIAL PRIMARY KEY,
+                lock_key VARCHAR NOT NULL,
+                job_class VARCHAR NOT NULL,
+                job_id VARCHAR,
+                locked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+              );
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_job_locks_key
+                ON pgbus_job_locks (lock_key);
+              CREATE INDEX IF NOT EXISTS idx_pgbus_job_locks_expires
+                ON pgbus_job_locks (expires_at);
+            SQL
+            conn.close
+          "
+      - name: Run integration tests
+        run: bundle exec rspec spec/integration/
+
   system_test:
     runs-on: ubuntu-latest
     name: System Tests

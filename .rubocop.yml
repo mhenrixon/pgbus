@@ -55,6 +55,10 @@ RSpec/VerifiedDoubles:
 RSpec/MultipleMemoizedHelpers:
   Enabled: false
 
+RSpec/DescribeClass:
+  Exclude:
+    - spec/integration/**/*
+
 RSpec/AnyInstance:
   Enabled: false
 

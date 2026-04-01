@@ -18,10 +18,21 @@ module Pgbus
           handle_dead_letter(message, queue_name, payload, source_queue: source_queue)
           signal_concurrency(payload)
           signal_batch_discarded(payload)
+          Uniqueness.release_lock(Uniqueness.extract_key(payload))
           return :dead_lettered
         end
 
         job_class = payload["job_class"]
+        uniqueness_key = Uniqueness.extract_key(payload)
+
+        # For :while_executing strategy, acquire the lock now (at execution time).
+        # If another worker is already executing this job, skip it — VT will expire
+        # and it'll be retried later when the lock is released.
+        if uniqueness_key && Uniqueness.extract_strategy(payload) == :while_executing && !Uniqueness.acquire_execution_lock(uniqueness_key,
+                                                                                                                            payload)
+          Pgbus.logger.info { "[Pgbus] Skipping duplicate execution for #{job_class}: #{uniqueness_key}" }
+          return :skipped
+        end
 
         job_succeeded = false
 
@@ -47,6 +58,8 @@ module Pgbus
         if job_succeeded
           signal_concurrency(payload)
           signal_batch_completed(payload)
+          # Release uniqueness lock on successful completion (both strategies)
+          Uniqueness.release_lock(uniqueness_key) if uniqueness_key
         end
       end
 

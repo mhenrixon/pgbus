@@ -34,6 +34,7 @@ module Pgbus
     initializer "pgbus.active_job" do
       ActiveSupport.on_load(:active_job) do
         include Pgbus::Concurrency
+        include Pgbus::Uniqueness
       end
     end
 
