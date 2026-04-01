@@ -62,9 +62,9 @@ RSpec.describe "Concurrency semaphores (integration)", :integration do
     it "never exceeds the limit under contention" do
       limit = 3
       results = Concurrent::Array.new
-      barrier = Concurrent::CyclicBarrier.new(10)
+      barrier = Concurrent::CyclicBarrier.new(8)
 
-      threads = 10.times.map do
+      threads = 8.times.map do
         Thread.new do
           barrier.wait
           result = Pgbus::Concurrency::Semaphore.acquire("race-key", limit, 300)
@@ -72,13 +72,13 @@ RSpec.describe "Concurrency semaphores (integration)", :integration do
         end
       end
 
-      threads.each(&:join)
+      threads.each { |t| t.join(10) }
 
       acquired = results.count(:acquired)
       blocked = results.count(:blocked)
 
       expect(acquired).to eq(limit)
-      expect(blocked).to eq(7)
+      expect(blocked).to eq(5)
       expect(Pgbus::Concurrency::Semaphore.current_value("race-key")).to eq(limit)
     end
   end

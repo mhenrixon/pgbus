@@ -24,8 +24,8 @@ RSpec.configure do |config|
     next
   end
 
-  # Connect ActiveRecord for model access
-  ActiveRecord::Base.establish_connection(PGBUS_DATABASE_URL)
+  # Connect ActiveRecord with a pool large enough for concurrent tests
+  ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=20")
 
   # Configure pgbus with the real database
   Pgbus.configure do |c|
@@ -37,12 +37,10 @@ RSpec.configure do |config|
     c.listen_notify = false
   end
 
-  # Clean up queues and tables between tests
-  config.around do |example|
+  # Purge all integration queues BEFORE each test so no stale messages leak
+  config.before do
     Pgbus.reset_client!
-    example.run
-  ensure
-    cleanup_queues
+    purge_integration_queues
     cleanup_tables
   end
 
@@ -51,16 +49,17 @@ RSpec.configure do |config|
   end
 end
 
-def cleanup_queues
-  client = Pgbus.client
-  queues = client.list_queues
-  queues.each do |q|
-    next unless q.to_s.start_with?("pgbus_int_")
-
-    client.purge_queue(q.to_s.delete_prefix("pgbus_int_"))
+# Purge all pgbus_int_* queues via raw SQL to avoid prefix double-application
+def purge_integration_queues
+  conn = ActiveRecord::Base.connection
+  queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta WHERE queue_name LIKE 'pgbus_int_%'")
+  queue_names.each do |full_name|
+    conn.execute("DELETE FROM pgmq.q_#{full_name}")
+  rescue StandardError
+    nil
   end
 rescue StandardError => e
-  warn "[pgbus integration] Queue cleanup warning: #{e.message}"
+  warn "[pgbus integration] Queue purge warning: #{e.message}"
 end
 
 def cleanup_tables
