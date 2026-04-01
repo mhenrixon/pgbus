@@ -36,6 +36,7 @@ module Pgbus
 
     METADATA_KEY = "pgbus_uniqueness_key"
     STRATEGY_KEY = "pgbus_uniqueness_strategy"
+    TTL_KEY = "pgbus_uniqueness_lock_ttl"
 
     VALID_STRATEGIES = %i[until_executed while_executing].freeze
     VALID_CONFLICTS = %i[reject discard log].freeze
@@ -83,7 +84,8 @@ module Pgbus
 
         payload_hash.merge(
           METADATA_KEY => key,
-          STRATEGY_KEY => config[:strategy].to_s
+          STRATEGY_KEY => config[:strategy].to_s,
+          TTL_KEY => config[:lock_ttl]
         )
       end
 
@@ -125,8 +127,7 @@ module Pgbus
 
         job_class = payload["job_class"]
         job_id = payload["job_id"]
-        # Use a reasonable default TTL for execution locks
-        ttl = 30 * 60 # 30 minutes
+        ttl = payload[TTL_KEY] || (30 * 60)
 
         JobLock.acquire!(key, job_class: job_class, job_id: job_id, ttl: ttl)
       end

@@ -33,7 +33,7 @@ module Pgbus
         say ""
         say "Next steps:"
         say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
-        say "  2. Add `include Pgbus::Uniqueness` and `ensures_uniqueness` to your job classes"
+        say "  2. Add `ensures_uniqueness` to your job classes (DSL is auto-included)"
         say "  3. Restart pgbus: bin/pgbus start"
         say ""
       end

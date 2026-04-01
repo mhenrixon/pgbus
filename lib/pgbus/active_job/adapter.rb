@@ -31,7 +31,11 @@ module Pgbus
       end
 
       def enqueue_all(active_jobs)
-        active_jobs.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
+        # Jobs with uniqueness must go through individual enqueue to acquire locks
+        unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
+        unique.each { |j| enqueue(j) }
+
+        bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
           enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.now })
           jobs.select { |j| j.scheduled_at && j.scheduled_at > Time.now }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
@@ -60,9 +64,15 @@ module Pgbus
           active_job.provider_job_id = msg_id
         end
 
+        Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
-      rescue Pgbus::SchemaNotReady => e
-        Pgbus.logger.error { "[Pgbus] #{e.message}" }
+      rescue StandardError
+        # Roll back the uniqueness lock if enqueue failed
+        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
+        if rollback_key
+          Uniqueness.release_lock(rollback_key)
+          Thread.current[:pgbus_acquired_uniqueness_key] = nil
+        end
         raise
       end
 
@@ -92,17 +102,20 @@ module Pgbus
         return false unless uniqueness_key
 
         result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job)
+
+        # Store the acquired key so we can release it if enqueue fails
+        Thread.current[:pgbus_acquired_uniqueness_key] = uniqueness_key if result == :acquired
         return false if result == :acquired
 
         config = Uniqueness.uniqueness_config(active_job)
         case config[:on_conflict]
         when :reject
-          raise JobNotUnique, "Job #{active_job.class.name} is already locked for key: #{uniqueness_key}"
+          raise JobNotUnique, "Job #{active_job.class.name} is already locked"
         when :discard
-          Pgbus.logger.info { "[Pgbus] Discarding duplicate job #{active_job.class.name}: #{uniqueness_key}" }
+          Pgbus.logger.info { "[Pgbus] Discarding duplicate job #{active_job.class.name}" }
           true
         when :log
-          Pgbus.logger.warn { "[Pgbus] Duplicate job #{active_job.class.name} detected: #{uniqueness_key}" }
+          Pgbus.logger.warn { "[Pgbus] Duplicate job #{active_job.class.name} detected" }
           true
         else
           true

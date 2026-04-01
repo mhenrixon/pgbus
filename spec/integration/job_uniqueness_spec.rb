@@ -4,8 +4,7 @@ require_relative "../integration_helper"
 
 RSpec.describe "Job uniqueness (integration)", :integration do
   before do
-    # Clean up any stale locks
-    ActiveRecord::Base.connection.execute("DELETE FROM pgbus_job_locks")
+    Pgbus::JobLock.delete_all
   end
 
   describe ":until_executed strategy" do
