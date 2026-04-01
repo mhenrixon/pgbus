@@ -110,7 +110,12 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "prefetch flow control" do
-    before { allow(worker).to receive(:interruptible_sleep) }
+    let(:wake_signal) { worker.instance_variable_get(:@wake_signal) }
+
+    before do
+      allow(worker).to receive(:interruptible_sleep)
+      allow(wake_signal).to receive(:wait)
+    end
 
     context "when prefetch_limit is nil (default)" do
       before { worker.config.prefetch_limit = nil }
@@ -132,11 +137,11 @@ RSpec.describe Pgbus::Process::Worker do
         expect(mock_client).to have_received(:read_batch).with("default", qty: 3)
       end
 
-      it "sleeps when in_flight >= prefetch_limit" do
+      it "waits when in_flight >= prefetch_limit" do
         worker.instance_variable_get(:@in_flight).value = 3
         worker.send(:claim_and_execute)
         expect(mock_client).not_to have_received(:read_batch)
-        expect(worker).to have_received(:interruptible_sleep)
+        expect(wake_signal).to have_received(:wait)
       end
 
       it "uses min of idle and available prefetch" do
@@ -213,7 +218,10 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "circuit breaker integration" do
-    before { allow(worker).to receive(:interruptible_sleep) }
+    before do
+      allow(worker).to receive(:interruptible_sleep)
+      allow(worker.instance_variable_get(:@wake_signal)).to receive(:wait)
+    end
 
     it "skips paused queues" do
       allow(circuit_breaker).to receive(:paused?).with("default").and_return(true)
@@ -246,6 +254,7 @@ RSpec.describe Pgbus::Process::Worker do
     before do
       allow(Pgbus::Process::QueueLock).to receive(:new).and_return(queue_lock)
       allow(worker).to receive(:interruptible_sleep)
+      allow(worker.instance_variable_get(:@wake_signal)).to receive(:wait)
     end
 
     it "only reads from queues where advisory lock is held" do

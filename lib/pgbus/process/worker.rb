@@ -83,11 +83,11 @@ module Pgbus
         poll_interval = effective_polling_interval
 
         idle = @pool.max_length - @pool.queue_length
-        return interruptible_sleep(poll_interval) if idle <= 0
+        return @wake_signal.wait(timeout: poll_interval) if idle <= 0
 
         if config.prefetch_limit
           available = config.prefetch_limit - @in_flight.value
-          return interruptible_sleep(poll_interval) if available <= 0
+          return @wake_signal.wait(timeout: poll_interval) if available <= 0
 
           idle = [idle, available].min
         end
@@ -95,7 +95,7 @@ module Pgbus
         tagged_messages = fetch_messages(idle)
 
         if tagged_messages.empty?
-          interruptible_sleep(poll_interval)
+          @wake_signal.wait(timeout: poll_interval)
           return
         end
 
