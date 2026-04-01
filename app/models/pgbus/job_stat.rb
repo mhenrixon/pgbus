@@ -11,6 +11,8 @@ module Pgbus
 
     # Record a job execution stat. Called by the executor after each job.
     def self.record!(job_class:, queue_name:, status:, duration_ms:)
+      return unless table_exists?
+
       create!(
         job_class: job_class,
         queue_name: queue_name,
@@ -19,6 +21,14 @@ module Pgbus
       )
     rescue StandardError => e
       Pgbus.logger.debug { "[Pgbus] Failed to record job stat: #{e.message}" }
+    end
+
+    def self.table_exists?
+      return @table_exists if defined?(@table_exists)
+
+      @table_exists = connection.table_exists?(table_name)
+    rescue StandardError
+      @table_exists = false
     end
 
     # Throughput: jobs per minute bucketed by minute for the last N minutes

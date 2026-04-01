@@ -75,70 +75,87 @@
 
 <script src="https://cdn.jsdelivr.net/npm/apexcharts@4"></script>
 <script>
-  const isDark = document.documentElement.classList.contains('dark');
-  const textColor = isDark ? '#9ca3af' : '#6b7280';
-  const gridColor = isDark ? '#374151' : '#e5e7eb';
+  let throughputChart, statusChart;
 
-  // Fetch chart data from API
+  function getThemeColors() {
+    const isDark = document.documentElement.classList.contains('dark');
+    return {
+      isDark,
+      text: isDark ? '#9ca3af' : '#6b7280',
+      grid: isDark ? '#374151' : '#e5e7eb',
+      tooltip: isDark ? 'dark' : 'light',
+      dataLabel: isDark ? '#fff' : '#000'
+    };
+  }
+
+  function renderCharts(data) {
+    const t = getThemeColors();
+
+    // Destroy existing charts before re-rendering
+    if (throughputChart) throughputChart.destroy();
+    if (statusChart) statusChart.destroy();
+
+    // Throughput chart
+    const throughputData = data.throughput.map(p => ({
+      x: new Date(p.time).getTime(), y: p.count
+    }));
+
+    throughputChart = new ApexCharts(document.querySelector('#throughput-chart'), {
+      series: [{ name: 'Jobs/min', data: throughputData }],
+      chart: { type: 'area', height: 280, toolbar: { show: false }, background: 'transparent', foreColor: t.text },
+      stroke: { curve: 'smooth', width: 2 },
+      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
+      colors: ['#6366f1'],
+      xaxis: { type: 'datetime', labels: { style: { colors: t.text } } },
+      yaxis: { labels: { style: { colors: t.text } } },
+      grid: { borderColor: t.grid },
+      tooltip: { theme: t.tooltip },
+      dataLabels: { enabled: false }
+    });
+    throughputChart.render();
+
+    // Status distribution chart
+    const statusLabels = Object.keys(data.status_counts);
+    const statusValues = Object.values(data.status_counts);
+    const statusColors = statusLabels.map(s => {
+      if (s === 'success') return '#10b981';
+      if (s === 'failed') return '#ef4444';
+      if (s === 'dead_lettered') return '#f97316';
+      return '#6b7280';
+    });
+
+    if (statusLabels.length > 0) {
+      statusChart = new ApexCharts(document.querySelector('#status-chart'), {
+        series: statusValues, labels: statusLabels,
+        chart: { type: 'donut', height: 280, background: 'transparent', foreColor: t.text },
+        colors: statusColors,
+        legend: { position: 'bottom', labels: { colors: t.text } },
+        plotOptions: { pie: { donut: { size: '60%' } } },
+        dataLabels: { style: { colors: [t.dataLabel] } },
+        tooltip: { theme: t.tooltip }
+      });
+      statusChart.render();
+    } else {
+      document.querySelector('#status-chart').innerHTML =
+        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">No data yet</p>';
+    }
+  }
+
+  // Fetch data and render
+  let chartData = null;
   fetch('<%= pgbus.api_insights_path %>')
     .then(r => r.json())
-    .then(data => {
-      // Throughput chart
-      const throughputData = data.throughput.map(p => ({
-        x: new Date(p.time).getTime(),
-        y: p.count
-      }));
-
-      new ApexCharts(document.querySelector('#throughput-chart'), {
-        series: [{ name: 'Jobs/min', data: throughputData }],
-        chart: {
-          type: 'area',
-          height: 280,
-          toolbar: { show: false },
-          background: 'transparent',
-          foreColor: textColor
-        },
-        stroke: { curve: 'smooth', width: 2 },
-        fill: {
-          type: 'gradient',
-          gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] }
-        },
-        colors: ['#6366f1'],
-        xaxis: { type: 'datetime', labels: { style: { colors: textColor } } },
-        yaxis: { labels: { style: { colors: textColor } } },
-        grid: { borderColor: gridColor },
-        tooltip: { theme: isDark ? 'dark' : 'light' },
-        dataLabels: { enabled: false }
-      }).render();
-
-      // Status distribution chart
-      const statusLabels = Object.keys(data.status_counts);
-      const statusValues = Object.values(data.status_counts);
-      const statusColors = statusLabels.map(s => {
-        if (s === 'success') return '#10b981';
-        if (s === 'failed') return '#ef4444';
-        if (s === 'dead_lettered') return '#f97316';
-        return '#6b7280';
-      });
-
-      if (statusLabels.length > 0) {
-        new ApexCharts(document.querySelector('#status-chart'), {
-          series: statusValues,
-          labels: statusLabels,
-          chart: { type: 'donut', height: 280, background: 'transparent', foreColor: textColor },
-          colors: statusColors,
-          legend: { position: 'bottom', labels: { colors: textColor } },
-          plotOptions: { pie: { donut: { size: '60%' } } },
-          dataLabels: { style: { colors: [isDark ? '#fff' : '#000'] } },
-          tooltip: { theme: isDark ? 'dark' : 'light' }
-        }).render();
-      } else {
-        document.querySelector('#status-chart').innerHTML =
-          '<p class="text-center text-sm text-gray-400 pt-24">No data yet</p>';
-      }
-    })
+    .then(data => { chartData = data; renderCharts(data); })
     .catch(() => {
-      document.querySelector('#throughput-chart').innerHTML =
-        '<p class="text-center text-sm text-gray-400 pt-24">Failed to load chart data</p>';
+      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">Failed to load chart data</p>';
+      document.querySelector('#throughput-chart').innerHTML = msg;
+      document.querySelector('#status-chart').innerHTML = msg;
     });
+
+  // Re-render charts when dark mode toggles
+  const origToggle = window.toggleDarkMode;
+  window.toggleDarkMode = function() {
+    origToggle();
+    if (chartData) renderCharts(chartData);
+  };
 </script>

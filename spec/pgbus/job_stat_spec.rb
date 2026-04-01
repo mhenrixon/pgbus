@@ -4,17 +4,7 @@ require "spec_helper"
 
 RSpec.describe Pgbus::JobStat do
   before do
-    stub_const("Pgbus::JobStat", Class.new do
-      def self.create!(**attrs); end
-
-      def self.record!(job_class:, queue_name:, status:, duration_ms:)
-        create!(job_class: job_class, queue_name: queue_name, status: status, duration_ms: duration_ms)
-      rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus] Failed to record job stat: #{e.message}" }
-      end
-    end)
-
-    allow(described_class).to receive(:create!)
+    allow(described_class).to receive_messages(create!: nil, table_exists?: true)
   end
 
   describe ".record!" do
@@ -32,6 +22,14 @@ RSpec.describe Pgbus::JobStat do
         status: "success",
         duration_ms: 42
       )
+    end
+
+    it "skips when table does not exist" do
+      allow(described_class).to receive(:table_exists?).and_return(false)
+
+      described_class.record!(job_class: "X", queue_name: "q", status: "s", duration_ms: 0)
+
+      expect(described_class).not_to have_received(:create!)
     end
 
     it "rescues errors gracefully" do

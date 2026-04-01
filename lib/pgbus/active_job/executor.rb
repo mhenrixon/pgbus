@@ -11,10 +11,9 @@ module Pgbus
       end
 
       def execute(message, queue_name, source_queue: nil)
+        execution_start = monotonic_now
         payload = JSON.parse(message.message)
         read_count = message.read_ct.to_i
-
-        execution_start = monotonic_now
 
         if read_count > config.max_retries
           handle_dead_letter(message, queue_name, payload, source_queue: source_queue)

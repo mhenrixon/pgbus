@@ -42,7 +42,7 @@
               <%= pgbus_duration(lock[:age_seconds]) %>
             <% end %>
           </td>
-          <td class="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-400"><%= pgbus_time_ago(lock[:expires_at]) %></td>
+          <td class="px-4 py-3 text-sm text-right text-gray-500 dark:text-gray-400"><%= pgbus_time_ago_future(lock[:expires_at]) %></td>
         </tr>
       <% end %>
       <% if @locks.empty? %>

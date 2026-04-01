@@ -24,7 +24,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
     # Stub stat recording
     stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
-    allow(Pgbus::JobStat).to receive(:record!)
+    allow(Pgbus::JobStat).to receive_messages(record!: nil, table_exists?: true)
   end
 
   describe "#execute" do
