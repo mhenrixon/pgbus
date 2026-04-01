@@ -66,7 +66,7 @@ module Pgbus
 
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           worker = Worker.new(queues: queues, threads: threads, config: config)
           worker.run
@@ -86,7 +86,7 @@ module Pgbus
       def fork_dispatcher
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           dispatcher = Dispatcher.new(config: config)
           dispatcher.run
@@ -113,7 +113,7 @@ module Pgbus
       def fork_scheduler
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           load_recurring_config
           scheduler = Recurring::Scheduler.new(config: config)
@@ -168,7 +168,7 @@ module Pgbus
 
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           consumer = Consumer.new(topics: topics, threads: threads, config: config)
           consumer.run
@@ -194,7 +194,7 @@ module Pgbus
       def fork_outbox_poller
         pid = fork do
           restore_signals
-          setup_child_signals
+          setup_child_process
           load_rails_app
           poller = Outbox::Poller.new(config: config)
           poller.run
@@ -265,7 +265,11 @@ module Pgbus
         end
       end
 
-      def setup_child_signals
+      def setup_child_process
+        # Reset the PGMQ client so this forked process gets a fresh
+        # PG::Connection instead of inheriting the parent's (which is
+        # in undefined state post-fork and not thread-safe to share).
+        Pgbus.reset_client!
         %w[INT TERM QUIT].each do |sig|
           trap(sig) { @shutting_down = true }
         end

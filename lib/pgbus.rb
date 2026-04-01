@@ -63,6 +63,14 @@ module Pgbus
       @configuration = nil
     end
 
+    # Reinitialize the PGMQ client with a fresh connection.
+    # Must be called after fork to avoid inheriting the parent's
+    # PG::Connection which is in undefined state post-fork.
+    def reset_client!
+      @client&.close
+      @client = nil
+    end
+
     def logger
       configuration.logger
     end
