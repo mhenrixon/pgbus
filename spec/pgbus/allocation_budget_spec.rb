@@ -19,6 +19,7 @@ RSpec.describe Pgbus::Client do
       c.instance_variable_set(:@config, Pgbus.configuration)
       c.instance_variable_set(:@pgmq_mutex, Mutex.new)
       c.instance_variable_set(:@queues_created, all_queues_created)
+      c.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
     end
   end
 
@@ -100,6 +101,7 @@ RSpec.describe Pgbus::Client do
         c.instance_variable_set(:@config, Pgbus.configuration)
         c.instance_variable_set(:@pgmq_mutex, Mutex.new)
         c.instance_variable_set(:@queues_created, all_queues_created)
+        c.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
       end
     end
 
