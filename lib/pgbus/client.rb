@@ -32,14 +32,11 @@ module Pgbus
       )
       @pgmq_mutex = Mutex.new
       @queues_created = Concurrent::Map.new
+      @queue_strategy = QueueFactory.for(config)
     end
 
     def ensure_queue(name)
-      if priority_enabled?
-        config.priority_queue_names(name).each { |pq| ensure_single_queue(pq) }
-      else
-        ensure_single_queue(config.queue_name(name))
-      end
+      @queue_strategy.physical_queue_names(name).each { |pq| ensure_single_queue(pq) }
     rescue PGMQ::Errors::ConnectionError => e
       raise Pgbus::SchemaNotReady,
             "PGMQ schema is not available (#{e.message}). Run `rails db:migrate` for the pgbus database."
@@ -56,7 +53,7 @@ module Pgbus
     end
 
     def send_message(queue_name, payload, headers: nil, delay: 0, priority: nil)
-      target = resolve_target_queue(queue_name, priority)
+      target = @queue_strategy.target_queue(queue_name, priority)
       ensure_queue(queue_name)
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
@@ -90,7 +87,11 @@ module Pgbus
     # Read from priority sub-queues, highest priority (p0) first.
     # Returns [priority_queue_name, messages] pairs.
     def read_batch_prioritized(queue_name, qty:, vt: nil)
-      return (read_batch(queue_name, qty: qty, vt: vt) || []).map { |m| [config.queue_name(queue_name), m] } unless priority_enabled?
+      unless @queue_strategy.priority?
+        return (read_batch(queue_name, qty: qty, vt: vt) || []).map do |m|
+          [config.queue_name(queue_name), m]
+        end
+      end
 
       remaining = qty
       results = []
@@ -236,21 +237,6 @@ module Pgbus
           @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
         end
         true
-      end
-    end
-
-    def priority_enabled?
-      config.priority_levels && config.priority_levels > 1
-    end
-
-    def resolve_target_queue(queue_name, priority)
-      if priority_enabled? && priority
-        clamped = priority.clamp(0, config.priority_levels - 1)
-        config.priority_queue_name(queue_name, clamped)
-      elsif priority_enabled?
-        config.priority_queue_name(queue_name, config.default_priority.clamp(0, config.priority_levels - 1))
-      else
-        config.queue_name(queue_name)
       end
     end
 

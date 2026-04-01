@@ -26,6 +26,7 @@ module Pgbus
         @pool = Concurrent::FixedThreadPool.new(threads)
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @queue_lock = QueueLock.new if @single_active_consumer
+        @wake_signal = WakeSignal.new
       end
 
       def stats
@@ -57,7 +58,7 @@ module Pgbus
           break if @lifecycle.draining? && @pool.queue_length.zero?
 
           claim_and_execute if @lifecycle.can_process?
-          interruptible_sleep(config.polling_interval) if @lifecycle.draining? || @lifecycle.paused?
+          @wake_signal.wait(timeout: config.polling_interval) if @lifecycle.draining? || @lifecycle.paused?
         end
 
         shutdown
@@ -66,11 +67,13 @@ module Pgbus
       def graceful_shutdown
         Pgbus.logger.info { "[Pgbus] Worker shutting down gracefully..." }
         @lifecycle.transition_to(:draining)
+        @wake_signal.notify!
       end
 
       def immediate_shutdown
         Pgbus.logger.warn { "[Pgbus] Worker shutting down immediately!" }
         @lifecycle.transition_to!(:stopped)
+        @wake_signal.notify!
         @pool.kill
       end
 
@@ -198,6 +201,7 @@ module Pgbus
         return unless @lifecycle.running? && recycle_needed?
 
         @lifecycle.transition_to(:draining)
+        @wake_signal.notify!
       end
 
       def recycle_needed?
