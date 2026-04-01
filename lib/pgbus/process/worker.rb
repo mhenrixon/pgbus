@@ -107,7 +107,8 @@ module Pgbus
         dlq_suffix = config.dead_letter_queue_suffix
         prefix = "#{config.queue_prefix}_"
 
-        all_queues = ActiveRecord::Base.connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+        all_queues = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
         resolved = all_queues
                    .reject { |q| q.end_with?(dlq_suffix) }
                    .map { |q| q.delete_prefix(prefix) }

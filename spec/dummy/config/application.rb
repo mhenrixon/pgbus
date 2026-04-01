@@ -9,6 +9,9 @@ require "action_view/railtie"
 
 Bundler.require(*Rails.groups)
 require "pgbus"
+# Ensure the engine is loaded even if pgbus was required before Rails
+# (e.g. when unit specs using spec_helper run before system specs).
+require "pgbus/engine"
 
 module Dummy
   class Application < Rails::Application

@@ -85,5 +85,38 @@ RSpec.describe Pgbus::Configuration do
       hide_const("ActiveRecord::Base") if defined?(ActiveRecord::Base)
       expect { config.connection_options }.to raise_error(Pgbus::ConfigurationError)
     end
+
+    context "with connects_to configured" do
+      let(:raw_connection) { double("raw_connection") }
+      let(:ar_connection) { double("ar_connection", raw_connection: raw_connection) }
+
+      before do
+        config.connects_to = { database: { writing: :pgbus } }
+        stub_const("Pgbus::ApplicationRecord", Class.new)
+        allow(Pgbus::ApplicationRecord).to receive(:connection).and_return(ar_connection)
+      end
+
+      it "returns a lambda that uses Pgbus::ApplicationRecord connection" do
+        result = config.connection_options
+        expect(result).to be_a(Proc)
+        expect(result.call).to eq(raw_connection)
+      end
+    end
+
+    context "without connects_to" do
+      let(:raw_connection) { double("raw_connection") }
+      let(:ar_connection) { double("ar_connection", raw_connection: raw_connection) }
+
+      before do
+        stub_const("ActiveRecord::Base", Class.new)
+        allow(ActiveRecord::Base).to receive(:connection).and_return(ar_connection)
+      end
+
+      it "returns a lambda that uses ActiveRecord::Base connection" do
+        result = config.connection_options
+        expect(result).to be_a(Proc)
+        expect(result.call).to eq(raw_connection)
+      end
+    end
   end
 end

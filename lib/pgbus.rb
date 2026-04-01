@@ -18,14 +18,31 @@ module Pgbus
         loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
-        # Register app/models for non-Rails usage (specs, standalone).
-        # When Rails is running, the Engine handles autoloading app/models.
-        unless defined?(Rails::Engine)
-          models_dir = File.expand_path("../app/models", __dir__)
-          loader.push_dir(models_dir) if File.directory?(models_dir)
-        end
         loader
       end
+    end
+
+    # Separate loader for app/models used only in non-Rails contexts (specs,
+    # standalone scripts). When the Engine boots, Rails' autoloader takes over
+    # app/models and this loader is torn down to avoid conflicts.
+    def models_loader
+      models_dir = File.expand_path("../app/models", __dir__)
+      return nil unless File.directory?(models_dir)
+
+      @models_loader ||= begin
+        loader = Zeitwerk::Loader.new
+        loader.tag = "pgbus-models"
+        loader.push_dir(models_dir)
+        loader.setup
+        loader
+      end
+    end
+
+    def teardown_models_loader!
+      return unless @models_loader
+
+      @models_loader.unregister
+      @models_loader = nil
     end
 
     def configuration
@@ -52,6 +69,10 @@ module Pgbus
   end
 
   loader.setup
+
+  # In non-Rails contexts, set up model autoloading via a separate loader.
+  # This is torn down by the Engine initializer when Rails boots.
+  models_loader unless defined?(Rails::Engine)
 end
 
 require "active_job/queue_adapters/pgbus_adapter" if defined?(ActiveJob)
