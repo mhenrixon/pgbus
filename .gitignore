@@ -18,3 +18,4 @@ spec/dummy/tmp/
 tmp/capybara/
 bin/rspec
 bin/rubocop
+.rspec_integration_status
