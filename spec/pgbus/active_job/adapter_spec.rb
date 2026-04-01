@@ -22,7 +22,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       result = adapter.enqueue(job)
 
       expect(Pgbus::Serializer).to have_received(:serialize_job_hash).with(job)
-      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0)
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0, priority: nil)
       expect(job).to have_received(:provider_job_id=).with(42)
       expect(result).to eq(job)
     end
@@ -39,7 +39,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         adapter.enqueue(job)
 
-        expect(mock_client).to have_received(:send_message).with("default", anything, delay: 0)
+        expect(mock_client).to have_received(:send_message).with("default", anything, delay: 0, priority: nil)
       end
     end
   end
@@ -51,7 +51,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       result = adapter.enqueue_at(job, future_time)
 
-      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value_between(59, 61))
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value_between(59, 61), priority: nil)
       expect(job).to have_received(:provider_job_id=).with(99)
       expect(result).to eq(job)
     end
@@ -63,7 +63,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         adapter.enqueue_at(job, past_time)
 
-        expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0)
+        expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0, priority: nil)
       end
     end
   end
@@ -94,7 +94,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       adapter.enqueue(job)
 
       expect(Pgbus::Concurrency::Semaphore).to have_received(:acquire).with("TestJob-42", 1, 900)
-      expect(mock_client).to have_received(:send_message).with("default", concurrency_payload, delay: 0)
+      expect(mock_client).to have_received(:send_message).with("default", concurrency_payload, delay: 0, priority: nil)
       expect(job).to have_received(:provider_job_id=).with(42)
     end
 
@@ -172,7 +172,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       adapter.enqueue_all([job, job2])
 
-      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value > 0)
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value > 0, priority: nil)
       expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash])
     end
 

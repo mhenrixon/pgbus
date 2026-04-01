@@ -28,13 +28,10 @@ module Pgbus
     end
 
     def ensure_queue(name)
-      full_name = config.queue_name(name)
-      return if @queues_created[full_name]
-
-      @queues_created.compute_if_absent(full_name) do
-        @pgmq.create(full_name)
-        @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
-        true
+      if priority_enabled?
+        config.priority_queue_names(name).each { |pq| ensure_single_queue(pq) }
+      else
+        ensure_single_queue(config.queue_name(name))
       end
     rescue PGMQ::Errors::ConnectionError => e
       raise Pgbus::SchemaNotReady,
@@ -51,11 +48,11 @@ module Pgbus
       end
     end
 
-    def send_message(queue_name, payload, headers: nil, delay: 0)
-      full_name = config.queue_name(queue_name)
+    def send_message(queue_name, payload, headers: nil, delay: 0, priority: nil)
+      target = resolve_target_queue(queue_name, priority)
       ensure_queue(queue_name)
-      Instrumentation.instrument("pgbus.client.send_message", queue: full_name) do
-        @pgmq.produce(full_name, serialize(payload), headers: headers && serialize(headers), delay: delay)
+      Instrumentation.instrument("pgbus.client.send_message", queue: target) do
+        @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay)
       end
     end
 
@@ -83,6 +80,28 @@ module Pgbus
       end
     end
 
+    # Read from priority sub-queues, highest priority (p0) first.
+    # Returns [priority_queue_name, messages] pairs.
+    def read_batch_prioritized(queue_name, qty:, vt: nil)
+      return read_batch(queue_name, qty: qty, vt: vt)&.map { |m| [config.queue_name(queue_name), m] } unless priority_enabled?
+
+      remaining = qty
+      results = []
+
+      config.priority_queue_names(queue_name).each do |pq_name|
+        break if remaining <= 0
+
+        msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
+          @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining)
+        end || []
+
+        msgs.each { |m| results << [pq_name, m] }
+        remaining -= msgs.size
+      end
+
+      results
+    end
+
     def read_with_poll(queue_name, qty:, vt: nil, max_poll_seconds: 5, poll_interval_ms: 100)
       full_name = config.queue_name(queue_name)
       @pgmq.read_with_poll(
@@ -102,6 +121,10 @@ module Pgbus
     def archive_message(queue_name, msg_id)
       full_name = config.queue_name(queue_name)
       @pgmq.archive(full_name, msg_id)
+    end
+
+    def archive_from_queue(full_queue_name, msg_id)
+      @pgmq.archive(full_queue_name, msg_id)
     end
 
     def extend_visibility(queue_name, msg_id, vt:)
@@ -148,6 +171,25 @@ module Pgbus
       @pgmq.purge_queue(config.queue_name(queue_name))
     end
 
+    def purge_archive(queue_name, older_than:, batch_size: 1000)
+      full_name = config.queue_name(queue_name)
+      sanitized = full_name.gsub(/[^a-zA-Z0-9_]/, "")
+      total = 0
+
+      loop do
+        deleted = @pgmq.pool.with do |conn|
+          conn.exec_params(
+            "DELETE FROM pgmq.a_#{sanitized} WHERE ctid = ANY(ARRAY(SELECT ctid FROM pgmq.a_#{sanitized} WHERE enqueued_at < $1 LIMIT $2))",
+            [older_than, batch_size]
+          ).cmd_tuples
+        end
+        total += deleted
+        break if deleted < batch_size
+      end
+
+      total
+    end
+
     # Topic routing
     def bind_topic(pattern, queue_name)
       full_name = config.queue_name(queue_name)
@@ -169,6 +211,31 @@ module Pgbus
     end
 
     private
+
+    def ensure_single_queue(full_name)
+      return if @queues_created[full_name]
+
+      @queues_created.compute_if_absent(full_name) do
+        @pgmq.create(full_name)
+        @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
+        true
+      end
+    end
+
+    def priority_enabled?
+      config.priority_levels && config.priority_levels > 1
+    end
+
+    def resolve_target_queue(queue_name, priority)
+      if priority_enabled? && priority
+        clamped = priority.clamp(0, config.priority_levels - 1)
+        config.priority_queue_name(queue_name, clamped)
+      elsif priority_enabled?
+        config.priority_queue_name(queue_name, config.default_priority.clamp(0, config.priority_levels - 1))
+      else
+        config.queue_name(queue_name)
+      end
+    end
 
     def serialize(data)
       case data

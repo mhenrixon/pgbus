@@ -192,6 +192,65 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
   end
 
+  describe "#compact_archives (private)" do
+    let(:connection) { double("connection") }
+
+    before do
+      dispatcher.config.archive_retention = 7 * 24 * 3600
+      prefix = dispatcher.config.queue_prefix
+      allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
+      allow(connection).to receive(:select_values).and_return(["#{prefix}_default", "#{prefix}_events"])
+      allow(mock_client).to receive(:purge_archive).and_return(0)
+    end
+
+    it "purges archive entries older than retention period" do
+      allow(mock_client).to receive(:purge_archive).and_return(5)
+
+      dispatcher.send(:compact_archives)
+
+      expect(mock_client).to have_received(:purge_archive).with("default", older_than: a_kind_of(Time), batch_size: 1000)
+      expect(mock_client).to have_received(:purge_archive).with("events", older_than: a_kind_of(Time), batch_size: 1000)
+    end
+
+    it "skips when archive_retention is nil" do
+      dispatcher.config.archive_retention = nil
+
+      dispatcher.send(:compact_archives)
+
+      expect(mock_client).not_to have_received(:purge_archive)
+    end
+
+    it "rescues errors gracefully" do
+      allow(connection).to receive(:select_values).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:compact_archives) }.not_to raise_error
+    end
+
+    it "rescues per-queue errors without stopping others" do
+      call_count = 0
+      allow(mock_client).to receive(:purge_archive) do |queue_name, **_opts|
+        call_count += 1
+        raise StandardError, "fail" if queue_name == "default"
+
+        3
+      end
+
+      dispatcher.send(:compact_archives)
+
+      expect(call_count).to eq(2)
+    end
+  end
+
+  describe "#run_maintenance includes archive compaction" do
+    it "runs compact_archives when interval has elapsed" do
+      allow(dispatcher).to receive(:compact_archives)
+
+      dispatcher.instance_variable_set(:@last_archive_compaction_at, Time.now - 3601)
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:compact_archives)
+    end
+  end
+
   describe "#cleanup_recurring_executions (private)" do
     it "deletes old recurring execution records" do
       relation = instance_double(ActiveRecord::Relation, delete_all: 5)

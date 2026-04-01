@@ -103,7 +103,7 @@ RSpec.describe Pgbus::Recurring::Schedule do
       schedule.enqueue_task(task, run_at: run_at)
 
       expect(mock_client).to have_received(:send_message).with(
-        "pgbus_maintenance",
+        "maintenance",
         anything,
         headers: anything
       )
@@ -115,7 +115,7 @@ RSpec.describe Pgbus::Recurring::Schedule do
       schedule.enqueue_task(task_no_queue, run_at: run_at)
 
       expect(mock_client).to have_received(:send_message).with(
-        "pgbus_default",
+        "default",
         anything,
         headers: anything
       )

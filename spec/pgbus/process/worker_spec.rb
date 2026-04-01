@@ -7,6 +7,7 @@ RSpec.describe Pgbus::Process::Worker do
   let(:mock_client) { build_mock_client }
   let(:executor) { instance_double(Pgbus::ActiveJob::Executor) }
   let(:pool) { instance_double(Concurrent::FixedThreadPool, max_length: 5, queue_length: 0, shutdown: true, kill: true) }
+  let(:circuit_breaker) { instance_double(Pgbus::CircuitBreaker, paused?: false, record_success: nil, record_failure: nil) }
   let(:worker) { described_class.new(queues: %w[default], threads: 5) }
 
   before do
@@ -14,6 +15,7 @@ RSpec.describe Pgbus::Process::Worker do
     allow(Pgbus).to receive(:client).and_return(mock_client)
     allow(Pgbus::ActiveJob::Executor).to receive(:new).and_return(executor)
     allow(Concurrent::FixedThreadPool).to receive(:new).and_return(pool)
+    allow(Pgbus::CircuitBreaker).to receive(:new).and_return(circuit_breaker)
   end
 
   describe "#initialize" do
@@ -27,6 +29,7 @@ RSpec.describe Pgbus::Process::Worker do
     it "initializes stats tracking" do
       expect(worker.stats[:jobs_processed]).to eq(0)
       expect(worker.stats[:jobs_failed]).to eq(0)
+      expect(worker.stats[:in_flight]).to eq(0)
       expect(worker.stats[:started_at]).to be_a(Time)
     end
   end
@@ -103,13 +106,74 @@ RSpec.describe Pgbus::Process::Worker do
     end
   end
 
+  describe "prefetch flow control" do
+    before { allow(worker).to receive(:interruptible_sleep) }
+
+    context "when prefetch_limit is nil (default)" do
+      before { worker.config.prefetch_limit = nil }
+
+      it "does not cap fetch quantity" do
+        allow(mock_client).to receive(:read_batch).and_return([])
+        worker.send(:claim_and_execute)
+        expect(mock_client).to have_received(:read_batch).with("default", qty: 5)
+      end
+    end
+
+    context "when prefetch_limit is configured" do
+      before { worker.config.prefetch_limit = 3 }
+      after { worker.config.prefetch_limit = nil }
+
+      it "caps fetch to prefetch_limit when below idle threads" do
+        allow(mock_client).to receive(:read_batch).and_return([])
+        worker.send(:claim_and_execute)
+        expect(mock_client).to have_received(:read_batch).with("default", qty: 3)
+      end
+
+      it "sleeps when in_flight >= prefetch_limit" do
+        worker.instance_variable_get(:@in_flight).value = 3
+        worker.send(:claim_and_execute)
+        expect(mock_client).not_to have_received(:read_batch)
+        expect(worker).to have_received(:interruptible_sleep)
+      end
+
+      it "uses min of idle and available prefetch" do
+        # 2 in flight, limit 3 => available = 1, idle = 5 => fetch 1
+        worker.instance_variable_get(:@in_flight).value = 2
+        allow(mock_client).to receive(:read_batch).and_return([])
+        worker.send(:claim_and_execute)
+        expect(mock_client).to have_received(:read_batch).with("default", qty: 1)
+      end
+    end
+
+    it "increments in_flight when messages are fetched" do
+      msg = build_message_double(msg_id: 1, message: '{"job_class":"TestJob"}')
+      allow(mock_client).to receive(:read_batch).and_return([msg])
+      allow(pool).to receive(:post).and_yield
+
+      allow(executor).to receive(:execute).and_return(:success)
+      worker.send(:claim_and_execute)
+      # After process_message completes (via yield), in_flight should be back to 0
+      expect(worker.stats[:in_flight]).to eq(0)
+    end
+
+    it "decrements in_flight even when executor raises" do
+      msg = build_message_double(msg_id: 1, message: '{"job_class":"TestJob"}')
+      allow(mock_client).to receive(:read_batch).and_return([msg])
+      allow(pool).to receive(:post).and_yield
+
+      allow(executor).to receive(:execute).and_raise(StandardError, "boom")
+      worker.send(:claim_and_execute)
+      expect(worker.stats[:in_flight]).to eq(0)
+    end
+  end
+
   describe "#process_message (private)" do
     let(:message) { build_message_double(msg_id: 1, message: '{"job_class":"TestJob"}') }
 
     it "executes the message and increments jobs_processed" do
       allow(executor).to receive(:execute).and_return(:success)
       worker.send(:process_message, message, "default")
-      expect(executor).to have_received(:execute).with(message, "default")
+      expect(executor).to have_received(:execute).with(message, "default", source_queue: nil)
       expect(worker.stats[:jobs_processed]).to eq(1)
     end
 
@@ -124,6 +188,51 @@ RSpec.describe Pgbus::Process::Worker do
       allow(executor).to receive(:execute).and_raise(StandardError, "boom")
       worker.send(:process_message, message, "default")
       expect(worker.stats[:jobs_failed]).to eq(1)
+    end
+
+    it "signals circuit breaker success on successful execution" do
+      allow(executor).to receive(:execute).and_return(:success)
+      worker.send(:process_message, message, "default")
+      expect(circuit_breaker).to have_received(:record_success).with("default")
+    end
+
+    it "signals circuit breaker failure on failed execution" do
+      allow(executor).to receive(:execute).and_return(:failed)
+      worker.send(:process_message, message, "default")
+      expect(circuit_breaker).to have_received(:record_failure).with("default")
+    end
+
+    it "signals circuit breaker failure when executor raises" do
+      allow(executor).to receive(:execute).and_raise(StandardError, "boom")
+      worker.send(:process_message, message, "default")
+      expect(circuit_breaker).to have_received(:record_failure).with("default")
+    end
+  end
+
+  describe "circuit breaker integration" do
+    before { allow(worker).to receive(:interruptible_sleep) }
+
+    it "skips paused queues" do
+      allow(circuit_breaker).to receive(:paused?).with("default").and_return(true)
+      allow(mock_client).to receive(:read_batch).and_return([])
+
+      worker.send(:claim_and_execute)
+      expect(mock_client).not_to have_received(:read_batch)
+    end
+
+    context "with multiple queues" do
+      let(:worker) { described_class.new(queues: %w[default events], threads: 4) }
+
+      it "only reads from non-paused queues" do
+        allow(circuit_breaker).to receive(:paused?).with("default").and_return(true)
+        allow(circuit_breaker).to receive(:paused?).with("events").and_return(false)
+        allow(mock_client).to receive(:read_batch).and_return([])
+
+        worker.send(:claim_and_execute)
+        expect(mock_client).not_to have_received(:read_batch).with("default", anything)
+        # With only one active queue, pool max_length (5) is the fetch qty
+        expect(mock_client).to have_received(:read_batch).with("events", qty: 5)
+      end
     end
   end
 end

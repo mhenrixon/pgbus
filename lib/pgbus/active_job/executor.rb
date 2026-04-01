@@ -10,12 +10,12 @@ module Pgbus
         @config = config
       end
 
-      def execute(message, queue_name)
+      def execute(message, queue_name, source_queue: nil)
         payload = JSON.parse(message.message)
         read_count = message.read_ct.to_i
 
         if read_count > config.max_retries
-          handle_dead_letter(message, queue_name, payload)
+          handle_dead_letter(message, queue_name, payload, source_queue: source_queue)
           signal_concurrency(payload)
           signal_batch_discarded(payload)
           return :dead_lettered
@@ -28,7 +28,7 @@ module Pgbus
         Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
           job = ::ActiveJob::Base.deserialize(payload)
           execute_job(job)
-          client.archive_message(queue_name, message.msg_id.to_i)
+          archive_from(queue_name, message.msg_id.to_i, source_queue: source_queue)
           job_succeeded = true
         end
 
@@ -109,12 +109,29 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Batch discard signal failed: #{e.message}" }
       end
 
-      def handle_dead_letter(message, queue_name, payload)
+      def archive_from(queue_name, msg_id, source_queue: nil)
+        if source_queue
+          client.archive_from_queue(source_queue, msg_id)
+        else
+          client.archive_message(queue_name, msg_id)
+        end
+      end
+
+      def handle_dead_letter(message, queue_name, payload, source_queue: nil)
         Pgbus.logger.warn do
           job_class = payload["job_class"] || "unknown"
           "[Pgbus] Moving job #{job_class} to dead letter queue after #{message.read_ct} attempts"
         end
-        client.move_to_dead_letter(queue_name, message)
+        if source_queue
+          client.ensure_dead_letter_queue(queue_name)
+          dlq_name = config.dead_letter_queue_name(queue_name)
+          client.pgmq.transaction do |txn|
+            txn.produce(dlq_name, message.message, headers: message.headers)
+            txn.delete(source_queue, message.msg_id.to_i)
+          end
+        else
+          client.move_to_dead_letter(queue_name, message)
+        end
       end
     end
   end

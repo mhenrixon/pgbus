@@ -40,6 +40,35 @@ RSpec.describe Pgbus::Configuration do
       expect(config.max_worker_lifetime).to be_nil
     end
 
+    it "has no prefetch_limit by default" do
+      expect(config.prefetch_limit).to be_nil
+    end
+
+    it "has circuit breaker enabled by default" do
+      expect(config.circuit_breaker_enabled).to be true
+      expect(config.circuit_breaker_threshold).to eq(5)
+      expect(config.circuit_breaker_base_backoff).to eq(30)
+      expect(config.circuit_breaker_max_backoff).to eq(600)
+    end
+
+    it "has no priority levels by default" do
+      expect(config.priority_levels).to be_nil
+      expect(config.default_priority).to eq(1)
+    end
+
+    it "has default archive retention of 7 days" do
+      expect(config.archive_retention).to eq(7 * 24 * 3600)
+      expect(config.archive_compaction_interval).to eq(3600)
+      expect(config.archive_compaction_batch_size).to eq(1000)
+    end
+
+    it "has outbox disabled by default" do
+      expect(config.outbox_enabled).to be false
+      expect(config.outbox_poll_interval).to eq(1.0)
+      expect(config.outbox_batch_size).to eq(100)
+      expect(config.outbox_retention).to eq(24 * 3600)
+    end
+
     it "has default recurring schedule interval" do
       expect(config.recurring_schedule_interval).to eq(1.0)
     end
@@ -66,6 +95,56 @@ RSpec.describe Pgbus::Configuration do
   describe "#dead_letter_queue_name" do
     it "appends dlq suffix to prefixed name" do
       expect(config.dead_letter_queue_name("critical")).to eq("pgbus_critical_dlq")
+    end
+  end
+
+  describe "#priority_queue_name" do
+    it "returns the priority sub-queue name" do
+      expect(config.priority_queue_name("critical", 0)).to eq("pgbus_critical_p0")
+      expect(config.priority_queue_name("critical", 2)).to eq("pgbus_critical_p2")
+    end
+  end
+
+  describe "#priority_queue_names" do
+    it "returns single queue name when priority_levels is nil" do
+      expect(config.priority_queue_names("default")).to eq(["pgbus_default"])
+    end
+
+    it "returns single queue name when priority_levels is 1" do
+      config.priority_levels = 1
+      expect(config.priority_queue_names("default")).to eq(["pgbus_default"])
+    end
+
+    it "returns sub-queue names when priority_levels > 1" do
+      config.priority_levels = 3
+      expect(config.priority_queue_names("default")).to eq(%w[pgbus_default_p0 pgbus_default_p1 pgbus_default_p2])
+    end
+  end
+
+  describe "#validate!" do
+    it "rejects invalid prefetch_limit" do
+      config.prefetch_limit = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /prefetch_limit/)
+    end
+
+    it "accepts valid prefetch_limit" do
+      config.prefetch_limit = 10
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects invalid priority_levels" do
+      config.priority_levels = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /priority_levels/)
+    end
+
+    it "rejects priority_levels > 10" do
+      config.priority_levels = 11
+      expect { config.validate! }.to raise_error(ArgumentError, /priority_levels/)
+    end
+
+    it "accepts valid priority_levels" do
+      config.priority_levels = 3
+      expect { config.validate! }.not_to raise_error
     end
   end
 

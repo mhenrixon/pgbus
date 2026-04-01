@@ -55,6 +55,9 @@ module Pgbus
 
         # Boot event consumers if configured
         boot_consumers
+
+        # Boot outbox poller if configured
+        boot_outbox_poller
       end
 
       def fork_worker(worker_config)
@@ -182,6 +185,32 @@ module Pgbus
         Pgbus.logger.error { "[Pgbus] Fork failed for consumer: #{e.message}" }
       end
 
+      def boot_outbox_poller
+        return unless config.outbox_enabled
+
+        fork_outbox_poller
+      end
+
+      def fork_outbox_poller
+        pid = fork do
+          restore_signals
+          setup_child_signals
+          load_rails_app
+          poller = Outbox::Poller.new(config: config)
+          poller.run
+        end
+
+        unless pid
+          Pgbus.logger.error { "[Pgbus] Failed to fork outbox poller" }
+          return
+        end
+
+        @forks[pid] = { type: :outbox_poller }
+        Pgbus.logger.info { "[Pgbus] Forked outbox poller pid=#{pid}" }
+      rescue Errno::EAGAIN, Errno::ENOMEM => e
+        Pgbus.logger.error { "[Pgbus] Fork failed for outbox poller: #{e.message}" }
+      end
+
       def monitor_loop
         loop do
           break if @shutting_down && @forks.empty?
@@ -223,6 +252,8 @@ module Pgbus
           fork_scheduler
         when :consumer
           fork_consumer(info[:config])
+        when :outbox_poller
+          fork_outbox_poller
         end
       end
 

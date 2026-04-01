@@ -292,6 +292,135 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#purge_archive" do
+    let(:pool) { double("pool") }
+    let(:conn) { double("conn") }
+    let(:result) { double("result", cmd_tuples: 50) }
+
+    before do
+      allow(mock_pgmq).to receive(:pool).and_return(pool)
+      allow(pool).to receive(:with).and_yield(conn)
+      allow(conn).to receive(:exec_params).and_return(result)
+    end
+
+    it "deletes archive entries older than the given time" do
+      cutoff = Time.now - 3600
+      client.purge_archive("default", older_than: cutoff)
+
+      expect(conn).to have_received(:exec_params).with(
+        a_string_matching(/DELETE FROM pgmq\.a_pgbus_test_default/),
+        [cutoff, 1000]
+      )
+    end
+
+    it "loops until batch is not full" do
+      small_result = double("result", cmd_tuples: 10)
+      allow(conn).to receive(:exec_params).and_return(result, small_result)
+
+      total = client.purge_archive("default", older_than: Time.now, batch_size: 50)
+      expect(total).to eq(60) # 50 + 10
+    end
+  end
+
+  describe "#read_batch_prioritized" do
+    context "when priority is not enabled" do
+      it "falls back to regular read_batch" do
+        client.read_batch_prioritized("default", qty: 5)
+
+        expect(mock_pgmq).to have_received(:read_batch).with("pgbus_test_default", vt: config.visibility_timeout, qty: 5)
+      end
+    end
+
+    context "when priority is enabled" do
+      before { config.priority_levels = 3 }
+      after { config.priority_levels = nil }
+
+      it "reads from p0 first, then p1, then p2" do
+        # Ensure all sub-queues are created first
+        client.ensure_queue("default")
+
+        msg0 = build_message_double(msg_id: 1, message: '{"p":0}')
+        msg1 = build_message_double(msg_id: 2, message: '{"p":1}')
+
+        allow(mock_pgmq).to receive(:read_batch)
+          .with("pgbus_test_default_p0", anything).and_return([msg0])
+        allow(mock_pgmq).to receive(:read_batch)
+          .with("pgbus_test_default_p1", anything).and_return([msg1])
+        allow(mock_pgmq).to receive(:read_batch)
+          .with("pgbus_test_default_p2", anything).and_return([])
+
+        results = client.read_batch_prioritized("default", qty: 5)
+
+        expect(results.size).to eq(2)
+        expect(results[0][0]).to eq("pgbus_test_default_p0")
+        expect(results[1][0]).to eq("pgbus_test_default_p1")
+      end
+
+      it "stops when qty is filled" do
+        client.ensure_queue("default")
+
+        msgs = 3.times.map { |i| build_message_double(msg_id: i, message: '{}') }
+        allow(mock_pgmq).to receive(:read_batch)
+          .with("pgbus_test_default_p0", anything).and_return(msgs)
+
+        results = client.read_batch_prioritized("default", qty: 3)
+
+        expect(results.size).to eq(3)
+        # Should not read from p1 or p2
+        expect(mock_pgmq).not_to have_received(:read_batch).with("pgbus_test_default_p1", anything)
+      end
+    end
+  end
+
+  describe "#send_message with priority" do
+    context "when priority is enabled" do
+      before { config.priority_levels = 3 }
+      after { config.priority_levels = nil }
+
+      it "routes to the correct sub-queue" do
+        client.send_message("default", { "data" => "test" }, priority: 0)
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_default_p0",
+          '{"data":"test"}',
+          headers: nil,
+          delay: 0
+        )
+      end
+
+      it "uses default_priority when none specified" do
+        config.default_priority = 1
+        client.send_message("default", { "data" => "test" })
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_default_p1",
+          '{"data":"test"}',
+          headers: nil,
+          delay: 0
+        )
+      end
+
+      it "clamps priority to valid range" do
+        client.send_message("default", { "data" => "test" }, priority: 99)
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_default_p2",
+          '{"data":"test"}',
+          headers: nil,
+          delay: 0
+        )
+      end
+    end
+  end
+
+  describe "#archive_from_queue" do
+    it "archives using the raw queue name" do
+      client.archive_from_queue("pgbus_test_default_p0", 42)
+
+      expect(mock_pgmq).to have_received(:archive).with("pgbus_test_default_p0", 42)
+    end
+  end
+
   describe "#bind_topic" do
     it "ensures the queue and binds the pattern" do
       client.bind_topic("orders.#", "events")

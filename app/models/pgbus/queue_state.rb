@@ -1,0 +1,33 @@
+# frozen_string_literal: true
+
+module Pgbus
+  class QueueState < ApplicationRecord
+    self.table_name = "pgbus_queue_states"
+
+    scope :paused, -> { where(paused: true) }
+
+    def self.paused?(queue_name)
+      where(queue_name: queue_name, paused: true).exists?
+    end
+
+    def self.pause!(queue_name, reason: nil)
+      record = find_or_initialize_by(queue_name: queue_name)
+      record.update!(paused: true, paused_reason: reason, paused_at: Time.current)
+      record
+    end
+
+    def self.resume!(queue_name)
+      record = find_by(queue_name: queue_name)
+      return unless record
+
+      record.update!(
+        paused: false,
+        paused_reason: nil,
+        paused_at: nil,
+        circuit_breaker_trip_count: 0,
+        circuit_breaker_resume_at: nil
+      )
+      record
+    end
+  end
+end

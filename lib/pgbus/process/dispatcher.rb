@@ -11,6 +11,8 @@ module Pgbus
       CONCURRENCY_INTERVAL = 300            # Run concurrency cleanup every 5 minutes
       BATCH_CLEANUP_INTERVAL = 3600         # Run batch cleanup every hour
       RECURRING_CLEANUP_INTERVAL = 3600     # Run recurring execution cleanup every hour
+      ARCHIVE_COMPACTION_INTERVAL = 3600    # Run archive compaction every hour
+      OUTBOX_CLEANUP_INTERVAL = 3600 # Run outbox cleanup every hour
 
       attr_reader :config
 
@@ -22,6 +24,8 @@ module Pgbus
         @last_concurrency_at = Time.now
         @last_batch_cleanup_at = Time.now
         @last_recurring_cleanup_at = Time.now
+        @last_archive_compaction_at = Time.now
+        @last_outbox_cleanup_at = Time.now
       end
 
       def run
@@ -64,6 +68,8 @@ module Pgbus
         run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
         run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
         run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
+        run_if_due(now, :@last_archive_compaction_at, archive_compaction_interval) { compact_archives }
+        run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
       end
 
       # Only update the timestamp when the block succeeds.
@@ -119,6 +125,46 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
+      end
+
+      def cleanup_outbox
+        return unless config.outbox_enabled
+
+        retention = config.outbox_retention
+        return unless retention&.positive?
+
+        deleted = OutboxEntry.published_before(Time.now.utc - retention).delete_all
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} published outbox entries" } if deleted.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
+      end
+
+      def archive_compaction_interval
+        config.archive_compaction_interval || ARCHIVE_COMPACTION_INTERVAL
+      end
+
+      def compact_archives
+        retention = config.archive_retention
+        return unless retention&.positive?
+
+        cutoff = Time.now.utc - retention
+        batch_size = config.archive_compaction_batch_size || 1000
+        prefix = config.queue_prefix
+
+        conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+        queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+
+        queue_names.each do |full_name|
+          next unless full_name.start_with?("#{prefix}_")
+
+          stripped = full_name.delete_prefix("#{prefix}_")
+          deleted = Pgbus.client.purge_archive(stripped, older_than: cutoff, batch_size: batch_size)
+          Pgbus.logger.debug { "[Pgbus] Compacted #{deleted} archive entries from #{full_name}" } if deleted.positive?
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Archive compaction failed for #{full_name}: #{e.message}" }
+        end
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Archive compaction failed: #{e.message}" }
       end
 
       def cleanup_recurring_executions

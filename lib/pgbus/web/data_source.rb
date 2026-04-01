@@ -33,7 +33,10 @@ module Pgbus
       # different connection lifecycle than the worker processes).
       def queues_with_metrics
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        queue_names.map { |name| queue_metrics_via_sql(name) }.compact
+        paused_queues = paused_queue_names
+        queue_names.map { |name| queue_metrics_via_sql(name) }.compact.map do |q|
+          q.merge(paused: paused_queues.include?(q[:name]))
+        end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error fetching queue metrics: #{e.class}: #{e.message}" }
         []
@@ -50,6 +53,24 @@ module Pgbus
 
       def purge_queue(name)
         @client.purge_queue(name)
+      end
+
+      def pause_queue(name, reason: nil)
+        QueueState.pause!(name, reason: reason)
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error pausing queue #{name}: #{e.message}" }
+      end
+
+      def resume_queue(name)
+        QueueState.resume!(name)
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error resuming queue #{name}: #{e.message}" }
+      end
+
+      def queue_paused?(name)
+        QueueState.paused?(name)
+      rescue StandardError
+        false
       end
 
       # Jobs (messages in queue tables)
@@ -451,6 +472,26 @@ module Pgbus
         0
       end
 
+      # Outbox
+      def outbox_stats
+        {
+          unpublished: OutboxEntry.unpublished.count,
+          total: OutboxEntry.count,
+          oldest_unpublished_age: oldest_unpublished_age
+        }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching outbox stats: #{e.message}" }
+        { unpublished: 0, total: 0, oldest_unpublished_age: nil }
+      end
+
+      def outbox_entries(page: 1, per_page: 25)
+        offset = (page - 1) * per_page
+        OutboxEntry.order(id: :desc).limit(per_page).offset(offset).to_a
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching outbox entries: #{e.message}" }
+        []
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|
@@ -569,6 +610,21 @@ module Pgbus
         raise ArgumentError, "Invalid queue name: #{name.inspect}" if sanitized.empty?
 
         sanitized
+      end
+
+      def paused_queue_names
+        QueueState.paused.pluck(:queue_name)
+      rescue StandardError
+        []
+      end
+
+      def oldest_unpublished_age
+        oldest = OutboxEntry.unpublished.order(:id).pick(:created_at)
+        return nil unless oldest
+
+        (Time.now - oldest).to_i
+      rescue StandardError
+        nil
       end
 
       def parse_arguments(args)

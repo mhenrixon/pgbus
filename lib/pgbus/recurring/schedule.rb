@@ -87,7 +87,7 @@ module Pgbus
       end
 
       def resolve_queue(task)
-        @config.queue_name(task.queue_name || @config.default_queue)
+        task.queue_name || @config.default_queue
       end
 
       def build_headers(task, run_at)

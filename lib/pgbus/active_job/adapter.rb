@@ -38,18 +38,19 @@ module Pgbus
       def enqueue_with_concurrency(active_job, queue, payload_hash, delay: 0)
         key = Concurrency.extract_key(payload_hash)
         concurrency = concurrency_config(active_job)
+        priority = active_job.try(:priority)
 
         if key && concurrency
           result = Concurrency::Semaphore.acquire(key, concurrency[:limit], concurrency[:duration])
 
           if result == :acquired
-            msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay)
+            msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
             active_job.provider_job_id = msg_id
           else
             handle_conflict(concurrency, active_job, key, queue, payload_hash)
           end
         else
-          msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay)
+          msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
           active_job.provider_job_id = msg_id
         end
 

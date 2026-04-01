@@ -16,13 +16,20 @@ module Pgbus
         @shutting_down = false
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
+        @in_flight = Concurrent::AtomicFixnum.new(0)
         @started_at = Time.now
         @executor = Pgbus::ActiveJob::Executor.new
         @pool = Concurrent::FixedThreadPool.new(threads)
+        @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
       end
 
       def stats
-        { jobs_processed: @jobs_processed.value, jobs_failed: @jobs_failed.value, started_at: @started_at }
+        {
+          jobs_processed: @jobs_processed.value,
+          jobs_failed: @jobs_failed.value,
+          in_flight: @in_flight.value,
+          started_at: @started_at
+        }
       end
 
       def run
@@ -60,6 +67,13 @@ module Pgbus
         idle = @pool.max_length - @pool.queue_length
         return interruptible_sleep(config.polling_interval) if idle <= 0
 
+        if config.prefetch_limit
+          available = config.prefetch_limit - @in_flight.value
+          return interruptible_sleep(config.polling_interval) if available <= 0
+
+          idle = [idle, available].min
+        end
+
         tagged_messages = fetch_messages(idle)
 
         if tagged_messages.empty?
@@ -67,21 +81,27 @@ module Pgbus
           return
         end
 
-        tagged_messages.each do |queue_name, message|
-          @pool.post { process_message(message, queue_name) }
+        tagged_messages.each do |queue_name, message, source_queue|
+          @in_flight.increment
+          @pool.post { process_message(message, queue_name, source_queue: source_queue) }
         end
       end
 
       # Returns an array of [queue_name, message] pairs so we always know
       # which queue each message came from (PGMQ messages don't carry this).
       def fetch_messages(qty)
-        if queues.size == 1
-          queue = queues.first
+        active_queues = queues.reject { |q| @circuit_breaker.paused?(q) }
+        return [] if active_queues.empty?
+
+        if priority_enabled?
+          fetch_prioritized(active_queues, qty)
+        elsif active_queues.size == 1
+          queue = active_queues.first
           messages = Pgbus.client.read_batch(queue, qty: qty) || []
           messages.map { |m| [queue, m] }
         else
-          per_queue = [(qty / queues.size.to_f).ceil, 1].max
-          queues.flat_map do |q|
+          per_queue = [(qty / active_queues.size.to_f).ceil, 1].max
+          active_queues.flat_map do |q|
             (Pgbus.client.read_batch(q, qty: per_queue) || []).map { |m| [q, m] }
           end.first(qty)
         end
@@ -90,13 +110,42 @@ module Pgbus
         []
       end
 
-      def process_message(message, queue_name)
-        result = @executor.execute(message, queue_name)
+      def fetch_prioritized(active_queues, qty)
+        remaining = qty
+        results = []
+
+        active_queues.each do |q|
+          break if remaining <= 0
+
+          batch = Pgbus.client.read_batch_prioritized(q, qty: remaining)
+          batch.each do |physical_queue, message|
+            results << [q, message, physical_queue]
+          end
+          remaining -= batch.size
+        end
+
+        results
+      end
+
+      def priority_enabled?
+        config.priority_levels && config.priority_levels > 1
+      end
+
+      def process_message(message, queue_name, source_queue: nil)
+        result = @executor.execute(message, queue_name, source_queue: source_queue)
         @jobs_processed.increment
-        @jobs_failed.increment if result == :failed
+        if result == :failed
+          @jobs_failed.increment
+          @circuit_breaker.record_failure(queue_name)
+        else
+          @circuit_breaker.record_success(queue_name)
+        end
       rescue StandardError => e
         @jobs_failed.increment
+        @circuit_breaker.record_failure(queue_name)
         Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
+      ensure
+        @in_flight.decrement
       end
 
       # Resolve "*" to all non-DLQ queues from pgmq.meta, stripping the prefix.
