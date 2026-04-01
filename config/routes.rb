@@ -49,8 +49,11 @@ Pgbus::Engine.routes.draw do
   end
 
   resources :outbox, only: [:index], controller: "outbox"
+  resources :locks, only: [:index]
+  resource :insights, only: [:show], controller: "insights"
 
   namespace :api do
     get :stats, to: "stats#show"
+    get :insights, to: "insights#show"
   end
 end

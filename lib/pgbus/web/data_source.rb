@@ -497,6 +497,55 @@ module Pgbus
         []
       end
 
+      # Job locks
+      def job_locks
+        JobLock.order(locked_at: :desc).limit(100).map do |lock|
+          {
+            lock_key: lock.lock_key,
+            job_class: lock.job_class,
+            job_id: lock.job_id,
+            state: lock.state,
+            owner_pid: lock.owner_pid,
+            owner_hostname: lock.owner_hostname,
+            locked_at: lock.locked_at,
+            expires_at: lock.expires_at,
+            age_seconds: lock.locked_at ? (Time.current - lock.locked_at).to_i : nil
+          }
+        end
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching job locks: #{e.message}" }
+        []
+      end
+
+      # Job stats
+      def job_stats_summary(minutes: 60)
+        JobStat.summary(minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching job stats summary: #{e.message}" }
+        { total: 0, success: 0, failed: 0, dead_lettered: 0, avg_duration_ms: 0, max_duration_ms: 0 }
+      end
+
+      def job_throughput(minutes: 60)
+        JobStat.throughput(minutes: minutes).map { |time, count| { time: time, count: count } }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching throughput: #{e.message}" }
+        []
+      end
+
+      def job_status_counts(minutes: 60)
+        JobStat.status_counts(minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching status counts: #{e.message}" }
+        {}
+      end
+
+      def slowest_job_classes(limit: 10, minutes: 60)
+        JobStat.slowest_classes(limit: limit, minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching slowest classes: #{e.message}" }
+        []
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|

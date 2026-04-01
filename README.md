@@ -627,6 +627,8 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
+| `stats_enabled` | `true` | Record job execution stats for insights dashboard |
+| `stats_retention` | `604800` | Seconds to keep job stats (7 days) |
 
 ## Architecture
 
@@ -684,14 +686,32 @@ pgbus help      # Show help
 
 The dashboard is a mountable Rails engine at `/pgbus` with:
 
-- **Overview** -- queue depths, enqueued count, active processes, failure count
-- **Queues** -- per-queue metrics, purge actions
+- **Overview** -- queue depths, enqueued count, active processes, failure count, throughput rate
+- **Queues** -- per-queue metrics, purge/pause/resume actions
 - **Jobs** -- enqueued and failed jobs, retry/discard actions
 - **Dead letter** -- DLQ messages with retry/discard, bulk actions
 - **Processes** -- active workers/dispatcher/consumers with heartbeat status
 - **Events** -- registered subscribers and processed events
+- **Outbox** -- transactional outbox entries pending publication
+- **Locks** -- active job uniqueness locks with state (queued/executing), owner PID@hostname, age
+- **Insights** -- throughput chart (jobs/min), status distribution donut, slowest job classes table
 
 All tables use Turbo Frames for periodic auto-refresh without page reloads.
+
+### Dark mode
+
+The dashboard supports dark mode via Tailwind CSS `dark:` classes. It respects your system preference on first visit and persists your choice via localStorage. Toggle with the sun/moon button in the nav bar.
+
+### Job stats and insights
+
+The executor records every job completion to `pgbus_job_stats` (job class, queue, status, duration). The insights page visualizes this data with ApexCharts (loaded via CDN, zero npm dependencies).
+
+```bash
+rails generate pgbus:add_job_stats           # Add the stats migration
+rails generate pgbus:add_job_stats --database=pgbus
+```
+
+Stats collection is enabled by default (`config.stats_enabled = true`). Old stats are cleaned up by the dispatcher based on `config.stats_retention` (default: 7 days). If the migration hasn't been run yet, stat recording is silently skipped.
 
 ## Database tables
 
@@ -708,6 +728,7 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
 | `pgbus_batches` | Batch tracking with job counters and callback config |
 | `pgbus_job_locks` | Job uniqueness locks (state, owner_pid, reaper correlation) |
+| `pgbus_job_stats` | Job execution metrics (class, queue, status, duration) |
 | `pgbus_queue_states` | Queue pause/resume and circuit breaker state |
 | `pgbus_outbox_entries` | Transactional outbox entries pending publication |
 | `pgbus_recurring_tasks` | Recurring job definitions |

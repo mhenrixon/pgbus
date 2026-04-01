@@ -11,6 +11,7 @@ module Pgbus
       end
 
       def execute(message, queue_name, source_queue: nil)
+        execution_start = monotonic_now
         payload = JSON.parse(message.message)
         read_count = message.read_ct.to_i
 
@@ -19,6 +20,7 @@ module Pgbus
           signal_concurrency(payload)
           signal_batch_discarded(payload)
           Uniqueness.release_lock(Uniqueness.extract_key(payload))
+          record_stat(payload, queue_name, "dead_lettered", execution_start)
           return :dead_lettered
         end
 
@@ -54,10 +56,12 @@ module Pgbus
         end
 
         instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
+        record_stat(payload, queue_name, "success", execution_start)
         :success
       rescue StandardError => e
         handle_failure(message, queue_name, e)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
+        record_stat(payload, queue_name, "failed", execution_start)
         # Don't signal concurrency on transient failure — the job will be retried.
         # Semaphore is released only on success or dead-lettering.
         :failed
@@ -81,6 +85,24 @@ module Pgbus
         else
           job.perform_now
         end
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
+      end
+
+      def record_stat(payload, queue_name, status, start_time)
+        return unless config.stats_enabled
+
+        duration_ms = ((monotonic_now - start_time) * 1000).round
+        JobStat.record!(
+          job_class: payload&.dig("job_class") || "unknown",
+          queue_name: queue_name,
+          status: status,
+          duration_ms: duration_ms
+        )
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Stat recording failed: #{e.message}" }
       end
 
       def handle_failure(_message, _queue_name, error)

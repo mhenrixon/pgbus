@@ -277,6 +277,35 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
   end
 
+  describe "#cleanup_stats (private)" do
+    before do
+      stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+      allow(Pgbus::JobStat).to receive(:cleanup!).and_return(10)
+    end
+
+    it "cleans up old job stats" do
+      dispatcher.send(:cleanup_stats)
+
+      expect(Pgbus::JobStat).to have_received(:cleanup!).with(older_than: a_kind_of(Time))
+    end
+
+    it "skips when stats_enabled is false" do
+      allow(dispatcher.config).to receive(:stats_enabled).and_return(false)
+
+      dispatcher.send(:cleanup_stats)
+
+      expect(Pgbus::JobStat).not_to have_received(:cleanup!)
+    end
+
+    it "skips when stats_retention is not positive" do
+      allow(dispatcher.config).to receive(:stats_retention).and_return(0)
+
+      dispatcher.send(:cleanup_stats)
+
+      expect(Pgbus::JobStat).not_to have_received(:cleanup!)
+    end
+  end
+
   describe "#start_heartbeat (private)" do
     it "creates and starts a heartbeat" do
       dispatcher.send(:start_heartbeat)

@@ -59,6 +59,9 @@ module Pgbus
     # Requires a matching entry in config/database.yml under the "pgbus" key.
     attr_accessor :connects_to
 
+    # Job stats
+    attr_accessor :stats_retention, :stats_enabled
+
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
 
@@ -119,6 +122,9 @@ module Pgbus
       @recurring_tasks_file = nil
       @skip_recurring = false
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
+
+      @stats_enabled = true
+      @stats_retention = 7 * 24 * 3600 # 7 days
 
       @connects_to = nil
 

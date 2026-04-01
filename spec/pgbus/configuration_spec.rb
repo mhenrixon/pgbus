@@ -62,6 +62,11 @@ RSpec.describe Pgbus::Configuration do
       expect(config.archive_compaction_batch_size).to eq(1000)
     end
 
+    it "has stats enabled by default" do
+      expect(config.stats_enabled).to be true
+      expect(config.stats_retention).to eq(7 * 24 * 3600)
+    end
+
     it "has outbox disabled by default" do
       expect(config.outbox_enabled).to be false
       expect(config.outbox_poll_interval).to eq(1.0)

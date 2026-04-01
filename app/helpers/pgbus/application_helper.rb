@@ -45,6 +45,34 @@ module Pgbus
       end
     end
 
+    def pgbus_duration(seconds)
+      return "—" unless seconds
+
+      seconds = seconds.to_i
+      if seconds < 60
+        "#{seconds}s"
+      elsif seconds < 3600
+        "#{seconds / 60}m #{seconds % 60}s"
+      elsif seconds < 86_400
+        "#{seconds / 3600}h #{(seconds % 3600) / 60}m"
+      else
+        "#{seconds / 86_400}d #{(seconds % 86_400) / 3600}h"
+      end
+    end
+
+    def pgbus_ms_duration(millis)
+      return "—" unless millis
+
+      millis = millis.to_i
+      if millis < 1000
+        "#{millis}ms"
+      elsif millis < 60_000
+        "#{(millis / 1000.0).round(1)}s"
+      else
+        "#{(millis / 60_000.0).round(1)}m"
+      end
+    end
+
     def pgbus_paused_badge(paused)
       return unless paused
 
