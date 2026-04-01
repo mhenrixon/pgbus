@@ -82,6 +82,7 @@ jobs:
         run: |
           PGPASSWORD=pgbus psql -h localhost -U pgbus -d pgbus_test -c "CREATE SCHEMA IF NOT EXISTS pgmq"
           bundle exec ruby -e "
+            require 'pg'
             require 'pgbus'
             Pgbus.configure { |c| c.database_url = ENV['PGBUS_DATABASE_URL'] }
             conn = PG.connect(ENV['PGBUS_DATABASE_URL'])
