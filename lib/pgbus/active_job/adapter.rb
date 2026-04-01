@@ -9,7 +9,10 @@ module Pgbus
         queue = active_job.queue_name || Pgbus.configuration.default_queue
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
+        payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
+
+        return active_job if uniqueness_rejected?(active_job, payload_hash)
 
         enqueue_with_concurrency(active_job, queue, payload_hash)
       end
@@ -18,14 +21,27 @@ module Pgbus
         queue = active_job.queue_name || Pgbus.configuration.default_queue
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
+        payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.now.to_f).ceil, 0].max
+
+        return active_job if uniqueness_rejected?(active_job, payload_hash)
 
         enqueue_with_concurrency(active_job, queue, payload_hash, delay: delay)
       end
 
       def enqueue_all(active_jobs)
-        active_jobs.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
+        # Jobs with uniqueness must go through individual enqueue to acquire locks
+        unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
+        unique.each do |j|
+          if j.scheduled_at && j.scheduled_at > Time.now
+            enqueue_at(j, j.scheduled_at.to_f)
+          else
+            enqueue(j)
+          end
+        end
+
+        bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
           enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.now })
           jobs.select { |j| j.scheduled_at && j.scheduled_at > Time.now }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
@@ -54,10 +70,20 @@ module Pgbus
           active_job.provider_job_id = msg_id
         end
 
+        Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
-      rescue Pgbus::SchemaNotReady => e
-        Pgbus.logger.error { "[Pgbus] #{e.message}" }
-        raise
+      rescue StandardError => e
+        # Roll back the uniqueness lock if enqueue failed
+        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
+        if rollback_key
+          begin
+            Uniqueness.release_lock(rollback_key)
+          rescue StandardError => rollback_error
+            Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{rollback_error.message}" }
+          end
+          Thread.current[:pgbus_acquired_uniqueness_key] = nil
+        end
+        raise e
       end
 
       def concurrency_config(active_job)
@@ -78,6 +104,34 @@ module Pgbus
           Pgbus.logger.info { "[Pgbus] Discarding job #{active_job.class.name}: concurrency limit for #{key}" }
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
+        end
+      end
+
+      def uniqueness_rejected?(active_job, payload_hash)
+        uniqueness_key = Uniqueness.extract_key(payload_hash)
+        return false unless uniqueness_key
+
+        result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job)
+
+        # :no_lock means no enqueue-time lock needed (e.g. :while_executing strategy)
+        return false if result == :no_lock
+
+        # Store the acquired key so we can release it if enqueue fails
+        Thread.current[:pgbus_acquired_uniqueness_key] = uniqueness_key if result == :acquired
+        return false if result == :acquired
+
+        config = Uniqueness.uniqueness_config(active_job)
+        case config[:on_conflict]
+        when :reject
+          raise JobNotUnique, "Job #{active_job.class.name} is already locked"
+        when :discard
+          Pgbus.logger.info { "[Pgbus] Discarding duplicate job #{active_job.class.name}" }
+          true
+        when :log
+          Pgbus.logger.warn { "[Pgbus] Duplicate job #{active_job.class.name} detected" }
+          true
+        else
+          true
         end
       end
 

@@ -18,10 +18,31 @@ module Pgbus
           handle_dead_letter(message, queue_name, payload, source_queue: source_queue)
           signal_concurrency(payload)
           signal_batch_discarded(payload)
+          Uniqueness.release_lock(Uniqueness.extract_key(payload))
           return :dead_lettered
         end
 
         job_class = payload["job_class"]
+        uniqueness_key = Uniqueness.extract_key(payload)
+        uniqueness_strategy = Uniqueness.extract_strategy(payload)
+        uniqueness_ttl = payload[Uniqueness::TTL_KEY] || Uniqueness::DEFAULT_LOCK_TTL
+
+        if uniqueness_key
+          case uniqueness_strategy
+          when :until_executed
+            # Transition the queued lock to executing state with our PID.
+            # The lock was acquired at enqueue time — now we claim ownership
+            # so the reaper can correlate it with our heartbeat.
+            Uniqueness.claim_for_execution!(uniqueness_key, ttl: uniqueness_ttl)
+          when :while_executing
+            # Acquire the lock now. If another worker is already executing
+            # this job, skip it — VT will expire and it'll be retried.
+            unless Uniqueness.acquire_execution_lock(uniqueness_key, payload)
+              Pgbus.logger.info { "[Pgbus] Skipping duplicate execution for #{job_class}" }
+              return :skipped
+            end
+          end
+        end
 
         job_succeeded = false
 
@@ -47,6 +68,8 @@ module Pgbus
         if job_succeeded
           signal_concurrency(payload)
           signal_batch_completed(payload)
+          # Release uniqueness lock on successful completion (both strategies)
+          Uniqueness.release_lock(uniqueness_key) if uniqueness_key
         end
       end
 

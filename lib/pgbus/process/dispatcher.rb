@@ -13,6 +13,7 @@ module Pgbus
       RECURRING_CLEANUP_INTERVAL = 3600     # Run recurring execution cleanup every hour
       ARCHIVE_COMPACTION_INTERVAL = 3600    # Run archive compaction every hour
       OUTBOX_CLEANUP_INTERVAL = 3600 # Run outbox cleanup every hour
+      JOB_LOCK_CLEANUP_INTERVAL = 300 # Run job lock cleanup every 5 minutes
 
       attr_reader :config
 
@@ -26,6 +27,7 @@ module Pgbus
         @last_recurring_cleanup_at = Time.now
         @last_archive_compaction_at = Time.now
         @last_outbox_cleanup_at = Time.now
+        @last_job_lock_cleanup_at = Time.now
       end
 
       def run
@@ -70,6 +72,7 @@ module Pgbus
         run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
         run_if_due(now, :@last_archive_compaction_at, archive_compaction_interval) { compact_archives }
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
+        run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
       end
 
       # Only update the timestamp when the block succeeds.
@@ -125,6 +128,19 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
+      end
+
+      def cleanup_job_locks
+        # Primary: reap orphaned locks whose owner worker is no longer alive.
+        # Cross-references (owner_pid, owner_hostname) against pgbus_processes heartbeats.
+        reaped = JobLock.reap_orphaned!
+        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned job locks" } if reaped.positive?
+
+        # Last resort: clean up locks with expired TTL (handles case where
+        # even the reaper/supervisor is dead and locks are truly abandoned).
+        expired = JobLock.cleanup_expired!
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{expired} expired job locks" } if expired.positive?
+        # No rescue here — let run_if_due handle the error and retry next tick
       end
 
       def cleanup_outbox
