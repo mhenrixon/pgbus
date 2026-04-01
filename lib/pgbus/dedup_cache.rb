@@ -36,10 +36,11 @@ module Pgbus
     # Mark a key as seen. Call this after successfully claiming idempotency
     # in the database so future lookups skip the DB.
     def mark!(key)
-      evict_oldest if @cache.size >= @max_size
+      already_present = @cache.key?(key)
+      evict_oldest if !already_present && @cache.size >= @max_size
 
       @cache[key] = monotonic_now
-      @insertion_order << key
+      @insertion_order << key unless already_present
     end
 
     def size
