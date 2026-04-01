@@ -33,12 +33,12 @@ RSpec.describe Pgbus::Client do
 
     before do
       client.instance_variable_set(:@schema_ensured, false)
-      allow(client).to receive(:resolve_raw_connection).and_return(raw_conn)
+      allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
     end
 
-    it "installs PGMQ schema when pgmq.meta table does not exist" do
-      result = double("result", ntuples: 0)
-      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+    it "installs via embedded SQL when pgmq.meta missing and no extension (auto mode)" do
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
       allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
 
       client.ensure_queue("jobs")
@@ -46,9 +46,30 @@ RSpec.describe Pgbus::Client do
       expect(raw_conn).to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
     end
 
+    it "installs via extension when available in auto mode" do
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 1))
+      allow(raw_conn).to receive(:exec).with("CREATE EXTENSION IF NOT EXISTS pgmq").and_return(nil)
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).to have_received(:exec).with("CREATE EXTENSION IF NOT EXISTS pgmq")
+    end
+
+    it "respects :extension schema mode" do
+      config.pgmq_schema_mode = :extension
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with("CREATE EXTENSION IF NOT EXISTS pgmq").and_return(nil)
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).to have_received(:exec).with("CREATE EXTENSION IF NOT EXISTS pgmq")
+      expect(raw_conn).not_to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
+      config.pgmq_schema_mode = :auto
+    end
+
     it "skips installation when pgmq.meta already exists" do
-      result = double("result", ntuples: 1)
-      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 1))
 
       client.ensure_queue("jobs")
 
@@ -56,8 +77,7 @@ RSpec.describe Pgbus::Client do
     end
 
     it "only checks once per client instance" do
-      result = double("result", ntuples: 1)
-      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(result)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 1))
 
       client.ensure_queue("jobs")
       client.ensure_queue("events")
@@ -336,7 +356,7 @@ RSpec.describe Pgbus::Client do
     let(:result) { double("result", cmd_tuples: 50) }
 
     before do
-      allow(client).to receive(:resolve_raw_connection).and_return(conn)
+      allow(client).to receive(:with_raw_connection).and_yield(conn)
       allow(conn).to receive(:exec_params).and_return(result)
     end
 

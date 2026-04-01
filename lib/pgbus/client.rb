@@ -200,7 +200,9 @@ module Pgbus
 
       loop do
         deleted = synchronized do
-          resolve_raw_connection.exec_params(sql, [older_than, batch_size]).cmd_tuples
+          with_raw_connection do |conn|
+            conn.exec_params(sql, [older_than, batch_size]).cmd_tuples
+          end
         end
         total += deleted
         break if deleted < batch_size
@@ -259,28 +261,54 @@ module Pgbus
       synchronized do
         return if @schema_ensured
 
-        raw_conn = resolve_raw_connection
-        exists = raw_conn.exec("SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1")
-        if exists.ntuples.zero?
-          Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing embedded SQL" }
-          raw_conn.exec(PgmqSchema.install_sql)
+        with_raw_connection do |raw_conn|
+          exists = raw_conn.exec("SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1")
+          install_pgmq_schema(raw_conn) if exists.ntuples.zero?
         end
         @schema_ensured = true
       end
     end
 
-    def resolve_raw_connection
-      opts = config.connection_options
-      case opts
-      when Proc
-        opts.call
-      when String
-        PG.connect(opts)
-      when Hash
-        PG.connect(**opts)
-      else
-        raise ConfigurationError, "Cannot resolve raw PG connection from #{opts.class}"
+    def install_pgmq_schema(conn)
+      mode = config.pgmq_schema_mode
+
+      case mode
+      when :extension
+        Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing via extension" }
+        conn.exec("CREATE EXTENSION IF NOT EXISTS pgmq")
+      when :embedded
+        Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing embedded SQL" }
+        conn.exec(PgmqSchema.install_sql)
+      else # :auto
+        ext = conn.exec("SELECT 1 FROM pg_available_extensions WHERE name = 'pgmq' LIMIT 1")
+        if ext.ntuples.positive?
+          Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing via extension" }
+          conn.exec("CREATE EXTENSION IF NOT EXISTS pgmq")
+        else
+          Pgbus.logger.info { "[Pgbus] PGMQ schema not found — installing embedded SQL" }
+          conn.exec(PgmqSchema.install_sql)
+        end
       end
+    end
+
+    def with_raw_connection
+      opts = config.connection_options
+      owned = false
+      conn = case opts
+             when Proc
+               opts.call
+             when String
+               owned = true
+               PG.connect(opts)
+             when Hash
+               owned = true
+               PG.connect(**opts)
+             else
+               raise ConfigurationError, "Cannot resolve raw PG connection from #{opts.class}"
+             end
+      yield conn
+    ensure
+      conn&.close if owned
     end
 
     def ensure_single_queue(full_name)

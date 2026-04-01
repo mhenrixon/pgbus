@@ -86,10 +86,11 @@ module Pgbus
       private
 
       def sync_recurring_tasks
-        return unless config.recurring_tasks.present?
+        tasks = config.recurring_tasks
+        return if tasks.nil?
 
-        RecurringTask.sync_from_config!(config.recurring_tasks)
-        Pgbus.logger.info { "[Pgbus] Synced #{config.recurring_tasks.size} recurring task(s) from configuration" }
+        RecurringTask.sync_from_config!(tasks)
+        Pgbus.logger.info { "[Pgbus] Synced #{tasks.size} recurring task(s) from configuration" }
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to sync recurring tasks: #{e.class}: #{e.message}" }
       end

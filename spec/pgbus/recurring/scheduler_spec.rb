@@ -100,6 +100,16 @@ RSpec.describe Pgbus::Recurring::Scheduler do
       expect(Pgbus::RecurringTask).not_to have_received(:sync_from_config!)
     end
 
+    it "syncs empty hash to remove stale tasks" do
+      config.recurring_tasks = {}
+      scheduler = described_class.new(config: config)
+      allow(Pgbus::RecurringTask).to receive(:sync_from_config!)
+
+      scheduler.send(:sync_recurring_tasks)
+
+      expect(Pgbus::RecurringTask).to have_received(:sync_from_config!).with({})
+    end
+
     it "handles errors gracefully" do
       scheduler = described_class.new(config: config)
       allow(Pgbus::RecurringTask).to receive(:sync_from_config!).and_raise(StandardError, "DB error")
