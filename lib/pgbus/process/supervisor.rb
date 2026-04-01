@@ -42,11 +42,6 @@ module Pgbus
       private
 
       def boot_processes
-        # Bootstrap all configured queues before forking workers.
-        # Without this, workers start reading from non-existent queues
-        # and recurring task enqueues fail.
-        bootstrap_queues
-
         # Boot workers
         config.workers.each do |worker_config|
           fork_worker(worker_config)
@@ -75,6 +70,7 @@ module Pgbus
           restore_signals
           setup_child_process
           load_rails_app
+          bootstrap_queues
           worker = Worker.new(
             queues: queues, threads: threads, config: config,
             single_active_consumer: single_active, consumer_priority: priority
@@ -126,6 +122,7 @@ module Pgbus
           setup_child_process
           load_rails_app
           load_recurring_config
+          bootstrap_queues
           scheduler = Recurring::Scheduler.new(config: config)
           scheduler.run
         end
