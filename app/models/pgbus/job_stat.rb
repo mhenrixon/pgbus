@@ -23,6 +23,9 @@ module Pgbus
       Pgbus.logger.debug { "[Pgbus] Failed to record job stat: #{e.message}" }
     end
 
+    # Memoized — intentionally never invalidated at runtime. If the
+    # pgbus_job_stats migration runs while the app is already running,
+    # a restart is required for stat recording to begin.
     def self.table_exists?
       return @table_exists if defined?(@table_exists)
 
@@ -62,16 +65,24 @@ module Pgbus
         .map { |cls, count, avg, max| { job_class: cls, count: count.to_i, avg_ms: avg.to_i, max_ms: max.to_i } }
     end
 
-    # Total stats summary
+    # Single-query aggregate summary using conditional counts.
     def self.summary(minutes: 60)
-      stats = since(minutes.minutes.ago)
+      row = since(minutes.minutes.ago).pick(
+        Arel.sql("COUNT(*)"),
+        Arel.sql("COUNT(*) FILTER (WHERE status = 'success')"),
+        Arel.sql("COUNT(*) FILTER (WHERE status = 'failed')"),
+        Arel.sql("COUNT(*) FILTER (WHERE status = 'dead_lettered')"),
+        Arel.sql("ROUND(AVG(duration_ms)::numeric, 1)"),
+        Arel.sql("MAX(duration_ms)")
+      )
+
       {
-        total: stats.count,
-        success: stats.successful.count,
-        failed: stats.failed.count,
-        dead_lettered: stats.dead_lettered.count,
-        avg_duration_ms: stats.average(:duration_ms)&.round(1) || 0,
-        max_duration_ms: stats.maximum(:duration_ms) || 0
+        total: row[0].to_i,
+        success: row[1].to_i,
+        failed: row[2].to_i,
+        dead_lettered: row[3].to_i,
+        avg_duration_ms: row[4]&.to_f || 0,
+        max_duration_ms: row[5].to_i
       }
     end
 
