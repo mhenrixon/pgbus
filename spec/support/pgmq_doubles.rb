@@ -31,6 +31,7 @@ module PgmqDoubles
     double("Pgbus::Client", pgmq: pgmq).tap do |client|
       allow(client).to receive_messages(
         ensure_queue: nil,
+        ensure_all_queues: nil,
         ensure_dead_letter_queue: nil,
         send_message: 1,
         send_batch: [1, 2],

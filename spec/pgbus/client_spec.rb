@@ -454,6 +454,71 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#ensure_all_queues" do
+    it "creates the default queue" do
+      client.ensure_all_queues
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default")
+    end
+
+    it "creates all queues from worker configs" do
+      config.workers = [
+        { queues: %w[default urgent], threads: 5 },
+        { queues: %w[emails], threads: 2 }
+      ]
+      client.ensure_all_queues
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default")
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_urgent")
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_emails")
+    end
+
+    it "creates queues for recurring tasks" do
+      config.recurring_tasks = {
+        "daily_report" => { class: "ReportJob", schedule: "0 2 * * *", queue: "reports" }
+      }
+      client.ensure_all_queues
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_reports")
+    end
+
+    it "deduplicates queues" do
+      config.workers = [
+        { queues: %w[default], threads: 5 },
+        { queues: %w[default], threads: 3 }
+      ]
+      client.ensure_all_queues
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default").once
+    end
+
+    it "skips wildcard queue entries" do
+      config.workers = [{ queues: %w[*], threads: 5 }]
+      client.ensure_all_queues
+
+      # Should still create default queue but not try to create "*"
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default")
+      expect(mock_pgmq).not_to have_received(:create).with("pgbus_test_*")
+    end
+
+    it "creates priority sub-queues when priority is enabled" do
+      config.priority_levels = 3
+      client.ensure_all_queues
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default_p0")
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default_p1")
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default_p2")
+      config.priority_levels = nil
+    end
+
+    it "logs the bootstrapped queues" do
+      allow(Pgbus.logger).to receive(:info)
+      client.ensure_all_queues
+
+      expect(Pgbus.logger).to have_received(:info).at_least(:once)
+    end
+  end
+
   describe "#close" do
     it "closes the pgmq connection" do
       client.close
