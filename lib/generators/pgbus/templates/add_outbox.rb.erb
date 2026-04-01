@@ -11,10 +11,15 @@ class AddPgbusOutbox < ActiveRecord::Migration<%= migration_version %>
       t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
     end
 
+    add_check_constraint :pgbus_outbox_entries,
+      "(queue_name IS NOT NULL) <> (routing_key IS NOT NULL)",
+      name: "chk_pgbus_outbox_destination"
+
     add_index :pgbus_outbox_entries, :published_at,
       where: "published_at IS NULL",
       name: "idx_pgbus_outbox_unpublished"
-    add_index :pgbus_outbox_entries, :created_at,
+    add_index :pgbus_outbox_entries, :published_at,
+      where: "published_at IS NOT NULL",
       name: "idx_pgbus_outbox_cleanup"
   end
 end

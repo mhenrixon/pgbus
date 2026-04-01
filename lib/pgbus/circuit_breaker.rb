@@ -87,7 +87,7 @@ module Pgbus
 
       # Auto-resume if circuit breaker backoff has expired
       if state.circuit_breaker_resume_at && Time.current >= state.circuit_breaker_resume_at
-        state.update!(paused: false, paused_reason: nil, paused_at: nil, circuit_breaker_resume_at: nil)
+        QueueState.resume!(queue_name)
         Pgbus.logger.info { "[Pgbus] Circuit breaker auto-resumed #{queue_name}" }
         return false
       end

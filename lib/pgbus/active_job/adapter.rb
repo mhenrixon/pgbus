@@ -47,7 +47,7 @@ module Pgbus
             msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
             active_job.provider_job_id = msg_id
           else
-            handle_conflict(concurrency, active_job, key, queue, payload_hash)
+            handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: priority)
           end
         else
           msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
@@ -64,14 +64,14 @@ module Pgbus
         active_job.class.respond_to?(:pgbus_concurrency) && active_job.class.pgbus_concurrency
       end
 
-      def handle_conflict(concurrency, active_job, key, queue, payload_hash)
+      def handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: nil)
         case concurrency[:on_conflict]
         when :block
           Concurrency::BlockedExecution.insert(
             concurrency_key: key,
             queue_name: queue,
             payload: payload_hash,
-            priority: active_job.try(:priority) || 0,
+            priority: priority || Pgbus.configuration.default_priority,
             duration: concurrency[:duration]
           )
         when :discard

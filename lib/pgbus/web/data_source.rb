@@ -40,7 +40,7 @@ module Pgbus
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
         paused_queues = paused_queue_names
         queue_names.map { |name| queue_metrics_via_sql(name) }.compact.map do |q|
-          q.merge(paused: paused_queues.include?(q[:name]))
+          q.merge(paused: paused_queues.include?(logical_queue_name(q[:name])))
         end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error fetching queue metrics: #{e.class}: #{e.message}" }
@@ -61,19 +61,19 @@ module Pgbus
       end
 
       def pause_queue(name, reason: nil)
-        QueueState.pause!(name, reason: reason)
+        QueueState.pause!(logical_queue_name(name), reason: reason)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error pausing queue #{name}: #{e.message}" }
       end
 
       def resume_queue(name)
-        QueueState.resume!(name)
+        QueueState.resume!(logical_queue_name(name))
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error resuming queue #{name}: #{e.message}" }
       end
 
       def queue_paused?(name)
-        QueueState.paused?(name)
+        QueueState.paused?(logical_queue_name(name))
       rescue StandardError
         false
       end
@@ -633,6 +633,12 @@ module Pgbus
         rate || 0.0
       rescue StandardError
         0.0
+      end
+
+      def logical_queue_name(name)
+        name
+          .delete_prefix("#{Pgbus.configuration.queue_prefix}_")
+          .sub(/_p\d+\z/, "")
       end
 
       def paused_queue_names

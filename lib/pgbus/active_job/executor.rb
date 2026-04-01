@@ -125,7 +125,7 @@ module Pgbus
         if source_queue
           client.ensure_dead_letter_queue(queue_name)
           dlq_name = config.dead_letter_queue_name(queue_name)
-          client.pgmq.transaction do |txn|
+          client.transaction do |txn|
             txn.produce(dlq_name, message.message, headers: message.headers)
             txn.delete(source_queue, message.msg_id.to_i)
           end

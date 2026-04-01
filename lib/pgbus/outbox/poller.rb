@@ -44,19 +44,25 @@ module Pgbus
         published = 0
 
         loop do
-          entries = OutboxEntry.unpublished
-                               .order(:id)
-                               .limit(config.outbox_batch_size)
-                               .lock("FOR UPDATE SKIP LOCKED")
-                               .to_a
-          break if entries.empty?
+          succeeded = 0
 
-          entries.each do |entry|
-            publish_entry(entry)
-            published += 1
+          OutboxEntry.transaction do
+            entries = OutboxEntry.unpublished
+                                 .order(:id)
+                                 .limit(config.outbox_batch_size)
+                                 .lock("FOR UPDATE SKIP LOCKED")
+                                 .to_a
+            break if entries.empty?
+
+            entries.each do |entry|
+              succeeded += 1 if publish_entry(entry)
+            end
+
+            published += succeeded
+            break if succeeded.zero? || entries.size < config.outbox_batch_size
           end
 
-          break if entries.size < config.outbox_batch_size
+          break if succeeded.zero?
         end
 
         Pgbus.logger.debug { "[Pgbus] Outbox published #{published} entries" } if published.positive?
@@ -86,8 +92,10 @@ module Pgbus
         end
 
         entry.update!(published_at: Time.current)
+        true
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to publish outbox entry #{entry.id}: #{e.message}" }
+        false
       end
 
       def start_heartbeat

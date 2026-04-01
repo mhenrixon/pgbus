@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class QueueState < ApplicationRecord
+  class QueueState < Pgbus::ApplicationRecord
     self.table_name = "pgbus_queue_states"
 
     scope :paused, -> { where(paused: true) }
@@ -12,7 +12,7 @@ module Pgbus
 
     def self.pause!(queue_name, reason: nil)
       record = find_or_initialize_by(queue_name: queue_name)
-      record.update!(paused: true, paused_reason: reason, paused_at: Time.current)
+      record.update!(paused: true, paused_reason: reason, paused_at: Time.current, circuit_breaker_resume_at: nil)
       record
     end
 

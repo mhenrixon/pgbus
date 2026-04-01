@@ -151,7 +151,7 @@ module Pgbus
         batch_size = config.archive_compaction_batch_size || 1000
         prefix = config.queue_prefix
 
-        conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+        conn = config.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
         queue_names.each do |full_name|
