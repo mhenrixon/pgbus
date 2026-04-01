@@ -38,7 +38,7 @@ module Pgbus
       end
     rescue PGMQ::Errors::ConnectionError => e
       raise Pgbus::SchemaNotReady,
-        "PGMQ schema is not available (#{e.message}). Run `rails db:migrate` for the pgbus database."
+            "PGMQ schema is not available (#{e.message}). Run `rails db:migrate` for the pgbus database."
     end
 
     def ensure_dead_letter_queue(name)
