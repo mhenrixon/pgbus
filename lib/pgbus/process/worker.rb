@@ -13,10 +13,11 @@ module Pgbus
         @queues = Array(queues)
         @threads = threads
         @config = config
-        @shutting_down = false
+        @lifecycle = Lifecycle.new
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
         @in_flight = Concurrent::AtomicFixnum.new(0)
+        @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
         @started_at = Time.now
         @executor = Pgbus::ActiveJob::Executor.new
         @pool = Concurrent::FixedThreadPool.new(threads)
@@ -28,6 +29,8 @@ module Pgbus
           jobs_processed: @jobs_processed.value,
           jobs_failed: @jobs_failed.value,
           in_flight: @in_flight.value,
+          state: @lifecycle.state,
+          rates: @rate_counter.rates,
           started_at: @started_at
         }
       end
@@ -36,15 +39,18 @@ module Pgbus
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
+        @lifecycle.transition_to!(:running)
         Pgbus.logger.info { "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} pid=#{::Process.pid}" }
 
         loop do
           process_signals
-          break if @shutting_down && @pool.queue_length.zero?
-          break if recycle_needed? && @pool.queue_length.zero?
+          check_recycle
 
-          claim_and_execute unless @shutting_down || recycle_needed?
-          interruptible_sleep(config.polling_interval) if (@shutting_down || recycle_needed?) && !@pool.queue_length.zero?
+          break if @lifecycle.stopped?
+          break if @lifecycle.draining? && @pool.queue_length.zero?
+
+          claim_and_execute if @lifecycle.can_process?
+          interruptible_sleep(config.polling_interval) if @lifecycle.draining? || @lifecycle.paused?
         end
 
         shutdown
@@ -52,12 +58,12 @@ module Pgbus
 
       def graceful_shutdown
         Pgbus.logger.info { "[Pgbus] Worker shutting down gracefully..." }
-        @shutting_down = true
+        @lifecycle.transition_to(:draining)
       end
 
       def immediate_shutdown
         Pgbus.logger.warn { "[Pgbus] Worker shutting down immediately!" }
-        @shutting_down = true
+        @lifecycle.transition_to!(:stopped)
         @pool.kill
       end
 
@@ -81,6 +87,7 @@ module Pgbus
           return
         end
 
+        @rate_counter.increment(:dequeued, tagged_messages.size)
         tagged_messages.each do |queue_name, message, source_queue|
           @in_flight.increment
           @pool.post { process_message(message, queue_name, source_queue: source_queue) }
@@ -134,14 +141,17 @@ module Pgbus
       def process_message(message, queue_name, source_queue: nil)
         result = @executor.execute(message, queue_name, source_queue: source_queue)
         @jobs_processed.increment
+        @rate_counter.increment(:processed)
         if result == :failed
           @jobs_failed.increment
+          @rate_counter.increment(:failed)
           @circuit_breaker.record_failure(queue_name)
         else
           @circuit_breaker.record_success(queue_name)
         end
       rescue StandardError => e
         @jobs_failed.increment
+        @rate_counter.increment(:failed)
         @circuit_breaker.record_failure(queue_name)
         Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
       ensure
@@ -172,6 +182,12 @@ module Pgbus
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
         @queues = [config.default_queue]
+      end
+
+      def check_recycle
+        return unless @lifecycle.running? && recycle_needed?
+
+        @lifecycle.transition_to(:draining)
       end
 
       def recycle_needed?
@@ -214,7 +230,8 @@ module Pgbus
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "worker",
-          metadata: { queues: queues, threads: threads, pid: ::Process.pid }
+          metadata: { queues: queues, threads: threads, pid: ::Process.pid },
+          on_beat: -> { @rate_counter.snapshot! }
         )
         @heartbeat.start
       end

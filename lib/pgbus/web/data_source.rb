@@ -7,6 +7,8 @@ module Pgbus
     class DataSource
       def initialize(client: Pgbus.client)
         @client = client
+        @last_throughput_snapshot = nil
+        @last_throughput_at = nil
       end
 
       # Dashboard summary
@@ -17,6 +19,8 @@ module Pgbus
         dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
         dlq_depth = queues.select { |q| q[:name].end_with?(dlq_suffix) }.sum { |q| q[:queue_length] }
 
+        throughput = compute_throughput(queues)
+
         {
           total_queues: queues.size,
           total_depth: total_depth,
@@ -24,7 +28,8 @@ module Pgbus
           active_processes: processes.count,
           failed_count: failed_events_count,
           dlq_depth: dlq_depth,
-          recurring_count: recurring_tasks_count
+          recurring_count: recurring_tasks_count,
+          throughput_rate: throughput
         }
       end
 
@@ -610,6 +615,24 @@ module Pgbus
         raise ArgumentError, "Invalid queue name: #{name.inspect}" if sanitized.empty?
 
         sanitized
+      end
+
+      def compute_throughput(queues)
+        current_totals = queues.sum { |q| q[:total_messages] }
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        if @last_throughput_snapshot && @last_throughput_at
+          elapsed = now - @last_throughput_at
+          delta = current_totals - @last_throughput_snapshot
+          rate = elapsed.positive? ? (delta / elapsed).round(1) : 0.0
+        end
+
+        @last_throughput_snapshot = current_totals
+        @last_throughput_at = now
+
+        rate || 0.0
+      rescue StandardError
+        0.0
       end
 
       def paused_queue_names

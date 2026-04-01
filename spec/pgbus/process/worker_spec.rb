@@ -30,21 +30,24 @@ RSpec.describe Pgbus::Process::Worker do
       expect(worker.stats[:jobs_processed]).to eq(0)
       expect(worker.stats[:jobs_failed]).to eq(0)
       expect(worker.stats[:in_flight]).to eq(0)
+      expect(worker.stats[:state]).to eq(:starting)
       expect(worker.stats[:started_at]).to be_a(Time)
     end
   end
 
   describe "#graceful_shutdown" do
-    it "sets shutting_down flag" do
+    it "transitions to draining state" do
+      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
       worker.graceful_shutdown
-      expect(worker.instance_variable_get(:@shutting_down)).to be true
+      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:draining)
     end
   end
 
   describe "#immediate_shutdown" do
-    it "sets shutting_down flag and kills the pool" do
+    it "transitions to stopped state and kills the pool" do
+      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
       worker.immediate_shutdown
-      expect(worker.instance_variable_get(:@shutting_down)).to be true
+      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:stopped)
       expect(pool).to have_received(:kill)
     end
   end
