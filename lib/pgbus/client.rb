@@ -90,7 +90,7 @@ module Pgbus
     # Read from priority sub-queues, highest priority (p0) first.
     # Returns [priority_queue_name, messages] pairs.
     def read_batch_prioritized(queue_name, qty:, vt: nil)
-      return read_batch(queue_name, qty: qty, vt: vt)&.map { |m| [config.queue_name(queue_name), m] } unless priority_enabled?
+      return (read_batch(queue_name, qty: qty, vt: vt) || []).map { |m| [config.queue_name(queue_name), m] } unless priority_enabled?
 
       remaining = qty
       results = []

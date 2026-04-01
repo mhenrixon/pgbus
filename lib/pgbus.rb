@@ -63,11 +63,11 @@ module Pgbus
       @configuration = nil
     end
 
-    # Reinitialize the PGMQ client with a fresh connection.
-    # Must be called after fork to avoid inheriting the parent's
-    # PG::Connection which is in undefined state post-fork.
+    # Discard the inherited PGMQ client after fork.
+    # Do NOT call close — the parent's @pgmq_mutex is in undefined
+    # state post-fork and attempting to acquire it can deadlock.
+    # The next call to Pgbus.client will lazily create a fresh one.
     def reset_client!
-      @client&.close
       @client = nil
     end
 
