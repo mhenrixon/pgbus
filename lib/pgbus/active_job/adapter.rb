@@ -99,6 +99,9 @@ module Pgbus
         end
 
         jobs.zip(msg_ids).each { |job, id| job.provider_job_id = id }
+      rescue Pgbus::SchemaNotReady => e
+        Pgbus.logger.error { "[Pgbus] #{e.message}" }
+        raise
       end
 
       def enqueue_after_transaction_commit?
