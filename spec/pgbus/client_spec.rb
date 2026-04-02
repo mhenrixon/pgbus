@@ -299,6 +299,22 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#archive_batch" do
+    it "archives multiple messages from the prefixed queue" do
+      client.archive_batch("default", [1, 2, 3])
+
+      expect(mock_pgmq).to have_received(:archive_batch).with("pgbus_test_default", [1, 2, 3])
+    end
+  end
+
+  describe "#delete_batch_from_queue" do
+    it "deletes multiple messages using the raw queue name" do
+      client.delete_batch_from_queue("pgbus_test_default_dlq", [4, 5])
+
+      expect(mock_pgmq).to have_received(:delete_batch).with("pgbus_test_default_dlq", [4, 5])
+    end
+  end
+
   describe "#extend_visibility" do
     it "sets VT on the prefixed queue" do
       client.extend_visibility("default", 5, vt: 120)

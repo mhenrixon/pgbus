@@ -290,14 +290,16 @@ module Pgbus
 
       def discard_all_dlq
         messages = dlq_messages(page: 1, per_page: 1000)
-        count = 0
-        messages.each do |m|
-          discard_dlq_message(m[:queue_name], m[:msg_id]) && count += 1
+        return 0 if messages.empty?
+
+        # Group by queue for batch delete — one call per DLQ instead of N calls
+        messages.group_by { |m| m[:queue_name] }.sum do |queue_name, msgs|
+          ids = msgs.map { |m| m[:msg_id].to_i }
+          @client.delete_batch_from_queue(queue_name, ids).size
         rescue StandardError => e
-          Pgbus.logger.debug { "[Pgbus::Web] Error discarding DLQ message #{m[:msg_id]}: #{e.message}" }
-          next
+          Pgbus.logger.debug { "[Pgbus::Web] Error batch-discarding DLQ messages from #{queue_name}: #{e.message}" }
+          0
         end
-        count
       end
 
       # Processes
