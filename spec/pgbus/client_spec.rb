@@ -594,4 +594,93 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:close)
     end
   end
+
+  describe "connection pooling strategy" do
+    it "uses configured pool_size when database_url is set (dedicated connections)" do
+      url_config = Pgbus::Configuration.new.tap do |c|
+        c.database_url = "postgres://localhost/pgbus_test"
+        c.connection_params = nil
+        c.pool_size = 5
+        c.queue_prefix = "pgbus_test"
+      end
+
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      described_class.new(url_config)
+
+      expect(PGMQ::Client).to have_received(:new).with(
+        "postgres://localhost/pgbus_test",
+        pool_size: 5,
+        pool_timeout: url_config.pool_timeout
+      )
+    end
+
+    it "uses configured pool_size when connection_params is set (dedicated connections)" do
+      url_config = Pgbus::Configuration.new.tap do |c|
+        c.database_url = nil
+        c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+        c.pool_size = 3
+        c.queue_prefix = "pgbus_test"
+      end
+
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      described_class.new(url_config)
+
+      expect(PGMQ::Client).to have_received(:new).with(
+        { host: "localhost", dbname: "pgbus_test" },
+        pool_size: 3,
+        pool_timeout: url_config.pool_timeout
+      )
+    end
+
+    it "forces pool_size=1 when connection_options returns a Proc (shared connection)" do
+      lambda_config = Pgbus::Configuration.new.tap do |c|
+        c.database_url = nil
+        c.connection_params = nil
+        c.pool_size = 5
+        c.queue_prefix = "pgbus_test"
+      end
+
+      # Simulate the Rails path where connection_options returns a lambda
+      raw_conn = double("PG::Connection")
+      ar_connection = double("AR::ConnectionAdapter", raw_connection: raw_conn)
+      stub_const("ActiveRecord::Base", double("AR::Base", connection: ar_connection))
+
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      described_class.new(lambda_config)
+
+      expect(PGMQ::Client).to have_received(:new).with(
+        an_instance_of(Proc),
+        pool_size: 1,
+        pool_timeout: lambda_config.pool_timeout
+      )
+    end
+
+    it "does not use mutex synchronization for dedicated connections" do
+      config.database_url = "postgres://localhost/pgbus_test"
+      config.pool_size = 5
+
+      # With dedicated connections, operations should not go through the mutex.
+      # We test this by verifying that the client does not have a @pgmq_mutex.
+      expect(client.instance_variable_get(:@pgmq_mutex)).to be_nil
+    end
+
+    it "uses mutex synchronization for shared (Proc) connections" do
+      lambda_config = Pgbus::Configuration.new.tap do |c|
+        c.database_url = nil
+        c.connection_params = nil
+        c.pool_size = 5
+        c.queue_prefix = "pgbus_test"
+      end
+
+      raw_conn = double("PG::Connection")
+      ar_connection = double("AR::ConnectionAdapter", raw_connection: raw_conn)
+      stub_const("ActiveRecord::Base", double("AR::Base", connection: ar_connection))
+
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      shared_client = described_class.new(lambda_config)
+      shared_client.instance_variable_set(:@schema_ensured, true)
+
+      expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+    end
+  end
 end
