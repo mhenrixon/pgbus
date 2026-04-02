@@ -51,6 +51,7 @@ module Pgbus
       @available_locales ||= Dir[Pgbus::Engine.root.join("config", "locales", "*.yml")]
                              .map { |f| File.basename(f, ".yml").to_sym }
     end
+    helper_method :available_locales
 
     def data_source
       @data_source ||= Pgbus.configuration.web_data_source || Web::DataSource.new

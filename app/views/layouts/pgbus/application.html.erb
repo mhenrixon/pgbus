@@ -89,7 +89,7 @@
               </button>
               <div id="pgbus-locale-menu" class="hidden absolute right-0 z-50 mt-1 w-44 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
                 <div class="py-1" role="menu">
-                  <% controller.send(:available_locales).sort.each do |loc| %>
+                  <% available_locales.sort.each do |loc| %>
                     <a href="<%= pgbus.set_locale_path(locale: loc) %>" role="menuitem" class="block px-3 py-1 text-sm no-underline <%= loc == I18n.locale ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700' %>">
                       <%= pgbus_locale_flag(loc) %> <%= pgbus_locale_name(loc) %>
                     </a>
