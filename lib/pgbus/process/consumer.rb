@@ -56,9 +56,12 @@ module Pgbus
         idle = @pool.max_length - @pool.queue_length
         return interruptible_sleep(config.polling_interval) if idle <= 0
 
-        tagged_messages = @queue_names.flat_map do |queue_name|
-          (Pgbus.client.read_batch(queue_name, qty: idle) || []).map { |m| [queue_name, m] }
-        end.first(idle)
+        tagged_messages = if @queue_names.size == 1
+                            queue = @queue_names.first
+                            (Pgbus.client.read_batch(queue, qty: idle) || []).map { |m| [queue, m] }
+                          else
+                            fetch_multi_consumer(idle)
+                          end
 
         if tagged_messages.empty?
           interruptible_sleep(config.polling_interval)
@@ -92,6 +95,16 @@ module Pgbus
         # Message stays in queue; VT will expire and it becomes available again.
         # read_ct tracks delivery attempts — when it exceeds max_retries,
         # the next read will route to DLQ above.
+      end
+
+      def fetch_multi_consumer(qty)
+        messages = Pgbus.client.read_multi(@queue_names, qty: qty) || []
+        prefix = "#{config.queue_prefix}_"
+
+        messages.map do |m|
+          logical = m.queue_name&.delete_prefix(prefix) || @queue_names.first
+          [logical, m]
+        end
       end
 
       def pattern_overlaps?(topic_filter, subscription_pattern)
