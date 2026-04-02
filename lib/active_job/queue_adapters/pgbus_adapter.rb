@@ -19,6 +19,13 @@ module ActiveJob
         true
       end
 
+      # Called by ActiveJob::Continuation (Rails 8.1+) at each checkpoint.
+      # When true, continuable jobs save their cursor and re-enqueue
+      # themselves so the worker can shut down gracefully.
+      def stopping?
+        Pgbus.stopping
+      end
+
       private
 
       def adapter

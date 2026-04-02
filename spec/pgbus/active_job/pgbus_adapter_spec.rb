@@ -28,4 +28,35 @@ RSpec.describe "ActiveJob::QueueAdapters::PgbusAdapter" do
     adapter = ActiveJob::QueueAdapters::PgbusAdapter.new
     expect(adapter).to respond_to(:enqueue_all)
   end
+
+  describe "#stopping?" do
+    let(:adapter) { ActiveJob::QueueAdapters::PgbusAdapter.new }
+
+    around do |example|
+      original = Pgbus.stopping
+      Pgbus.stopping = false
+      example.run
+    ensure
+      Pgbus.stopping = original
+    end
+
+    it "responds to stopping?" do
+      expect(adapter).to respond_to(:stopping?)
+    end
+
+    it "returns false by default" do
+      expect(adapter.stopping?).to be false
+    end
+
+    it "returns true when Pgbus.stopping is set" do
+      Pgbus.stopping = true
+      expect(adapter.stopping?).to be true
+    end
+
+    it "returns false after Pgbus.stopping is cleared" do
+      Pgbus.stopping = true
+      Pgbus.stopping = false
+      expect(adapter.stopping?).to be false
+    end
+  end
 end

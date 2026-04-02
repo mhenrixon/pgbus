@@ -135,10 +135,10 @@ end
 
 ## Step 5: Migrate recurring tasks
 
-If you use SolidQueue's `config/recurring.yml`:
+If you use SolidQueue's `config/recurring.yml`, Pgbus supports the same file format:
 
 ```yaml
-# Before: config/recurring.yml (SolidQueue)
+# config/recurring.yml (works with both SolidQueue and Pgbus)
 production:
   daily_cleanup:
     class: CleanupJob
@@ -150,26 +150,7 @@ production:
     args: [42, "sync"]
 ```
 
-Pgbus does not yet have built-in recurring task support. Options:
-
-1. **Use the `whenever` gem** for cron-based scheduling:
-   ```ruby
-   # config/schedule.rb (whenever gem)
-   every 1.day, at: "2:00 am" do
-     runner "CleanupJob.perform_later"
-   end
-   every :hour do
-     runner "SyncJob.perform_later(42, 'sync')"
-   end
-   ```
-
-2. **Use system cron** directly:
-   ```cron
-   0 2 * * * cd /app && bin/rails runner "CleanupJob.perform_later"
-   0 * * * * cd /app && bin/rails runner "SyncJob.perform_later(42, 'sync')"
-   ```
-
-3. Wait for Pgbus recurring task support (planned).
+Pgbus parses both human-readable (`every day at 2am`) and standard cron (`0 * * * *`) syntax via Fugit. Your existing `recurring.yml` should work without changes. Verify per-environment overrides and `args` parameter passing.
 
 ## Step 6: Replace the dashboard
 
@@ -221,25 +202,28 @@ end
 - **Event bus** -- AMQP-style pub/sub with topic routing, not available in SolidQueue.
 - **PGMQ under the hood** -- battle-tested message queue extension with visibility timeouts and atomic operations.
 
-## What you lose (for now)
+## Feature comparison
 
-| SolidQueue feature | Status in Pgbus |
+| SolidQueue feature | Pgbus equivalent |
 |--------------------|-----------------|
-| `limits_concurrency` | `Pgbus::Concurrency` with `limits_concurrency` DSL |
-| `config/recurring.yml` | Planned |
+| `limits_concurrency` | `Pgbus::Concurrency` with `limits_concurrency` DSL (add `include Pgbus::Concurrency`) |
+| `config/recurring.yml` | Supported -- same YAML format, cron + human-readable syntax via Fugit |
 | Queue pausing (`SolidQueue::Queue.pause`) | Planned |
-| Separate queue database | Not planned (PGMQ lives in your primary DB) |
-| Numeric job priorities | PGMQ reads in FIFO order per queue; use separate queues for priority |
+| Separate queue database (`connects_to`) | Supported -- `Pgbus.configure { \|c\| c.connects_to = { database: { writing: :pgbus } } }` |
+| Numeric job priorities | Supported -- configurable priority levels with per-queue subqueues |
+| `ActiveJob::Continuation` (Rails 8.1+) | Supported -- `stopping?` wired to worker lifecycle |
 
 ## Gotchas
 
 1. **PgBouncer**: If you run PgBouncer in transaction mode, LISTEN/NOTIFY won't work. Use session mode or direct connections for Pgbus worker processes. This also applies to PGMQ's `FOR UPDATE SKIP LOCKED`.
 
-2. **Separate queue database**: SolidQueue supports `connects_to` for a dedicated queue DB. Pgbus requires PGMQ in the same database it connects to. If you need isolation, use a separate PostgreSQL database with PGMQ installed and configure `Pgbus.configuration.database_url`.
+2. **Separate queue database**: Both SolidQueue and Pgbus support `connects_to` for a dedicated queue DB. PGMQ must be installed in whichever database Pgbus connects to.
 
 3. **Queue naming**: SolidQueue uses bare queue names (`default`). Pgbus prefixes all queues (`pgbus_default`). Your `queue_as :default` declarations work unchanged -- the prefix is applied automatically.
 
-4. **`ActionMailer::MailDeliveryJob`**: This can bypass the application-level adapter setting in some Rails versions. If mailer jobs don't appear in Pgbus, add to `ApplicationMailer`:
+4. **Uniqueness**: SolidQueue has no built-in uniqueness. If you need it, add `include Pgbus::Uniqueness` with `ensures_uniqueness strategy: :until_executed` or `:while_executing`.
+
+5. **`ActionMailer::MailDeliveryJob`**: This can bypass the application-level adapter setting in some Rails versions. If mailer jobs don't appear in Pgbus, add to `ApplicationMailer`:
    ```ruby
    class ApplicationMailer < ActionMailer::Base
      self.deliver_later_queue_name = :mailers

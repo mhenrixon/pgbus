@@ -66,12 +66,14 @@ module Pgbus
 
       def graceful_shutdown
         Pgbus.logger.info { "[Pgbus] Worker shutting down gracefully..." }
+        Pgbus.stopping = true
         @lifecycle.transition_to(:draining)
         @wake_signal.notify!
       end
 
       def immediate_shutdown
         Pgbus.logger.warn { "[Pgbus] Worker shutting down immediately!" }
+        Pgbus.stopping = true
         @lifecycle.transition_to!(:stopped)
         @wake_signal.notify!
         @pool.kill
@@ -210,6 +212,7 @@ module Pgbus
       def check_recycle
         return unless @lifecycle.running? && recycle_needed?
 
+        Pgbus.stopping = true
         @lifecycle.transition_to(:draining)
         @wake_signal.notify!
       end

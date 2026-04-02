@@ -13,6 +13,14 @@ module Pgbus
   class SchemaNotReady < Error; end
 
   class << self
+    # Process-global flag set by Worker#graceful_shutdown so the adapter
+    # can report stopping? to ActiveJob::Continuation (Rails 8.1+).
+    attr_writer :stopping
+
+    def stopping
+      @stopping || false
+    end
+
     def loader
       @loader ||= begin
         loader = Zeitwerk::Loader.for_gem

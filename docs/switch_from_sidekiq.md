@@ -200,16 +200,17 @@ Once all Sidekiq jobs have drained and you've verified Pgbus is processing corre
 - **Event bus** -- AMQP-style topic routing for pub/sub, built into the same infrastructure
 - **LISTEN/NOTIFY** -- instant job wake-up without polling overhead
 
-## What you lose (for now)
+## Feature comparison
 
-| Sidekiq feature | Status in Pgbus |
+| Sidekiq feature | Pgbus equivalent |
 |-----------------|-----------------|
-| Batches (Pro) | `Pgbus::Batch` with on_finish/on_success/on_discard callbacks |
-| Rate limiting (Enterprise) | Planned |
+| Batches (Pro) | `Pgbus::Batch` with `on_finish` / `on_success` / `on_discard` callbacks |
 | Concurrency controls (Enterprise) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
-| Unique jobs (Enterprise / `sidekiq-unique-jobs`) | Partial -- event bus has idempotency; job-level dedup planned |
-| Cron / recurring jobs (`sidekiq-cron`) | Planned |
-| Real-time metrics (Sidekiq Web) | Pgbus dashboard covers queue depth, failures, processes |
+| Unique jobs (Enterprise / `sidekiq-unique-jobs`) | `Pgbus::Uniqueness` with `until_executed` / `while_executing` strategies |
+| Cron / recurring jobs (`sidekiq-cron`) | `config/recurring.yml` with cron syntax (Fugit) |
+| Rate limiting (Enterprise) | Use `limits_concurrency` for most cases; sliding-window rate limiting not yet built |
+| Real-time metrics (Sidekiq Web) | Pgbus dashboard covers queue depth, failures, processes, recurring tasks |
+| `ActiveJob::Continuation` (Rails 8.1+) | Supported -- `stopping?` wired to worker lifecycle |
 
 ## Gotchas
 
