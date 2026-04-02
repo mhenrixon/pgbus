@@ -105,7 +105,7 @@ sv:
           handler: Hanterare
           processed_at: Behandlad den
         not_found: Händelse hittades inte
-        title: Händelse
+        title: Händelse %{event_id}
     helpers:
       paused_badge: Pausad
       queue_badge:

@@ -105,7 +105,7 @@ jp:
           handler: ハンドラー
           processed_at: 処理日時
         not_found: イベントが見つかりません
-        title: イベント
+        title: イベント %{event_id}
     helpers:
       paused_badge: 一時停止中
       queue_badge:

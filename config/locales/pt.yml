@@ -105,7 +105,7 @@ pt:
           handler: Manipulador
           processed_at: Processado em
         not_found: Evento não encontrado
-        title: Evento
+        title: Evento %{event_id}
     helpers:
       paused_badge: Pausado
       queue_badge:

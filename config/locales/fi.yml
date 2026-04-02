@@ -105,7 +105,7 @@ fi:
           handler: Käsittelijä
           processed_at: Käsitelty klo
         not_found: Tapahtumaa ei löytynyt
-        title: Tapahtuma
+        title: Tapahtuma %{event_id}
     helpers:
       paused_badge: Tauolla
       queue_badge:

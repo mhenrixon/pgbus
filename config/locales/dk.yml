@@ -105,7 +105,7 @@ dk:
           handler: Håndterer
           processed_at: Behandlet kl.
         not_found: Begivenhed ikke fundet
-        title: Begivenhed
+        title: Begivenhed %{event_id}
     helpers:
       paused_badge: Pause
       queue_badge:

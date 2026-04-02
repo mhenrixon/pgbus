@@ -105,7 +105,7 @@ en:
           handler: Handler
           processed_at: Processed At
         not_found: Event not found
-        title: Event
+        title: Event %{event_id}
     helpers:
       paused_badge: Paused
       queue_badge:

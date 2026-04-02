@@ -105,7 +105,7 @@ it:
           handler: Gestore
           processed_at: Elaborato alle
         not_found: Evento non trovato
-        title: Evento
+        title: Evento %{event_id}
     helpers:
       paused_badge: In pausa
       queue_badge:

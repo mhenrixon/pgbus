@@ -105,7 +105,7 @@ nl:
           handler: Handler
           processed_at: Verwerkt op
         not_found: Gebeurtenis niet gevonden
-        title: Gebeurtenis
+        title: Gebeurtenis %{event_id}
     helpers:
       paused_badge: Gepauzeerd
       queue_badge:

@@ -105,7 +105,7 @@
           handler: Behandler
           processed_at: Behandlet klokken
         not_found: Hendelse ikke funnet
-        title: Hendelse
+        title: Hendelse %{event_id}
     helpers:
       paused_badge: Pause
       queue_badge:
