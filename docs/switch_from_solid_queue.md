@@ -209,7 +209,7 @@ end
 | `limits_concurrency` | `Pgbus::Concurrency` with `limits_concurrency` DSL (add `include Pgbus::Concurrency`) |
 | `config/recurring.yml` | Supported -- same YAML format, cron + human-readable syntax via Fugit |
 | Queue pausing (`SolidQueue::Queue.pause`) | Planned |
-| Separate queue database (`connects_to`) | Supported -- `Pgbus.configure { |c| c.connects_to = { database: { writing: :pgbus } } }` |
+| Separate queue database (`connects_to`) | Supported -- `Pgbus.configure { \|c\| c.connects_to = { database: { writing: :pgbus } } }` |
 | Numeric job priorities | Supported -- configurable priority levels with per-queue subqueues |
 | `ActiveJob::Continuation` (Rails 8.1+) | Supported -- `stopping?` wired to worker lifecycle |
 
