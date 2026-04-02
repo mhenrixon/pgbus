@@ -1,6 +1,26 @@
-<div class="mb-6">
-  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Insights</h1>
-  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Job performance metrics for the last hour</p>
+<div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Insights</h1>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Job performance metrics for the last <%= pgbus_time_range_label(@minutes) %></p>
+  </div>
+  <nav class="inline-flex rounded-lg shadow-sm" role="group" aria-label="Time range">
+    <% ranges = [["1h", 60], ["24h", 1440], ["7d", 10_080], ["30d", 43_200]] %>
+    <% ranges.each_with_index do |(label, mins), i| %>
+      <%
+        active = @minutes == mins
+        base = "px-3 py-1.5 text-xs font-medium border border-gray-300 dark:border-gray-600 focus:z-10 focus:outline-none"
+        colors = active ?
+          "bg-indigo-600 text-white border-indigo-600 dark:border-indigo-500" :
+          "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+        rounded = case i
+                  when 0 then "rounded-l-lg"
+                  when ranges.length - 1 then "rounded-r-lg"
+                  else "-ml-px"
+                  end
+      %>
+      <%= link_to label, pgbus.insights_path(minutes: mins), class: "#{base} #{colors} #{rounded}" %>
+    <% end %>
+  </nav>
 </div>
 
 <!-- Summary cards -->
@@ -143,7 +163,7 @@
 
   // Fetch data and render
   let chartData = null;
-  fetch('<%= pgbus.api_insights_path %>')
+  fetch('<%= pgbus.api_insights_path(minutes: @minutes) %>')
     .then(r => r.json())
     .then(data => { chartData = data; renderCharts(data); })
     .catch(() => {

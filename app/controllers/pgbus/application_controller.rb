@@ -32,6 +32,14 @@ module Pgbus
       Pgbus.configuration.web_per_page
     end
 
+    def insights_minutes
+      config = Pgbus.configuration
+      default = config.insights_default_minutes.to_i
+      max = config.stats_retention.to_i / 60
+      value = (params[:minutes] || default).to_i
+      value.clamp(1, [max, 1].max)
+    end
+
     def turbo_frame_request?
       request.headers["Turbo-Frame"].present? || params[:frame].present?
     end

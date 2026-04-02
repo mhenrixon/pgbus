@@ -62,9 +62,13 @@ RSpec.describe Pgbus::Configuration do
       expect(config.archive_compaction_batch_size).to eq(1000)
     end
 
-    it "has stats enabled by default" do
+    it "has stats enabled with 30 day retention by default" do
       expect(config.stats_enabled).to be true
-      expect(config.stats_retention).to eq(7 * 24 * 3600)
+      expect(config.stats_retention).to eq(30 * 24 * 3600)
+    end
+
+    it "has insights_default_minutes of 30 days" do
+      expect(config.insights_default_minutes).to eq(30 * 24 * 60)
     end
 
     it "has outbox disabled by default" do
@@ -150,6 +154,21 @@ RSpec.describe Pgbus::Configuration do
     it "accepts valid priority_levels" do
       config.priority_levels = 3
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects non-positive insights_default_minutes" do
+      config.insights_default_minutes = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
+
+    it "rejects negative insights_default_minutes" do
+      config.insights_default_minutes = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
+
+    it "rejects fractional insights_default_minutes" do
+      config.insights_default_minutes = 90.5
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
     end
   end
 

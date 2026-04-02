@@ -63,7 +63,8 @@ module Pgbus
     attr_accessor :stats_retention, :stats_enabled
 
     # Web dashboard
-    attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
+    attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
+                  :insights_default_minutes
 
     def initialize
       @database_url = nil
@@ -124,7 +125,7 @@ module Pgbus
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
       @stats_enabled = true
-      @stats_retention = 7 * 24 * 3600 # 7 days
+      @stats_retention = 30 * 24 * 3600 # 30 days
 
       @connects_to = nil
 
@@ -133,6 +134,7 @@ module Pgbus
       @web_per_page = 25
       @web_live_updates = true
       @web_data_source = nil
+      @insights_default_minutes = 30 * 24 * 60 # 30 days
     end
 
     def queue_name(name)
@@ -180,6 +182,10 @@ module Pgbus
 
       if priority_levels && !(priority_levels.is_a?(Integer) && priority_levels >= 1 && priority_levels <= 10)
         raise ArgumentError, "priority_levels must be an integer between 1 and 10"
+      end
+
+      unless insights_default_minutes.is_a?(Integer) && insights_default_minutes.positive?
+        raise ArgumentError, "insights_default_minutes must be a positive integer"
       end
 
       self
