@@ -184,8 +184,8 @@ module Pgbus
         raise ArgumentError, "priority_levels must be an integer between 1 and 10"
       end
 
-      unless insights_default_minutes.is_a?(Numeric) && insights_default_minutes.positive?
-        raise ArgumentError, "insights_default_minutes must be > 0"
+      unless insights_default_minutes.is_a?(Integer) && insights_default_minutes.positive?
+        raise ArgumentError, "insights_default_minutes must be a positive integer"
       end
 
       self

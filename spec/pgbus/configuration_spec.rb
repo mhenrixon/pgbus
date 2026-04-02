@@ -165,6 +165,11 @@ RSpec.describe Pgbus::Configuration do
       config.insights_default_minutes = -1
       expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
     end
+
+    it "rejects fractional insights_default_minutes" do
+      config.insights_default_minutes = 90.5
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
   end
 
   describe "#connection_options" do

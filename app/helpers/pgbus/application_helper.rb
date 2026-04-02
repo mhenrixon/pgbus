@@ -135,12 +135,23 @@ module Pgbus
       minutes = [minutes.to_i, 1].max
       if minutes < 60
         minutes == 1 ? "1 minute" : "#{minutes} minutes"
-      elsif minutes <= 1440
+      elsif minutes < 1440 || (minutes <= 1440 && (minutes % 60).zero?)
         hours = minutes / 60
-        hours == 1 ? "1 hour" : "#{hours} hours"
+        remainder = minutes % 60
+        if remainder.zero?
+          hours == 1 ? "1 hour" : "#{hours} hours"
+        else
+          "#{minutes} minutes"
+        end
       else
         days = minutes / 1440
-        days == 1 ? "1 day" : "#{days} days"
+        remainder = minutes % 1440
+        if remainder.zero?
+          days == 1 ? "1 day" : "#{days} days"
+        else
+          hours = minutes / 60
+          hours == 1 ? "1 hour" : "#{hours} hours"
+        end
       end
     end
 

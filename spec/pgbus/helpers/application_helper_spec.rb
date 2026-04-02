@@ -139,6 +139,14 @@ RSpec.describe Pgbus::ApplicationHelper do
     it "clamps negative to 1 minute" do
       expect(helper.pgbus_time_range_label(-5)).to eq("1 minute")
     end
+
+    it "keeps non-divisible hour values as minutes" do
+      expect(helper.pgbus_time_range_label(90)).to eq("90 minutes")
+    end
+
+    it "keeps non-divisible day values as hours" do
+      expect(helper.pgbus_time_range_label(1500)).to eq("25 hours")
+    end
   end
 
   describe "#pgbus_json_preview" do
