@@ -3,17 +3,17 @@
     <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= @queue&.dig(:name) || params[:name] %></h1>
     <% if @queue %>
       <p class="text-sm text-gray-500 mt-1">
-        Depth: <span class="font-mono"><%= @queue[:queue_length] %></span> |
-        Visible: <span class="font-mono"><%= @queue[:queue_visible_length] %></span> |
-        Total: <span class="font-mono"><%= pgbus_number(@queue[:total_messages]) %></span>
+        <%= t("pgbus.queues.show.depth") %> <span class="font-mono"><%= @queue[:queue_length] %></span> |
+        <%= t("pgbus.queues.show.visible") %> <span class="font-mono"><%= @queue[:queue_visible_length] %></span> |
+        <%= t("pgbus.queues.show.total") %> <span class="font-mono"><%= pgbus_number(@queue[:total_messages]) %></span>
       </p>
     <% end %>
   </div>
   <div class="flex space-x-2">
-    <%= button_to "Purge Queue", pgbus.purge_queue_path(name: params[:name]),
+    <%= button_to t("pgbus.queues.show.purge_queue"), pgbus.purge_queue_path(name: params[:name]),
           method: :post,
           class: "rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500",
-          data: { turbo_confirm: "Purge all messages?" } %>
+          data: { turbo_confirm: t("pgbus.queues.show.purge_confirm") } %>
   </div>
 </div>
 
@@ -22,11 +22,11 @@
   <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
     <thead class="bg-gray-50 dark:bg-gray-900">
       <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">ID</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Enqueued</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Reads</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">VT</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Payload</th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.id") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.enqueued") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.reads") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.vt") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.payload") %></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -42,7 +42,7 @@
         </tr>
       <% end %>
       <% if @messages.empty? %>
-        <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400">Queue is empty</td></tr>
+        <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.queues.show.empty") %></td></tr>
       <% end %>
     </tbody>
   </table>

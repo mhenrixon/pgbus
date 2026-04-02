@@ -1,0 +1,40 @@
+---
+# i18n-tasks configuration for Pgbus engine
+# https://github.com/glebm/i18n-tasks
+
+base_locale: en
+
+data:
+  router: pattern_router
+  read:
+    - config/locales/%{locale}.yml
+    - config/locales/**/*.%{locale}.yml
+  write:
+    - config/locales/%{locale}.yml
+  yaml:
+    write:
+      line_width: -1
+
+search:
+  paths:
+    - app/
+  exclude:
+    - "*.md"
+    - app/assets/images
+  strict: false
+
+translation:
+  backend: openai
+  openai_api_key: <%= ENV["OPENAI_API_KEY"] %>
+  openai_model: gpt-4.1-mini
+
+ignore_missing:
+  - "activerecord.*"
+
+ignore_unused:
+  - "pgbus.helpers.*"
+  - "pgbus.insights.show.time_ranges.*"
+  - "pgbus.insights.show.charts.series_name"
+  - "pgbus.insights.show.charts.failed_to_load"
+  - "pgbus.insights.show.charts.no_data"
+  - "pgbus.recurring_tasks.index.task_count.*"

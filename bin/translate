@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Translation management CLI for Pgbus engine
+#
+# Usage:
+#   bin/translate                    # Show missing/unused status
+#   bin/translate --translate        # Translate missing keys via OpenAI
+#   bin/translate --normalize        # Normalize locale files
+#   bin/translate --missing          # List missing keys
+#   bin/translate --unused           # List unused keys
+#   bin/translate --health           # Full health check
+#   bin/translate --help             # Show help
+#
+# Examples:
+#   bin/translate --translate --locale fr
+#   bin/translate --missing
+#   bin/translate --health
+
+require "optparse"
+
+APP_ROOT = File.expand_path("..", __dir__)
+Dir.chdir(APP_ROOT)
+
+options = {
+  command: :status,
+  locale: nil,
+  verbose: false,
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: bin/translate [options]"
+
+  opts.separator ""
+  opts.separator "Commands:"
+
+  opts.on("--status", "Show translation status (default)") { options[:command] = :status }
+  opts.on("--translate", "Translate missing keys (requires OPENAI_API_KEY)") { options[:command] = :translate }
+  opts.on("--normalize", "Normalize locale files") { options[:command] = :normalize }
+  opts.on("--missing", "List missing translation keys") { options[:command] = :missing }
+  opts.on("--unused", "List unused translation keys") { options[:command] = :unused }
+  opts.on("--health", "Full health check (missing + unused)") { options[:command] = :health }
+
+  opts.separator ""
+  opts.separator "Options:"
+
+  opts.on("-l", "--locale LOCALE", "Process specific locale") { |l| options[:locale] = l }
+  opts.on("-v", "--verbose", "Verbose output") { options[:verbose] = true }
+  opts.on("-h", "--help", "Show this help") { puts opts; exit }
+end.parse!
+
+def run(cmd)
+  puts "$ #{cmd}" if $VERBOSE
+  system(cmd) || exit(1)
+end
+
+$VERBOSE = options[:verbose]
+
+case options[:command]
+when :status
+  puts "Translation Status"
+  puts "=" * 40
+  run "bundle exec i18n-tasks health"
+
+when :translate
+  unless ENV["OPENAI_API_KEY"]
+    warn "OPENAI_API_KEY environment variable not set"
+    exit 1
+  end
+
+  locale_flag = options[:locale] ? "-l #{options[:locale]}" : ""
+  puts "Translating missing keys..."
+  run "bundle exec i18n-tasks translate-missing #{locale_flag}"
+  puts ""
+  puts "Normalizing locale files..."
+  run "bundle exec i18n-tasks normalize -p"
+  puts "Done!"
+
+when :normalize
+  run "bundle exec i18n-tasks normalize -p"
+
+when :missing
+  locale_flag = options[:locale] ? "-l #{options[:locale]}" : ""
+  run "bundle exec i18n-tasks missing #{locale_flag}"
+
+when :unused
+  run "bundle exec i18n-tasks unused"
+
+when :health
+  run "bundle exec i18n-tasks health"
+end

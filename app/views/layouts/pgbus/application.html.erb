@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pgbus Dashboard</title>
+  <title><%= t("pgbus.layout.title") %></title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { darkMode: 'class' };
@@ -46,25 +46,25 @@
         <div class="flex h-14 items-center justify-between">
           <div class="flex items-center space-x-8">
             <%= link_to pgbus.root_path, class: "flex items-center space-x-2" do %>
-              <span class="text-lg font-bold text-white">Pgbus</span>
+              <span class="text-lg font-bold text-white"><%= t("pgbus.layout.brand") %></span>
               <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300"><%= Pgbus::VERSION %></span>
             <% end %>
 
             <div class="flex space-x-1">
-              <%= pgbus_nav_link "Dashboard", pgbus.root_path %>
-              <%= pgbus_nav_link "Queues", pgbus.queues_path %>
-              <%= pgbus_nav_link "Jobs", pgbus.jobs_path %>
-              <%= pgbus_nav_link "Recurring", pgbus.recurring_tasks_path %>
-              <%= pgbus_nav_link "Processes", pgbus.processes_path %>
-              <%= pgbus_nav_link "Events", pgbus.events_path %>
-              <%= pgbus_nav_link "DLQ", pgbus.dead_letter_index_path %>
-              <%= pgbus_nav_link "Outbox", pgbus.outbox_index_path %>
-              <%= pgbus_nav_link "Locks", pgbus.locks_path %>
-              <%= pgbus_nav_link "Insights", pgbus.insights_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.dashboard"), pgbus.root_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.queues"), pgbus.queues_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.jobs"), pgbus.jobs_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.recurring"), pgbus.recurring_tasks_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.processes"), pgbus.processes_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.events"), pgbus.events_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.dlq"), pgbus.dead_letter_index_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.outbox"), pgbus.outbox_index_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.locks"), pgbus.locks_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.insights"), pgbus.insights_path %>
             </div>
           </div>
 
-          <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="Toggle dark mode">
+          <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
             <svg class="h-5 w-5 hidden dark:block" fill="currentColor" viewBox="0 0 20 20">
               <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
             </svg>

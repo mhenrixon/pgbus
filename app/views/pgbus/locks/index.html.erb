@@ -1,18 +1,18 @@
 <div class="mb-6">
-  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Job Locks</h1>
-  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Active uniqueness locks preventing duplicate job execution</p>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= t("pgbus.locks.index.title") %></h1>
+  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.description") %></p>
 </div>
 
 <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
   <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
     <thead class="bg-gray-50 dark:bg-gray-900">
       <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Lock Key</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Job Class</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">State</th>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Owner</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Age</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Expires</th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.lock_key") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.job_class") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.state") %></th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.owner") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.age") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.locks.index.headers.expires") %></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -22,9 +22,9 @@
           <td class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300"><%= lock[:job_class] %></td>
           <td class="px-4 py-3 text-sm">
             <% if lock[:state] == "executing" %>
-              <span class="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/50 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-300">Executing</span>
+              <span class="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/50 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:text-blue-300"><%= t("pgbus.locks.index.executing") %></span>
             <% else %>
-              <span class="inline-flex items-center rounded-full bg-yellow-100 dark:bg-yellow-900/50 px-2.5 py-0.5 text-xs font-medium text-yellow-800 dark:text-yellow-300">Queued</span>
+              <span class="inline-flex items-center rounded-full bg-yellow-100 dark:bg-yellow-900/50 px-2.5 py-0.5 text-xs font-medium text-yellow-800 dark:text-yellow-300"><%= t("pgbus.locks.index.queued") %></span>
             <% end %>
           </td>
           <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
@@ -46,7 +46,7 @@
         </tr>
       <% end %>
       <% if @locks.empty? %>
-        <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No active locks</td></tr>
+        <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500"><%= t("pgbus.locks.index.empty") %></td></tr>
       <% end %>
     </tbody>
   </table>

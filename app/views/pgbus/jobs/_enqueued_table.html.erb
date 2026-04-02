@@ -1,15 +1,15 @@
 <turbo-frame id="jobs-enqueued" data-auto-refresh src="<%= pgbus.jobs_path(request.query_parameters.merge(frame: 'enqueued')) %>">
   <div>
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Enqueued Jobs</h2>
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3"><%= t("pgbus.jobs.enqueued_table.title") %></h2>
     <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">ID</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Job Class</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Enqueued</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Reads</th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.enqueued_table.headers.id") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.enqueued_table.headers.job_class") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.enqueued_table.headers.queue") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.enqueued_table.headers.enqueued") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.enqueued_table.headers.reads") %></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -27,33 +27,33 @@
                   </summary>
                   <div class="px-4 pb-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-100">
                     <div class="flex items-center mt-3 mb-3">
-                      <span class="text-xs font-mono text-gray-400">Job ID: <%= payload["job_id"] %></span>
+                      <span class="text-xs font-mono text-gray-400"><%= t("pgbus.jobs.enqueued_table.job_id") %> <%= payload["job_id"] %></span>
                     </div>
                     <div class="grid grid-cols-2 gap-4 mb-3">
                       <div>
-                        <span class="text-xs font-medium text-gray-500">Arguments</span>
+                        <span class="text-xs font-medium text-gray-500"><%= t("pgbus.jobs.enqueued_table.arguments") %></span>
                         <pre class="text-xs text-gray-700 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-40"><%= JSON.pretty_generate(payload["arguments"] || []) rescue "—" %></pre>
                       </div>
                       <div>
-                        <span class="text-xs font-medium text-gray-500">Metadata</span>
+                        <span class="text-xs font-medium text-gray-500"><%= t("pgbus.jobs.enqueued_table.metadata") %></span>
                         <div class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 space-y-1">
-                          <% if payload["queue_name"] %><p><strong>Queue:</strong> <%= payload["queue_name"] %></p><% end %>
-                          <% if payload["priority"] %><p><strong>Priority:</strong> <%= payload["priority"] %></p><% end %>
-                          <% if payload["locale"] %><p><strong>Locale:</strong> <%= payload["locale"] %></p><% end %>
-                          <% if payload["timezone"] %><p><strong>Timezone:</strong> <%= payload["timezone"] %></p><% end %>
-                          <% if payload["scheduled_at"] %><p><strong>Scheduled:</strong> <%= payload["scheduled_at"] %></p><% end %>
-                          <% if j[:vt] %><p><strong>Visible at:</strong> <%= j[:vt] %></p><% end %>
-                          <% if j[:last_read_at] %><p><strong>Last read:</strong> <%= j[:last_read_at] %></p><% end %>
+                          <% if payload["queue_name"] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.queue") %></strong> <%= payload["queue_name"] %></p><% end %>
+                          <% if payload["priority"] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.priority") %></strong> <%= payload["priority"] %></p><% end %>
+                          <% if payload["locale"] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.locale") %></strong> <%= payload["locale"] %></p><% end %>
+                          <% if payload["timezone"] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.timezone") %></strong> <%= payload["timezone"] %></p><% end %>
+                          <% if payload["scheduled_at"] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.scheduled") %></strong> <%= payload["scheduled_at"] %></p><% end %>
+                          <% if j[:vt] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.visible_at") %></strong> <%= j[:vt] %></p><% end %>
+                          <% if j[:last_read_at] %><p><strong><%= t("pgbus.jobs.enqueued_table.metadata_labels.last_read") %></strong> <%= j[:last_read_at] %></p><% end %>
                         </div>
                       </div>
                     </div>
                     <details class="mt-2">
-                      <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">Full JSON payload</summary>
+                      <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700"><%= t("pgbus.jobs.enqueued_table.full_json_payload") %></summary>
                       <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-96"><%= JSON.pretty_generate(payload) rescue j[:message] %></pre>
                     </details>
                     <% if j[:headers] %>
                       <details class="mt-2">
-                        <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">Headers</summary>
+                        <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700"><%= t("pgbus.jobs.enqueued_table.headers_section") %></summary>
                         <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(j[:headers])) rescue j[:headers] %></pre>
                       </details>
                     <% end %>
@@ -63,7 +63,7 @@
             </tr>
           <% end %>
           <% if @jobs.empty? %>
-            <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400">No enqueued jobs</td></tr>
+            <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.jobs.enqueued_table.empty") %></td></tr>
           <% end %>
         </tbody>
       </table>

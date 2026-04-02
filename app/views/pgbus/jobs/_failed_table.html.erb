@@ -1,16 +1,16 @@
 <turbo-frame id="jobs-failed" data-auto-refresh src="<%= pgbus.jobs_path(frame: 'failed') %>">
   <div class="mb-8">
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3">Failed Jobs</h2>
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3"><%= t("pgbus.jobs.failed_table.title") %></h2>
     <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
       <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">ID</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Queue</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Error</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Retries</th>
-            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Failed</th>
-            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Actions</th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.id") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.queue") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.error") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.retries") %></th>
+            <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.failed") %></th>
+            <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.jobs.failed_table.headers.actions") %></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -26,17 +26,17 @@
               <td class="px-4 py-3 text-sm text-gray-500"><%= f["retry_count"] %></td>
               <td class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(f["failed_at"]) %></td>
               <td class="px-4 py-3 text-sm text-right space-x-2">
-                <%= button_to "Retry", pgbus.retry_job_path(f["id"]), method: :post,
+                <%= button_to t("pgbus.jobs.failed_table.retry"), pgbus.retry_job_path(f["id"]), method: :post,
                       class: "text-xs text-indigo-600 hover:text-indigo-800 font-medium",
                       data: { turbo_frame: "_top" } %>
-                <%= button_to "Discard", pgbus.discard_job_path(f["id"]), method: :post,
+                <%= button_to t("pgbus.jobs.failed_table.discard"), pgbus.discard_job_path(f["id"]), method: :post,
                       class: "text-xs text-red-600 hover:text-red-800 font-medium",
-                      data: { turbo_confirm: "Discard this job?", turbo_frame: "_top" } %>
+                      data: { turbo_confirm: t("pgbus.jobs.failed_table.discard_confirm"), turbo_frame: "_top" } %>
               </td>
             </tr>
           <% end %>
           <% if @failed.empty? %>
-            <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No failed jobs</td></tr>
+            <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.jobs.failed_table.empty") %></td></tr>
           <% end %>
         </tbody>
       </table>

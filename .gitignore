@@ -16,7 +16,6 @@ spec/dummy/db/*.sqlite3
 spec/dummy/log/
 spec/dummy/tmp/
 tmp/capybara/
-bin/rspec
-bin/rubocop
+.env
 .rspec_integration_status
 codedb.snapshot

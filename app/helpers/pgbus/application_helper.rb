@@ -31,17 +31,21 @@ module Pgbus
 
     def pgbus_status_badge(healthy)
       if healthy
-        tag.span("Healthy", class: "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800")
+        tag.span(I18n.t("pgbus.helpers.status_badge.healthy"),
+                 class: "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800")
       else
-        tag.span("Stale", class: "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800")
+        tag.span(I18n.t("pgbus.helpers.status_badge.stale"),
+                 class: "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800")
       end
     end
 
     def pgbus_queue_badge(name)
       if name.to_s.end_with?("_dlq")
-        tag.span("DLQ", class: "inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700")
+        tag.span(I18n.t("pgbus.helpers.queue_badge.dlq"),
+                 class: "inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700")
       else
-        tag.span("Queue", class: "inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700")
+        tag.span(I18n.t("pgbus.helpers.queue_badge.queue"),
+                 class: "inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700")
       end
     end
 
@@ -76,7 +80,8 @@ module Pgbus
     def pgbus_paused_badge(paused)
       return unless paused
 
-      tag.span("Paused", class: "inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800")
+      tag.span(I18n.t("pgbus.helpers.paused_badge"),
+               class: "inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800")
     end
 
     def pgbus_parse_message(message)
@@ -123,10 +128,10 @@ module Pgbus
 
     def pgbus_recurring_health_badge(task)
       if task[:last_run_at].nil?
-        tag.span("Pending",
+        tag.span(I18n.t("pgbus.helpers.recurring_health.pending"),
                  class: "inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800")
       else
-        tag.span("Active",
+        tag.span(I18n.t("pgbus.helpers.recurring_health.active"),
                  class: "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800")
       end
     end
