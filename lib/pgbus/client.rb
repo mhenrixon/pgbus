@@ -19,18 +19,26 @@ module Pgbus
         require "pgmq"
       end
       @config = config
-      # Force pool_size=1. PG::Connection (libpq) is not thread-safe.
-      # When using the Rails lambda path (-> { AR::Base.connection.raw_connection }),
-      # the pool would return the same underlying PG::Connection that ActiveRecord
-      # also uses, causing concurrent access corruption (segfaults, result.ntuples
-      # NoMethodError). A single-connection pool combined with @pgmq_mutex ensures
-      # all PGMQ operations are serialized.
-      @pgmq = PGMQ::Client.new(
-        config.connection_options,
-        pool_size: 1,
-        pool_timeout: config.pool_timeout
-      )
-      @pgmq_mutex = Mutex.new
+      conn_opts = config.connection_options
+      @shared_connection = conn_opts.is_a?(Proc)
+
+      if @shared_connection
+        # When using the Rails lambda path (-> { AR::Base.connection.raw_connection }),
+        # the Proc returns the same underlying PG::Connection that ActiveRecord uses.
+        # PG::Connection (libpq) is not thread-safe — concurrent access causes
+        # segfaults and result corruption. Force pool_size=1 and serialize all
+        # operations through a mutex.
+        @pgmq = PGMQ::Client.new(conn_opts, pool_size: 1, pool_timeout: config.pool_timeout)
+        @pgmq_mutex = Mutex.new
+      else
+        # With a String URL or Hash params, pgmq-ruby creates its own dedicated
+        # PG::Connection per pool slot — no shared state with ActiveRecord.
+        # Use the configured pool_size and let pgmq-ruby's connection_pool handle
+        # concurrency internally (no mutex needed).
+        @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.pool_size, pool_timeout: config.pool_timeout)
+        @pgmq_mutex = nil
+      end
+
       @queues_created = Concurrent::Map.new
       @queue_strategy = QueueFactory.for(config)
       @schema_ensured = false
@@ -327,11 +335,15 @@ module Pgbus
       end
     end
 
-    # Serialize all PGMQ operations through a single mutex.
-    # PG::Connection is not thread-safe — concurrent access from worker
-    # threads causes segfaults and result corruption.
+    # Serialize PGMQ operations through a mutex when sharing a connection
+    # with ActiveRecord (Proc path). When pgmq-ruby owns its own connections
+    # (String/Hash path), the internal connection_pool handles concurrency.
     def synchronized(&)
-      @pgmq_mutex.synchronize(&)
+      if @pgmq_mutex
+        @pgmq_mutex.synchronize(&)
+      else
+        yield
+      end
     end
 
     def serialize(data)
