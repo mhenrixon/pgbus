@@ -147,6 +147,10 @@ RSpec.describe Pgbus::ApplicationHelper do
     it "keeps non-divisible day values as hours" do
       expect(helper.pgbus_time_range_label(1500)).to eq("25 hours")
     end
+
+    it "falls back to minutes for values not divisible by 60 above a day" do
+      expect(helper.pgbus_time_range_label(1530)).to eq("1530 minutes")
+    end
   end
 
   describe "#pgbus_json_preview" do
