@@ -77,7 +77,7 @@ module Pgbus
       full_name = config.queue_name(queue_name)
       ensure_queue(queue_name)
       serialized = payloads.map { |p| serialize(p) }
-      serialized_headers = headers&.map { |h| serialize(h) }
+      serialized_headers = headers&.map { |h| h.nil? ? nil : serialize(h) }
       Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
         synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
       end

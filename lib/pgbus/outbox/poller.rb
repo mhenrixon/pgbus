@@ -54,10 +54,7 @@ module Pgbus
                                  .to_a
             break if entries.empty?
 
-            entries.each do |entry|
-              succeeded += 1 if publish_entry(entry)
-            end
-
+            succeeded = publish_entries(entries)
             published += succeeded
             break if succeeded.zero? || entries.size < config.outbox_batch_size
           end
@@ -74,24 +71,65 @@ module Pgbus
 
       private
 
-      def publish_entry(entry)
-        if entry.routing_key.present?
-          Pgbus.client.publish_to_topic(
-            entry.routing_key,
-            entry.payload,
-            headers: entry.headers,
-            delay: entry.delay || 0
-          )
-        else
-          Pgbus.client.send_message(
-            entry.queue_name,
-            entry.payload,
-            headers: entry.headers,
-            delay: entry.delay || 0,
-            priority: entry.priority
-          )
-        end
+      def publish_entries(entries)
+        # Partition: topic-routed entries must be published individually
+        # (different routing keys), direct-queue entries can be batched.
+        topic_entries, queue_entries = entries.partition { |e| e.routing_key.present? }
 
+        succeeded = 0
+        topic_entries.each { |e| succeeded += 1 if publish_single(e) }
+        succeeded += publish_queue_batch(queue_entries)
+        succeeded
+      end
+
+      def publish_single(entry)
+        Pgbus.client.publish_to_topic(
+          entry.routing_key,
+          entry.payload,
+          headers: entry.headers,
+          delay: entry.delay || 0
+        )
+        entry.update!(published_at: Time.current)
+        true
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to publish outbox entry #{entry.id}: #{e.message}" }
+        false
+      end
+
+      # Group direct-queue entries by (queue_name, priority, delay) and
+      # use send_batch for each group to reduce round-trips.
+      def publish_queue_batch(entries)
+        return 0 if entries.empty?
+
+        succeeded = 0
+        entries.group_by { |e| [e.queue_name, e.priority, e.delay || 0] }.each do |(queue, _priority, delay), group|
+          payloads = group.map(&:payload)
+          headers = group.map(&:headers)
+          headers = nil if headers.all?(&:blank?)
+
+          Pgbus.client.send_batch(queue, payloads, headers: headers, delay: delay)
+          now = Time.current
+          group.each { |e| e.update!(published_at: now) }
+          succeeded += group.size
+        rescue StandardError => e
+          Pgbus.logger.error { "[Pgbus] Failed to batch-publish #{group.size} outbox entries: #{e.message}" }
+          # Fall back to individual publishing for this group
+          group.each { |entry| succeeded += 1 if publish_single_queue(entry) }
+        end
+        succeeded
+      end
+
+      # Fallback for individual publishing when a batch fails.
+      # Intentionally omits priority to match send_batch routing behavior
+      # (base queue only), ensuring consistent queue placement regardless
+      # of whether the batch or fallback path is used.
+      def publish_single_queue(entry)
+        Pgbus.client.send_message(
+          entry.queue_name,
+          entry.payload,
+          headers: entry.headers,
+          delay: entry.delay || 0
+        )
         entry.update!(published_at: Time.current)
         true
       rescue StandardError => e

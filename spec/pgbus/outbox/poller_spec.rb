@@ -30,31 +30,35 @@ RSpec.describe Pgbus::Outbox::Poller do
       allow(relation).to receive_messages(order: relation, limit: relation, lock: relation)
     end
 
-    it "publishes entries to PGMQ via queue_name" do
-      entry = double("entry",
-                     id: 1,
-                     queue_name: "default",
-                     routing_key: nil,
-                     payload: { "data" => "test" },
-                     headers: nil,
-                     delay: 0,
-                     priority: 1,
-                     update!: true)
-      allow(relation).to receive(:to_a).and_return([entry], [])
+    context "with direct-queue entries for the same queue" do
+      let(:first_entry) do
+        double("first_entry", id: 1, queue_name: "default", routing_key: nil,
+                              payload: { "data" => "one" }, headers: nil, delay: 0, priority: 1, update!: true)
+      end
+      let(:second_entry) do
+        double("second_entry", id: 2, queue_name: "default", routing_key: nil,
+                               payload: { "data" => "two" }, headers: nil, delay: 0, priority: 1, update!: true)
+      end
 
-      result = poller.poll_and_publish
+      before { allow(relation).to receive(:to_a).and_return([first_entry, second_entry], []) }
 
-      expect(mock_client).to have_received(:send_message).with("default", { "data" => "test" }, headers: nil, delay: 0, priority: 1)
-      expect(entry).to have_received(:update!).with(published_at: a_kind_of(Time))
-      expect(result).to eq(1)
+      it "batch-publishes via send_batch" do
+        result = poller.poll_and_publish
+
+        expect(mock_client).to have_received(:send_batch).with(
+          "default", [{ "data" => "one" }, { "data" => "two" }], headers: nil, delay: 0
+        )
+        expect(first_entry).to have_received(:update!).with(published_at: a_kind_of(Time))
+        expect(second_entry).to have_received(:update!).with(published_at: a_kind_of(Time))
+        expect(result).to eq(2)
+      end
     end
 
-    it "publishes entries via routing_key" do
-      routing_key = "orders.created"
+    it "publishes topic-routed entries individually" do
       entry = double("entry",
-                     id: 2,
+                     id: 3,
                      queue_name: nil,
-                     routing_key: routing_key,
+                     routing_key: "orders.created",
                      payload: { "event" => "data" },
                      headers: { "trace" => "id" },
                      delay: nil,
@@ -66,6 +70,42 @@ RSpec.describe Pgbus::Outbox::Poller do
 
       expect(mock_client).to have_received(:publish_to_topic)
         .with("orders.created", { "event" => "data" }, headers: { "trace" => "id" }, delay: 0)
+      expect(result).to eq(1)
+    end
+
+    it "groups direct-queue entries by queue, priority, and delay" do
+      entry_a = double("entry_a", id: 4, queue_name: "default", routing_key: nil,
+                                  payload: "a", headers: nil, delay: 0, priority: 1, update!: true)
+      entry_b = double("entry_b", id: 5, queue_name: "urgent", routing_key: nil,
+                                  payload: "b", headers: nil, delay: 0, priority: 0, update!: true)
+      allow(relation).to receive(:to_a).and_return([entry_a, entry_b], [])
+
+      poller.poll_and_publish
+
+      expect(mock_client).to have_received(:send_batch).with("default", ["a"], headers: nil, delay: 0)
+      expect(mock_client).to have_received(:send_batch).with("urgent", ["b"], headers: nil, delay: 0)
+    end
+
+    it "falls back to individual sends when batch fails" do
+      entry = double("entry",
+                     id: 6,
+                     queue_name: "default",
+                     routing_key: nil,
+                     payload: { "data" => "test" },
+                     headers: nil,
+                     delay: 0,
+                     priority: 1,
+                     update!: true)
+      allow(relation).to receive(:to_a).and_return([entry], [])
+      allow(mock_client).to receive(:send_batch).and_raise(StandardError, "batch failed")
+      allow(mock_client).to receive(:send_message).and_return(1)
+
+      result = poller.poll_and_publish
+
+      # Fallback intentionally omits priority to match send_batch routing
+      expect(mock_client).to have_received(:send_message).with(
+        "default", { "data" => "test" }, headers: nil, delay: 0
+      )
       expect(result).to eq(1)
     end
 

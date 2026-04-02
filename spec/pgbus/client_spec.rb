@@ -223,6 +223,17 @@ RSpec.describe Pgbus::Client do
         delay: 0
       )
     end
+
+    it "preserves nil elements in mixed headers arrays" do
+      client.send_batch("default", %w[p1 p2], headers: [nil, { "h" => 1 }])
+
+      expect(mock_pgmq).to have_received(:produce_batch).with(
+        "pgbus_test_default",
+        %w[p1 p2],
+        headers: [nil, '{"h":1}'],
+        delay: 0
+      )
+    end
   end
 
   describe "#read_message" do
@@ -316,6 +327,12 @@ RSpec.describe Pgbus::Client do
       client.archive_batch("default", [1, 2, 3])
 
       expect(mock_pgmq).to have_received(:archive_batch).with("pgbus_test_default", [1, 2, 3])
+    end
+
+    it "skips prefix when prefixed: false" do
+      client.archive_batch("raw_queue", [4, 5], prefixed: false)
+
+      expect(mock_pgmq).to have_received(:archive_batch).with("raw_queue", [4, 5])
     end
   end
 
