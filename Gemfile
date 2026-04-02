@@ -8,8 +8,10 @@ gem "irb"
 gem "rake", "~> 13.0"
 
 group :development do
+  gem "i18n-tasks", "~> 1.0"
   gem "rubocop", "~> 1.21"
   gem "rubocop-rspec", "~> 3.0"
+  gem "ruby-openai"
 end
 
 group :test do

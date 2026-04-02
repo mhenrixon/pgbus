@@ -1,0 +1,348 @@
+---
+nb:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Ingen prosesser kjører
+        headers:
+          host: Vert
+          kind: Type
+          pid: PID
+          status: Status
+        title: Aktive prosesser
+      queues_table:
+        empty: Ingen køer funnet
+        headers:
+          depth: Dybde
+          oldest: Eldste (s)
+          queue: Kø
+          total: Totalt
+          visible: Synlig
+        title: Køer
+        view_all: Vis alle
+      recent_failures:
+        empty: Ingen feil
+        headers:
+          error: Feil
+          queue: Kø
+          when: Når
+        title: Nylige feil
+        view_all: Vis alle
+      show:
+        title: Dashbord
+      stats_cards:
+        enqueued: I kø
+        failed_dlq: Mislyktes / DLQ
+        processes: Prosesser
+        queues: Køer
+        recurring: Gjentakende
+        throughput: Gjennomstrømning
+        throughput_unit: meldinger/s
+        view_tasks: Vis oppgaver
+        visible: synlig
+    dead_letter:
+      index:
+        discard_all: Forkast alle
+        discard_all_confirm: Slett alle DLQ-meldinger permanent?
+        retry_all: Prøv alle på nytt
+        retry_all_confirm: Prøv alle DLQ-meldinger på nytt?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Argumenter
+        discard: Forkast
+        discard_confirm: Slett permanent?
+        empty: Dead letter queue er tom
+        full_json_payload: Full JSON-payload
+        headers:
+          enqueued: I kø
+          id: ID
+          job_class: Jobbklasse
+          reads: Leser
+          source_queue: Kildekø
+        headers_section: Overskrifter
+        job_id: 'Jobb-ID:'
+        metadata: Metadata
+        metadata_labels:
+          executions: 'Utførelser:'
+          last_read: 'Sist lest:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          visible_at: 'Synlig ved:'
+        retry: Prøv igjen
+      show:
+        back: Tilbake til DLQ
+        discard: Forkast
+        discard_confirm: Forkaste permanent?
+        headers: Overskrifter
+        labels:
+          enqueued_at: Innlagt klokken
+          read_count: Antall ganger lest
+          source_queue: Kildekø
+          visibility_timeout: Synlighetstidsavbrudd
+        not_found: Melding ikke funnet
+        payload: Innhold
+        retry: Prøv igjen
+        title: 'DLQ-melding #%{id}'
+    events:
+      index:
+        processed_empty: Ingen hendelser behandlet ennå
+        processed_headers:
+          event_id: Hendelses-ID
+          handler: Behandler
+          processed_at: Behandlet klokken
+        processed_title: Behandlede hendelser
+        subscribers_empty: Ingen abonnenter registrert
+        subscribers_headers:
+          handler: Behandler
+          pattern: Mønster
+          queue: Kø
+        subscribers_title: Registrerte abonnenter
+        title: Hendelser
+      show:
+        back: Tilbake til hendelser
+        labels:
+          event_id: Hendelses-ID
+          handler: Behandler
+          processed_at: Behandlet klokken
+        not_found: Hendelse ikke funnet
+        title: Hendelse %{event_id}
+    helpers:
+      paused_badge: Pause
+      queue_badge:
+        dlq: DLQ
+        queue: Kø
+      recurring_health:
+        active: Aktiv
+        pending: Avventer
+      status_badge:
+        healthy: Sunn
+        stale: Utdatert
+    insights:
+      show:
+        charts:
+          failed_to_load: Kunne ikke laste diagramdata
+          no_data: Ingen data ennå
+          series_name: Jobber/min
+          status_distribution: Statusfordeling
+          throughput: Gjennomstrømning (jobber/min)
+        description_html: Jobbprestasjonsmålinger for de siste %{range}
+        slowest:
+          empty: Ingen jobbstatistikk ennå
+          headers:
+            avg: Gj.snitt
+            count: Antall
+            job_class: Jobbklasse
+            max: Maks
+          title: Sakte jobber (gj.snitt varighet)
+        summary:
+          avg_duration: Gj.snitt varighet
+          dead_lettered: Døde brev
+          failed: Mislyktes
+          max_duration: Maks varighet
+          succeeded: Lyktes
+          total_jobs: Totalt antall jobber
+        time_ranges:
+          1h: 1t
+          24h: 24t
+          30d: 30d
+          7d: 7d
+        title: Innsikt
+    jobs:
+      enqueued_table:
+        arguments: Argumenter
+        empty: Ingen kølagte jobber
+        full_json_payload: Full JSON-payload
+        headers:
+          enqueued: Kølagt
+          id: ID
+          job_class: Jobbklasse
+          queue: Kø
+          reads: Lesninger
+        headers_section: Overskrifter
+        job_id: 'Jobb-ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Sist lest:'
+          locale: 'Språk:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          scheduled: 'Planlagt:'
+          timezone: 'Tidssone:'
+          visible_at: 'Synlig fra:'
+        title: Kølagte jobber
+      failed_table:
+        discard: Forkast
+        discard_confirm: Forkast denne jobben?
+        empty: Ingen mislykkede jobber
+        headers:
+          actions: Handlinger
+          error: Feil
+          failed: Mislyktes
+          id: ID
+          queue: Kø
+          retries: Forsøk
+        retry: Prøv på nytt
+        title: Mislykkede jobber
+      index:
+        discard_all: Forkast alle
+        discard_all_confirm: Forkast alle mislykkede jobber?
+        retry_all: Prøv alle på nytt
+        retry_all_confirm: Prøv alle mislykkede jobber på nytt?
+        title: Jobber
+      show:
+        back: Tilbake til jobber
+        backtrace: Tilbakekalling
+        discard: Forkast
+        discard_confirm: Slett denne jobben permanent?
+        error_message: Feilmelding
+        labels:
+          error_class: Feilklasse
+          failed_at: Feilet ved
+          queue: Kø
+          retry_count: Antall forsøk
+        not_found: Jobb ikke funnet
+        payload: Innhold
+        retry: Prøv igjen
+        title: 'Feilet jobb #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashbord
+        dlq: DLQ
+        events: Hendelser
+        insights: Innsikter
+        jobs: Jobber
+        locks: Låser
+        outbox: Utgående postkasse
+        processes: Prosesser
+        queues: Køer
+        recurring: Gjentakende
+      title: Pgbus-dashbord
+      toggle_dark_mode: Bytt til mørk modus
+    locks:
+      index:
+        description: Aktive unike låser som forhindrer duplisert jobbkjøring
+        empty: Ingen aktive låser
+        executing: Utfører
+        headers:
+          age: Alder
+          expires: Utløper
+          job_class: Jobbklasse
+          lock_key: Låsenøkkel
+          owner: Eier
+          state: Status
+        queued: I kø
+        title: Jobblåser
+    outbox:
+      index:
+        description: Transaksjonelle utgående postkasseoppføringer som venter på publisering til PGMQ
+        empty: Ingen utgående postkasseoppføringer
+        headers:
+          created: Opprettet
+          id: ID
+          payload: Innhold
+          priority: Prioritet
+          queue_topic: Kø / Emne
+          status: Status
+        pending: Venter
+        published: Publisert
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Eldste upubliserte
+          total: Totalt
+          unpublished: Upublisert
+        title: Utgående postkasse
+    processes:
+      index:
+        title: Prosesser
+      processes_table:
+        empty: Ingen prosesser kjører
+        headers:
+          hostname: Vertsnavn
+          kind: Type
+          last_heartbeat: Siste hjertebank
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Køer
+      queues_list:
+        empty: Ingen køer funnet
+        headers:
+          actions: Handlinger
+          depth: Dybde
+          newest: Nyeste (s)
+          oldest: Eldste (s)
+          queue: Kø
+          total_ever: Totalt noensinne
+          visible: Synlig
+        pause: Pause
+        pause_confirm: Pause behandling for %{name}?
+        paused: Pauset
+        purge: Rens
+        purge_confirm: Rens alle meldinger fra %{name}?
+        resume: Gjenoppta
+      show:
+        depth: 'Dybde:'
+        empty: Køen er tom
+        headers:
+          enqueued: I kø
+          id: ID
+          payload: Innhold
+          reads: Lesninger
+          vt: VT
+        purge_confirm: Rens alle meldinger?
+        purge_queue: Rens kø
+        total: 'Totalt:'
+        visible: 'Synlig:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} oppgave konfigurert"
+          other: "%{count} oppgaver konfigurert"
+        title: Gjentakende oppgaver
+      show:
+        back: Tilbake
+        configuration: Konfigurasjon
+        default_queue: standard
+        disable: Deaktiver
+        disabled: Deaktivert
+        enable: Aktiver
+        execution_headers:
+          enqueued_at: I kø kl
+          scheduled_for: Planlagt for
+        labels:
+          arguments: Argumenter
+          command: Kommando
+          description: Beskrivelse
+          job_class: Jobbklasse
+          priority: Prioritet
+          queue: Kø
+          source: Kilde
+        next_run: Neste kjøring
+        no_executions: Ingen kjøringer registrert ennå
+        recent_executions: Nylige kjøringer
+        run_now: Kjør nå
+        schedule: Planlegg
+        source_config: Konfigurasjonsfil
+        source_dynamic: Dynamisk
+        status: Status
+      tasks_table:
+        default_queue: standard
+        disable: Deaktiver
+        disabled: Deaktivert
+        empty_hint: Legg til oppgaver i config/recurring.yml
+        empty_title: Ingen tilbakevendende oppgaver konfigurert
+        enable: Aktiver
+        headers:
+          actions: Handlinger
+          last_run: Siste kjøring
+          next_run: Neste kjøring
+          queue: Kø
+          schedule: Planlegg
+          status: Status
+          task: Oppgave
+        never: Aldri
+        run_now: Kjør nå

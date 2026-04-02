@@ -1,13 +1,13 @@
 <div class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Jobs</h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= t("pgbus.jobs.index.title") %></h1>
   <% if @failed.any? %>
     <div class="flex space-x-2">
-      <%= button_to "Retry All", pgbus.retry_all_jobs_path, method: :post,
+      <%= button_to t("pgbus.jobs.index.retry_all"), pgbus.retry_all_jobs_path, method: :post,
             class: "rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-500",
-            data: { turbo_confirm: "Retry all failed jobs?" } %>
-      <%= button_to "Discard All", pgbus.discard_all_jobs_path, method: :post,
+            data: { turbo_confirm: t("pgbus.jobs.index.retry_all_confirm") } %>
+      <%= button_to t("pgbus.jobs.index.discard_all"), pgbus.discard_all_jobs_path, method: :post,
             class: "rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500",
-            data: { turbo_confirm: "Discard all failed jobs?" } %>
+            data: { turbo_confirm: t("pgbus.jobs.index.discard_all_confirm") } %>
     </div>
   <% end %>
 </div>

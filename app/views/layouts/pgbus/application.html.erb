@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="h-full">
+<html lang="<%= I18n.locale %>" class="h-full">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pgbus Dashboard</title>
+  <title><%= t("pgbus.layout.title") %></title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { darkMode: 'class' };
@@ -17,6 +17,21 @@
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('pgbus-dark', isDark);
     }
+    // Locale dropdown toggle
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest('[data-action="click->dropdown#toggle"]');
+      var menu = btn && btn.parentElement.querySelector('[data-dropdown-target="menu"]');
+      // Close all menus first
+      document.querySelectorAll('[data-dropdown-target="menu"]').forEach(function(m) {
+        if (m !== menu) m.classList.add('hidden');
+      });
+      if (menu) { menu.classList.toggle('hidden'); e.stopPropagation(); }
+    });
+    document.addEventListener('click', function() {
+      document.querySelectorAll('[data-dropdown-target="menu"]').forEach(function(m) {
+        m.classList.add('hidden');
+      });
+    });
   </script>
   <script type="module">
     import * as Turbo from "https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017.esm.js";
@@ -46,25 +61,45 @@
         <div class="flex h-14 items-center justify-between">
           <div class="flex items-center space-x-8">
             <%= link_to pgbus.root_path, class: "flex items-center space-x-2" do %>
-              <span class="text-lg font-bold text-white">Pgbus</span>
+              <span class="text-lg font-bold text-white"><%= t("pgbus.layout.brand") %></span>
               <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300"><%= Pgbus::VERSION %></span>
             <% end %>
 
             <div class="flex space-x-1">
-              <%= pgbus_nav_link "Dashboard", pgbus.root_path %>
-              <%= pgbus_nav_link "Queues", pgbus.queues_path %>
-              <%= pgbus_nav_link "Jobs", pgbus.jobs_path %>
-              <%= pgbus_nav_link "Recurring", pgbus.recurring_tasks_path %>
-              <%= pgbus_nav_link "Processes", pgbus.processes_path %>
-              <%= pgbus_nav_link "Events", pgbus.events_path %>
-              <%= pgbus_nav_link "DLQ", pgbus.dead_letter_index_path %>
-              <%= pgbus_nav_link "Outbox", pgbus.outbox_index_path %>
-              <%= pgbus_nav_link "Locks", pgbus.locks_path %>
-              <%= pgbus_nav_link "Insights", pgbus.insights_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.dashboard"), pgbus.root_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.queues"), pgbus.queues_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.jobs"), pgbus.jobs_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.recurring"), pgbus.recurring_tasks_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.processes"), pgbus.processes_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.events"), pgbus.events_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.dlq"), pgbus.dead_letter_index_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.outbox"), pgbus.outbox_index_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.locks"), pgbus.locks_path %>
+              <%= pgbus_nav_link t("pgbus.layout.nav.insights"), pgbus.insights_path %>
             </div>
           </div>
 
-          <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="Toggle dark mode">
+          <div class="flex items-center space-x-2">
+            <!-- Locale switcher -->
+            <div class="relative" data-controller="dropdown">
+              <button type="button" data-action="click->dropdown#toggle" class="rounded-md px-2 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <%= pgbus_locale_flag(I18n.locale) %> <%= I18n.locale.to_s.upcase %>
+              </button>
+              <div data-dropdown-target="menu" class="hidden absolute right-0 z-50 mt-1 w-44 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+                <div class="py-1" role="menu">
+                  <% controller.send(:available_locales).sort.each do |loc| %>
+                    <%= form_tag pgbus.set_locale_path, method: :post, class: "contents" do %>
+                      <%= hidden_field_tag :locale, loc %>
+                      <button type="submit" role="menuitem" class="w-full text-left px-3 py-1.5 text-sm <%= loc == I18n.locale ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700' %>">
+                        <%= pgbus_locale_flag(loc) %> <%= pgbus_locale_name(loc) %>
+                      </button>
+                    <% end %>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+
+          <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
             <svg class="h-5 w-5 hidden dark:block" fill="currentColor" viewBox="0 0 20 20">
               <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
             </svg>
@@ -72,6 +107,7 @@
               <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
             </svg>
           </button>
+          </div>
         </div>
       </div>
     </nav>

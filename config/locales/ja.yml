@@ -1,0 +1,348 @@
+---
+ja:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: 実行中のプロセスはありません
+        headers:
+          host: ホスト
+          kind: 種類
+          pid: PID
+          status: ステータス
+        title: アクティブなプロセス
+      queues_table:
+        empty: キューが見つかりません
+        headers:
+          depth: 深さ
+          oldest: 最古 (秒)
+          queue: キュー
+          total: 合計
+          visible: 表示中
+        title: キュー
+        view_all: すべて表示
+      recent_failures:
+        empty: 失敗はありません
+        headers:
+          error: エラー
+          queue: キュー
+          when: 日時
+        title: 最近の失敗
+        view_all: すべて表示
+      show:
+        title: ダッシュボード
+      stats_cards:
+        enqueued: キューに追加済み
+        failed_dlq: 失敗 / DLQ
+        processes: プロセス
+        queues: キュー
+        recurring: 繰り返し
+        throughput: スループット
+        throughput_unit: メッセージ/秒
+        view_tasks: タスクを表示
+        visible: 表示中
+    dead_letter:
+      index:
+        discard_all: すべて破棄
+        discard_all_confirm: すべてのDLQメッセージを完全に破棄しますか？
+        retry_all: すべて再試行
+        retry_all_confirm: すべてのDLQメッセージを再試行しますか？
+        title: デッドレターキュー
+      messages_table:
+        arguments: 引数
+        discard: 破棄
+        discard_confirm: 完全に破棄しますか？
+        empty: デッドレターキューは空です
+        full_json_payload: 完全なJSONペイロード
+        headers:
+          enqueued: キューに追加済み
+          id: ID
+          job_class: ジョブクラス
+          reads: 読み取り数
+          source_queue: ソースキュー
+        headers_section: ヘッダー
+        job_id: 'ジョブID:'
+        metadata: メタデータ
+        metadata_labels:
+          executions: '実行回数:'
+          last_read: '最終読み取り:'
+          priority: '優先度:'
+          queue: 'キュー:'
+          visible_at: '表示日時:'
+        retry: 再試行
+      show:
+        back: DLQに戻る
+        discard: 破棄
+        discard_confirm: 完全に破棄しますか？
+        headers: ヘッダー
+        labels:
+          enqueued_at: キューイング日時
+          read_count: 読み取り回数
+          source_queue: ソースキュー
+          visibility_timeout: 可視性タイムアウト
+        not_found: メッセージが見つかりません
+        payload: ペイロード
+        retry: 再試行
+        title: 'DLQメッセージ #%{id}'
+    events:
+      index:
+        processed_empty: まだ処理されたイベントはありません
+        processed_headers:
+          event_id: イベントID
+          handler: ハンドラー
+          processed_at: 処理日時
+        processed_title: 処理済みイベント
+        subscribers_empty: 登録された購読者がいません
+        subscribers_headers:
+          handler: ハンドラー
+          pattern: パターン
+          queue: キュー
+        subscribers_title: 登録された購読者
+        title: イベント
+      show:
+        back: イベントに戻る
+        labels:
+          event_id: イベントID
+          handler: ハンドラー
+          processed_at: 処理日時
+        not_found: イベントが見つかりません
+        title: イベント %{event_id}
+    helpers:
+      paused_badge: 一時停止中
+      queue_badge:
+        dlq: DLQ
+        queue: キュー
+      recurring_health:
+        active: アクティブ
+        pending: 保留中
+      status_badge:
+        healthy: 正常
+        stale: 期限切れ
+    insights:
+      show:
+        charts:
+          failed_to_load: チャートデータの読み込みに失敗しました
+          no_data: まだデータがありません
+          series_name: ジョブ/分
+          status_distribution: ステータス分布
+          throughput: スループット（ジョブ/分）
+        description_html: 過去%{range}の仕事のパフォーマンス指標
+        slowest:
+          empty: まだジョブ統計がありません
+          headers:
+            avg: 平均
+            count: カウント
+            job_class: ジョブクラス
+            max: 最大
+          title: 最も遅いジョブクラス（平均実行時間）
+        summary:
+          avg_duration: 平均実行時間
+          dead_lettered: デッドレター化された
+          failed: 失敗した
+          max_duration: 最大実行時間
+          succeeded: 成功した
+          total_jobs: 合計ジョブ数
+        time_ranges:
+          1h: 1時間
+          24h: 24時間
+          30d: 30日
+          7d: 7日
+        title: インサイト
+    jobs:
+      enqueued_table:
+        arguments: 引数
+        empty: キューに入っているジョブはありません
+        full_json_payload: 完全なJSONペイロード
+        headers:
+          enqueued: キューに入れられた
+          id: ID
+          job_class: ジョブクラス
+          queue: キュー
+          reads: 読み取り数
+        headers_section: ヘッダー
+        job_id: ジョブID：
+        metadata: メタデータ
+        metadata_labels:
+          last_read: 最終読み取り：
+          locale: ロケール：
+          priority: 優先度：
+          queue: キュー：
+          scheduled: スケジュール済み：
+          timezone: タイムゾーン：
+          visible_at: 表示可能日時：
+        title: キューに入れられたジョブ
+      failed_table:
+        discard: 破棄
+        discard_confirm: このジョブを破棄しますか？
+        empty: 失敗したジョブはありません
+        headers:
+          actions: アクション
+          error: エラー
+          failed: 失敗
+          id: ID
+          queue: キュー
+          retries: リトライ回数
+        retry: リトライ
+        title: 失敗したジョブ
+      index:
+        discard_all: すべて破棄
+        discard_all_confirm: すべての失敗したジョブを破棄しますか？
+        retry_all: すべてリトライ
+        retry_all_confirm: すべての失敗したジョブをリトライしますか？
+        title: ジョブ
+      show:
+        back: ジョブに戻る
+        backtrace: バックトレース
+        discard: 破棄
+        discard_confirm: このジョブを完全に破棄しますか？
+        error_message: エラーメッセージ
+        labels:
+          error_class: エラークラス
+          failed_at: 失敗時刻
+          queue: キュー
+          retry_count: リトライ回数
+        not_found: ジョブが見つかりません
+        payload: ペイロード
+        retry: リトライ
+        title: '失敗したジョブ #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: ダッシュボード
+        dlq: DLQ
+        events: イベント
+        insights: インサイト
+        jobs: ジョブ
+        locks: ロック
+        outbox: アウトボックス
+        processes: プロセス
+        queues: キュー
+        recurring: 定期実行
+      title: Pgbus ダッシュボード
+      toggle_dark_mode: ダークモード切替
+    locks:
+      index:
+        description: 重複ジョブ実行を防ぐアクティブなユニークロック
+        empty: アクティブなロックはありません
+        executing: 実行中
+        headers:
+          age: 経過時間
+          expires: 有効期限
+          job_class: ジョブクラス
+          lock_key: ロックキー
+          owner: 所有者
+          state: 状態
+        queued: キューに追加済み
+        title: ジョブロック
+    outbox:
+      index:
+        description: PGMQへの公開待ちのトランザクショナルアウトボックスエントリ
+        empty: アウトボックスエントリはありません
+        headers:
+          created: 作成日
+          id: ID
+          payload: ペイロード
+          priority: 優先度
+          queue_topic: キュー / トピック
+          status: ステータス
+        pending: 保留中
+        published: 公開済み
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}秒"
+          oldest_unpublished: 最も古い未公開
+          total: 合計
+          unpublished: 未公開
+        title: アウトボックス
+    processes:
+      index:
+        title: プロセス
+      processes_table:
+        empty: 実行中のプロセスはありません
+        headers:
+          hostname: ホスト名
+          kind: 種類
+          last_heartbeat: 最終ハートビート
+          metadata: メタデータ
+          pid: PID
+          status: ステータス
+    queues:
+      index:
+        title: キュー
+      queues_list:
+        empty: キューが見つかりません
+        headers:
+          actions: アクション
+          depth: 深さ
+          newest: 最新 (秒)
+          oldest: 最古 (秒)
+          queue: キュー
+          total_ever: 合計数
+          visible: 表示中
+        pause: 一時停止
+        pause_confirm: "%{name} の処理を一時停止しますか？"
+        paused: 一時停止中
+        purge: パージ
+        purge_confirm: "%{name} からすべてのメッセージを削除しますか？"
+        resume: 再開
+      show:
+        depth: 深さ：
+        empty: キューは空です
+        headers:
+          enqueued: エンキュー済み
+          id: ID
+          payload: ペイロード
+          reads: 読み取り回数
+          vt: VT
+        purge_confirm: すべてのメッセージを削除しますか？
+        purge_queue: キューをパージ
+        total: 合計：
+        visible: 表示中：
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} タスクが設定されています"
+          other: "%{count} タスクが設定されています"
+        title: 定期タスク
+      show:
+        back: 戻る
+        configuration: 設定
+        default_queue: デフォルト
+        disable: 無効にする
+        disabled: 無効
+        enable: 有効にする
+        execution_headers:
+          enqueued_at: エンキュー日時
+          scheduled_for: スケジュール日時
+        labels:
+          arguments: 引数
+          command: コマンド
+          description: 説明
+          job_class: ジョブクラス
+          priority: 優先度
+          queue: キュー
+          source: ソース
+        next_run: 次の実行
+        no_executions: まだ実行記録がありません
+        recent_executions: 最近の実行
+        run_now: 今すぐ実行
+        schedule: スケジュール
+        source_config: 設定ファイル
+        source_dynamic: 動的
+        status: ステータス
+      tasks_table:
+        default_queue: デフォルト
+        disable: 無効にする
+        disabled: 無効
+        empty_hint: config/recurring.yml にタスクを追加
+        empty_title: 定期タスクは設定されていません
+        enable: 有効にする
+        headers:
+          actions: アクション
+          last_run: 最終実行
+          next_run: 次の実行
+          queue: キュー
+          schedule: スケジュール
+          status: ステータス
+          task: タスク
+        never: なし
+        run_now: 今すぐ実行

@@ -52,6 +52,8 @@ Pgbus::Engine.routes.draw do
   resources :locks, only: [:index]
   resource :insights, only: [:show], controller: "insights"
 
+  post :set_locale, to: "locale#update"
+
   namespace :api do
     get :stats, to: "stats#show"
     get :insights, to: "insights#show"

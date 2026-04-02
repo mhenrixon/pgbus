@@ -1,0 +1,348 @@
+---
+es:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: No hay procesos en ejecución
+        headers:
+          host: Host
+          kind: Tipo
+          pid: PID
+          status: Estado
+        title: Procesos activos
+      queues_table:
+        empty: No se encontraron colas
+        headers:
+          depth: Profundidad
+          oldest: El más antiguo (s)
+          queue: Cola
+          total: Total
+          visible: Visible
+        title: Colas
+        view_all: Ver todo
+      recent_failures:
+        empty: Sin fallos
+        headers:
+          error: Error
+          queue: Cola
+          when: Cuándo
+        title: Fallos recientes
+        view_all: Ver todo
+      show:
+        title: Panel de control
+      stats_cards:
+        enqueued: Encolado
+        failed_dlq: Fallidos / DLQ
+        processes: Procesos
+        queues: Colas
+        recurring: Recurrente
+        throughput: Rendimiento
+        throughput_unit: msgs/s
+        view_tasks: Ver tareas
+        visible: visible
+    dead_letter:
+      index:
+        discard_all: Descartar todo
+        discard_all_confirm: "¿Descartar permanentemente todos los mensajes DLQ?"
+        retry_all: Reintentar todo
+        retry_all_confirm: "¿Reintentar todos los mensajes DLQ?"
+        title: Cola de mensajes muertos
+      messages_table:
+        arguments: Argumentos
+        discard: Descartar
+        discard_confirm: "¿Descartar permanentemente?"
+        empty: La cola de mensajes muertos está vacía
+        full_json_payload: Carga JSON completa
+        headers:
+          enqueued: Encolado
+          id: ID
+          job_class: Clase de trabajo
+          reads: Lecturas
+          source_queue: Cola de origen
+        headers_section: Encabezados
+        job_id: 'ID de trabajo:'
+        metadata: Metadatos
+        metadata_labels:
+          executions: 'Ejecuciones:'
+          last_read: 'Última lectura:'
+          priority: 'Prioridad:'
+          queue: 'Cola:'
+          visible_at: 'Visible en:'
+        retry: Reintentar
+      show:
+        back: Volver a DLQ
+        discard: Descartar
+        discard_confirm: "¿Descartar permanentemente?"
+        headers: Encabezados
+        labels:
+          enqueued_at: Encolado en
+          read_count: Conteo de lecturas
+          source_queue: Cola de origen
+          visibility_timeout: Tiempo de espera de visibilidad
+        not_found: Mensaje no encontrado
+        payload: Carga útil
+        retry: Reintentar
+        title: 'Mensaje DLQ #%{id}'
+    events:
+      index:
+        processed_empty: No se han procesado eventos aún
+        processed_headers:
+          event_id: ID del evento
+          handler: Manejador
+          processed_at: Procesado en
+        processed_title: Eventos procesados
+        subscribers_empty: No hay suscriptores registrados
+        subscribers_headers:
+          handler: Manejador
+          pattern: Patrón
+          queue: Cola
+        subscribers_title: Suscriptores registrados
+        title: Eventos
+      show:
+        back: Volver a eventos
+        labels:
+          event_id: ID del evento
+          handler: Manejador
+          processed_at: Procesado en
+        not_found: Evento no encontrado
+        title: Evento %{event_id}
+    helpers:
+      paused_badge: Pausado
+      queue_badge:
+        dlq: DLQ
+        queue: Cola
+      recurring_health:
+        active: Activo
+        pending: Pendiente
+      status_badge:
+        healthy: Saludable
+        stale: Obsoleto
+    insights:
+      show:
+        charts:
+          failed_to_load: Error al cargar datos del gráfico
+          no_data: Aún no hay datos
+          series_name: Trabajos/min
+          status_distribution: Distribución de estado
+          throughput: Rendimiento (trabajos/min)
+        description_html: Métricas de desempeño laboral para los últimos %{range}
+        slowest:
+          empty: Aún no hay estadísticas de trabajos
+          headers:
+            avg: Promedio
+            count: Conteo
+            job_class: Clase de trabajo
+            max: Máximo
+          title: Clases de Trabajo Más Lentas (duración promedio)
+        summary:
+          avg_duration: Duración Promedio
+          dead_lettered: Enviado a Dead Letter
+          failed: Fallado
+          max_duration: Duración Máxima
+          succeeded: Exitoso
+          total_jobs: Total de Trabajos
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Perspectivas
+    jobs:
+      enqueued_table:
+        arguments: Argumentos
+        empty: No hay trabajos en cola
+        full_json_payload: Carga JSON completa
+        headers:
+          enqueued: En cola
+          id: ID
+          job_class: Clase de Trabajo
+          queue: Cola
+          reads: Lecturas
+        headers_section: Encabezados
+        job_id: 'ID del Trabajo:'
+        metadata: Metadatos
+        metadata_labels:
+          last_read: 'Última lectura:'
+          locale: 'Configuración regional:'
+          priority: 'Prioridad:'
+          queue: 'Cola:'
+          scheduled: 'Programado:'
+          timezone: 'Zona horaria:'
+          visible_at: 'Visible en:'
+        title: Trabajos en Cola
+      failed_table:
+        discard: Descartar
+        discard_confirm: "¿Descartar este trabajo?"
+        empty: No hay trabajos fallidos
+        headers:
+          actions: Acciones
+          error: Error
+          failed: Fallado
+          id: ID
+          queue: Cola
+          retries: Reintentos
+        retry: Reintentar
+        title: Trabajos Fallidos
+      index:
+        discard_all: Descartar Todo
+        discard_all_confirm: "¿Descartar todos los trabajos fallidos?"
+        retry_all: Reintentar Todo
+        retry_all_confirm: "¿Reintentar todos los trabajos fallidos?"
+        title: Trabajos
+      show:
+        back: Volver a Trabajos
+        backtrace: Rastreo de pila
+        discard: Descartar
+        discard_confirm: "¿Descartar este trabajo permanentemente?"
+        error_message: Mensaje de error
+        labels:
+          error_class: Clase de error
+          failed_at: Falló en
+          queue: Cola
+          retry_count: Recuento de reintentos
+        not_found: Trabajo no encontrado
+        payload: Carga útil
+        retry: Reintentar
+        title: 'Trabajo fallido #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Panel de control
+        dlq: DLQ
+        events: Eventos
+        insights: Perspectivas
+        jobs: Trabajos
+        locks: Bloqueos
+        outbox: Bandeja de salida
+        processes: Procesos
+        queues: Colas
+        recurring: Recurrente
+      title: Panel de Pgbus
+      toggle_dark_mode: Alternar modo oscuro
+    locks:
+      index:
+        description: Bloqueos de unicidad activos que impiden la ejecución duplicada del trabajo
+        empty: No hay bloqueos activos
+        executing: Ejecutando
+        headers:
+          age: Antigüedad
+          expires: Expira
+          job_class: Clase de trabajo
+          lock_key: Clave de bloqueo
+          owner: Propietario
+          state: Estado
+        queued: En cola
+        title: Bloqueos de trabajo
+    outbox:
+      index:
+        description: Entradas de bandeja de salida transaccional pendientes de publicación en PGMQ
+        empty: No hay entradas en la bandeja de salida
+        headers:
+          created: Creado
+          id: ID
+          payload: Carga útil
+          priority: Prioridad
+          queue_topic: Cola / Tema
+          status: Estado
+        pending: Pendiente
+        published: Publicado
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Más antiguo no publicado
+          total: Total
+          unpublished: No publicado
+        title: Bandeja de salida
+    processes:
+      index:
+        title: Procesos
+      processes_table:
+        empty: No hay procesos en ejecución
+        headers:
+          hostname: Nombre del host
+          kind: Tipo
+          last_heartbeat: Último latido
+          metadata: Metadatos
+          pid: PID
+          status: Estado
+    queues:
+      index:
+        title: Colas
+      queues_list:
+        empty: No se encontraron colas
+        headers:
+          actions: Acciones
+          depth: Profundidad
+          newest: Más nuevo (s)
+          oldest: Más antiguo (s)
+          queue: Cola
+          total_ever: Total acumulado
+          visible: Visible
+        pause: Pausar
+        pause_confirm: "¿Pausar el procesamiento de %{name}?"
+        paused: Pausado
+        purge: Purgar
+        purge_confirm: "¿Purgar todos los mensajes de %{name}?"
+        resume: Reanudar
+      show:
+        depth: 'Profundidad:'
+        empty: La cola está vacía
+        headers:
+          enqueued: Encolado
+          id: ID
+          payload: Carga útil
+          reads: Lecturas
+          vt: VT
+        purge_confirm: "¿Purgar todos los mensajes?"
+        purge_queue: Purgar cola
+        total: 'Total:'
+        visible: 'Visible:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: Tarea %{count} configurada
+          other: Tareas %{count} configuradas
+        title: Tareas recurrentes
+      show:
+        back: Atrás
+        configuration: Configuración
+        default_queue: predeterminado
+        disable: Desactivar
+        disabled: Desactivado
+        enable: Activar
+        execution_headers:
+          enqueued_at: Encolado en
+          scheduled_for: Programado para
+        labels:
+          arguments: Argumentos
+          command: Comando
+          description: Descripción
+          job_class: Clase de trabajo
+          priority: Prioridad
+          queue: Cola
+          source: Fuente
+        next_run: Próxima ejecución
+        no_executions: Aún no se han registrado ejecuciones
+        recent_executions: Ejecuciones recientes
+        run_now: Ejecutar ahora
+        schedule: Programar
+        source_config: Archivo de configuración
+        source_dynamic: Dinámico
+        status: Estado
+      tasks_table:
+        default_queue: predeterminado
+        disable: Desactivar
+        disabled: Desactivado
+        empty_hint: Agregar tareas a config/recurring.yml
+        empty_title: No hay tareas recurrentes configuradas
+        enable: Activar
+        headers:
+          actions: Acciones
+          last_run: Última ejecución
+          next_run: Próxima ejecución
+          queue: Cola
+          schedule: Programar
+          status: Estado
+          task: Tarea
+        never: Nunca
+        run_now: Ejecutar ahora

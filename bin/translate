@@ -1,0 +1,194 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Translation management CLI for Pgbus engine
+#
+# Usage:
+#   bin/translate                    # Show status (default)
+#   bin/translate --translate        # Translate missing keys via OpenAI
+#   bin/translate --validate         # Validate translations (for CI)
+#   bin/translate --normalize        # Normalize locale files
+#   bin/translate --missing          # List missing keys
+#   bin/translate --unused           # List unused keys
+#   bin/translate --health           # Full health check
+#   bin/translate --help             # Show help
+#
+# Examples:
+#   bin/translate --translate --locale fr
+#   bin/translate --translate              # translates ALL locales in parallel
+#   bin/translate --validate --strict
+
+require "optparse"
+
+APP_ROOT = File.expand_path("..", __dir__)
+Dir.chdir(APP_ROOT)
+
+VALID_LOCALE = /\A[a-z]{2}(-[A-Z]{2})?\z/
+
+options = {
+  command: :status,
+  locale: nil,
+  verbose: false,
+  strict: false
+}
+
+OptionParser.new do |opts|
+  opts.banner = "Usage: bin/translate [options]"
+
+  opts.separator ""
+  opts.separator "Commands:"
+
+  opts.on("--status", "Show translation status (default)") { options[:command] = :status }
+  opts.on("--translate", "Translate missing keys (requires OPENAI_API_KEY)") { options[:command] = :translate }
+  opts.on("--validate", "Validate translations (for CI)") { options[:command] = :validate }
+  opts.on("--normalize", "Normalize locale files") { options[:command] = :normalize }
+  opts.on("--missing", "List missing translation keys") { options[:command] = :missing }
+  opts.on("--unused", "List unused translation keys") { options[:command] = :unused }
+  opts.on("--health", "Full health check (missing + unused)") { options[:command] = :health }
+
+  opts.separator ""
+  opts.separator "Options:"
+
+  opts.on("-l", "--locale LOCALE", "Process specific locale") { |l| options[:locale] = l }
+  opts.on("--strict", "Fail on any issues (for CI)") { options[:strict] = true }
+  opts.on("-v", "--verbose", "Verbose output") { options[:verbose] = true }
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit
+  end
+end.parse!
+
+def run(*cmd)
+  puts "$ #{cmd.join(" ")}" if $VERBOSE
+  system(*cmd)
+end
+
+def run!(*cmd)
+  run(*cmd) || exit(1)
+end
+
+def validate_locale!(locale)
+  return unless locale
+  return if locale.match?(VALID_LOCALE)
+
+  warn "Invalid locale: #{locale.inspect}. Expected format: en, fr, en-ZA"
+  exit 1
+end
+
+def available_locales
+  Dir[File.join(APP_ROOT, "config", "locales", "*.yml")]
+    .map { |f| File.basename(f, ".yml") }
+    .reject { |l| l == "en" }
+    .sort
+end
+
+def translate_locale(locale)
+  cmd = %W[bundle exec i18n-tasks translate-missing -l #{locale}]
+  puts "  [#{locale}] Translating..."
+  success = system(*cmd, out: $VERBOSE ? $stdout : File::NULL, err: :out)
+  if success
+    puts "  [#{locale}] Done!"
+  else
+    warn "  [#{locale}] FAILED"
+  end
+  success
+end
+
+$VERBOSE = options[:verbose]
+validate_locale!(options[:locale])
+
+case options[:command]
+when :status
+  puts "Translation Status"
+  puts "=" * 40
+  run! "bundle", "exec", "i18n-tasks", "health"
+
+when :translate
+  unless ENV["OPENAI_API_KEY"]
+    warn "OPENAI_API_KEY environment variable not set"
+    exit 1
+  end
+
+  if options[:locale]
+    puts "Translating #{options[:locale]}..."
+    run! "bundle", "exec", "i18n-tasks", "translate-missing", "-l", options[:locale]
+  else
+    locales = available_locales
+    puts "Translating #{locales.size} locales in parallel: #{locales.join(", ")}"
+    puts ""
+
+    threads = locales.map do |locale|
+      Thread.new { [locale, translate_locale(locale)] }
+    end
+
+    results = threads.map(&:value)
+    failed = results.reject { |_, ok| ok }.map(&:first)
+
+    puts ""
+    if failed.empty?
+      puts "All #{locales.size} locales translated successfully!"
+    else
+      warn "Failed locales: #{failed.join(", ")}"
+      exit 1
+    end
+  end
+
+  puts ""
+  puts "Normalizing locale files..."
+  run! "bundle", "exec", "i18n-tasks", "normalize", "-p"
+  puts "Done!"
+
+when :validate
+  issues = 0
+
+  puts "Checking for missing keys..."
+  cmd = %w[bundle exec i18n-tasks missing]
+  cmd.push("-l", options[:locale]) if options[:locale]
+  unless run(*cmd)
+    issues += 1
+    puts "Missing keys found!"
+  end
+
+  puts ""
+  puts "Checking for unused keys..."
+  unless run("bundle", "exec", "i18n-tasks", "unused")
+    issues += 1
+    puts "Unused keys found!"
+  end
+
+  puts ""
+  puts "Checking normalization..."
+  unless run("bundle", "exec", "i18n-tasks", "check-normalized")
+    issues += 1
+    puts "Files need normalization! Run: bin/translate --normalize"
+  end
+
+  puts ""
+  puts "Checking interpolation consistency..."
+  unless run("bundle", "exec", "i18n-tasks", "check-consistent-interpolations")
+    issues += 1
+    puts "Inconsistent interpolations found!"
+  end
+
+  puts ""
+  if issues.zero?
+    puts "All validations passed!"
+  else
+    puts "#{issues} validation(s) failed."
+    exit 1 if options[:strict]
+  end
+
+when :normalize
+  run! "bundle", "exec", "i18n-tasks", "normalize", "-p"
+
+when :missing
+  cmd = %w[bundle exec i18n-tasks missing]
+  cmd.push("-l", options[:locale]) if options[:locale]
+  run!(*cmd)
+
+when :unused
+  run! "bundle", "exec", "i18n-tasks", "unused"
+
+when :health
+  run! "bundle", "exec", "i18n-tasks", "health"
+end

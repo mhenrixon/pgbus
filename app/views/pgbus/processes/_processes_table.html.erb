@@ -3,12 +3,12 @@
     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
       <thead class="bg-gray-50 dark:bg-gray-900">
         <tr>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Kind</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Hostname</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">PID</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Last Heartbeat</th>
-          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Metadata</th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.kind") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.hostname") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.pid") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.status") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.last_heartbeat") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.processes.processes_table.headers.metadata") %></th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -29,7 +29,7 @@
           </tr>
         <% end %>
         <% if @processes.empty? %>
-          <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400">No processes running</td></tr>
+          <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.processes.processes_table.empty") %></td></tr>
         <% end %>
       </tbody>
     </table>

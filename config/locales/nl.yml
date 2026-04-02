@@ -1,0 +1,348 @@
+---
+nl:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Geen processen actief
+        headers:
+          host: Host
+          kind: Type
+          pid: PID
+          status: Status
+        title: Actieve processen
+      queues_table:
+        empty: Geen wachtrijen gevonden
+        headers:
+          depth: Diepte
+          oldest: Oudste (s)
+          queue: Wachtrij
+          total: Totaal
+          visible: Zichtbaar
+        title: Wachtrijen
+        view_all: Bekijk alles
+      recent_failures:
+        empty: Geen fouten
+        headers:
+          error: Fout
+          queue: Wachtrij
+          when: Wanneer
+        title: Recente fouten
+        view_all: Bekijk alles
+      show:
+        title: Dashboard
+      stats_cards:
+        enqueued: In de wachtrij geplaatst
+        failed_dlq: Mislukt / DLQ
+        processes: Processen
+        queues: Wachtrijen
+        recurring: Terugkerend
+        throughput: Doorvoer
+        throughput_unit: berichten/s
+        view_tasks: Bekijk taken
+        visible: zichtbaar
+    dead_letter:
+      index:
+        discard_all: Alles weggooien
+        discard_all_confirm: Alle DLQ-berichten permanent verwijderen?
+        retry_all: Alles opnieuw proberen
+        retry_all_confirm: Alle DLQ-berichten opnieuw proberen?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Argumenten
+        discard: Weggooien
+        discard_confirm: Permanent verwijderen?
+        empty: Dead letter queue is leeg
+        full_json_payload: Volledige JSON-inhoud
+        headers:
+          enqueued: In de wachtrij geplaatst
+          id: ID
+          job_class: Taakklasse
+          reads: Leest
+          source_queue: Bronwachtrij
+        headers_section: Headers
+        job_id: 'Taak-ID:'
+        metadata: Metadata
+        metadata_labels:
+          executions: 'Uitvoeringen:'
+          last_read: 'Laatst gelezen:'
+          priority: 'Prioriteit:'
+          queue: 'Wachtrij:'
+          visible_at: 'Zichtbaar op:'
+        retry: Opnieuw proberen
+      show:
+        back: Terug naar DLQ
+        discard: Verwerpen
+        discard_confirm: Permanent verwerpen?
+        headers: Headers
+        labels:
+          enqueued_at: In de wachtrij geplaatst op
+          read_count: Aantal keer gelezen
+          source_queue: Bronwachtrij
+          visibility_timeout: Zichtbaarheidstijdlimiet
+        not_found: Bericht niet gevonden
+        payload: Inhoud
+        retry: Opnieuw proberen
+        title: 'DLQ Bericht #%{id}'
+    events:
+      index:
+        processed_empty: Nog geen gebeurtenissen verwerkt
+        processed_headers:
+          event_id: Gebeurtenis ID
+          handler: Handler
+          processed_at: Verwerkt op
+        processed_title: Verwerkte gebeurtenissen
+        subscribers_empty: Geen geregistreerde abonnees
+        subscribers_headers:
+          handler: Handler
+          pattern: Patroon
+          queue: Wachtrij
+        subscribers_title: Geregistreerde abonnees
+        title: Gebeurtenissen
+      show:
+        back: Terug naar gebeurtenissen
+        labels:
+          event_id: Gebeurtenis ID
+          handler: Handler
+          processed_at: Verwerkt op
+        not_found: Gebeurtenis niet gevonden
+        title: Gebeurtenis %{event_id}
+    helpers:
+      paused_badge: Gepauzeerd
+      queue_badge:
+        dlq: DLQ
+        queue: Wachtrij
+      recurring_health:
+        active: Actief
+        pending: In afwachting
+      status_badge:
+        healthy: Gezond
+        stale: Verouderd
+    insights:
+      show:
+        charts:
+          failed_to_load: Fout bij laden grafiekgegevens
+          no_data: Nog geen gegevens
+          series_name: Taken/min
+          status_distribution: Statusverdeling
+          throughput: Doorvoer (taken/min)
+        description_html: Prestatie-indicatoren voor de laatste %{range}
+        slowest:
+          empty: Nog geen taakstatistieken
+          headers:
+            avg: Gemiddeld
+            count: Aantal
+            job_class: Taakklasse
+            max: Maximaal
+          title: Langzaamste Taakklassen (gem. duur)
+        summary:
+          avg_duration: Gem. Duur
+          dead_lettered: Dead Lettered
+          failed: Mislukt
+          max_duration: Maximale Duur
+          succeeded: Geslaagd
+          total_jobs: Totaal Taken
+        time_ranges:
+          1h: 1u
+          24h: 24u
+          30d: 30d
+          7d: 7d
+        title: Inzichten
+    jobs:
+      enqueued_table:
+        arguments: Argumenten
+        empty: Geen in de wachtrij geplaatste taken
+        full_json_payload: Volledige JSON payload
+        headers:
+          enqueued: In de wachtrij geplaatst
+          id: ID
+          job_class: Taakklasse
+          queue: Wachtrij
+          reads: Leest
+        headers_section: Headers
+        job_id: 'Taak ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Laatst gelezen:'
+          locale: 'Locale:'
+          priority: 'Prioriteit:'
+          queue: 'Wachtrij:'
+          scheduled: 'Gepland:'
+          timezone: 'Tijdzone:'
+          visible_at: 'Zichtbaar op:'
+        title: Taken in de wachtrij
+      failed_table:
+        discard: Verwijderen
+        discard_confirm: Deze taak verwijderen?
+        empty: Geen mislukte taken
+        headers:
+          actions: Acties
+          error: Fout
+          failed: Mislukt
+          id: ID
+          queue: Wachtrij
+          retries: Herhalingen
+        retry: Opnieuw proberen
+        title: Mislukte Taken
+      index:
+        discard_all: Alles Verwijderen
+        discard_all_confirm: Alle mislukte taken verwijderen?
+        retry_all: Alles Opnieuw Proberen
+        retry_all_confirm: Alle mislukte taken opnieuw proberen?
+        title: Taken
+      show:
+        back: Terug naar Taken
+        backtrace: Stacktrace
+        discard: Verwijderen
+        discard_confirm: Deze taak permanent verwijderen?
+        error_message: Foutmelding
+        labels:
+          error_class: Foutklasse
+          failed_at: Mislukt bij
+          queue: Wachtrij
+          retry_count: Aantal pogingen
+        not_found: Taak niet gevonden
+        payload: Payload
+        retry: Opnieuw proberen
+        title: 'Mislukte taak #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashboard
+        dlq: DLQ
+        events: Evenementen
+        insights: Inzichten
+        jobs: Taken
+        locks: Vergrendelingen
+        outbox: Uitgaande berichten
+        processes: Processen
+        queues: Wachtrijen
+        recurring: Terugkerend
+      title: Pgbus Dashboard
+      toggle_dark_mode: Donkere modus schakelen
+    locks:
+      index:
+        description: Actieve uniekheidsvergrendelingen voorkomen dubbele taakuitvoering
+        empty: Geen actieve vergrendelingen
+        executing: Uitvoeren
+        headers:
+          age: Leeftijd
+          expires: Verloopt
+          job_class: Taakklasse
+          lock_key: Vergrendelingssleutel
+          owner: Eigenaar
+          state: Status
+        queued: In wachtrij
+        title: Taakvergrendelingen
+    outbox:
+      index:
+        description: Transactionele uitgaande berichten wachten op publicatie naar PGMQ
+        empty: Geen uitgaande berichten
+        headers:
+          created: Gemaakt
+          id: ID
+          payload: Payload
+          priority: Prioriteit
+          queue_topic: Wachtrij / Onderwerp
+          status: Status
+        pending: In afwachting
+        published: Gepubliceerd
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Oudste niet-gepubliceerde
+          total: Totaal
+          unpublished: Niet gepubliceerd
+        title: Uitgaande berichten
+    processes:
+      index:
+        title: Processen
+      processes_table:
+        empty: Geen processen actief
+        headers:
+          hostname: Hostnaam
+          kind: Type
+          last_heartbeat: Laatste hartslag
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Wachtrijen
+      queues_list:
+        empty: Geen wachtrijen gevonden
+        headers:
+          actions: Acties
+          depth: Diepte
+          newest: Nieuwste (s)
+          oldest: Oudste (s)
+          queue: Wachtrij
+          total_ever: Totaal ooit
+          visible: Zichtbaar
+        pause: Pauzeren
+        pause_confirm: Verwerking pauzeren voor %{name}?
+        paused: Gepauzeerd
+        purge: Opschonen
+        purge_confirm: Alle berichten verwijderen uit %{name}?
+        resume: Hervatten
+      show:
+        depth: 'Diepte:'
+        empty: Wachtrij is leeg
+        headers:
+          enqueued: In de wachtrij geplaatst
+          id: ID
+          payload: Inhoud
+          reads: Lezingen
+          vt: VT
+        purge_confirm: Alle berichten verwijderen?
+        purge_queue: Wachtrij opschonen
+        total: 'Totaal:'
+        visible: 'Zichtbaar:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} taak geconfigureerd"
+          other: "%{count} taken geconfigureerd"
+        title: Terugkerende taken
+      show:
+        back: Terug
+        configuration: Configuratie
+        default_queue: standaard
+        disable: Uitschakelen
+        disabled: Uitgeschakeld
+        enable: Inschakelen
+        execution_headers:
+          enqueued_at: In de wachtrij geplaatst op
+          scheduled_for: Gepland voor
+        labels:
+          arguments: Argumenten
+          command: Opdracht
+          description: Beschrijving
+          job_class: Taakklasse
+          priority: Prioriteit
+          queue: Wachtrij
+          source: Bron
+        next_run: Volgende uitvoering
+        no_executions: Nog geen uitvoeringen geregistreerd
+        recent_executions: Recente uitvoeringen
+        run_now: Nu uitvoeren
+        schedule: Schema
+        source_config: Configuratiebestand
+        source_dynamic: Dynamisch
+        status: Status
+      tasks_table:
+        default_queue: standaard
+        disable: Uitschakelen
+        disabled: Uitgeschakeld
+        empty_hint: Taken toevoegen aan config/recurring.yml
+        empty_title: Geen terugkerende taken geconfigureerd
+        enable: Inschakelen
+        headers:
+          actions: Acties
+          last_run: Laatste uitvoering
+          next_run: Volgende uitvoering
+          queue: Wachtrij
+          schedule: Schema
+          status: Status
+          task: Taak
+        never: Nooit
+        run_now: Nu uitvoeren

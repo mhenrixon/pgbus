@@ -5,16 +5,16 @@
       <p class="mt-1 text-sm text-gray-500"><%= @task[:class_name] || @task[:command] %></p>
     </div>
     <div class="flex space-x-2">
-      <%= button_to @task[:enabled] ? "Disable" : "Enable",
+      <%= button_to @task[:enabled] ? t("pgbus.recurring_tasks.show.disable") : t("pgbus.recurring_tasks.show.enable"),
           pgbus.toggle_recurring_task_path(@task[:id]),
           class: "inline-flex items-center rounded-md px-3 py-2 text-sm font-medium " \
                  "#{@task[:enabled] ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}" %>
       <% if @task[:enabled] %>
-        <%= button_to "Run Now",
+        <%= button_to t("pgbus.recurring_tasks.show.run_now"),
             pgbus.enqueue_recurring_task_path(@task[:id]),
             class: "inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700" %>
       <% end %>
-      <%= link_to "Back", pgbus.recurring_tasks_path,
+      <%= link_to t("pgbus.recurring_tasks.show.back"), pgbus.recurring_tasks_path,
           class: "inline-flex items-center rounded-md bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200" %>
     </div>
   </div>
@@ -22,7 +22,7 @@
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
   <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <p class="text-sm font-medium text-gray-500">Schedule</p>
+    <p class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.schedule") %></p>
     <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white"><%= @task[:schedule] %></p>
     <% if @task[:human_schedule] && @task[:human_schedule] != @task[:schedule] %>
       <p class="text-xs text-gray-400"><%= @task[:human_schedule] %></p>
@@ -30,7 +30,7 @@
   </div>
 
   <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <p class="text-sm font-medium text-gray-500">Next Run</p>
+    <p class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.next_run") %></p>
     <% if @task[:enabled] && @task[:next_run_at] %>
       <p class="mt-1 text-lg font-semibold text-gray-900 dark:text-white"><%= pgbus_time_ago_future(@task[:next_run_at]) %></p>
       <p class="text-xs text-gray-400"><%= @task[:next_run_at]&.strftime("%Y-%m-%d %H:%M:%S %Z") %></p>
@@ -40,50 +40,50 @@
   </div>
 
   <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <p class="text-sm font-medium text-gray-500">Status</p>
-    <p class="mt-1"><%= @task[:enabled] ? pgbus_recurring_health_badge(@task) : raw('<span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">Disabled</span>') %></p>
+    <p class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.status") %></p>
+    <p class="mt-1"><%= @task[:enabled] ? pgbus_recurring_health_badge(@task) : content_tag(:span, t("pgbus.recurring_tasks.show.disabled"), class: "inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600") %></p>
   </div>
 </div>
 
 <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 mb-8">
   <div class="px-4 py-3 border-b border-gray-200">
-    <h2 class="text-lg font-medium text-gray-900 dark:text-white">Configuration</h2>
+    <h2 class="text-lg font-medium text-gray-900 dark:text-white"><%= t("pgbus.recurring_tasks.show.configuration") %></h2>
   </div>
   <div class="p-4">
     <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
-        <dt class="text-sm font-medium text-gray-500">Job Class</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.job_class") %></dt>
         <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:class_name] || "—" %></dd>
       </div>
       <% if @task[:command] %>
         <div>
-          <dt class="text-sm font-medium text-gray-500">Command</dt>
+          <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.command") %></dt>
           <dd class="mt-1 text-sm text-gray-900 dark:text-white font-mono text-xs"><%= @task[:command] %></dd>
         </div>
       <% end %>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Queue</dt>
-        <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:queue_name] || "default" %></dd>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.queue") %></dt>
+        <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:queue_name] || t("pgbus.recurring_tasks.show.default_queue") %></dd>
       </div>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Priority</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.priority") %></dt>
         <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:priority] %></dd>
       </div>
       <% if @task[:arguments]&.any? %>
         <div class="sm:col-span-2">
-          <dt class="text-sm font-medium text-gray-500">Arguments</dt>
+          <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.arguments") %></dt>
           <dd class="mt-1 text-sm text-gray-900 dark:text-white font-mono text-xs"><%= @task[:arguments].inspect %></dd>
         </div>
       <% end %>
       <% if @task[:description] %>
         <div class="sm:col-span-2">
-          <dt class="text-sm font-medium text-gray-500">Description</dt>
+          <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.description") %></dt>
           <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:description] %></dd>
         </div>
       <% end %>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Source</dt>
-        <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:static] ? "Config file" : "Dynamic" %></dd>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.recurring_tasks.show.labels.source") %></dt>
+        <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @task[:static] ? t("pgbus.recurring_tasks.show.source_config") : t("pgbus.recurring_tasks.show.source_dynamic") %></dd>
       </div>
     </dl>
   </div>
@@ -91,14 +91,14 @@
 
 <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
   <div class="px-4 py-3 border-b border-gray-200">
-    <h2 class="text-lg font-medium text-gray-900 dark:text-white">Recent Executions</h2>
+    <h2 class="text-lg font-medium text-gray-900 dark:text-white"><%= t("pgbus.recurring_tasks.show.recent_executions") %></h2>
   </div>
   <% if @task[:executions]&.any? %>
     <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
       <thead class="bg-gray-50 dark:bg-gray-900">
         <tr>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Scheduled For</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enqueued At</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"><%= t("pgbus.recurring_tasks.show.execution_headers.scheduled_for") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"><%= t("pgbus.recurring_tasks.show.execution_headers.enqueued_at") %></th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
@@ -116,7 +116,7 @@
     </table>
   <% else %>
     <div class="p-8 text-center text-gray-500">
-      <p>No executions recorded yet</p>
+      <p><%= t("pgbus.recurring_tasks.show.no_executions") %></p>
     </div>
   <% end %>
 </div>

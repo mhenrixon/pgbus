@@ -1,0 +1,348 @@
+---
+de:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Keine Prozesse laufen
+        headers:
+          host: Host
+          kind: Art
+          pid: PID
+          status: Status
+        title: Aktive Prozesse
+      queues_table:
+        empty: Keine Warteschlangen gefunden
+        headers:
+          depth: Tiefe
+          oldest: Älteste (s)
+          queue: Warteschlange
+          total: Gesamt
+          visible: Sichtbar
+        title: Warteschlangen
+        view_all: Alle anzeigen
+      recent_failures:
+        empty: Keine Fehler
+        headers:
+          error: Fehler
+          queue: Warteschlange
+          when: Wann
+        title: Kürzliche Fehler
+        view_all: Alle anzeigen
+      show:
+        title: Dashboard
+      stats_cards:
+        enqueued: Eingereiht
+        failed_dlq: Fehlgeschlagen / DLQ
+        processes: Prozesse
+        queues: Warteschlangen
+        recurring: Wiederkehrend
+        throughput: Durchsatz
+        throughput_unit: Nachrichten/s
+        view_tasks: Aufgaben anzeigen
+        visible: sichtbar
+    dead_letter:
+      index:
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle DLQ-Nachrichten dauerhaft verwerfen?
+        retry_all: Alle erneut versuchen
+        retry_all_confirm: Alle DLQ-Nachrichten erneut versuchen?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Argumente
+        discard: Verwerfen
+        discard_confirm: Dauerhaft verwerfen?
+        empty: Dead Letter Queue ist leer
+        full_json_payload: Vollständige JSON-Nutzlast
+        headers:
+          enqueued: Eingereiht
+          id: ID
+          job_class: Job-Klasse
+          reads: Liest
+          source_queue: Quellwarteschlange
+        headers_section: Header
+        job_id: 'Job-ID:'
+        metadata: Metadaten
+        metadata_labels:
+          executions: 'Ausführungen:'
+          last_read: 'Letztes Lesen:'
+          priority: 'Priorität:'
+          queue: 'Warteschlange:'
+          visible_at: 'Sichtbar um:'
+        retry: Erneut versuchen
+      show:
+        back: Zurück zur DLQ
+        discard: Verwerfen
+        discard_confirm: Dauerhaft verwerfen?
+        headers: Header
+        labels:
+          enqueued_at: Eingereiht am
+          read_count: Anzahl der Lesevorgänge
+          source_queue: Quellwarteschlange
+          visibility_timeout: Sichtbarkeits-Timeout
+        not_found: Nachricht nicht gefunden
+        payload: Nutzlast
+        retry: Erneut versuchen
+        title: 'DLQ Nachricht #%{id}'
+    events:
+      index:
+        processed_empty: Noch keine Ereignisse verarbeitet
+        processed_headers:
+          event_id: Ereignis-ID
+          handler: Handler
+          processed_at: Verarbeitet am
+        processed_title: Verarbeitete Ereignisse
+        subscribers_empty: Keine Abonnenten registriert
+        subscribers_headers:
+          handler: Handler
+          pattern: Muster
+          queue: Warteschlange
+        subscribers_title: Registrierte Abonnenten
+        title: Ereignisse
+      show:
+        back: Zurück zu Ereignissen
+        labels:
+          event_id: Ereignis-ID
+          handler: Handler
+          processed_at: Verarbeitet am
+        not_found: Ereignis nicht gefunden
+        title: Ereignis %{event_id}
+    helpers:
+      paused_badge: Pausiert
+      queue_badge:
+        dlq: DLQ
+        queue: Warteschlange
+      recurring_health:
+        active: Aktiv
+        pending: Ausstehend
+      status_badge:
+        healthy: Gesund
+        stale: Veraltet
+    insights:
+      show:
+        charts:
+          failed_to_load: Fehler beim Laden der Diagrammdaten
+          no_data: Noch keine Daten
+          series_name: Aufträge/Min
+          status_distribution: Statusverteilung
+          throughput: Durchsatz (Aufträge/Min)
+        description_html: Leistungskennzahlen für die letzten %{range}
+        slowest:
+          empty: Noch keine Auftragsstatistiken
+          headers:
+            avg: Durchschnitt
+            count: Anzahl
+            job_class: Job-Klasse
+            max: Max
+          title: Langsamste Job-Klassen (durchschnittliche Dauer)
+        summary:
+          avg_duration: Durchschnittliche Dauer
+          dead_lettered: In Dead Letter verschoben
+          failed: Fehlgeschlagen
+          max_duration: Maximale Dauer
+          succeeded: Erfolgreich
+          total_jobs: Gesamtanzahl der Jobs
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Einblicke
+    jobs:
+      enqueued_table:
+        arguments: Argumente
+        empty: Keine eingereihten Jobs
+        full_json_payload: Vollständige JSON-Nutzlast
+        headers:
+          enqueued: Eingereiht
+          id: ID
+          job_class: Job-Klasse
+          queue: Warteschlange
+          reads: Lesevorgänge
+        headers_section: Header
+        job_id: 'Job-ID:'
+        metadata: Metadaten
+        metadata_labels:
+          last_read: 'Letzter Lesevorgang:'
+          locale: 'Sprache:'
+          priority: 'Priorität:'
+          queue: 'Warteschlange:'
+          scheduled: 'Geplant:'
+          timezone: 'Zeitzone:'
+          visible_at: 'Sichtbar ab:'
+        title: Eingereihte Jobs
+      failed_table:
+        discard: Verwerfen
+        discard_confirm: Diesen Job verwerfen?
+        empty: Keine fehlgeschlagenen Jobs
+        headers:
+          actions: Aktionen
+          error: Fehler
+          failed: Fehlgeschlagen
+          id: ID
+          queue: Warteschlange
+          retries: Wiederholungen
+        retry: Wiederholen
+        title: Fehlgeschlagene Jobs
+      index:
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle fehlgeschlagenen Jobs verwerfen?
+        retry_all: Alle wiederholen
+        retry_all_confirm: Alle fehlgeschlagenen Jobs wiederholen?
+        title: Jobs
+      show:
+        back: Zurück zu Jobs
+        backtrace: Stacktrace
+        discard: Verwerfen
+        discard_confirm: Diesen Auftrag dauerhaft verwerfen?
+        error_message: Fehlermeldung
+        labels:
+          error_class: Fehlerklasse
+          failed_at: Fehlgeschlagen bei
+          queue: Warteschlange
+          retry_count: Anzahl der Wiederholungen
+        not_found: Auftrag nicht gefunden
+        payload: Nutzlast
+        retry: Wiederholen
+        title: 'Fehlgeschlagener Auftrag #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashboard
+        dlq: DLQ
+        events: Ereignisse
+        insights: Einblicke
+        jobs: Aufträge
+        locks: Sperren
+        outbox: Postausgang
+        processes: Prozesse
+        queues: Warteschlangen
+        recurring: Wiederkehrend
+      title: Pgbus Dashboard
+      toggle_dark_mode: Dunkelmodus umschalten
+    locks:
+      index:
+        description: Aktive Einzigartigkeitssperren verhindern doppelte Auftragserstellung
+        empty: Keine aktiven Sperren
+        executing: Ausführen
+        headers:
+          age: Alter
+          expires: Läuft ab
+          job_class: Auftragsklasse
+          lock_key: Sperrschlüssel
+          owner: Besitzer
+          state: Status
+        queued: In Warteschlange
+        title: Auftragssperren
+    outbox:
+      index:
+        description: Transaktionale Postausgangseinträge ausstehend zur Veröffentlichung an PGMQ
+        empty: Keine Postausgangseinträge
+        headers:
+          created: Erstellt
+          id: ID
+          payload: Nutzlast
+          priority: Priorität
+          queue_topic: Warteschlange / Thema
+          status: Status
+        pending: Ausstehend
+        published: Veröffentlicht
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Ältester unveröffentlichter
+          total: Gesamt
+          unpublished: Unveröffentlicht
+        title: Postausgang
+    processes:
+      index:
+        title: Prozesse
+      processes_table:
+        empty: Keine Prozesse laufen
+        headers:
+          hostname: Hostname
+          kind: Art
+          last_heartbeat: Letzter Heartbeat
+          metadata: Metadaten
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Warteschlangen
+      queues_list:
+        empty: Keine Warteschlangen gefunden
+        headers:
+          actions: Aktionen
+          depth: Tiefe
+          newest: Neueste (s)
+          oldest: Älteste (s)
+          queue: Warteschlange
+          total_ever: Insgesamt jemals
+          visible: Sichtbar
+        pause: Pause
+        pause_confirm: Verarbeitung für %{name} pausieren?
+        paused: Pausiert
+        purge: Bereinigen
+        purge_confirm: Alle Nachrichten von %{name} löschen?
+        resume: Fortsetzen
+      show:
+        depth: 'Tiefe:'
+        empty: Warteschlange ist leer
+        headers:
+          enqueued: Eingereiht
+          id: ID
+          payload: Nutzlast
+          reads: Lesevorgänge
+          vt: VT
+        purge_confirm: Alle Nachrichten löschen?
+        purge_queue: Warteschlange bereinigen
+        total: 'Insgesamt:'
+        visible: 'Sichtbar:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} Aufgabe konfiguriert"
+          other: "%{count} Aufgaben konfiguriert"
+        title: Wiederkehrende Aufgaben
+      show:
+        back: Zurück
+        configuration: Konfiguration
+        default_queue: Standard
+        disable: Deaktivieren
+        disabled: Deaktiviert
+        enable: Aktivieren
+        execution_headers:
+          enqueued_at: Eingereiht am
+          scheduled_for: Geplant für
+        labels:
+          arguments: Argumente
+          command: Befehl
+          description: Beschreibung
+          job_class: Job-Klasse
+          priority: Priorität
+          queue: Warteschlange
+          source: Quelle
+        next_run: Nächster Lauf
+        no_executions: Noch keine Ausführungen aufgezeichnet
+        recent_executions: Letzte Ausführungen
+        run_now: Jetzt ausführen
+        schedule: Zeitplan
+        source_config: Konfigurationsdatei
+        source_dynamic: Dynamisch
+        status: Status
+      tasks_table:
+        default_queue: Standard
+        disable: Deaktivieren
+        disabled: Deaktiviert
+        empty_hint: Aufgaben zu config/recurring.yml hinzufügen
+        empty_title: Keine wiederkehrenden Aufgaben konfiguriert
+        enable: Aktivieren
+        headers:
+          actions: Aktionen
+          last_run: Letzter Lauf
+          next_run: Nächster Lauf
+          queue: Warteschlange
+          schedule: Zeitplan
+          status: Status
+          task: Aufgabe
+        never: Nie
+        run_now: Jetzt ausführen

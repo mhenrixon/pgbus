@@ -1,7 +1,7 @@
 <div class="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
   <div>
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Insights</h1>
-    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Job performance metrics for the last <%= pgbus_time_range_label(@minutes) %></p>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= t("pgbus.insights.show.title") %></h1>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.description_html", range: pgbus_time_range_label(@minutes)) %></p>
   </div>
   <nav class="inline-flex rounded-lg shadow-sm" role="group" aria-label="Time range">
     <% ranges = [["1h", 60], ["24h", 1440], ["7d", 10_080], ["30d", 43_200]] %>
@@ -26,27 +26,27 @@
 <!-- Summary cards -->
 <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6 mb-8">
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Total Jobs</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.total_jobs") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_number(@summary[:total]) %></dd>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Succeeded</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.succeeded") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400"><%= pgbus_number(@summary[:success]) %></dd>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Failed</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.failed") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-red-600 dark:text-red-400"><%= pgbus_number(@summary[:failed]) %></dd>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Dead Lettered</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.dead_lettered") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-orange-600 dark:text-orange-400"><%= pgbus_number(@summary[:dead_lettered]) %></dd>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Avg Duration</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.avg_duration") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_ms_duration(@summary[:avg_duration_ms]) %></dd>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Max Duration</dt>
+    <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.summary.max_duration") %></dt>
     <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_ms_duration(@summary[:max_duration_ms]) %></dd>
   </div>
 </div>
@@ -54,11 +54,11 @@
 <!-- Charts -->
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
   <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Throughput (jobs/min)</h3>
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4"><%= t("pgbus.insights.show.charts.throughput") %></h3>
     <div id="throughput-chart" style="height: 280px;"></div>
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">Status Distribution</h3>
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4"><%= t("pgbus.insights.show.charts.status_distribution") %></h3>
     <div id="status-chart" style="height: 280px;"></div>
   </div>
 </div>
@@ -66,15 +66,15 @@
 <!-- Slowest job classes -->
 <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
   <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Slowest Job Classes (avg duration)</h3>
+    <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300"><%= t("pgbus.insights.show.slowest.title") %></h3>
   </div>
   <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
     <thead class="bg-gray-50 dark:bg-gray-900">
       <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Job Class</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Count</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Avg</th>
-        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400">Max</th>
+        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.slowest.headers.job_class") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.slowest.headers.count") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.slowest.headers.avg") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.slowest.headers.max") %></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -87,7 +87,7 @@
         </tr>
       <% end %>
       <% if @slowest.empty? %>
-        <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500">No job stats yet</td></tr>
+        <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500"><%= t("pgbus.insights.show.slowest.empty") %></td></tr>
       <% end %>
     </tbody>
   </table>
@@ -121,7 +121,7 @@
     }));
 
     throughputChart = new ApexCharts(document.querySelector('#throughput-chart'), {
-      series: [{ name: 'Jobs/min', data: throughputData }],
+      series: [{ name: '<%= j(t("pgbus.insights.show.charts.series_name")) %>', data: throughputData }],
       chart: { type: 'area', height: 280, toolbar: { show: false }, background: 'transparent', foreColor: t.text },
       stroke: { curve: 'smooth', width: 2 },
       fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
@@ -157,7 +157,7 @@
       statusChart.render();
     } else {
       document.querySelector('#status-chart').innerHTML =
-        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">No data yet</p>';
+        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.no_data")) %></p>';
     }
   }
 
@@ -167,7 +167,7 @@
     .then(r => r.json())
     .then(data => { chartData = data; renderCharts(data); })
     .catch(() => {
-      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">Failed to load chart data</p>';
+      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.failed_to_load")) %></p>';
       document.querySelector('#throughput-chart').innerHTML = msg;
       document.querySelector('#status-chart').innerHTML = msg;
     });

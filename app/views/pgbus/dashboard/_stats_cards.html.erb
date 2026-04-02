@@ -1,42 +1,42 @@
 <turbo-frame id="dashboard-stats" data-auto-refresh src="<%= pgbus.root_path(frame: 'stats') %>">
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6 mb-8">
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Queues</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.queues") %></p>
       <p class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white"><%= @stats[:total_queues] %></p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Enqueued</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.enqueued") %></p>
       <p class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white"><%= pgbus_number(@stats[:total_depth]) %></p>
-      <p class="text-xs text-gray-400 dark:text-gray-500"><%= pgbus_number(@stats[:total_visible]) %> visible</p>
+      <p class="text-xs text-gray-400 dark:text-gray-500"><%= pgbus_number(@stats[:total_visible]) %> <%= t("pgbus.dashboard.stats_cards.visible") %></p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Processes</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.processes") %></p>
       <p class="mt-1 text-3xl font-semibold <%= @stats[:active_processes] > 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-400' %>">
         <%= @stats[:active_processes] %>
       </p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Recurring</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.recurring") %></p>
       <p class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white"><%= @stats[:recurring_count] %></p>
       <p class="text-xs text-gray-400">
-        <%= link_to "View tasks", pgbus.recurring_tasks_path, class: "text-blue-500 hover:text-blue-700 dark:text-blue-400" %>
+        <%= link_to t("pgbus.dashboard.stats_cards.view_tasks"), pgbus.recurring_tasks_path, class: "text-blue-500 hover:text-blue-700 dark:text-blue-400" %>
       </p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Failed / DLQ</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.failed_dlq") %></p>
       <p class="mt-1 text-3xl font-semibold <%= (@stats[:failed_count] + @stats[:dlq_depth]) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white' %>">
         <%= @stats[:failed_count] %> / <%= @stats[:dlq_depth] %>
       </p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-      <p class="text-sm font-medium text-gray-500 dark:text-gray-400">Throughput</p>
+      <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.throughput") %></p>
       <p class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white"><%= @stats[:throughput_rate] %></p>
-      <p class="text-xs text-gray-400">msgs/s</p>
+      <p class="text-xs text-gray-400"><%= t("pgbus.dashboard.stats_cards.throughput_unit") %></p>
     </div>
   </div>
 </turbo-frame>

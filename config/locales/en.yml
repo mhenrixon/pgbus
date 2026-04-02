@@ -1,0 +1,348 @@
+---
+en:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: No processes running
+        headers:
+          host: Host
+          kind: Kind
+          pid: PID
+          status: Status
+        title: Active Processes
+      queues_table:
+        empty: No queues found
+        headers:
+          depth: Depth
+          oldest: Oldest (s)
+          queue: Queue
+          total: Total
+          visible: Visible
+        title: Queues
+        view_all: View all
+      recent_failures:
+        empty: No failures
+        headers:
+          error: Error
+          queue: Queue
+          when: When
+        title: Recent Failures
+        view_all: View all
+      show:
+        title: Dashboard
+      stats_cards:
+        enqueued: Enqueued
+        failed_dlq: Failed / DLQ
+        processes: Processes
+        queues: Queues
+        recurring: Recurring
+        throughput: Throughput
+        throughput_unit: msgs/s
+        view_tasks: View tasks
+        visible: visible
+    dead_letter:
+      index:
+        discard_all: Discard All
+        discard_all_confirm: Permanently discard all DLQ messages?
+        retry_all: Retry All
+        retry_all_confirm: Retry all DLQ messages?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Arguments
+        discard: Discard
+        discard_confirm: Permanently discard?
+        empty: Dead letter queue is empty
+        full_json_payload: Full JSON payload
+        headers:
+          enqueued: Enqueued
+          id: ID
+          job_class: Job Class
+          reads: Reads
+          source_queue: Source Queue
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
+        metadata_labels:
+          executions: 'Executions:'
+          last_read: 'Last read:'
+          priority: 'Priority:'
+          queue: 'Queue:'
+          visible_at: 'Visible at:'
+        retry: Retry
+      show:
+        back: Back to DLQ
+        discard: Discard
+        discard_confirm: Permanently discard?
+        headers: Headers
+        labels:
+          enqueued_at: Enqueued At
+          read_count: Read Count
+          source_queue: Source Queue
+          visibility_timeout: Visibility Timeout
+        not_found: Message not found
+        payload: Payload
+        retry: Retry
+        title: 'DLQ Message #%{id}'
+    events:
+      index:
+        processed_empty: No events processed yet
+        processed_headers:
+          event_id: Event ID
+          handler: Handler
+          processed_at: Processed At
+        processed_title: Processed Events
+        subscribers_empty: No subscribers registered
+        subscribers_headers:
+          handler: Handler
+          pattern: Pattern
+          queue: Queue
+        subscribers_title: Registered Subscribers
+        title: Events
+      show:
+        back: Back to Events
+        labels:
+          event_id: Event ID
+          handler: Handler
+          processed_at: Processed At
+        not_found: Event not found
+        title: Event %{event_id}
+    helpers:
+      paused_badge: Paused
+      queue_badge:
+        dlq: DLQ
+        queue: Queue
+      recurring_health:
+        active: Active
+        pending: Pending
+      status_badge:
+        healthy: Healthy
+        stale: Stale
+    insights:
+      show:
+        charts:
+          failed_to_load: Failed to load chart data
+          no_data: No data yet
+          series_name: Jobs/min
+          status_distribution: Status Distribution
+          throughput: Throughput (jobs/min)
+        description_html: Job performance metrics for the last %{range}
+        slowest:
+          empty: No job stats yet
+          headers:
+            avg: Avg
+            count: Count
+            job_class: Job Class
+            max: Max
+          title: Slowest Job Classes (avg duration)
+        summary:
+          avg_duration: Avg Duration
+          dead_lettered: Dead Lettered
+          failed: Failed
+          max_duration: Max Duration
+          succeeded: Succeeded
+          total_jobs: Total Jobs
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Insights
+    jobs:
+      enqueued_table:
+        arguments: Arguments
+        empty: No enqueued jobs
+        full_json_payload: Full JSON payload
+        headers:
+          enqueued: Enqueued
+          id: ID
+          job_class: Job Class
+          queue: Queue
+          reads: Reads
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Last read:'
+          locale: 'Locale:'
+          priority: 'Priority:'
+          queue: 'Queue:'
+          scheduled: 'Scheduled:'
+          timezone: 'Timezone:'
+          visible_at: 'Visible at:'
+        title: Enqueued Jobs
+      failed_table:
+        discard: Discard
+        discard_confirm: Discard this job?
+        empty: No failed jobs
+        headers:
+          actions: Actions
+          error: Error
+          failed: Failed
+          id: ID
+          queue: Queue
+          retries: Retries
+        retry: Retry
+        title: Failed Jobs
+      index:
+        discard_all: Discard All
+        discard_all_confirm: Discard all failed jobs?
+        retry_all: Retry All
+        retry_all_confirm: Retry all failed jobs?
+        title: Jobs
+      show:
+        back: Back to Jobs
+        backtrace: Backtrace
+        discard: Discard
+        discard_confirm: Discard this job permanently?
+        error_message: Error Message
+        labels:
+          error_class: Error Class
+          failed_at: Failed At
+          queue: Queue
+          retry_count: Retry Count
+        not_found: Job not found
+        payload: Payload
+        retry: Retry
+        title: 'Failed Job #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashboard
+        dlq: DLQ
+        events: Events
+        insights: Insights
+        jobs: Jobs
+        locks: Locks
+        outbox: Outbox
+        processes: Processes
+        queues: Queues
+        recurring: Recurring
+      title: Pgbus Dashboard
+      toggle_dark_mode: Toggle dark mode
+    locks:
+      index:
+        description: Active uniqueness locks preventing duplicate job execution
+        empty: No active locks
+        executing: Executing
+        headers:
+          age: Age
+          expires: Expires
+          job_class: Job Class
+          lock_key: Lock Key
+          owner: Owner
+          state: State
+        queued: Queued
+        title: Job Locks
+    outbox:
+      index:
+        description: Transactional outbox entries pending publication to PGMQ
+        empty: No outbox entries
+        headers:
+          created: Created
+          id: ID
+          payload: Payload
+          priority: Priority
+          queue_topic: Queue / Topic
+          status: Status
+        pending: Pending
+        published: Published
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Oldest Unpublished
+          total: Total
+          unpublished: Unpublished
+        title: Outbox
+    processes:
+      index:
+        title: Processes
+      processes_table:
+        empty: No processes running
+        headers:
+          hostname: Hostname
+          kind: Kind
+          last_heartbeat: Last Heartbeat
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Queues
+      queues_list:
+        empty: No queues found
+        headers:
+          actions: Actions
+          depth: Depth
+          newest: Newest (s)
+          oldest: Oldest (s)
+          queue: Queue
+          total_ever: Total Ever
+          visible: Visible
+        pause: Pause
+        pause_confirm: Pause processing for %{name}?
+        paused: Paused
+        purge: Purge
+        purge_confirm: Purge all messages from %{name}?
+        resume: Resume
+      show:
+        depth: 'Depth:'
+        empty: Queue is empty
+        headers:
+          enqueued: Enqueued
+          id: ID
+          payload: Payload
+          reads: Reads
+          vt: VT
+        purge_confirm: Purge all messages?
+        purge_queue: Purge Queue
+        total: 'Total:'
+        visible: 'Visible:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} task configured"
+          other: "%{count} tasks configured"
+        title: Recurring Tasks
+      show:
+        back: Back
+        configuration: Configuration
+        default_queue: default
+        disable: Disable
+        disabled: Disabled
+        enable: Enable
+        execution_headers:
+          enqueued_at: Enqueued At
+          scheduled_for: Scheduled For
+        labels:
+          arguments: Arguments
+          command: Command
+          description: Description
+          job_class: Job Class
+          priority: Priority
+          queue: Queue
+          source: Source
+        next_run: Next Run
+        no_executions: No executions recorded yet
+        recent_executions: Recent Executions
+        run_now: Run Now
+        schedule: Schedule
+        source_config: Config file
+        source_dynamic: Dynamic
+        status: Status
+      tasks_table:
+        default_queue: default
+        disable: Disable
+        disabled: Disabled
+        empty_hint: Add tasks to config/recurring.yml
+        empty_title: No recurring tasks configured
+        enable: Enable
+        headers:
+          actions: Actions
+          last_run: Last Run
+          next_run: Next Run
+          queue: Queue
+          schedule: Schedule
+          status: Status
+          task: Task
+        never: Never
+        run_now: Run Now

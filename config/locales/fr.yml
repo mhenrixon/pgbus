@@ -1,0 +1,348 @@
+---
+fr:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Aucun processus en cours d'exécution
+        headers:
+          host: Hôte
+          kind: Type
+          pid: PID
+          status: Statut
+        title: Processus actifs
+      queues_table:
+        empty: Aucune file d'attente trouvée
+        headers:
+          depth: Profondeur
+          oldest: Le plus ancien (s)
+          queue: File d'attente
+          total: Total
+          visible: Visible
+        title: Files d'attente
+        view_all: Voir tout
+      recent_failures:
+        empty: Aucune erreur
+        headers:
+          error: Erreur
+          queue: File d'attente
+          when: Quand
+        title: Échecs récents
+        view_all: Voir tout
+      show:
+        title: Tableau de bord
+      stats_cards:
+        enqueued: Enregistré
+        failed_dlq: Échoué / DLQ
+        processes: Processus
+        queues: Files d'attente
+        recurring: Récurrent
+        throughput: Débit
+        throughput_unit: msg/s
+        view_tasks: Voir les tâches
+        visible: visible
+    dead_letter:
+      index:
+        discard_all: Tout rejeter
+        discard_all_confirm: Rejeter définitivement tous les messages DLQ ?
+        retry_all: Tout réessayer
+        retry_all_confirm: Réessayer tous les messages DLQ ?
+        title: File d'attente des messages morts
+      messages_table:
+        arguments: Arguments
+        discard: Rejeter
+        discard_confirm: Rejeter définitivement ?
+        empty: La file d'attente des messages morts est vide
+        full_json_payload: Charge utile JSON complète
+        headers:
+          enqueued: Enregistré
+          id: ID
+          job_class: Classe de tâche
+          reads: Lectures
+          source_queue: File d'attente source
+        headers_section: En-têtes
+        job_id: 'ID de la tâche :'
+        metadata: Métadonnées
+        metadata_labels:
+          executions: 'Exécutions :'
+          last_read: 'Dernière lecture :'
+          priority: 'Priorité :'
+          queue: 'File d''attente :'
+          visible_at: 'Visible à :'
+        retry: Réessayer
+      show:
+        back: Retour à la DLQ
+        discard: Ignorer
+        discard_confirm: Ignorer définitivement ?
+        headers: En-têtes
+        labels:
+          enqueued_at: Mis en file à
+          read_count: Nombre de lectures
+          source_queue: File source
+          visibility_timeout: Délai de visibilité
+        not_found: Message non trouvé
+        payload: Charge utile
+        retry: Réessayer
+        title: Message DLQ n°%{id}
+    events:
+      index:
+        processed_empty: Aucun événement traité pour le moment
+        processed_headers:
+          event_id: ID de l'événement
+          handler: Gestionnaire
+          processed_at: Traité à
+        processed_title: Événements traités
+        subscribers_empty: Aucun abonné enregistré
+        subscribers_headers:
+          handler: Gestionnaire
+          pattern: Modèle
+          queue: File d'attente
+        subscribers_title: Abonnés enregistrés
+        title: Événements
+      show:
+        back: Retour aux événements
+        labels:
+          event_id: ID de l'événement
+          handler: Gestionnaire
+          processed_at: Traité à
+        not_found: Événement non trouvé
+        title: Événement %{event_id}
+    helpers:
+      paused_badge: En pause
+      queue_badge:
+        dlq: DLQ
+        queue: File d'attente
+      recurring_health:
+        active: Actif
+        pending: En attente
+      status_badge:
+        healthy: Sain
+        stale: Obsolète
+    insights:
+      show:
+        charts:
+          failed_to_load: Échec du chargement des données du graphique
+          no_data: Pas encore de données
+          series_name: Tâches/min
+          status_distribution: Répartition du statut
+          throughput: Débit (tâches/min)
+        description_html: Indicateurs de performance professionnelle pour les derniers %{range}
+        slowest:
+          empty: Pas encore de statistiques de tâches
+          headers:
+            avg: Moyenne
+            count: Nombre
+            job_class: Classe de tâche
+            max: Max
+          title: Classes de travail les plus lentes (durée moyenne)
+        summary:
+          avg_duration: Durée moyenne
+          dead_lettered: Lettré mort
+          failed: Échoué
+          max_duration: Durée maximale
+          succeeded: Réussi
+          total_jobs: Total des travaux
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30j
+          7d: 7j
+        title: Aperçus
+    jobs:
+      enqueued_table:
+        arguments: Arguments
+        empty: Aucun travail en file d'attente
+        full_json_payload: Charge utile JSON complète
+        headers:
+          enqueued: En file d'attente
+          id: ID
+          job_class: Classe de travail
+          queue: File d'attente
+          reads: Lectures
+        headers_section: En-têtes
+        job_id: 'ID du travail :'
+        metadata: Métadonnées
+        metadata_labels:
+          last_read: 'Dernière lecture :'
+          locale: 'Langue :'
+          priority: 'Priorité :'
+          queue: 'File d''attente :'
+          scheduled: 'Planifié :'
+          timezone: 'Fuseau horaire :'
+          visible_at: 'Visible à :'
+        title: Travaux en file d'attente
+      failed_table:
+        discard: Ignorer
+        discard_confirm: Ignorer ce travail ?
+        empty: Aucun travail échoué
+        headers:
+          actions: Actions
+          error: Erreur
+          failed: Échoué
+          id: ID
+          queue: File d'attente
+          retries: Reprises
+        retry: Réessayer
+        title: Travaux échoués
+      index:
+        discard_all: Tout ignorer
+        discard_all_confirm: Ignorer tous les travaux échoués ?
+        retry_all: Tout réessayer
+        retry_all_confirm: Réessayer tous les travaux échoués ?
+        title: Travaux
+      show:
+        back: Retour aux travaux
+        backtrace: Trace de la pile
+        discard: Ignorer
+        discard_confirm: Supprimer ce travail définitivement ?
+        error_message: Message d'erreur
+        labels:
+          error_class: Classe d'erreur
+          failed_at: Échoué à
+          queue: File d'attente
+          retry_count: Nombre de tentatives
+        not_found: Travail non trouvé
+        payload: Charge utile
+        retry: Réessayer
+        title: 'Travail échoué #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Tableau de bord
+        dlq: DLQ
+        events: Événements
+        insights: Analyses
+        jobs: Travaux
+        locks: Verrous
+        outbox: Boîte d'envoi
+        processes: Processus
+        queues: Files d'attente
+        recurring: Récurrent
+      title: Tableau de bord Pgbus
+      toggle_dark_mode: Basculer en mode sombre
+    locks:
+      index:
+        description: Verrous d'unicité actifs empêchant l'exécution de travaux en double
+        empty: Aucun verrou actif
+        executing: Exécution
+        headers:
+          age: Âge
+          expires: Expire
+          job_class: Classe de travail
+          lock_key: Clé de verrou
+          owner: Propriétaire
+          state: État
+        queued: En file d'attente
+        title: Verrous de travail
+    outbox:
+      index:
+        description: Entrées de boîte d'envoi transactionnelle en attente de publication vers PGMQ
+        empty: Aucune entrée dans la boîte d'envoi
+        headers:
+          created: Créé
+          id: ID
+          payload: Charge utile
+          priority: Priorité
+          queue_topic: File d'attente / Sujet
+          status: Statut
+        pending: En attente
+        published: Publié
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Plus ancien non publié
+          total: Total
+          unpublished: Non publié
+        title: Boîte d'envoi
+    processes:
+      index:
+        title: Processus
+      processes_table:
+        empty: Aucun processus en cours d'exécution
+        headers:
+          hostname: Nom d'hôte
+          kind: Type
+          last_heartbeat: Dernier battement de cœur
+          metadata: Métadonnées
+          pid: PID
+          status: Statut
+    queues:
+      index:
+        title: Files d'attente
+      queues_list:
+        empty: Aucune file d'attente trouvée
+        headers:
+          actions: Actions
+          depth: Profondeur
+          newest: Le plus récent (s)
+          oldest: Le plus ancien (s)
+          queue: File d'attente
+          total_ever: Total jamais
+          visible: Visible
+        pause: Pause
+        pause_confirm: Mettre en pause le traitement pour %{name} ?
+        paused: En pause
+        purge: Purger
+        purge_confirm: Purger tous les messages de %{name} ?
+        resume: Reprendre
+      show:
+        depth: 'Profondeur :'
+        empty: La file d'attente est vide
+        headers:
+          enqueued: Enregistré
+          id: ID
+          payload: Charge utile
+          reads: Lectures
+          vt: VT
+        purge_confirm: Purger tous les messages ?
+        purge_queue: Purger la file d'attente
+        total: 'Total :'
+        visible: 'Visible :'
+    recurring_tasks:
+      index:
+        task_count:
+          one: Tâche %{count} configurée
+          other: Tâches %{count} configurées
+        title: Tâches récurrentes
+      show:
+        back: Retour
+        configuration: Configuration
+        default_queue: par défaut
+        disable: Désactiver
+        disabled: Désactivé
+        enable: Activer
+        execution_headers:
+          enqueued_at: Enregistré à
+          scheduled_for: Planifié pour
+        labels:
+          arguments: Arguments
+          command: Commande
+          description: Description
+          job_class: Classe de tâche
+          priority: Priorité
+          queue: File d'attente
+          source: Source
+        next_run: Prochaine exécution
+        no_executions: Aucune exécution enregistrée pour le moment
+        recent_executions: Exécutions récentes
+        run_now: Exécuter maintenant
+        schedule: Planifier
+        source_config: Fichier de configuration
+        source_dynamic: Dynamique
+        status: Statut
+      tasks_table:
+        default_queue: par défaut
+        disable: Désactiver
+        disabled: Désactivé
+        empty_hint: Ajouter des tâches dans config/recurring.yml
+        empty_title: Aucune tâche récurrente configurée
+        enable: Activer
+        headers:
+          actions: Actions
+          last_run: Dernière exécution
+          next_run: Prochaine exécution
+          queue: File d'attente
+          schedule: Planifier
+          status: Statut
+          task: Tâche
+        never: Jamais
+        run_now: Exécuter maintenant

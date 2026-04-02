@@ -48,6 +48,10 @@ module Pgbus
       load File.expand_path("../tasks/pgbus_pgmq.rake", __dir__)
     end
 
+    initializer "pgbus.i18n" do
+      config.i18n.load_path += Dir[root.join("config", "locales", "**", "*.yml")]
+    end
+
     initializer "pgbus.web" do
       require "pgbus/web/authentication"
       require "pgbus/web/data_source"

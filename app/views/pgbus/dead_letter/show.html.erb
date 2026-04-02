@@ -1,52 +1,52 @@
 <div class="mb-6">
-  <%= link_to "&larr; Back to DLQ".html_safe, pgbus.dead_letter_index_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
+  <%= link_to "\u2190 #{t("pgbus.dead_letter.show.back")}", pgbus.dead_letter_index_path, class: "text-sm text-indigo-600 hover:text-indigo-500" %>
 </div>
 
 <% if @message %>
-  <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">DLQ Message #<%= @message[:msg_id] %></h1>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6"><%= t("pgbus.dead_letter.show.title", id: @message[:msg_id]) %></h1>
 
   <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <div>
-        <dt class="text-sm font-medium text-gray-500">Source Queue</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.dead_letter.show.labels.source_queue") %></dt>
         <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:queue_name] %></dd>
       </div>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Enqueued At</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.dead_letter.show.labels.enqueued_at") %></dt>
         <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:enqueued_at] %></dd>
       </div>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Read Count</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.dead_letter.show.labels.read_count") %></dt>
         <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:read_ct] %></dd>
       </div>
       <div>
-        <dt class="text-sm font-medium text-gray-500">Visibility Timeout</dt>
+        <dt class="text-sm font-medium text-gray-500"><%= t("pgbus.dead_letter.show.labels.visibility_timeout") %></dt>
         <dd class="text-sm text-gray-900 dark:text-white"><%= @message[:vt] %></dd>
       </div>
     </dl>
   </div>
 
   <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
-    <h2 class="text-sm font-medium text-gray-500 mb-2">Payload</h2>
+    <h2 class="text-sm font-medium text-gray-500 mb-2"><%= t("pgbus.dead_letter.show.payload") %></h2>
     <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:message])) rescue @message[:message] %></pre>
   </div>
 
   <% if @message[:headers] %>
     <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
-      <h2 class="text-sm font-medium text-gray-500 mb-2">Headers</h2>
+      <h2 class="text-sm font-medium text-gray-500 mb-2"><%= t("pgbus.dead_letter.show.headers") %></h2>
       <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@message[:headers])) rescue @message[:headers] %></pre>
     </div>
   <% end %>
 
   <div class="flex space-x-2">
-    <%= button_to "Retry", pgbus.retry_dead_letter_path(@message[:msg_id], queue_name: @message[:queue_name]), method: :post,
+    <%= button_to t("pgbus.dead_letter.show.retry"), pgbus.retry_dead_letter_path(@message[:msg_id], queue_name: @message[:queue_name]), method: :post,
           class: "rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500" %>
-    <%= button_to "Discard", pgbus.discard_dead_letter_path(@message[:msg_id], queue_name: @message[:queue_name]), method: :post,
+    <%= button_to t("pgbus.dead_letter.show.discard"), pgbus.discard_dead_letter_path(@message[:msg_id], queue_name: @message[:queue_name]), method: :post,
           class: "rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500",
-          data: { turbo_confirm: "Permanently discard?" } %>
+          data: { turbo_confirm: t("pgbus.dead_letter.show.discard_confirm") } %>
   </div>
 <% else %>
   <div class="text-center py-12">
-    <p class="text-gray-400">Message not found</p>
+    <p class="text-gray-400"><%= t("pgbus.dead_letter.show.not_found") %></p>
   </div>
 <% end %>

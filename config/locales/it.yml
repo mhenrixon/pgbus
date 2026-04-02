@@ -1,0 +1,348 @@
+---
+it:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Nessun processo in esecuzione
+        headers:
+          host: Host
+          kind: Tipo
+          pid: PID
+          status: Stato
+        title: Processi attivi
+      queues_table:
+        empty: Nessuna coda trovata
+        headers:
+          depth: Profondità
+          oldest: Più vecchio (s)
+          queue: Coda
+          total: Totale
+          visible: Visibile
+        title: Code
+        view_all: Visualizza tutto
+      recent_failures:
+        empty: Nessun errore
+        headers:
+          error: Errore
+          queue: Coda
+          when: Quando
+        title: Errori recenti
+        view_all: Visualizza tutto
+      show:
+        title: Cruscotto
+      stats_cards:
+        enqueued: In coda
+        failed_dlq: Falliti / DLQ
+        processes: Processi
+        queues: Code
+        recurring: Ricorrente
+        throughput: Throughput
+        throughput_unit: msg/s
+        view_tasks: Visualizza attività
+        visible: visibile
+    dead_letter:
+      index:
+        discard_all: Scarta tutto
+        discard_all_confirm: Scartare definitivamente tutti i messaggi DLQ?
+        retry_all: Riprova tutto
+        retry_all_confirm: Riprova tutti i messaggi DLQ?
+        title: Coda di lettere morte
+      messages_table:
+        arguments: Argomenti
+        discard: Scarta
+        discard_confirm: Scartare definitivamente?
+        empty: La coda di lettere morte è vuota
+        full_json_payload: Payload JSON completo
+        headers:
+          enqueued: In coda
+          id: ID
+          job_class: Classe lavoro
+          reads: Letture
+          source_queue: Coda sorgente
+        headers_section: Intestazioni
+        job_id: 'ID lavoro:'
+        metadata: Metadati
+        metadata_labels:
+          executions: 'Esecuzioni:'
+          last_read: 'Ultima lettura:'
+          priority: 'Priorità:'
+          queue: 'Coda:'
+          visible_at: 'Visibile alle:'
+        retry: Riprova
+      show:
+        back: Torna a DLQ
+        discard: Scarta
+        discard_confirm: Scartare definitivamente?
+        headers: Intestazioni
+        labels:
+          enqueued_at: Inserito alle
+          read_count: Conteggio letture
+          source_queue: Coda di origine
+          visibility_timeout: Timeout di visibilità
+        not_found: Messaggio non trovato
+        payload: Payload
+        retry: Riprova
+        title: 'Messaggio DLQ #%{id}'
+    events:
+      index:
+        processed_empty: Nessun evento elaborato ancora
+        processed_headers:
+          event_id: ID evento
+          handler: Gestore
+          processed_at: Elaborato alle
+        processed_title: Eventi elaborati
+        subscribers_empty: Nessun iscritto registrato
+        subscribers_headers:
+          handler: Gestore
+          pattern: Modello
+          queue: Coda
+        subscribers_title: Iscritti registrati
+        title: Eventi
+      show:
+        back: Torna agli eventi
+        labels:
+          event_id: ID evento
+          handler: Gestore
+          processed_at: Elaborato alle
+        not_found: Evento non trovato
+        title: Evento %{event_id}
+    helpers:
+      paused_badge: In pausa
+      queue_badge:
+        dlq: DLQ
+        queue: Coda
+      recurring_health:
+        active: Attivo
+        pending: In sospeso
+      status_badge:
+        healthy: Sano
+        stale: Obsoleto
+    insights:
+      show:
+        charts:
+          failed_to_load: Impossibile caricare i dati del grafico
+          no_data: Nessun dato ancora
+          series_name: Lavori/min
+          status_distribution: Distribuzione stato
+          throughput: Throughput (lavori/min)
+        description_html: Metriche di rendimento lavorativo per gli ultimi %{range}
+        slowest:
+          empty: Nessuna statistica lavori ancora
+          headers:
+            avg: Media
+            count: Conteggio
+            job_class: Classe lavoro
+            max: Massimo
+          title: Classi di Lavoro Più Lente (durata media)
+        summary:
+          avg_duration: Durata Media
+          dead_lettered: Messaggi in Dead Letter
+          failed: Falliti
+          max_duration: Durata Massima
+          succeeded: Riusciti
+          total_jobs: Totale Lavori
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30g
+          7d: 7g
+        title: Approfondimenti
+    jobs:
+      enqueued_table:
+        arguments: Argomenti
+        empty: Nessun lavoro in coda
+        full_json_payload: Payload JSON completo
+        headers:
+          enqueued: In coda
+          id: ID
+          job_class: Classe Lavoro
+          queue: Coda
+          reads: Letture
+        headers_section: Intestazioni
+        job_id: 'ID Lavoro:'
+        metadata: Metadati
+        metadata_labels:
+          last_read: 'Ultima lettura:'
+          locale: 'Locale:'
+          priority: 'Priorità:'
+          queue: 'Coda:'
+          scheduled: 'Programmato:'
+          timezone: 'Fuso orario:'
+          visible_at: 'Visibile alle:'
+        title: Lavori in coda
+      failed_table:
+        discard: Scarta
+        discard_confirm: Scartare questo lavoro?
+        empty: Nessun lavoro fallito
+        headers:
+          actions: Azioni
+          error: Errore
+          failed: Fallito
+          id: ID
+          queue: Coda
+          retries: Tentativi
+        retry: Riprova
+        title: Lavori Falliti
+      index:
+        discard_all: Scarta Tutto
+        discard_all_confirm: Scartare tutti i lavori falliti?
+        retry_all: Riprova Tutto
+        retry_all_confirm: Riprova tutti i lavori falliti?
+        title: Lavori
+      show:
+        back: Torna ai Lavori
+        backtrace: Traccia dello stack
+        discard: Scarta
+        discard_confirm: Scartare definitivamente questo lavoro?
+        error_message: Messaggio di errore
+        labels:
+          error_class: Classe di errore
+          failed_at: Fallito a
+          queue: Coda
+          retry_count: Conteggio tentativi
+        not_found: Lavoro non trovato
+        payload: Payload
+        retry: Riprova
+        title: 'Lavoro fallito #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Cruscotto
+        dlq: DLQ
+        events: Eventi
+        insights: Approfondimenti
+        jobs: Lavori
+        locks: Blocchi
+        outbox: Outbox
+        processes: Processi
+        queues: Code
+        recurring: Ricorrente
+      title: Cruscotto Pgbus
+      toggle_dark_mode: Attiva/disattiva modalità scura
+    locks:
+      index:
+        description: Blocchi di unicità attivi che impediscono l'esecuzione duplicata del lavoro
+        empty: Nessun blocco attivo
+        executing: In esecuzione
+        headers:
+          age: Età
+          expires: Scade
+          job_class: Classe del lavoro
+          lock_key: Chiave di blocco
+          owner: Proprietario
+          state: Stato
+        queued: In coda
+        title: Blocchi del lavoro
+    outbox:
+      index:
+        description: Voci dell'outbox transazionali in attesa di pubblicazione su PGMQ
+        empty: Nessuna voce nell'outbox
+        headers:
+          created: Creato
+          id: ID
+          payload: Payload
+          priority: Priorità
+          queue_topic: Coda / Argomento
+          status: Stato
+        pending: In sospeso
+        published: Pubblicato
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Più vecchio non pubblicato
+          total: Totale
+          unpublished: Non pubblicato
+        title: Outbox
+    processes:
+      index:
+        title: Processi
+      processes_table:
+        empty: Nessun processo in esecuzione
+        headers:
+          hostname: Nome host
+          kind: Tipo
+          last_heartbeat: Ultimo segnale di vita
+          metadata: Metadati
+          pid: PID
+          status: Stato
+    queues:
+      index:
+        title: Code
+      queues_list:
+        empty: Nessuna coda trovata
+        headers:
+          actions: Azioni
+          depth: Profondità
+          newest: Più recente (s)
+          oldest: Più vecchio (s)
+          queue: Coda
+          total_ever: Totale mai
+          visible: Visibile
+        pause: Pausa
+        pause_confirm: Mettere in pausa l'elaborazione per %{name}?
+        paused: In pausa
+        purge: Pulisci
+        purge_confirm: Eliminare tutti i messaggi da %{name}?
+        resume: Riprendi
+      show:
+        depth: 'Profondità:'
+        empty: La coda è vuota
+        headers:
+          enqueued: In coda
+          id: ID
+          payload: Carico utile
+          reads: Letture
+          vt: VT
+        purge_confirm: Eliminare tutti i messaggi?
+        purge_queue: Pulisci coda
+        total: 'Totale:'
+        visible: 'Visibile:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} attività configurata"
+          other: "%{count} attività configurate"
+        title: Attività ricorrenti
+      show:
+        back: Indietro
+        configuration: Configurazione
+        default_queue: predefinito
+        disable: Disabilita
+        disabled: Disabilitato
+        enable: Abilita
+        execution_headers:
+          enqueued_at: Messo in coda il
+          scheduled_for: Programmato per
+        labels:
+          arguments: Argomenti
+          command: Comando
+          description: Descrizione
+          job_class: Classe lavoro
+          priority: Priorità
+          queue: Coda
+          source: Fonte
+        next_run: Prossima esecuzione
+        no_executions: Nessuna esecuzione registrata ancora
+        recent_executions: Esecuzioni recenti
+        run_now: Esegui ora
+        schedule: Programma
+        source_config: File di configurazione
+        source_dynamic: Dinamico
+        status: Stato
+      tasks_table:
+        default_queue: predefinito
+        disable: Disabilita
+        disabled: Disabilitato
+        empty_hint: Aggiungi attività a config/recurring.yml
+        empty_title: Nessuna attività ricorrente configurata
+        enable: Abilita
+        headers:
+          actions: Azioni
+          last_run: Ultima esecuzione
+          next_run: Prossima esecuzione
+          queue: Coda
+          schedule: Programma
+          status: Stato
+          task: Attività
+        never: Mai
+        run_now: Esegui ora

@@ -5,6 +5,7 @@ module Pgbus
     include Web::Authentication
 
     protect_from_forgery with: :exception
+    before_action :set_locale
 
     layout "pgbus/application"
 
@@ -19,6 +20,37 @@ module Pgbus
     helper_method :pgbus
 
     private
+
+    def set_locale
+      I18n.locale = extract_locale || I18n.default_locale
+    end
+
+    def extract_locale
+      locale = params[:locale] || cookies[:pgbus_locale] || preferred_locale_from_header
+      locale if locale && available_locales.include?(locale.to_sym)
+    end
+
+    def preferred_locale_from_header
+      return unless request.env["HTTP_ACCEPT_LANGUAGE"]
+
+      request.env["HTTP_ACCEPT_LANGUAGE"]
+             .scan(/([a-z]{2}(?:-[A-Z]{2})?)\s*;?\s*(?:q=([0-9.]+))?/i)
+             .sort_by { |_, q| -(q&.to_f || 1.0) }
+             .each do |lang, _|
+               code = lang.downcase.to_sym
+               return code.to_s if available_locales.include?(code)
+
+               # Try base language (e.g., "de" from "de-AT")
+               base = lang.split("-").first.downcase.to_sym
+               return base.to_s if available_locales.include?(base)
+             end
+      nil
+    end
+
+    def available_locales
+      @available_locales ||= Dir[Pgbus::Engine.root.join("config", "locales", "*.yml")]
+                             .map { |f| File.basename(f, ".yml").to_sym }
+    end
 
     def data_source
       @data_source ||= Pgbus.configuration.web_data_source || Web::DataSource.new
