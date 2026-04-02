@@ -1,4 +1,4 @@
-<turbo-frame id="recurring-tasks" data-auto-refresh src="<%= pgbus.recurring_tasks_path(frame: 'recurring_tasks') %>">
+<turbo-frame id="recurring-tasks" data-auto-refresh data-src="<%= pgbus.recurring_tasks_path(frame: 'recurring_tasks') %>">
   <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
     <% if @recurring_tasks.empty? %>
       <div class="p-8 text-center text-gray-500">

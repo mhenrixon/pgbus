@@ -51,6 +51,7 @@ module Pgbus
       @available_locales ||= Dir[Pgbus::Engine.root.join("config", "locales", "*.yml")]
                              .map { |f| File.basename(f, ".yml").to_sym }
     end
+    helper_method :available_locales
 
     def data_source
       @data_source ||= Pgbus.configuration.web_data_source || Web::DataSource.new
@@ -67,9 +68,8 @@ module Pgbus
     def insights_minutes
       config = Pgbus.configuration
       default = config.insights_default_minutes.to_i
-      max = config.stats_retention.to_i / 60
       value = (params[:minutes] || default).to_i
-      value.clamp(1, [max, 1].max)
+      value.clamp(1, [default, 43_200].max)
     end
 
     def turbo_frame_request?

@@ -1,4 +1,4 @@
-<turbo-frame id="jobs-enqueued" data-auto-refresh src="<%= pgbus.jobs_path(request.query_parameters.merge(frame: 'enqueued')) %>">
+<turbo-frame id="jobs-enqueued" data-auto-refresh data-src="<%= pgbus.jobs_path(request.query_parameters.merge(frame: 'enqueued')) %>">
   <div>
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3"><%= t("pgbus.jobs.enqueued_table.title") %></h2>
     <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">

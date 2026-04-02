@@ -1,4 +1,4 @@
-<turbo-frame id="dashboard-stats" data-auto-refresh src="<%= pgbus.root_path(frame: 'stats') %>">
+<turbo-frame id="dashboard-stats" data-auto-refresh data-src="<%= pgbus.root_path(frame: 'stats') %>">
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6 mb-8">
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">
       <p class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.dashboard.stats_cards.queues") %></p>
