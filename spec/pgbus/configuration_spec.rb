@@ -62,9 +62,13 @@ RSpec.describe Pgbus::Configuration do
       expect(config.archive_compaction_batch_size).to eq(1000)
     end
 
-    it "has stats enabled by default" do
+    it "has stats enabled with 30 day retention by default" do
       expect(config.stats_enabled).to be true
-      expect(config.stats_retention).to eq(7 * 24 * 3600)
+      expect(config.stats_retention).to eq(30 * 24 * 3600)
+    end
+
+    it "has insights_default_minutes of 30 days" do
+      expect(config.insights_default_minutes).to eq(30 * 24 * 60)
     end
 
     it "has outbox disabled by default" do

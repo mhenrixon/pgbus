@@ -131,6 +131,19 @@ module Pgbus
       end
     end
 
+    def pgbus_time_range_label(minutes)
+      minutes = minutes.to_i
+      if minutes < 60
+        "#{minutes} minutes"
+      elsif minutes <= 1440
+        hours = minutes / 60
+        hours == 1 ? "1 hour" : "#{hours} hours"
+      else
+        days = minutes / 1440
+        days == 1 ? "1 day" : "#{days} days"
+      end
+    end
+
     def pgbus_nav_link(label, path)
       active = request.path == path || (path != pgbus.root_path && request.path.start_with?(path))
       css = if active

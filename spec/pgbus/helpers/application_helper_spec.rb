@@ -103,6 +103,32 @@ RSpec.describe Pgbus::ApplicationHelper do
     end
   end
 
+  describe "#pgbus_time_range_label" do
+    it "returns '1 hour' for 60 minutes" do
+      expect(helper.pgbus_time_range_label(60)).to eq("1 hour")
+    end
+
+    it "returns '24 hours' for 1440 minutes" do
+      expect(helper.pgbus_time_range_label(1440)).to eq("24 hours")
+    end
+
+    it "returns '7 days' for 10080 minutes" do
+      expect(helper.pgbus_time_range_label(10_080)).to eq("7 days")
+    end
+
+    it "returns '30 days' for 43200 minutes" do
+      expect(helper.pgbus_time_range_label(43_200)).to eq("30 days")
+    end
+
+    it "returns hours for sub-day ranges" do
+      expect(helper.pgbus_time_range_label(360)).to eq("6 hours")
+    end
+
+    it "returns minutes for sub-hour ranges" do
+      expect(helper.pgbus_time_range_label(15)).to eq("15 minutes")
+    end
+  end
+
   describe "#pgbus_json_preview" do
     it "returns dash for nil" do
       expect(helper.pgbus_json_preview(nil)).to eq("—")

@@ -63,7 +63,8 @@ module Pgbus
     attr_accessor :stats_retention, :stats_enabled
 
     # Web dashboard
-    attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source
+    attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
+                  :insights_default_minutes
 
     def initialize
       @database_url = nil
@@ -124,7 +125,7 @@ module Pgbus
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
       @stats_enabled = true
-      @stats_retention = 7 * 24 * 3600 # 7 days
+      @stats_retention = 30 * 24 * 3600 # 30 days
 
       @connects_to = nil
 
@@ -133,6 +134,7 @@ module Pgbus
       @web_per_page = 25
       @web_live_updates = true
       @web_data_source = nil
+      @insights_default_minutes = 30 * 24 * 60 # 30 days
     end
 
     def queue_name(name)
