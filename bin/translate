@@ -22,10 +22,12 @@ require "optparse"
 APP_ROOT = File.expand_path("..", __dir__)
 Dir.chdir(APP_ROOT)
 
+VALID_LOCALE = /\A[a-z]{2}(-[A-Z]{2})?\z/
+
 options = {
   command: :status,
   locale: nil,
-  verbose: false,
+  verbose: false
 }
 
 OptionParser.new do |opts|
@@ -46,21 +48,33 @@ OptionParser.new do |opts|
 
   opts.on("-l", "--locale LOCALE", "Process specific locale") { |l| options[:locale] = l }
   opts.on("-v", "--verbose", "Verbose output") { options[:verbose] = true }
-  opts.on("-h", "--help", "Show this help") { puts opts; exit }
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit
+  end
 end.parse!
 
-def run(cmd)
-  puts "$ #{cmd}" if $VERBOSE
-  system(cmd) || exit(1)
+def run(*cmd)
+  puts "$ #{cmd.join(" ")}" if $VERBOSE
+  system(*cmd) || exit(1)
+end
+
+def validate_locale!(locale)
+  return unless locale
+  return if locale.match?(VALID_LOCALE)
+
+  warn "Invalid locale: #{locale.inspect}. Expected format: en, fr, en-ZA"
+  exit 1
 end
 
 $VERBOSE = options[:verbose]
+validate_locale!(options[:locale])
 
 case options[:command]
 when :status
   puts "Translation Status"
   puts "=" * 40
-  run "bundle exec i18n-tasks health"
+  run "bundle", "exec", "i18n-tasks", "health"
 
 when :translate
   unless ENV["OPENAI_API_KEY"]
@@ -68,24 +82,26 @@ when :translate
     exit 1
   end
 
-  locale_flag = options[:locale] ? "-l #{options[:locale]}" : ""
   puts "Translating missing keys..."
-  run "bundle exec i18n-tasks translate-missing #{locale_flag}"
+  cmd = %w[bundle exec i18n-tasks translate-missing]
+  cmd.push("-l", options[:locale]) if options[:locale]
+  run(*cmd)
   puts ""
   puts "Normalizing locale files..."
-  run "bundle exec i18n-tasks normalize -p"
+  run "bundle", "exec", "i18n-tasks", "normalize", "-p"
   puts "Done!"
 
 when :normalize
-  run "bundle exec i18n-tasks normalize -p"
+  run "bundle", "exec", "i18n-tasks", "normalize", "-p"
 
 when :missing
-  locale_flag = options[:locale] ? "-l #{options[:locale]}" : ""
-  run "bundle exec i18n-tasks missing #{locale_flag}"
+  cmd = %w[bundle exec i18n-tasks missing]
+  cmd.push("-l", options[:locale]) if options[:locale]
+  run(*cmd)
 
 when :unused
-  run "bundle exec i18n-tasks unused"
+  run "bundle", "exec", "i18n-tasks", "unused"
 
 when :health
-  run "bundle exec i18n-tasks health"
+  run "bundle", "exec", "i18n-tasks", "health"
 end

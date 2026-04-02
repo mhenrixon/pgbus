@@ -14,7 +14,7 @@
   </div>
   <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
     <dt class="text-xs font-medium uppercase text-gray-500"><%= t("pgbus.outbox.index.stats.oldest_unpublished") %></dt>
-    <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= @stats[:oldest_unpublished_age] ? "#{@stats[:oldest_unpublished_age]}s" : "—" %></dd>
+    <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= @stats[:oldest_unpublished_age] ? t("pgbus.outbox.index.stats.oldest_age", seconds: @stats[:oldest_unpublished_age]) : t("pgbus.outbox.index.stats.no_age") %></dd>
   </div>
 </div>
 

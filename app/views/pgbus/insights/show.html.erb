@@ -121,7 +121,7 @@
     }));
 
     throughputChart = new ApexCharts(document.querySelector('#throughput-chart'), {
-      series: [{ name: '<%= t("pgbus.insights.show.charts.series_name") %>', data: throughputData }],
+      series: [{ name: '<%= j(t("pgbus.insights.show.charts.series_name")) %>', data: throughputData }],
       chart: { type: 'area', height: 280, toolbar: { show: false }, background: 'transparent', foreColor: t.text },
       stroke: { curve: 'smooth', width: 2 },
       fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
@@ -157,7 +157,7 @@
       statusChart.render();
     } else {
       document.querySelector('#status-chart').innerHTML =
-        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= t("pgbus.insights.show.charts.no_data") %></p>';
+        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.no_data")) %></p>';
     }
   }
 
@@ -167,7 +167,7 @@
     .then(r => r.json())
     .then(data => { chartData = data; renderCharts(data); })
     .catch(() => {
-      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= t("pgbus.insights.show.charts.failed_to_load") %></p>';
+      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.failed_to_load")) %></p>';
       document.querySelector('#throughput-chart').innerHTML = msg;
       document.querySelector('#status-chart').innerHTML = msg;
     });
