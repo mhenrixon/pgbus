@@ -13,68 +13,42 @@ RSpec.describe Pgbus::EventBus::Publisher do
   end
 
   describe ".publish" do
-    context "when pgmq responds to produce_topic (topic support)" do
-      before do
-        allow(mock_pgmq).to receive(:respond_to?).with(:produce_topic).and_return(true)
-      end
+    it "publishes via publish_to_topic and never falls back to send_message" do
+      described_class.publish("orders.created", { "order_id" => 1 })
 
-      it "publishes via publish_to_topic" do
-        described_class.publish("orders.created", { "order_id" => 1 })
-
-        expect(mock_client).to have_received(:publish_to_topic).with(
-          "orders.created",
-          hash_including("event_id" => a_kind_of(String), "payload" => { "order_id" => 1 }),
-          headers: nil,
-          delay: 0
-        )
-      end
-
-      it "forwards headers" do
-        described_class.publish("orders.created", { "order_id" => 1 }, headers: { "x-trace" => "abc" })
-
-        expect(mock_client).to have_received(:publish_to_topic).with(
-          "orders.created",
-          hash_including("payload" => { "order_id" => 1 }),
-          headers: { "x-trace" => "abc" },
-          delay: 0
-        )
-      end
-
-      it "forwards delay" do
-        described_class.publish("orders.created", { "order_id" => 1 }, delay: 30)
-
-        expect(mock_client).to have_received(:publish_to_topic).with(
-          "orders.created",
-          hash_including("payload" => { "order_id" => 1 }),
-          headers: nil,
-          delay: 30
-        )
-      end
+      expect(mock_client).to have_received(:publish_to_topic).with(
+        "orders.created",
+        hash_including("event_id" => a_kind_of(String), "payload" => { "order_id" => 1 }),
+        headers: nil,
+        delay: 0
+      )
+      expect(mock_client).not_to have_received(:send_message)
     end
 
-    context "when pgmq does not respond to produce_topic (fallback)" do
-      before do
-        allow(mock_pgmq).to receive(:respond_to?).with(:produce_topic).and_return(false)
-      end
+    it "forwards headers" do
+      described_class.publish("orders.created", { "order_id" => 1 }, headers: { "x-trace" => "abc" })
 
-      it "falls back to send_message" do
-        described_class.publish("orders.created", { "order_id" => 1 })
+      expect(mock_client).to have_received(:publish_to_topic).with(
+        "orders.created",
+        hash_including("payload" => { "order_id" => 1 }),
+        headers: { "x-trace" => "abc" },
+        delay: 0
+      )
+    end
 
-        expect(mock_client).to have_received(:send_message).with(
-          "orders.created",
-          hash_including("event_id" => a_kind_of(String), "payload" => { "order_id" => 1 }),
-          headers: nil,
-          delay: 0
-        )
-      end
+    it "forwards delay" do
+      described_class.publish("orders.created", { "order_id" => 1 }, delay: 30)
+
+      expect(mock_client).to have_received(:publish_to_topic).with(
+        "orders.created",
+        hash_including("payload" => { "order_id" => 1 }),
+        headers: nil,
+        delay: 30
+      )
     end
   end
 
   describe ".publish_later" do
-    before do
-      allow(mock_pgmq).to receive(:respond_to?).with(:produce_topic).and_return(true)
-    end
-
     it "delegates to .publish with the specified delay" do
       described_class.publish_later("orders.shipped", { "order_id" => 2 }, delay: 60)
 
