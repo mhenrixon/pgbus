@@ -284,18 +284,30 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#delete_message" do
-    it "deletes from the prefixed queue" do
+    it "deletes from the prefixed queue by default" do
       client.delete_message("default", 42)
 
       expect(mock_pgmq).to have_received(:delete).with("pgbus_test_default", 42)
     end
+
+    it "skips prefix when prefixed: false" do
+      client.delete_message("raw_queue", 99, prefixed: false)
+
+      expect(mock_pgmq).to have_received(:delete).with("raw_queue", 99)
+    end
   end
 
   describe "#archive_message" do
-    it "archives from the prefixed queue" do
+    it "archives from the prefixed queue by default" do
       client.archive_message("default", 7)
 
       expect(mock_pgmq).to have_received(:archive).with("pgbus_test_default", 7)
+    end
+
+    it "skips prefix when prefixed: false" do
+      client.archive_message("pgbus_test_default_p0", 42, prefixed: false)
+
+      expect(mock_pgmq).to have_received(:archive).with("pgbus_test_default_p0", 42)
     end
   end
 
@@ -307,35 +319,31 @@ RSpec.describe Pgbus::Client do
     end
   end
 
-  describe "#delete_batch_from_queue" do
-    it "deletes multiple messages using the raw queue name" do
-      client.delete_batch_from_queue("pgbus_test_default_dlq", [4, 5])
+  describe "#delete_batch" do
+    it "deletes multiple messages from the prefixed queue" do
+      client.delete_batch("default", [1, 2])
+
+      expect(mock_pgmq).to have_received(:delete_batch).with("pgbus_test_default", [1, 2])
+    end
+
+    it "skips prefix when prefixed: false" do
+      client.delete_batch("pgbus_test_default_dlq", [4, 5], prefixed: false)
 
       expect(mock_pgmq).to have_received(:delete_batch).with("pgbus_test_default_dlq", [4, 5])
     end
   end
 
-  describe "#extend_visibility" do
-    it "sets VT on the prefixed queue" do
-      client.extend_visibility("default", 5, vt: 120)
+  describe "#set_visibility_timeout" do
+    it "adds prefix by default" do
+      client.set_visibility_timeout("default", 5, vt: 120)
 
       expect(mock_pgmq).to have_received(:set_vt).with("pgbus_test_default", 5, vt: 120)
     end
-  end
 
-  describe "#set_visibility_timeout" do
-    it "passes the raw queue name directly to pgmq" do
-      client.set_visibility_timeout("raw_queue", 3, vt: 60)
+    it "skips prefix when prefixed: false" do
+      client.set_visibility_timeout("raw_queue", 3, vt: 60, prefixed: false)
 
       expect(mock_pgmq).to have_received(:set_vt).with("raw_queue", 3, vt: 60)
-    end
-  end
-
-  describe "#delete_from_queue" do
-    it "passes the raw queue name directly to pgmq" do
-      client.delete_from_queue("raw_queue", 99)
-
-      expect(mock_pgmq).to have_received(:delete).with("raw_queue", 99)
     end
   end
 
@@ -516,14 +524,6 @@ RSpec.describe Pgbus::Client do
           delay: 0
         )
       end
-    end
-  end
-
-  describe "#archive_from_queue" do
-    it "archives using the raw queue name" do
-      client.archive_from_queue("pgbus_test_default_p0", 42)
-
-      expect(mock_pgmq).to have_received(:archive).with("pgbus_test_default_p0", 42)
     end
   end
 

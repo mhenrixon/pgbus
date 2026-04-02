@@ -44,7 +44,7 @@ module PgmqDoubles
         read_multi: [],
         delete_message: true,
         archive_message: true,
-        extend_visibility: nil,
+        set_visibility_timeout: nil,
         move_to_dead_letter: nil,
         metrics: nil,
         list_queues: [],
@@ -55,7 +55,7 @@ module PgmqDoubles
         transaction: nil
       )
       # Batch operations echo back the ids to mirror pgmq-ruby behavior
-      allow(client).to receive(:delete_batch_from_queue) { |_queue, ids| ids.map(&:to_s) }
+      allow(client).to receive(:delete_batch) { |_queue, ids| ids.map(&:to_s) }
       allow(client).to receive(:archive_batch) { |_queue, ids| ids.map(&:to_s) }
     end
   end

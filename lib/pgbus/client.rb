@@ -146,44 +146,37 @@ module Pgbus
       end
     end
 
-    def delete_message(queue_name, msg_id)
-      full_name = config.queue_name(queue_name)
-      synchronized { @pgmq.delete(full_name, msg_id) }
+    # Delete a message. Pass prefixed: false when queue_name is already
+    # the full PGMQ queue name (e.g. from priority sub-queues or dashboard).
+    def delete_message(queue_name, msg_id, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.delete(name, msg_id) }
     end
 
-    def archive_message(queue_name, msg_id)
-      full_name = config.queue_name(queue_name)
-      synchronized { @pgmq.archive(full_name, msg_id) }
-    end
-
-    def archive_from_queue(full_queue_name, msg_id)
-      synchronized { @pgmq.archive(full_queue_name, msg_id) }
+    # Archive a message. Pass prefixed: false when queue_name is already
+    # the full PGMQ queue name.
+    def archive_message(queue_name, msg_id, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.archive(name, msg_id) }
     end
 
     # Batch archive — moves multiple messages to the archive table in one call.
-    # queue_name is a logical name (prefix is added).
-    def archive_batch(queue_name, msg_ids)
-      full_name = config.queue_name(queue_name)
-      synchronized { @pgmq.archive_batch(full_name, msg_ids) }
+    def archive_batch(queue_name, msg_ids, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.archive_batch(name, msg_ids) }
     end
 
     # Batch delete — permanently removes multiple messages in one call.
-    # queue_name is the full PGMQ queue name (no prefix added).
-    def delete_batch_from_queue(queue_name, msg_ids)
-      synchronized { @pgmq.delete_batch(queue_name, msg_ids) }
+    def delete_batch(queue_name, msg_ids, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.delete_batch(name, msg_ids) }
     end
 
-    def extend_visibility(queue_name, msg_id, vt:)
-      full_name = config.queue_name(queue_name)
-      synchronized { @pgmq.set_vt(full_name, msg_id, vt: vt) }
-    end
-
-    def set_visibility_timeout(queue_name, msg_id, vt:)
-      synchronized { @pgmq.set_vt(queue_name, msg_id, vt: vt) }
-    end
-
-    def delete_from_queue(queue_name, msg_id)
-      synchronized { @pgmq.delete(queue_name, msg_id) }
+    # Set visibility timeout. Pass prefixed: false when queue_name is already
+    # the full PGMQ queue name.
+    def set_visibility_timeout(queue_name, msg_id, vt:, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.set_vt(name, msg_id, vt: vt) }
     end
 
     def transaction(&block)
