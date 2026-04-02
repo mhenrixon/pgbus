@@ -50,18 +50,21 @@ task :build do
   sh("rm -rf /tmp/gem-verify #{gem_file}")
 end
 
-desc "Release a new version (rake release[1.2.3] or rake release[pre])"
-task :release, [:version] do |_t, args|
+desc "Release a new version (rake release[1.2.3] or rake release[pre] or rake release[1.2.3,force])"
+task :release, %i[version force] do |_t, args|
   require_relative "lib/pgbus/version"
 
   def info(msg)    = puts "\e[34m→\e[0m #{msg}"
   def success(msg) = puts "\e[32m✓\e[0m #{msg}"
   def skip(msg)    = puts "\e[33m⊘\e[0m #{msg} \e[33m(skipped)\e[0m"
+  def warn(msg)    = puts "\e[33m⚠\e[0m #{msg}"
   def error(msg)   = puts "\e[31m✗\e[0m #{msg}"
   def header(msg)  = puts "\n\e[1;36m#{msg}\e[0m\n#{"─" * msg.length}"
 
   new_version = args[:version]
-  abort "\e[31mUsage: rake release[X.Y.Z] or rake release[pre]\e[0m" unless new_version
+  abort "\e[31mUsage: rake release[X.Y.Z] or rake release[X.Y.Z,force]\e[0m" unless new_version
+
+  force = args[:force]&.to_s&.downcase == "force"
 
   dirty = `git status --porcelain`.strip
   abort "\e[31mAborting: working directory is not clean.\e[0m\n#{dirty}" unless dirty.empty?
@@ -77,20 +80,40 @@ task :release, [:version] do |_t, args|
   tag = "v#{new_version}"
   version_file = "lib/pgbus/version.rb"
 
-  header "Release #{tag}"
+  title = "Release #{tag}"
+  title += " (force)" if force
+  header title
   info "Current version: #{current}"
   info "New version:     #{new_version}"
   info "Pre-release:     #{prerelease}"
 
+  # Step 0: Force cleanup — delete existing release and tag
+  if force
+    header "Force cleanup"
+    if system("gh release view #{tag} >/dev/null 2>&1")
+      sh("gh release delete #{tag} --yes --cleanup-tag")
+      success "Deleted release and remote tag #{tag}"
+    else
+      skip "No release #{tag} to delete"
+    end
+
+    if system("git rev-parse #{tag} >/dev/null 2>&1")
+      sh("git tag -d #{tag}")
+      success "Deleted local tag #{tag}"
+    else
+      skip "No local tag #{tag} to delete"
+    end
+  end
+
   # Step 1: Update version file
   header "Version"
-  if new_version != current
+  if new_version == current
+    skip "Version already #{new_version}"
+  else
     content = File.read(version_file)
     content.sub!(/VERSION = ".*"/, "VERSION = \"#{new_version}\"")
     File.write(version_file, content)
     success "Updated #{version_file}"
-  else
-    skip "Version already #{new_version}"
   end
 
   # Step 2: Verify gem builds cleanly
@@ -121,13 +144,13 @@ task :release, [:version] do |_t, args|
     success "Pushed to origin/main"
   end
 
-  # Step 5: Check if tag exists
+  # Step 5: Create release
   header "Release"
   tag_exists = system("git rev-parse #{tag} >/dev/null 2>&1")
   release_exists = system("gh release view #{tag} >/dev/null 2>&1")
 
   if release_exists
-    skip "Release #{tag} already exists"
+    skip "Release #{tag} already exists (use force to re-create)"
   elsif tag_exists
     info "Tag #{tag} exists, creating release from it"
     pre_flag = prerelease ? "--prerelease" : ""
