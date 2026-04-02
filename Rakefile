@@ -54,11 +54,17 @@ desc "Release a new version (rake release[1.2.3] or rake release[pre])"
 task :release, [:version] do |_t, args|
   require_relative "lib/pgbus/version"
 
+  def info(msg)    = puts "\e[34m→\e[0m #{msg}"
+  def success(msg) = puts "\e[32m✓\e[0m #{msg}"
+  def skip(msg)    = puts "\e[33m⊘\e[0m #{msg} \e[33m(skipped)\e[0m"
+  def error(msg)   = puts "\e[31m✗\e[0m #{msg}"
+  def header(msg)  = puts "\n\e[1;36m#{msg}\e[0m\n#{"─" * msg.length}"
+
   new_version = args[:version]
-  abort "Usage: rake release[X.Y.Z] or rake release[pre]" unless new_version
+  abort "\e[31mUsage: rake release[X.Y.Z] or rake release[pre]\e[0m" unless new_version
 
   dirty = `git status --porcelain`.strip
-  abort "Aborting: working directory is not clean.\n#{dirty}" unless dirty.empty?
+  abort "\e[31mAborting: working directory is not clean.\e[0m\n#{dirty}" unless dirty.empty?
 
   current = Pgbus::VERSION
   prerelease = new_version.match?(/alpha|beta|rc|pre/) || new_version == "pre"
@@ -69,43 +75,77 @@ task :release, [:version] do |_t, args|
   end
 
   tag = "v#{new_version}"
-
-  puts "Current version: #{current}"
-  puts "New version:     #{new_version}"
-  puts "Tag:             #{tag}"
-  puts "Pre-release:     #{prerelease}"
-  puts ""
-
-  # Update version file if needed
   version_file = "lib/pgbus/version.rb"
+
+  header "Release #{tag}"
+  info "Current version: #{current}"
+  info "New version:     #{new_version}"
+  info "Pre-release:     #{prerelease}"
+
+  # Step 1: Update version file
+  header "Version"
   if new_version != current
     content = File.read(version_file)
     content.sub!(/VERSION = ".*"/, "VERSION = \"#{new_version}\"")
     File.write(version_file, content)
-    puts "Updated #{version_file}"
+    success "Updated #{version_file}"
+  else
+    skip "Version already #{new_version}"
   end
 
-  # Verify gem builds cleanly
+  # Step 2: Verify gem builds cleanly
+  header "Build verification"
   sh("gem build pgbus.gemspec --strict")
   sh("rm -f pgbus-*.gem")
+  success "Gem builds cleanly"
 
-  # Commit, push, and create release
-  if new_version != current
+  # Step 3: Commit version bump
+  header "Git commit"
+  version_changed = !`git diff #{version_file}`.strip.empty? || !`git diff --cached #{version_file}`.strip.empty?
+  if version_changed
     sh("git add #{version_file}")
     sh("git commit -m 'chore: bump version to #{new_version}'")
+    success "Committed version bump"
+  else
+    skip "No version change to commit"
   end
-  sh("git push origin main")
 
-  pre_flag = prerelease ? "--prerelease" : ""
-  sh("gh release create #{tag} --generate-notes --target main #{pre_flag}".strip)
+  # Step 4: Push to origin
+  header "Git push"
+  local_sha = `git rev-parse HEAD`.strip
+  remote_sha = `git rev-parse origin/main 2>/dev/null`.strip
+  if local_sha == remote_sha
+    skip "origin/main already at #{local_sha[0..6]}"
+  else
+    sh("git push origin main")
+    success "Pushed to origin/main"
+  end
+
+  # Step 5: Check if tag exists
+  header "Release"
+  tag_exists = system("git rev-parse #{tag} >/dev/null 2>&1")
+  release_exists = system("gh release view #{tag} >/dev/null 2>&1")
+
+  if release_exists
+    skip "Release #{tag} already exists"
+  elsif tag_exists
+    info "Tag #{tag} exists, creating release from it"
+    pre_flag = prerelease ? "--prerelease" : ""
+    sh("gh release create #{tag} --generate-notes #{pre_flag}".strip)
+    success "Release #{tag} created from existing tag"
+  else
+    pre_flag = prerelease ? "--prerelease" : ""
+    sh("gh release create #{tag} --generate-notes --target main #{pre_flag}".strip)
+    success "Release #{tag} created"
+  end
 
   puts ""
-  puts "Release #{tag} created! CI will handle the rest:"
-  puts "  - Run tests"
-  puts "  - Build + verify gem"
-  puts "  - Sign with Sigstore"
-  puts "  - Publish to RubyGems"
-  puts "  - Upload assets to the release"
+  success "\e[1mRelease #{tag} complete!\e[0m CI will handle the rest:"
+  puts "    • Run tests"
+  puts "    • Build + verify gem"
+  puts "    • Sign with Sigstore"
+  puts "    • Publish to RubyGems"
+  puts "    • Upload assets to the release"
 end
 
 task default: %i[spec rubocop]
