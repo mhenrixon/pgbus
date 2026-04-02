@@ -48,5 +48,15 @@ RSpec.describe Pgbus::ApplicationController do
         expect(available_locales).to contain_exactly(:en, :de)
       end
     end
+
+    context "when host app has no available locales" do
+      before do
+        allow(I18n).to receive(:available_locales).and_return([])
+      end
+
+      it "returns an empty array" do
+        expect(available_locales).to be_empty
+      end
+    end
   end
 end
