@@ -58,6 +58,7 @@ RSpec/MultipleMemoizedHelpers:
 RSpec/DescribeClass:
   Exclude:
     - spec/integration/**/*
+    - spec/i18n_spec.rb
 
 RSpec/AnyInstance:
   Enabled: false

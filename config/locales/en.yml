@@ -1,348 +1,348 @@
 ---
 en:
   pgbus:
-    layout:
-      title: "Pgbus Dashboard"
-      brand: "Pgbus"
-      toggle_dark_mode: "Toggle dark mode"
-      nav:
-        dashboard: "Dashboard"
-        queues: "Queues"
-        jobs: "Jobs"
-        recurring: "Recurring"
-        processes: "Processes"
-        events: "Events"
-        dlq: "DLQ"
-        outbox: "Outbox"
-        locks: "Locks"
-        insights: "Insights"
     dashboard:
-      show:
-        title: "Dashboard"
-      stats_cards:
-        queues: "Queues"
-        enqueued: "Enqueued"
-        visible: "visible"
-        processes: "Processes"
-        recurring: "Recurring"
-        view_tasks: "View tasks"
-        failed_dlq: "Failed / DLQ"
-        throughput: "Throughput"
-        throughput_unit: "msgs/s"
+      processes_table:
+        empty: No processes running
+        headers:
+          host: Host
+          kind: Kind
+          pid: PID
+          status: Status
+        title: Active Processes
       queues_table:
-        title: "Queues"
-        view_all: "View all"
+        empty: No queues found
         headers:
-          queue: "Queue"
-          depth: "Depth"
-          visible: "Visible"
-          oldest: "Oldest (s)"
-          total: "Total"
-        empty: "No queues found"
-      processes_table:
-        title: "Active Processes"
-        headers:
-          kind: "Kind"
-          host: "Host"
-          pid: "PID"
-          status: "Status"
-        empty: "No processes running"
+          depth: Depth
+          oldest: Oldest (s)
+          queue: Queue
+          total: Total
+          visible: Visible
+        title: Queues
+        view_all: View all
       recent_failures:
-        title: "Recent Failures"
-        view_all: "View all"
+        empty: No failures
         headers:
-          queue: "Queue"
-          error: "Error"
-          when: "When"
-        empty: "No failures"
-    jobs:
-      index:
-        title: "Jobs"
-        retry_all: "Retry All"
-        retry_all_confirm: "Retry all failed jobs?"
-        discard_all: "Discard All"
-        discard_all_confirm: "Discard all failed jobs?"
+          error: Error
+          queue: Queue
+          when: When
+        title: Recent Failures
+        view_all: View all
       show:
-        back: "Back to Jobs"
-        title: "Failed Job #%{id}"
-        labels:
-          queue: "Queue"
-          failed_at: "Failed At"
-          error_class: "Error Class"
-          retry_count: "Retry Count"
-        error_message: "Error Message"
-        backtrace: "Backtrace"
-        payload: "Payload"
-        retry: "Retry"
-        discard: "Discard"
-        discard_confirm: "Discard this job permanently?"
-        not_found: "Job not found"
-      failed_table:
-        title: "Failed Jobs"
+        title: Dashboard
+      stats_cards:
+        enqueued: Enqueued
+        failed_dlq: Failed / DLQ
+        processes: Processes
+        queues: Queues
+        recurring: Recurring
+        throughput: Throughput
+        throughput_unit: msgs/s
+        view_tasks: View tasks
+        visible: visible
+    dead_letter:
+      index:
+        discard_all: Discard All
+        discard_all_confirm: Permanently discard all DLQ messages?
+        retry_all: Retry All
+        retry_all_confirm: Retry all DLQ messages?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Arguments
+        discard: Discard
+        discard_confirm: Permanently discard?
+        empty: Dead letter queue is empty
+        full_json_payload: Full JSON payload
         headers:
-          id: "ID"
-          queue: "Queue"
-          error: "Error"
-          retries: "Retries"
-          failed: "Failed"
-          actions: "Actions"
-        retry: "Retry"
-        discard: "Discard"
-        discard_confirm: "Discard this job?"
-        empty: "No failed jobs"
-      enqueued_table:
-        title: "Enqueued Jobs"
-        headers:
-          id: "ID"
-          job_class: "Job Class"
-          queue: "Queue"
-          enqueued: "Enqueued"
-          reads: "Reads"
-        job_id: "Job ID:"
-        arguments: "Arguments"
-        metadata: "Metadata"
+          enqueued: Enqueued
+          id: ID
+          job_class: Job Class
+          reads: Reads
+          source_queue: Source Queue
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
         metadata_labels:
-          queue: "Queue:"
-          priority: "Priority:"
-          locale: "Locale:"
-          timezone: "Timezone:"
-          scheduled: "Scheduled:"
-          visible_at: "Visible at:"
-          last_read: "Last read:"
-        full_json_payload: "Full JSON payload"
-        headers_section: "Headers"
-        empty: "No enqueued jobs"
-    queues:
-      index:
-        title: "Queues"
+          executions: 'Executions:'
+          last_read: 'Last read:'
+          priority: 'Priority:'
+          queue: 'Queue:'
+          visible_at: 'Visible at:'
+        retry: Retry
       show:
-        depth: "Depth:"
-        visible: "Visible:"
-        total: "Total:"
-        purge_queue: "Purge Queue"
-        purge_confirm: "Purge all messages?"
-        headers:
-          id: "ID"
-          enqueued: "Enqueued"
-          reads: "Reads"
-          vt: "VT"
-          payload: "Payload"
-        empty: "Queue is empty"
-      queues_list:
-        headers:
-          queue: "Queue"
-          depth: "Depth"
-          visible: "Visible"
-          oldest: "Oldest (s)"
-          newest: "Newest (s)"
-          total_ever: "Total Ever"
-          actions: "Actions"
-        paused: "Paused"
-        resume: "Resume"
-        pause: "Pause"
-        pause_confirm: "Pause processing for %{name}?"
-        purge: "Purge"
-        purge_confirm: "Purge all messages from %{name}?"
-        empty: "No queues found"
-    processes:
-      index:
-        title: "Processes"
-      processes_table:
-        headers:
-          kind: "Kind"
-          hostname: "Hostname"
-          pid: "PID"
-          status: "Status"
-          last_heartbeat: "Last Heartbeat"
-          metadata: "Metadata"
-        empty: "No processes running"
+        back: Back to DLQ
+        discard: Discard
+        discard_confirm: Permanently discard?
+        headers: Headers
+        labels:
+          enqueued_at: Enqueued At
+          read_count: Read Count
+          source_queue: Source Queue
+          visibility_timeout: Visibility Timeout
+        not_found: Message not found
+        payload: Payload
+        retry: Retry
+        title: 'DLQ Message #%{id}'
     events:
       index:
-        title: "Events"
-        subscribers_title: "Registered Subscribers"
-        subscribers_headers:
-          pattern: "Pattern"
-          handler: "Handler"
-          queue: "Queue"
-        subscribers_empty: "No subscribers registered"
-        processed_title: "Processed Events"
+        processed_empty: No events processed yet
         processed_headers:
-          event_id: "Event ID"
-          handler: "Handler"
-          processed_at: "Processed At"
-        processed_empty: "No events processed yet"
+          event_id: Event ID
+          handler: Handler
+          processed_at: Processed At
+        processed_title: Processed Events
+        subscribers_empty: No subscribers registered
+        subscribers_headers:
+          handler: Handler
+          pattern: Pattern
+          queue: Queue
+        subscribers_title: Registered Subscribers
+        title: Events
       show:
-        back: "Back to Events"
-        title: "Event"
+        back: Back to Events
         labels:
-          event_id: "Event ID"
-          handler: "Handler"
-          processed_at: "Processed At"
-        not_found: "Event not found"
+          event_id: Event ID
+          handler: Handler
+          processed_at: Processed At
+        not_found: Event not found
+        title: Event
+    helpers:
+      paused_badge: Paused
+      queue_badge:
+        dlq: DLQ
+        queue: Queue
+      recurring_health:
+        active: Active
+        pending: Pending
+      status_badge:
+        healthy: Healthy
+        stale: Stale
+    insights:
+      show:
+        charts:
+          failed_to_load: Failed to load chart data
+          no_data: No data yet
+          series_name: Jobs/min
+          status_distribution: Status Distribution
+          throughput: Throughput (jobs/min)
+        description_html: Job performance metrics for the last %{range}
+        slowest:
+          empty: No job stats yet
+          headers:
+            avg: Avg
+            count: Count
+            job_class: Job Class
+            max: Max
+          title: Slowest Job Classes (avg duration)
+        summary:
+          avg_duration: Avg Duration
+          dead_lettered: Dead Lettered
+          failed: Failed
+          max_duration: Max Duration
+          succeeded: Succeeded
+          total_jobs: Total Jobs
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Insights
+    jobs:
+      enqueued_table:
+        arguments: Arguments
+        empty: No enqueued jobs
+        full_json_payload: Full JSON payload
+        headers:
+          enqueued: Enqueued
+          id: ID
+          job_class: Job Class
+          queue: Queue
+          reads: Reads
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Last read:'
+          locale: 'Locale:'
+          priority: 'Priority:'
+          queue: 'Queue:'
+          scheduled: 'Scheduled:'
+          timezone: 'Timezone:'
+          visible_at: 'Visible at:'
+        title: Enqueued Jobs
+      failed_table:
+        discard: Discard
+        discard_confirm: Discard this job?
+        empty: No failed jobs
+        headers:
+          actions: Actions
+          error: Error
+          failed: Failed
+          id: ID
+          queue: Queue
+          retries: Retries
+        retry: Retry
+        title: Failed Jobs
+      index:
+        discard_all: Discard All
+        discard_all_confirm: Discard all failed jobs?
+        retry_all: Retry All
+        retry_all_confirm: Retry all failed jobs?
+        title: Jobs
+      show:
+        back: Back to Jobs
+        backtrace: Backtrace
+        discard: Discard
+        discard_confirm: Discard this job permanently?
+        error_message: Error Message
+        labels:
+          error_class: Error Class
+          failed_at: Failed At
+          queue: Queue
+          retry_count: Retry Count
+        not_found: Job not found
+        payload: Payload
+        retry: Retry
+        title: 'Failed Job #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashboard
+        dlq: DLQ
+        events: Events
+        insights: Insights
+        jobs: Jobs
+        locks: Locks
+        outbox: Outbox
+        processes: Processes
+        queues: Queues
+        recurring: Recurring
+      title: Pgbus Dashboard
+      toggle_dark_mode: Toggle dark mode
+    locks:
+      index:
+        description: Active uniqueness locks preventing duplicate job execution
+        empty: No active locks
+        executing: Executing
+        headers:
+          age: Age
+          expires: Expires
+          job_class: Job Class
+          lock_key: Lock Key
+          owner: Owner
+          state: State
+        queued: Queued
+        title: Job Locks
+    outbox:
+      index:
+        description: Transactional outbox entries pending publication to PGMQ
+        empty: No outbox entries
+        headers:
+          created: Created
+          id: ID
+          payload: Payload
+          priority: Priority
+          queue_topic: Queue / Topic
+          status: Status
+        pending: Pending
+        published: Published
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Oldest Unpublished
+          total: Total
+          unpublished: Unpublished
+        title: Outbox
+    processes:
+      index:
+        title: Processes
+      processes_table:
+        empty: No processes running
+        headers:
+          hostname: Hostname
+          kind: Kind
+          last_heartbeat: Last Heartbeat
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Queues
+      queues_list:
+        empty: No queues found
+        headers:
+          actions: Actions
+          depth: Depth
+          newest: Newest (s)
+          oldest: Oldest (s)
+          queue: Queue
+          total_ever: Total Ever
+          visible: Visible
+        pause: Pause
+        pause_confirm: Pause processing for %{name}?
+        paused: Paused
+        purge: Purge
+        purge_confirm: Purge all messages from %{name}?
+        resume: Resume
+      show:
+        depth: 'Depth:'
+        empty: Queue is empty
+        headers:
+          enqueued: Enqueued
+          id: ID
+          payload: Payload
+          reads: Reads
+          vt: VT
+        purge_confirm: Purge all messages?
+        purge_queue: Purge Queue
+        total: 'Total:'
+        visible: 'Visible:'
     recurring_tasks:
       index:
-        title: "Recurring Tasks"
         task_count:
           one: "%{count} task configured"
           other: "%{count} tasks configured"
+        title: Recurring Tasks
       show:
-        disable: "Disable"
-        enable: "Enable"
-        run_now: "Run Now"
-        back: "Back"
-        schedule: "Schedule"
-        next_run: "Next Run"
-        status: "Status"
-        disabled: "Disabled"
-        configuration: "Configuration"
-        labels:
-          job_class: "Job Class"
-          command: "Command"
-          queue: "Queue"
-          priority: "Priority"
-          arguments: "Arguments"
-          description: "Description"
-          source: "Source"
-        source_config: "Config file"
-        source_dynamic: "Dynamic"
-        recent_executions: "Recent Executions"
+        back: Back
+        configuration: Configuration
+        default_queue: default
+        disable: Disable
+        disabled: Disabled
+        enable: Enable
         execution_headers:
-          scheduled_for: "Scheduled For"
-          enqueued_at: "Enqueued At"
-        no_executions: "No executions recorded yet"
-        default_queue: "default"
-      tasks_table:
-        empty_title: "No recurring tasks configured"
-        empty_hint: "Add tasks to config/recurring.yml"
-        headers:
-          task: "Task"
-          schedule: "Schedule"
-          queue: "Queue"
-          last_run: "Last Run"
-          next_run: "Next Run"
-          status: "Status"
-          actions: "Actions"
-        never: "Never"
-        disabled: "Disabled"
-        disable: "Disable"
-        enable: "Enable"
-        run_now: "Run Now"
-        default_queue: "default"
-    dead_letter:
-      index:
-        title: "Dead Letter Queue"
-        retry_all: "Retry All"
-        retry_all_confirm: "Retry all DLQ messages?"
-        discard_all: "Discard All"
-        discard_all_confirm: "Permanently discard all DLQ messages?"
-      show:
-        back: "Back to DLQ"
-        title: "DLQ Message #%{id}"
+          enqueued_at: Enqueued At
+          scheduled_for: Scheduled For
         labels:
-          source_queue: "Source Queue"
-          enqueued_at: "Enqueued At"
-          read_count: "Read Count"
-          visibility_timeout: "Visibility Timeout"
-        payload: "Payload"
-        headers: "Headers"
-        retry: "Retry"
-        discard: "Discard"
-        discard_confirm: "Permanently discard?"
-        not_found: "Message not found"
-      messages_table:
+          arguments: Arguments
+          command: Command
+          description: Description
+          job_class: Job Class
+          priority: Priority
+          queue: Queue
+          source: Source
+        next_run: Next Run
+        no_executions: No executions recorded yet
+        recent_executions: Recent Executions
+        run_now: Run Now
+        schedule: Schedule
+        source_config: Config file
+        source_dynamic: Dynamic
+        status: Status
+      tasks_table:
+        default_queue: default
+        disable: Disable
+        disabled: Disabled
+        empty_hint: Add tasks to config/recurring.yml
+        empty_title: No recurring tasks configured
+        enable: Enable
         headers:
-          id: "ID"
-          job_class: "Job Class"
-          source_queue: "Source Queue"
-          enqueued: "Enqueued"
-          reads: "Reads"
-        job_id: "Job ID:"
-        retry: "Retry"
-        discard: "Discard"
-        discard_confirm: "Permanently discard?"
-        arguments: "Arguments"
-        metadata: "Metadata"
-        metadata_labels:
-          queue: "Queue:"
-          priority: "Priority:"
-          executions: "Executions:"
-          visible_at: "Visible at:"
-          last_read: "Last read:"
-        full_json_payload: "Full JSON payload"
-        headers_section: "Headers"
-        empty: "Dead letter queue is empty"
-    outbox:
-      index:
-        title: "Outbox"
-        description: "Transactional outbox entries pending publication to PGMQ"
-        stats:
-          unpublished: "Unpublished"
-          total: "Total"
-          oldest_unpublished: "Oldest Unpublished"
-          oldest_age: "%{seconds}s"
-          no_age: "—"
-        headers:
-          id: "ID"
-          queue_topic: "Queue / Topic"
-          payload: "Payload"
-          priority: "Priority"
-          status: "Status"
-          created: "Created"
-        published: "Published"
-        pending: "Pending"
-        empty: "No outbox entries"
-    locks:
-      index:
-        title: "Job Locks"
-        description: "Active uniqueness locks preventing duplicate job execution"
-        headers:
-          lock_key: "Lock Key"
-          job_class: "Job Class"
-          state: "State"
-          owner: "Owner"
-          age: "Age"
-          expires: "Expires"
-        executing: "Executing"
-        queued: "Queued"
-        empty: "No active locks"
-    insights:
-      show:
-        title: "Insights"
-        description_html: "Job performance metrics for the last %{range}"
-        time_ranges:
-          1h: "1h"
-          24h: "24h"
-          7d: "7d"
-          30d: "30d"
-        summary:
-          total_jobs: "Total Jobs"
-          succeeded: "Succeeded"
-          failed: "Failed"
-          dead_lettered: "Dead Lettered"
-          avg_duration: "Avg Duration"
-          max_duration: "Max Duration"
-        charts:
-          throughput: "Throughput (jobs/min)"
-          status_distribution: "Status Distribution"
-          no_data: "No data yet"
-          failed_to_load: "Failed to load chart data"
-          series_name: "Jobs/min"
-        slowest:
-          title: "Slowest Job Classes (avg duration)"
-          headers:
-            job_class: "Job Class"
-            count: "Count"
-            avg: "Avg"
-            max: "Max"
-          empty: "No job stats yet"
-    helpers:
-      status_badge:
-        healthy: "Healthy"
-        stale: "Stale"
-      queue_badge:
-        dlq: "DLQ"
-        queue: "Queue"
-      paused_badge: "Paused"
-      recurring_health:
-        pending: "Pending"
-        active: "Active"
+          actions: Actions
+          last_run: Last Run
+          next_run: Next Run
+          queue: Queue
+          schedule: Schedule
+          status: Status
+          task: Task
+        never: Never
+        run_now: Run Now
