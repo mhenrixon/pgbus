@@ -99,10 +99,11 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "tags each message with its source queue from the queue_name field" do
+        prefix = worker.config.queue_prefix
         msg1 = build_message_double(msg_id: 1, message: '{"a":1}')
         msg2 = build_message_double(msg_id: 2, message: '{"b":2}')
-        allow(msg1).to receive(:queue_name).and_return("pgbus_test_default")
-        allow(msg2).to receive(:queue_name).and_return("pgbus_test_priority")
+        allow(msg1).to receive(:queue_name).and_return("#{prefix}_default")
+        allow(msg2).to receive(:queue_name).and_return("#{prefix}_priority")
 
         allow(mock_client).to receive(:read_multi).and_return([msg1, msg2])
 
