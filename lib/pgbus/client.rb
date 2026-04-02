@@ -267,6 +267,10 @@ module Pgbus
         end
         @schema_ensured = true
       end
+    rescue StandardError => e
+      raise Pgbus::SchemaNotReady,
+            "PGMQ schema installation failed (#{e.class}: #{e.message}). " \
+            "Ensure the pgbus database exists and migrations have been run."
     end
 
     def install_pgmq_schema(conn)

@@ -76,6 +76,17 @@ RSpec.describe Pgbus::Client do
       expect(raw_conn).not_to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
     end
 
+    it "wraps install failures as SchemaNotReady" do
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql)
+                     .and_raise(StandardError, "permission denied for schema pgmq")
+
+      expect { client.ensure_queue("jobs") }.to raise_error(
+        Pgbus::SchemaNotReady, /PGMQ schema installation failed/
+      )
+    end
+
     it "only checks once per client instance" do
       allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 1))
 
