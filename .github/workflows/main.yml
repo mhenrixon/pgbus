@@ -40,6 +40,8 @@ jobs:
           bundler-cache: true
       - name: RuboCop
         run: bundle exec rubocop
+      - name: Verify gem builds
+        run: bundle exec rake build
 
   test:
     runs-on: ubuntu-latest
