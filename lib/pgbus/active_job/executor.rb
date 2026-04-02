@@ -156,7 +156,7 @@ module Pgbus
 
       def archive_from(queue_name, msg_id, source_queue: nil)
         if source_queue
-          client.archive_from_queue(source_queue, msg_id)
+          client.archive_message(source_queue, msg_id, prefixed: false)
         else
           client.archive_message(queue_name, msg_id)
         end

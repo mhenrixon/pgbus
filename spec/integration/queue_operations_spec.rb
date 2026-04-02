@@ -77,7 +77,7 @@ RSpec.describe "Queue operations (integration)", :integration do
       msg_id = client.send_message("vt_test", { "extend" => true })
       client.read_batch("vt_test", qty: 1, vt: 5)
 
-      client.extend_visibility("vt_test", msg_id, vt: 60)
+      client.set_visibility_timeout("vt_test", msg_id, vt: 60)
 
       messages = client.read_batch("vt_test", qty: 1, vt: 5)
       expect(messages || []).to be_empty

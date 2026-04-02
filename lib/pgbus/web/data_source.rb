@@ -105,11 +105,11 @@ module Pgbus
       end
 
       def retry_job(queue_name, msg_id)
-        @client.set_visibility_timeout(queue_name, msg_id.to_i, vt: 0)
+        @client.set_visibility_timeout(queue_name, msg_id.to_i, vt: 0, prefixed: false)
       end
 
       def discard_job(queue_name, msg_id)
-        @client.archive_message(queue_name, msg_id.to_i)
+        @client.archive_message(queue_name, msg_id.to_i, prefixed: false)
       end
 
       # Failed events
@@ -269,7 +269,7 @@ module Pgbus
 
       def discard_dlq_message(queue_name, msg_id)
         # queue_name here is the full DLQ name (already prefixed)
-        @client.delete_from_queue(queue_name, msg_id.to_i)
+        @client.delete_message(queue_name, msg_id.to_i, prefixed: false)
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error discarding DLQ message #{msg_id}: #{e.message}" }
@@ -295,7 +295,7 @@ module Pgbus
         # Group by queue for batch delete — one call per DLQ instead of N calls
         messages.group_by { |m| m[:queue_name] }.sum do |queue_name, msgs|
           ids = msgs.map { |m| m[:msg_id].to_i }
-          @client.delete_batch_from_queue(queue_name, ids).size
+          @client.delete_batch(queue_name, ids, prefixed: false).size
         rescue StandardError => e
           Pgbus.logger.debug { "[Pgbus::Web] Error batch-discarding DLQ messages from #{queue_name}: #{e.message}" }
           0
