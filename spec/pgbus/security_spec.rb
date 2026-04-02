@@ -45,6 +45,17 @@ RSpec.describe "Security" do
       end
     end
 
+    context "when allowed_global_id_models is an empty array" do
+      before { Pgbus.configuration.allowed_global_id_models = [] }
+      after { Pgbus.configuration.allowed_global_id_models = nil }
+
+      it "rejects all GlobalID models with a clear message" do
+        expect do
+          Pgbus::Serializer.locate_global_id(gid_uri)
+        end.to raise_error(ArgumentError, /deserialization is disabled/)
+      end
+    end
+
     it "raises on invalid GlobalID strings" do
       expect do
         Pgbus::Serializer.locate_global_id("not-a-gid")

@@ -9,6 +9,10 @@ module Pgbus
         before_action :authenticate_pgbus!
       end
 
+      class << self
+        attr_accessor :auth_warned
+      end
+
       private
 
       def authenticate_pgbus!
@@ -25,14 +29,14 @@ module Pgbus
       end
 
       def warn_unauthenticated_dashboard
-        return if @_pgbus_auth_warned
+        return if Pgbus::Web::Authentication.auth_warned
 
         Pgbus.logger.warn do
           "[Pgbus] Dashboard is accessible without authentication. " \
             "Configure Pgbus.configuration.web_auth to restrict access. " \
             "See: https://github.com/mhenrixon/pgbus#dashboard-authentication"
         end
-        @_pgbus_auth_warned = true
+        Pgbus::Web::Authentication.auth_warned = true
       end
     end
   end
