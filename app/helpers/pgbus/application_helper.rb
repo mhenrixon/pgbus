@@ -158,6 +158,43 @@ module Pgbus
       link_to label, path, class: css
     end
 
+    LOCALE_NAMES = {
+      de: "Deutsch",
+      dk: "Dansk",
+      en: "English",
+      es: "Espa\u00f1ol",
+      fi: "Suomi",
+      fr: "Fran\u00e7ais",
+      it: "Italiano",
+      jp: "\u65E5\u672C\u8A9E",
+      nl: "Nederlands",
+      no: "Norsk",
+      pt: "Portugu\u00eas",
+      sv: "Svenska"
+    }.freeze
+
+    def pgbus_locale_name(code)
+      LOCALE_NAMES[code.to_sym] || code.to_s.upcase
+    end
+
+    def pgbus_locale_flag(code)
+      case code.to_sym
+      when :en then "\u{1F1EC}\u{1F1E7}"
+      when :de then "\u{1F1E9}\u{1F1EA}"
+      when :dk then "\u{1F1E9}\u{1F1F0}"
+      when :es then "\u{1F1EA}\u{1F1F8}"
+      when :fi then "\u{1F1EB}\u{1F1EE}"
+      when :fr then "\u{1F1EB}\u{1F1F7}"
+      when :it then "\u{1F1EE}\u{1F1F9}"
+      when :jp then "\u{1F1EF}\u{1F1F5}"
+      when :nl then "\u{1F1F3}\u{1F1F1}"
+      when :no then "\u{1F1F3}\u{1F1F4}"
+      when :pt then "\u{1F1F5}\u{1F1F9}"
+      when :sv then "\u{1F1F8}\u{1F1EA}"
+      else "\u{1F310}"
+      end
+    end
+
     private
 
     def pgbus_pluralize_unit(count, unit)

@@ -1,0 +1,348 @@
+---
+pt:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Nenhum processo em execução
+        headers:
+          host: Host
+          kind: Tipo
+          pid: PID
+          status: Status
+        title: Processos Ativos
+      queues_table:
+        empty: Nenhuma fila encontrada
+        headers:
+          depth: Profundidade
+          oldest: Mais antigo (s)
+          queue: Fila
+          total: Total
+          visible: Visível
+        title: Filas
+        view_all: Ver tudo
+      recent_failures:
+        empty: Nenhuma falha
+        headers:
+          error: Erro
+          queue: Fila
+          when: Quando
+        title: Falhas Recentes
+        view_all: Ver tudo
+      show:
+        title: Painel
+      stats_cards:
+        enqueued: Enfileirado
+        failed_dlq: Falhou / DLQ
+        processes: Processos
+        queues: Filas
+        recurring: Recorrente
+        throughput: Taxa de transferência
+        throughput_unit: msgs/s
+        view_tasks: Ver tarefas
+        visible: visível
+    dead_letter:
+      index:
+        discard_all: Descartar Tudo
+        discard_all_confirm: Descartar permanentemente todas as mensagens DLQ?
+        retry_all: Tentar Novamente Tudo
+        retry_all_confirm: Tentar novamente todas as mensagens DLQ?
+        title: Fila de Mensagens Mortas
+      messages_table:
+        arguments: Argumentos
+        discard: Descartar
+        discard_confirm: Descartar permanentemente?
+        empty: A fila de mensagens mortas está vazia
+        full_json_payload: Carga JSON completa
+        headers:
+          enqueued: Enfileirado
+          id: ID
+          job_class: Classe do Trabalho
+          reads: Leituras
+          source_queue: Fila de Origem
+        headers_section: Cabeçalhos
+        job_id: 'ID do Trabalho:'
+        metadata: Metadados
+        metadata_labels:
+          executions: 'Execuções:'
+          last_read: 'Última leitura:'
+          priority: 'Prioridade:'
+          queue: 'Fila:'
+          visible_at: 'Visível em:'
+        retry: Tentar novamente
+      show:
+        back: Voltar para DLQ
+        discard: Descartar
+        discard_confirm: Descartar permanentemente?
+        headers: Cabeçalhos
+        labels:
+          enqueued_at: Enfileirado em
+          read_count: Contagem de leituras
+          source_queue: Fila de origem
+          visibility_timeout: Tempo limite de visibilidade
+        not_found: Mensagem não encontrada
+        payload: Carga útil
+        retry: Tentar novamente
+        title: 'Mensagem DLQ #%{id}'
+    events:
+      index:
+        processed_empty: Nenhum evento processado ainda
+        processed_headers:
+          event_id: ID do evento
+          handler: Manipulador
+          processed_at: Processado em
+        processed_title: Eventos processados
+        subscribers_empty: Nenhum assinante registrado
+        subscribers_headers:
+          handler: Manipulador
+          pattern: Padrão
+          queue: Fila
+        subscribers_title: Assinantes registrados
+        title: Eventos
+      show:
+        back: Voltar para eventos
+        labels:
+          event_id: ID do evento
+          handler: Manipulador
+          processed_at: Processado em
+        not_found: Evento não encontrado
+        title: Evento
+    helpers:
+      paused_badge: Pausado
+      queue_badge:
+        dlq: DLQ
+        queue: Fila
+      recurring_health:
+        active: Ativo
+        pending: Pendente
+      status_badge:
+        healthy: Saudável
+        stale: Obsoleto
+    insights:
+      show:
+        charts:
+          failed_to_load: Falha ao carregar dados do gráfico
+          no_data: Sem dados ainda
+          series_name: Tarefas/min
+          status_distribution: Distribuição de status
+          throughput: Taxa de transferência (tarefas/min)
+        description_html: Métricas de desempenho de trabalho para os últimos %{range}
+        slowest:
+          empty: Nenhuma estatística de tarefa ainda
+          headers:
+            avg: Média
+            count: Contagem
+            job_class: Classe da tarefa
+            max: Máximo
+          title: Classes de Trabalho Mais Lentas (duração média)
+        summary:
+          avg_duration: Duração Média
+          dead_lettered: Cartas Mortas
+          failed: Falhou
+          max_duration: Duração Máxima
+          succeeded: Bem-sucedido
+          total_jobs: Total de Trabalhos
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Insights
+    jobs:
+      enqueued_table:
+        arguments: Argumentos
+        empty: Nenhum trabalho enfileirado
+        full_json_payload: Carga JSON completa
+        headers:
+          enqueued: Enfileirado
+          id: ID
+          job_class: Classe do Trabalho
+          queue: Fila
+          reads: Leituras
+        headers_section: Cabeçalhos
+        job_id: 'ID do Trabalho:'
+        metadata: Metadados
+        metadata_labels:
+          last_read: 'Última leitura:'
+          locale: 'Localidade:'
+          priority: 'Prioridade:'
+          queue: 'Fila:'
+          scheduled: 'Agendado:'
+          timezone: 'Fuso horário:'
+          visible_at: 'Visível em:'
+        title: Trabalhos Enfileirados
+      failed_table:
+        discard: Descartar
+        discard_confirm: Descartar este trabalho?
+        empty: Nenhum trabalho falhou
+        headers:
+          actions: Ações
+          error: Erro
+          failed: Falhou
+          id: ID
+          queue: Fila
+          retries: Tentativas
+        retry: Tentar Novamente
+        title: Trabalhos Falhados
+      index:
+        discard_all: Descartar Todos
+        discard_all_confirm: Descartar todos os trabalhos falhados?
+        retry_all: Tentar Novamente Todos
+        retry_all_confirm: Tentar novamente todos os trabalhos falhados?
+        title: Trabalhos
+      show:
+        back: Voltar para Trabalhos
+        backtrace: Rastreamento de Pilha
+        discard: Descartar
+        discard_confirm: Descartar este trabalho permanentemente?
+        error_message: Mensagem de Erro
+        labels:
+          error_class: Classe de Erro
+          failed_at: Falhou em
+          queue: Fila
+          retry_count: Contagem de Tentativas
+        not_found: Trabalho não encontrado
+        payload: Carga útil
+        retry: Tentar novamente
+        title: 'Trabalho falhado #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Painel
+        dlq: DLQ
+        events: Eventos
+        insights: Insights
+        jobs: Trabalhos
+        locks: Bloqueios
+        outbox: Caixa de saída
+        processes: Processos
+        queues: Filas
+        recurring: Recorrente
+      title: Painel Pgbus
+      toggle_dark_mode: Alternar modo escuro
+    locks:
+      index:
+        description: Bloqueios de exclusividade ativos impedindo a execução duplicada do trabalho
+        empty: Nenhum bloqueio ativo
+        executing: Executando
+        headers:
+          age: Idade
+          expires: Expira
+          job_class: Classe do Trabalho
+          lock_key: Chave de Bloqueio
+          owner: Proprietário
+          state: Estado
+        queued: Na fila
+        title: Bloqueios de Trabalho
+    outbox:
+      index:
+        description: Entradas da caixa de saída transacional pendentes de publicação para PGMQ
+        empty: Nenhuma entrada na caixa de saída
+        headers:
+          created: Criado
+          id: ID
+          payload: Carga útil
+          priority: Prioridade
+          queue_topic: Fila / Tópico
+          status: Status
+        pending: Pendente
+        published: Publicado
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Mais antigo não publicado
+          total: Total
+          unpublished: Não publicado
+        title: Caixa de saída
+    processes:
+      index:
+        title: Processos
+      processes_table:
+        empty: Nenhum processo em execução
+        headers:
+          hostname: Nome do host
+          kind: Tipo
+          last_heartbeat: Último Batimento
+          metadata: Metadados
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Filas
+      queues_list:
+        empty: Nenhuma fila encontrada
+        headers:
+          actions: Ações
+          depth: Profundidade
+          newest: Mais novo (s)
+          oldest: Mais antigo (s)
+          queue: Fila
+          total_ever: Total de todos os tempos
+          visible: Visível
+        pause: Pausar
+        pause_confirm: Pausar processamento por %{name}?
+        paused: Pausado
+        purge: Limpar
+        purge_confirm: Limpar todas as mensagens de %{name}?
+        resume: Retomar
+      show:
+        depth: 'Profundidade:'
+        empty: Fila está vazia
+        headers:
+          enqueued: Enfileirado
+          id: ID
+          payload: Carga útil
+          reads: Leituras
+          vt: VT
+        purge_confirm: Limpar todas as mensagens?
+        purge_queue: Limpar fila
+        total: 'Total:'
+        visible: 'Visível:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} tarefa configurada"
+          other: "%{count} tarefas configuradas"
+        title: Tarefas Recorrentes
+      show:
+        back: Voltar
+        configuration: Configuração
+        default_queue: padrão
+        disable: Desativar
+        disabled: Desativado
+        enable: Ativar
+        execution_headers:
+          enqueued_at: Enfileirado em
+          scheduled_for: Agendado para
+        labels:
+          arguments: Argumentos
+          command: Comando
+          description: Descrição
+          job_class: Classe do trabalho
+          priority: Prioridade
+          queue: Fila
+          source: Fonte
+        next_run: Próxima Execução
+        no_executions: Nenhuma execução registrada ainda
+        recent_executions: Execuções Recentes
+        run_now: Executar Agora
+        schedule: Agendar
+        source_config: Arquivo de configuração
+        source_dynamic: Dinâmico
+        status: Status
+      tasks_table:
+        default_queue: padrão
+        disable: Desativar
+        disabled: Desativado
+        empty_hint: Adicionar tarefas em config/recurring.yml
+        empty_title: Nenhuma tarefa recorrente configurada
+        enable: Ativar
+        headers:
+          actions: Ações
+          last_run: Última Execução
+          next_run: Próxima Execução
+          queue: Fila
+          schedule: Agendar
+          status: Status
+          task: Tarefa
+        never: Nunca
+        run_now: Executar Agora

@@ -3,6 +3,7 @@
 # https://github.com/glebm/i18n-tasks
 
 base_locale: en
+locales: [en, de, dk, es, fi, fr, it, jp, nl, no, pt, sv]
 
 data:
   router: pattern_router

@@ -1,0 +1,348 @@
+---
+sv:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Inga processer körs
+        headers:
+          host: Värd
+          kind: Typ
+          pid: PID
+          status: Status
+        title: Aktiva processer
+      queues_table:
+        empty: Inga köer hittades
+        headers:
+          depth: Djup
+          oldest: Äldst (s)
+          queue: Kö
+          total: Totalt
+          visible: Synliga
+        title: Köer
+        view_all: Visa alla
+      recent_failures:
+        empty: Inga fel
+        headers:
+          error: Fel
+          queue: Kö
+          when: När
+        title: Senaste fel
+        view_all: Visa alla
+      show:
+        title: Instrumentpanel
+      stats_cards:
+        enqueued: Inlagda
+        failed_dlq: Misslyckade / DLQ
+        processes: Processer
+        queues: Köer
+        recurring: Återkommande
+        throughput: Genomströmning
+        throughput_unit: meddelanden/s
+        view_tasks: Visa uppgifter
+        visible: synliga
+    dead_letter:
+      index:
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera permanent alla DLQ-meddelanden?
+        retry_all: Försök igen alla
+        retry_all_confirm: Försök igen alla DLQ-meddelanden?
+        title: Dead Letter-kö
+      messages_table:
+        arguments: Argument
+        discard: Kassera
+        discard_confirm: Kassera permanent?
+        empty: Dead letter-kön är tom
+        full_json_payload: Fullständig JSON-payload
+        headers:
+          enqueued: Inlagda
+          id: ID
+          job_class: Jobbklass
+          reads: Läser
+          source_queue: Källkö
+        headers_section: Rubriker
+        job_id: 'Jobb-ID:'
+        metadata: Metadata
+        metadata_labels:
+          executions: 'Utföranden:'
+          last_read: 'Senast läst:'
+          priority: 'Prioritet:'
+          queue: 'Kö:'
+          visible_at: 'Synlig vid:'
+        retry: Försök igen
+      show:
+        back: Tillbaka till DLQ
+        discard: Kassera
+        discard_confirm: Kassera permanent?
+        headers: Rubriker
+        labels:
+          enqueued_at: Inlagd den
+          read_count: Antal läsningar
+          source_queue: Källkö
+          visibility_timeout: Synlighetstidsgräns
+        not_found: Meddelande hittades inte
+        payload: Innehåll
+        retry: Försök igen
+        title: 'DLQ-meddelande #%{id}'
+    events:
+      index:
+        processed_empty: Inga händelser behandlade än
+        processed_headers:
+          event_id: Händelse-ID
+          handler: Hanterare
+          processed_at: Behandlad den
+        processed_title: Behandlade händelser
+        subscribers_empty: Inga registrerade prenumeranter
+        subscribers_headers:
+          handler: Hanterare
+          pattern: Mönster
+          queue: Kö
+        subscribers_title: Registrerade prenumeranter
+        title: Händelser
+      show:
+        back: Tillbaka till händelser
+        labels:
+          event_id: Händelse-ID
+          handler: Hanterare
+          processed_at: Behandlad den
+        not_found: Händelse hittades inte
+        title: Händelse
+    helpers:
+      paused_badge: Pausad
+      queue_badge:
+        dlq: DLQ
+        queue: Kö
+      recurring_health:
+        active: Aktiv
+        pending: Väntande
+      status_badge:
+        healthy: Hälsosam
+        stale: Föråldrad
+    insights:
+      show:
+        charts:
+          failed_to_load: Misslyckades att ladda diagramdata
+          no_data: Inga data än
+          series_name: Jobb/min
+          status_distribution: Statusfördelning
+          throughput: Genomströmning (jobb/min)
+        description_html: Jobbprestandamått för de senaste %{range}
+        slowest:
+          empty: Inga jobbstatistik än
+          headers:
+            avg: Genomsnitt
+            count: Antal
+            job_class: Jobbklass
+            max: Max
+          title: Långsammaste jobbklasser (genomsnittlig varaktighet)
+        summary:
+          avg_duration: Genomsnittlig varaktighet
+          dead_lettered: Dead Lettered
+          failed: Misslyckades
+          max_duration: Maximal varaktighet
+          succeeded: Lyckades
+          total_jobs: Totalt antal jobb
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Insikter
+    jobs:
+      enqueued_table:
+        arguments: Argument
+        empty: Inga köade jobb
+        full_json_payload: Fullständig JSON-payload
+        headers:
+          enqueued: Köade
+          id: ID
+          job_class: Jobbklass
+          queue: Kö
+          reads: Läser
+        headers_section: Headers
+        job_id: 'Jobb-ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Senast läst:'
+          locale: 'Språk:'
+          priority: 'Prioritet:'
+          queue: 'Kö:'
+          scheduled: 'Schemalagt:'
+          timezone: 'Tidszon:'
+          visible_at: 'Synlig vid:'
+        title: Köade jobb
+      failed_table:
+        discard: Kassera
+        discard_confirm: Kassera detta jobb?
+        empty: Inga misslyckade jobb
+        headers:
+          actions: Åtgärder
+          error: Fel
+          failed: Misslyckades
+          id: ID
+          queue: Kö
+          retries: Försök igen
+        retry: Försök igen
+        title: Misslyckade jobb
+      index:
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera alla misslyckade jobb?
+        retry_all: Försök igen alla
+        retry_all_confirm: Försök igen alla misslyckade jobb?
+        title: Jobb
+      show:
+        back: Tillbaka till jobb
+        backtrace: Backtrace
+        discard: Kassera
+        discard_confirm: Kassera detta jobb permanent?
+        error_message: Felmeddelande
+        labels:
+          error_class: Felkategori
+          failed_at: Misslyckades vid
+          queue: Kö
+          retry_count: Antal försök
+        not_found: Jobb hittades inte
+        payload: Data
+        retry: Försök igen
+        title: 'Misslyckat jobb #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Instrumentpanel
+        dlq: DLQ
+        events: Händelser
+        insights: Insikter
+        jobs: Jobb
+        locks: Lås
+        outbox: Utbox
+        processes: Processer
+        queues: Köer
+        recurring: Återkommande
+      title: Pgbus-instrumentpanel
+      toggle_dark_mode: Växla mörkt läge
+    locks:
+      index:
+        description: Aktiva unika lås som förhindrar duplicerad jobbexekvering
+        empty: Inga aktiva lås
+        executing: Utför
+        headers:
+          age: Ålder
+          expires: Upphör
+          job_class: Jobbklass
+          lock_key: Låsningsnyckel
+          owner: Ägare
+          state: Status
+        queued: I kö
+        title: Jobblås
+    outbox:
+      index:
+        description: Transaktionella utboxposter som väntar på publicering till PGMQ
+        empty: Inga utboxposter
+        headers:
+          created: Skapad
+          id: ID
+          payload: Data
+          priority: Prioritet
+          queue_topic: Kö / Ämne
+          status: Status
+        pending: Väntande
+        published: Publicerad
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Äldsta opublicerade
+          total: Totalt
+          unpublished: Opublicerad
+        title: Utbox
+    processes:
+      index:
+        title: Processer
+      processes_table:
+        empty: Inga processer körs
+        headers:
+          hostname: Värdnamn
+          kind: Typ
+          last_heartbeat: Senaste hjärtslag
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Köer
+      queues_list:
+        empty: Inga köer hittades
+        headers:
+          actions: Åtgärder
+          depth: Djup
+          newest: Nyaste (s)
+          oldest: Äldsta (s)
+          queue: Kö
+          total_ever: Totalt någonsin
+          visible: Synliga
+        pause: Pausa
+        pause_confirm: Pausa bearbetning för %{name}?
+        paused: Pausad
+        purge: Rensa
+        purge_confirm: Rensa alla meddelanden från %{name}?
+        resume: Återuppta
+      show:
+        depth: 'Djup:'
+        empty: Kön är tom
+        headers:
+          enqueued: Inlagd
+          id: ID
+          payload: Innehåll
+          reads: Läsningar
+          vt: VT
+        purge_confirm: Rensa alla meddelanden?
+        purge_queue: Rensa kö
+        total: 'Totalt:'
+        visible: 'Synliga:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} uppgift konfigurerad"
+          other: "%{count} uppgifter konfigurerade"
+        title: Återkommande uppgifter
+      show:
+        back: Tillbaka
+        configuration: Konfiguration
+        default_queue: standard
+        disable: Inaktivera
+        disabled: Inaktiverad
+        enable: Aktivera
+        execution_headers:
+          enqueued_at: Inlagd vid
+          scheduled_for: Schemalagd för
+        labels:
+          arguments: Argument
+          command: Kommando
+          description: Beskrivning
+          job_class: Jobbklass
+          priority: Prioritet
+          queue: Kö
+          source: Källa
+        next_run: Nästa körning
+        no_executions: Inga körningar registrerade än
+        recent_executions: Senaste körningar
+        run_now: Kör nu
+        schedule: Schema
+        source_config: Konfigurationsfil
+        source_dynamic: Dynamisk
+        status: Status
+      tasks_table:
+        default_queue: standard
+        disable: Inaktivera
+        disabled: Inaktiverad
+        empty_hint: Lägg till uppgifter i config/recurring.yml
+        empty_title: Inga återkommande uppgifter konfigurerade
+        enable: Aktivera
+        headers:
+          actions: Åtgärder
+          last_run: Senaste körning
+          next_run: Nästa körning
+          queue: Kö
+          schedule: Schema
+          status: Status
+          task: Uppgift
+        never: Aldrig
+        run_now: Kör nu

@@ -1,0 +1,348 @@
+---
+fi:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Ei käynnissä olevia prosesseja
+        headers:
+          host: Isäntä
+          kind: Tyyppi
+          pid: PID
+          status: Tila
+        title: Aktiiviset prosessit
+      queues_table:
+        empty: Jonot eivät löytyneet
+        headers:
+          depth: Syvyys
+          oldest: Vanhin (s)
+          queue: Jono
+          total: Yhteensä
+          visible: Näkyvissä
+        title: Jonot
+        view_all: Näytä kaikki
+      recent_failures:
+        empty: Ei virheitä
+        headers:
+          error: Virhe
+          queue: Jono
+          when: Milloin
+        title: Viimeaikaiset virheet
+        view_all: Näytä kaikki
+      show:
+        title: Kojelauta
+      stats_cards:
+        enqueued: Lisätty jonoon
+        failed_dlq: Epäonnistuneet / DLQ
+        processes: Prosessit
+        queues: Jonot
+        recurring: Toistuva
+        throughput: Läpäisykyky
+        throughput_unit: viestit/s
+        view_tasks: Näytä tehtävät
+        visible: näkyvissä
+    dead_letter:
+      index:
+        discard_all: Hylkää kaikki
+        discard_all_confirm: Hylätäänkö kaikki DLQ-viestit pysyvästi?
+        retry_all: Yritä uudelleen kaikki
+        retry_all_confirm: Yritetäänkö uudelleen kaikkia DLQ-viestejä?
+        title: Dead Letter -jono
+      messages_table:
+        arguments: Argumentit
+        discard: Hylkää
+        discard_confirm: Hylätäänkö pysyvästi?
+        empty: Dead letter -jono on tyhjä
+        full_json_payload: Täysi JSON-payload
+        headers:
+          enqueued: Lisätty jonoon
+          id: ID
+          job_class: Työluokka
+          reads: Lukee
+          source_queue: Lähdejono
+        headers_section: Otsikot
+        job_id: 'Työ ID:'
+        metadata: Metatiedot
+        metadata_labels:
+          executions: 'Suoritukset:'
+          last_read: 'Viimeksi luettu:'
+          priority: 'Prioriteetti:'
+          queue: 'Jono:'
+          visible_at: 'Näkyvissä klo:'
+        retry: Yritä uudelleen
+      show:
+        back: Takaisin DLQ:hon
+        discard: Hylkää
+        discard_confirm: Hylätään pysyvästi?
+        headers: Otsikot
+        labels:
+          enqueued_at: Jonoon lisätty
+          read_count: Lukukerrat
+          source_queue: Lähdejono
+          visibility_timeout: Näkyvyysaikaraja
+        not_found: Viestia ei löytynyt
+        payload: Kuorma
+        retry: Yritä uudelleen
+        title: 'DLQ-viesti #%{id}'
+    events:
+      index:
+        processed_empty: Ei vielä käsiteltyjä tapahtumia
+        processed_headers:
+          event_id: Tapahtuman tunnus
+          handler: Käsittelijä
+          processed_at: Käsitelty klo
+        processed_title: Käsitellyt tapahtumat
+        subscribers_empty: Ei rekisteröityjä tilaajia
+        subscribers_headers:
+          handler: Käsittelijä
+          pattern: Malli
+          queue: Jono
+        subscribers_title: Rekisteröidyt tilaajat
+        title: Tapahtumat
+      show:
+        back: Takaisin tapahtumiin
+        labels:
+          event_id: Tapahtuman tunnus
+          handler: Käsittelijä
+          processed_at: Käsitelty klo
+        not_found: Tapahtumaa ei löytynyt
+        title: Tapahtuma
+    helpers:
+      paused_badge: Tauolla
+      queue_badge:
+        dlq: DLQ
+        queue: Jono
+      recurring_health:
+        active: Aktiivinen
+        pending: Odottaa
+      status_badge:
+        healthy: Toimiva
+        stale: Vanha
+    insights:
+      show:
+        charts:
+          failed_to_load: Latauksen kaavioaineisto epäonnistui
+          no_data: Ei vielä tietoja
+          series_name: Tehtäviä/min
+          status_distribution: Tilajakauma
+          throughput: Kapasiteetti (tehtäviä/min)
+        description_html: Työsuorituksen mittarit viimeiseltä %{range}
+        slowest:
+          empty: Ei vielä tehtävätilastoja
+          headers:
+            avg: Keskim.
+            count: Määrä
+            job_class: Tehtäväluokka
+            max: Maksimi
+          title: Hitaimmat työn luokat (keskimääräinen kesto)
+        summary:
+          avg_duration: Keskimääräinen kesto
+          dead_lettered: Kuolleet kirjeet
+          failed: Epäonnistuneet
+          max_duration: Maksimikesto
+          succeeded: Onnistuneet
+          total_jobs: Yhteensä töitä
+        time_ranges:
+          1h: 1h
+          24h: 24h
+          30d: 30d
+          7d: 7d
+        title: Näkemykset
+    jobs:
+      enqueued_table:
+        arguments: Argumentit
+        empty: Ei jonotettuja töitä
+        full_json_payload: Täysi JSON-payload
+        headers:
+          enqueued: Jonotettu
+          id: ID
+          job_class: Työn luokka
+          queue: Jono
+          reads: Lukemiset
+        headers_section: Otsikot
+        job_id: 'Työn ID:'
+        metadata: Metatiedot
+        metadata_labels:
+          last_read: 'Viimeksi luettu:'
+          locale: 'Alue:'
+          priority: 'Prioriteetti:'
+          queue: 'Jono:'
+          scheduled: 'Aikataulutettu:'
+          timezone: 'Aikavyöhyke:'
+          visible_at: 'Näkyvissä:'
+        title: Jonotetut työt
+      failed_table:
+        discard: Hylkää
+        discard_confirm: Hylätäänkö tämä työ?
+        empty: Ei epäonnistuneita töitä
+        headers:
+          actions: Toiminnot
+          error: Virhe
+          failed: Epäonnistunut
+          id: ID
+          queue: Jono
+          retries: Uudelleenyritykset
+        retry: Yritä uudelleen
+        title: Epäonnistuneet työt
+      index:
+        discard_all: Hylkää kaikki
+        discard_all_confirm: Hylätäänkö kaikki epäonnistuneet työt?
+        retry_all: Yritä uudelleen kaikki
+        retry_all_confirm: Yritetäänkö uudelleen kaikki epäonnistuneet työt?
+        title: Työt
+      show:
+        back: Takaisin töihin
+        backtrace: Takautumisketju
+        discard: Hylkää
+        discard_confirm: Hylkää tämä työ pysyvästi?
+        error_message: Virheilmoitus
+        labels:
+          error_class: Virheluokka
+          failed_at: Epäonnistui kohdassa
+          queue: Jono
+          retry_count: Uudelleenyrityskertojen määrä
+        not_found: Työtä ei löytynyt
+        payload: Tietokuorma
+        retry: Yritä uudelleen
+        title: 'Epäonnistunut työ #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Hallintapaneeli
+        dlq: DLQ
+        events: Tapahtumat
+        insights: Oivallukset
+        jobs: Työt
+        locks: Lukot
+        outbox: Lähetyslaatikko
+        processes: Prosessit
+        queues: Jonot
+        recurring: Toistuva
+      title: Pgbus-hallintapaneeli
+      toggle_dark_mode: Vaihda tumma tila
+    locks:
+      index:
+        description: Aktiiviset ainutlaatuisuuden lukot estävät päällekkäisen työn suorittamisen
+        empty: Ei aktiivisia lukkoja
+        executing: Suoritetaan
+        headers:
+          age: Ikä
+          expires: Vanhenee
+          job_class: Työluokka
+          lock_key: Lukon avain
+          owner: Omistaja
+          state: Tila
+        queued: Jonossa
+        title: Työn lukot
+    outbox:
+      index:
+        description: Transaktionaaliset lähetyslaatikon merkinnät odottavat julkaisua PGMQ:lle
+        empty: Ei lähetyslaatikon merkintöjä
+        headers:
+          created: Luotu
+          id: ID
+          payload: Tietokuorma
+          priority: Prioriteetti
+          queue_topic: Jono / Aihe
+          status: Tila
+        pending: Odottaa
+        published: Julkaistu
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Vanhin julkaisematon
+          total: Yhteensä
+          unpublished: Julkaisematon
+        title: Lähetyslaatikko
+    processes:
+      index:
+        title: Prosessit
+      processes_table:
+        empty: Ei käynnissä olevia prosesseja
+        headers:
+          hostname: Isäntänimi
+          kind: Tyyppi
+          last_heartbeat: Viimeisin sydämenlyönti
+          metadata: Metatiedot
+          pid: PID
+          status: Tila
+    queues:
+      index:
+        title: Jonot
+      queues_list:
+        empty: Jonot eivät löydy
+        headers:
+          actions: Toiminnot
+          depth: Syvyys
+          newest: Uusimmat (s)
+          oldest: Vanhimmat (s)
+          queue: Jono
+          total_ever: Yhteensä koskaan
+          visible: Näkyvissä
+        pause: Tauko
+        pause_confirm: Keskeytä käsittely %{name} ajan?
+        paused: Keskeytetty
+        purge: Tyhjennä
+        purge_confirm: Tyhjennä kaikki viestit %{name}:sta?
+        resume: Jatka
+      show:
+        depth: 'Syvyys:'
+        empty: Jono on tyhjä
+        headers:
+          enqueued: Jonoon lisätty
+          id: ID
+          payload: Kuorma
+          reads: Lukukerrat
+          vt: VT
+        purge_confirm: Tyhjennetäänkö kaikki viestit?
+        purge_queue: Tyhjennä jono
+        total: 'Yhteensä:'
+        visible: 'Näkyvissä:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} tehtävä määritetty"
+          other: "%{count} tehtävää määritetty"
+        title: Toistuvat tehtävät
+      show:
+        back: Takaisin
+        configuration: Asetukset
+        default_queue: oletus
+        disable: Poista käytöstä
+        disabled: Poistettu käytöstä
+        enable: Ota käyttöön
+        execution_headers:
+          enqueued_at: Lisätty jonoon
+          scheduled_for: Aikataulutettu
+        labels:
+          arguments: Argumentit
+          command: Komento
+          description: Kuvaus
+          job_class: Työluokka
+          priority: Prioriteetti
+          queue: Jono
+          source: Lähde
+        next_run: Seuraava ajoitus
+        no_executions: Suorituksia ei ole vielä kirjattu
+        recent_executions: Viimeaikaiset suoritukset
+        run_now: Suorita nyt
+        schedule: Aikataulu
+        source_config: Konfiguraatiotiedosto
+        source_dynamic: Dynaaminen
+        status: Tila
+      tasks_table:
+        default_queue: oletus
+        disable: Poista käytöstä
+        disabled: Poistettu käytöstä
+        empty_hint: Lisää tehtäviä tiedostoon config/recurring.yml
+        empty_title: Toistuvia tehtäviä ei ole määritetty
+        enable: Ota käyttöön
+        headers:
+          actions: Toiminnot
+          last_run: Viimeisin ajoitus
+          next_run: Seuraava ajoitus
+          queue: Jono
+          schedule: Aikataulu
+          status: Tila
+          task: Tehtävä
+        never: Ei koskaan
+        run_now: Suorita nyt

@@ -1,0 +1,348 @@
+---
+dk:
+  pgbus:
+    dashboard:
+      processes_table:
+        empty: Ingen processer kører
+        headers:
+          host: Vært
+          kind: Type
+          pid: PID
+          status: Status
+        title: Aktive processer
+      queues_table:
+        empty: Ingen køer fundet
+        headers:
+          depth: Dybde
+          oldest: Ældste (s)
+          queue: Kø
+          total: Total
+          visible: Synlig
+        title: Køer
+        view_all: Se alle
+      recent_failures:
+        empty: Ingen fejl
+        headers:
+          error: Fejl
+          queue: Kø
+          when: Hvornår
+        title: Seneste fejl
+        view_all: Se alle
+      show:
+        title: Dashboard
+      stats_cards:
+        enqueued: Sat i kø
+        failed_dlq: Mislykkedes / DLQ
+        processes: Processer
+        queues: Køer
+        recurring: Gentagende
+        throughput: Gennemløb
+        throughput_unit: besk/s
+        view_tasks: Se opgaver
+        visible: synlig
+    dead_letter:
+      index:
+        discard_all: Kassér alle
+        discard_all_confirm: Slet permanent alle DLQ-beskeder?
+        retry_all: Prøv igen alle
+        retry_all_confirm: Prøv igen alle DLQ-beskeder?
+        title: Dead Letter Queue
+      messages_table:
+        arguments: Argumenter
+        discard: Kassér
+        discard_confirm: Slet permanent?
+        empty: Dead letter queue er tom
+        full_json_payload: Fuld JSON-payload
+        headers:
+          enqueued: Sat i kø
+          id: ID
+          job_class: Jobklasse
+          reads: Læsninger
+          source_queue: Kildekø
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
+        metadata_labels:
+          executions: 'Udførelser:'
+          last_read: 'Sidst læst:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          visible_at: 'Synlig ved:'
+        retry: Forsøg igen
+      show:
+        back: Tilbage til DLQ
+        discard: Kassér
+        discard_confirm: Slet permanent?
+        headers: Overskrifter
+        labels:
+          enqueued_at: Indsat kl.
+          read_count: Antal læsninger
+          source_queue: Kildekø
+          visibility_timeout: Synlighedstimeout
+        not_found: Besked ikke fundet
+        payload: Indhold
+        retry: Forsøg igen
+        title: 'DLQ-besked #%{id}'
+    events:
+      index:
+        processed_empty: Ingen begivenheder behandlet endnu
+        processed_headers:
+          event_id: Begivenheds-ID
+          handler: Håndterer
+          processed_at: Behandlet kl.
+        processed_title: Behandlede begivenheder
+        subscribers_empty: Ingen abonnenter registreret
+        subscribers_headers:
+          handler: Håndterer
+          pattern: Mønster
+          queue: Kø
+        subscribers_title: Registrerede abonnenter
+        title: Begivenheder
+      show:
+        back: Tilbage til begivenheder
+        labels:
+          event_id: Begivenheds-ID
+          handler: Håndterer
+          processed_at: Behandlet kl.
+        not_found: Begivenhed ikke fundet
+        title: Begivenhed
+    helpers:
+      paused_badge: Pause
+      queue_badge:
+        dlq: DLQ
+        queue: Kø
+      recurring_health:
+        active: Aktiv
+        pending: Afventer
+      status_badge:
+        healthy: Sund
+        stale: Forældet
+    insights:
+      show:
+        charts:
+          failed_to_load: Kunne ikke indlæse diagramdata
+          no_data: Ingen data endnu
+          series_name: Job/min
+          status_distribution: Statusfordeling
+          throughput: Gennemstrømning (job/min)
+        description_html: Jobpræstationsmålinger for de sidste %{range}
+        slowest:
+          empty: Ingen jobstatistikker endnu
+          headers:
+            avg: Gns.
+            count: Antal
+            job_class: Jobklasse
+            max: Max
+          title: Langsommeste jobklasser (gennemsnitlig varighed)
+        summary:
+          avg_duration: Gennemsnitlig varighed
+          dead_lettered: Døde breve
+          failed: Mislykkedes
+          max_duration: Maksimal varighed
+          succeeded: Succesfuld
+          total_jobs: Totale job
+        time_ranges:
+          1h: 1t
+          24h: 24t
+          30d: 30d
+          7d: 7d
+        title: Indsigter
+    jobs:
+      enqueued_table:
+        arguments: Argumenter
+        empty: Ingen job i kø
+        full_json_payload: Fuld JSON-payload
+        headers:
+          enqueued: I kø
+          id: ID
+          job_class: Jobklasse
+          queue: Kø
+          reads: Læsninger
+        headers_section: Headers
+        job_id: 'Job ID:'
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Sidste læsning:'
+          locale: 'Locale:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          scheduled: 'Planlagt:'
+          timezone: 'Tidszone:'
+          visible_at: 'Synlig fra:'
+        title: Job i kø
+      failed_table:
+        discard: Kassér
+        discard_confirm: Kassér dette job?
+        empty: Ingen mislykkede job
+        headers:
+          actions: Handlinger
+          error: Fejl
+          failed: Mislykkedes
+          id: ID
+          queue: Kø
+          retries: Forsøg
+        retry: Forsøg igen
+        title: Mislykkede job
+      index:
+        discard_all: Kassér alle
+        discard_all_confirm: Kassér alle mislykkede job?
+        retry_all: Forsøg alle igen
+        retry_all_confirm: Forsøg alle mislykkede job igen?
+        title: Job
+      show:
+        back: Tilbage til job
+        backtrace: Stacktrace
+        discard: Kassér
+        discard_confirm: Slet dette job permanent?
+        error_message: Fejlmeddelelse
+        labels:
+          error_class: Fejlklasse
+          failed_at: Mislykkedes ved
+          queue: Kø
+          retry_count: Antal forsøg
+        not_found: Job ikke fundet
+        payload: Indhold
+        retry: Forsøg igen
+        title: 'Mislykket job #%{id}'
+    layout:
+      brand: Pgbus
+      nav:
+        dashboard: Dashboard
+        dlq: DLQ
+        events: Begivenheder
+        insights: Indsigter
+        jobs: Jobs
+        locks: Låse
+        outbox: Udbakke
+        processes: Processer
+        queues: Køer
+        recurring: Gentagende
+      title: Pgbus Dashboard
+      toggle_dark_mode: Skift til mørk tilstand
+    locks:
+      index:
+        description: Aktive unikke låse forhindrer duplikeret jobudførelse
+        empty: Ingen aktive låse
+        executing: Udfører
+        headers:
+          age: Alder
+          expires: Udløber
+          job_class: Jobklasse
+          lock_key: Låsenøgle
+          owner: Ejer
+          state: Status
+        queued: I kø
+        title: Joblåse
+    outbox:
+      index:
+        description: Transaktionelle udbakke-poster, der venter på publicering til PGMQ
+        empty: Ingen udbakkeposter
+        headers:
+          created: Oprettet
+          id: ID
+          payload: Indhold
+          priority: Prioritet
+          queue_topic: Kø / Emne
+          status: Status
+        pending: Afventer
+        published: Publiceret
+        stats:
+          no_age: "—"
+          oldest_age: "%{seconds}s"
+          oldest_unpublished: Ældste upublicerede
+          total: Total
+          unpublished: Upubliceret
+        title: Udbakke
+    processes:
+      index:
+        title: Processer
+      processes_table:
+        empty: Ingen processer kører
+        headers:
+          hostname: Værtsnavn
+          kind: Type
+          last_heartbeat: Sidste Heartbeat
+          metadata: Metadata
+          pid: PID
+          status: Status
+    queues:
+      index:
+        title: Køer
+      queues_list:
+        empty: Ingen køer fundet
+        headers:
+          actions: Handlinger
+          depth: Dybde
+          newest: Nyeste (s)
+          oldest: Ældste (s)
+          queue: Kø
+          total_ever: Total nogensinde
+          visible: Synlig
+        pause: Pause
+        pause_confirm: Pause behandling i %{name}?
+        paused: Pauset
+        purge: Rens
+        purge_confirm: Rens alle beskeder fra %{name}?
+        resume: Genoptag
+      show:
+        depth: 'Dybde:'
+        empty: Køen er tom
+        headers:
+          enqueued: Sat i kø
+          id: ID
+          payload: Indhold
+          reads: Læsninger
+          vt: VT
+        purge_confirm: Rens alle beskeder?
+        purge_queue: Rens kø
+        total: 'Total:'
+        visible: 'Synlig:'
+    recurring_tasks:
+      index:
+        task_count:
+          one: "%{count} opgave konfigureret"
+          other: "%{count} opgaver konfigureret"
+        title: Gentagne opgaver
+      show:
+        back: Tilbage
+        configuration: Konfiguration
+        default_queue: standard
+        disable: Deaktiver
+        disabled: Deaktiveret
+        enable: Aktiver
+        execution_headers:
+          enqueued_at: Sat i kø den
+          scheduled_for: Planlagt til
+        labels:
+          arguments: Argumenter
+          command: Kommando
+          description: Beskrivelse
+          job_class: Jobklasse
+          priority: Prioritet
+          queue: Kø
+          source: Kilde
+        next_run: Næste kørsel
+        no_executions: Ingen udførelser registreret endnu
+        recent_executions: Seneste udførelser
+        run_now: Kør nu
+        schedule: Planlæg
+        source_config: Konfigurationsfil
+        source_dynamic: Dynamisk
+        status: Status
+      tasks_table:
+        default_queue: standard
+        disable: Deaktiver
+        disabled: Deaktiveret
+        empty_hint: Tilføj opgaver til config/recurring.yml
+        empty_title: Ingen tilbagevendende opgaver konfigureret
+        enable: Aktiver
+        headers:
+          actions: Handlinger
+          last_run: Sidste kørsel
+          next_run: Næste kørsel
+          queue: Kø
+          schedule: Planlæg
+          status: Status
+          task: Opgave
+        never: Aldrig
+        run_now: Kør nu
