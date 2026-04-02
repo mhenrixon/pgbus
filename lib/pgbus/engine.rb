@@ -27,6 +27,11 @@ module Pgbus
 
     initializer "pgbus.db" do
       ActiveSupport.on_load(:active_record) do
+        # When the host app uses selective railtie requires (require "rails" +
+        # individual railties) instead of require "rails/all", Zeitwerk may not
+        # have registered the engine's app/models path yet when this hook fires.
+        # Explicit require ensures the model is available regardless of boot order.
+        require_relative "../../app/models/pgbus/application_record"
         Pgbus::ApplicationRecord.connects_to(**Pgbus.configuration.connects_to) if Pgbus.configuration.connects_to
       end
     end
