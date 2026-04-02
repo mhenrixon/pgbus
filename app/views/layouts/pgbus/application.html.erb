@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= t("pgbus.layout.title") %></title>
+  <style>
+    /* Prevent white flash during navigation in dark mode.
+       Applied before Tailwind CDN loads so the background is correct immediately. */
+    html.dark { background-color: #030712; } /* gray-950 */
+    html.dark body { background-color: #030712; }
+  </style>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { darkMode: 'class' };
@@ -17,24 +23,17 @@
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('pgbus-dark', isDark);
     }
-    // Locale dropdown toggle
+    // Close locale dropdown when clicking outside
     document.addEventListener('click', function(e) {
-      var btn = e.target.closest('[data-action="click->dropdown#toggle"]');
-      var menu = btn && btn.parentElement.querySelector('[data-dropdown-target="menu"]');
-      // Close all menus first
-      document.querySelectorAll('[data-dropdown-target="menu"]').forEach(function(m) {
-        if (m !== menu) m.classList.add('hidden');
-      });
-      if (menu) { menu.classList.toggle('hidden'); e.stopPropagation(); }
-    });
-    document.addEventListener('click', function() {
-      document.querySelectorAll('[data-dropdown-target="menu"]').forEach(function(m) {
-        m.classList.add('hidden');
-      });
+      var switcher = document.getElementById('pgbus-locale-switcher');
+      var menu = document.getElementById('pgbus-locale-menu');
+      if (menu && switcher && !switcher.contains(e.target)) {
+        menu.classList.add('hidden');
+      }
     });
   </script>
   <script type="module">
-    import * as Turbo from "https://cdn.jsdelivr.net/npm/@hotwired/turbo@8/dist/turbo.es2017.esm.js";
+    import * as Turbo from "https://esm.sh/@hotwired/turbo@8";
 
     <% if Pgbus.configuration.web_live_updates %>
     const interval = <%= Pgbus.configuration.web_refresh_interval %>;
@@ -43,7 +42,10 @@
       function refreshFrames() {
         if (document.hidden) return;
         document.querySelectorAll("turbo-frame[data-auto-refresh]")
-          .forEach(frame => frame.reload());
+          .forEach(frame => {
+            if (!frame.src && frame.dataset.src) frame.src = frame.dataset.src;
+            if (frame.src) frame.reload();
+          });
       }
       function start() { timer = setInterval(refreshFrames, interval); }
       function stop() { clearInterval(timer); }
@@ -81,19 +83,16 @@
 
           <div class="flex items-center space-x-2">
             <!-- Locale switcher -->
-            <div class="relative" data-controller="dropdown">
-              <button type="button" data-action="click->dropdown#toggle" class="rounded-md px-2 py-1.5 text-sm text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <div class="relative" id="pgbus-locale-switcher">
+              <button type="button" onclick="document.getElementById('pgbus-locale-menu').classList.toggle('hidden')" class="rounded-md px-2 py-1 text-sm text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <%= pgbus_locale_flag(I18n.locale) %> <%= I18n.locale.to_s.upcase %>
               </button>
-              <div data-dropdown-target="menu" class="hidden absolute right-0 z-50 mt-1 w-44 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+              <div id="pgbus-locale-menu" class="hidden absolute right-0 z-50 mt-1 w-44 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
                 <div class="py-1" role="menu">
                   <% controller.send(:available_locales).sort.each do |loc| %>
-                    <%= form_tag pgbus.set_locale_path, method: :post, class: "contents" do %>
-                      <%= hidden_field_tag :locale, loc %>
-                      <button type="submit" role="menuitem" class="w-full text-left px-3 py-1.5 text-sm <%= loc == I18n.locale ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700' %>">
-                        <%= pgbus_locale_flag(loc) %> <%= pgbus_locale_name(loc) %>
-                      </button>
-                    <% end %>
+                    <a href="<%= pgbus.set_locale_path(locale: loc) %>" role="menuitem" class="block px-3 py-1 text-sm no-underline <%= loc == I18n.locale ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-medium' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700' %>">
+                      <%= pgbus_locale_flag(loc) %> <%= pgbus_locale_name(loc) %>
+                    </a>
                   <% end %>
                 </div>
               </div>
