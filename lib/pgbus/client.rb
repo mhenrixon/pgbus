@@ -160,6 +160,19 @@ module Pgbus
       synchronized { @pgmq.archive(full_queue_name, msg_id) }
     end
 
+    # Batch archive — moves multiple messages to the archive table in one call.
+    # queue_name is a logical name (prefix is added).
+    def archive_batch(queue_name, msg_ids)
+      full_name = config.queue_name(queue_name)
+      synchronized { @pgmq.archive_batch(full_name, msg_ids) }
+    end
+
+    # Batch delete — permanently removes multiple messages in one call.
+    # queue_name is the full PGMQ queue name (no prefix added).
+    def delete_batch_from_queue(queue_name, msg_ids)
+      synchronized { @pgmq.delete_batch(queue_name, msg_ids) }
+    end
+
     def extend_visibility(queue_name, msg_id, vt:)
       full_name = config.queue_name(queue_name)
       synchronized { @pgmq.set_vt(full_name, msg_id, vt: vt) }
