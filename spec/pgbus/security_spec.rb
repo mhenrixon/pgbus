@@ -56,6 +56,17 @@ RSpec.describe "Security" do
       end
     end
 
+    context "when allowed_global_id_models contains non-Class values" do
+      before { Pgbus.configuration.allowed_global_id_models = ["Order"] }
+      after { Pgbus.configuration.allowed_global_id_models = nil }
+
+      it "raises with a clear type error" do
+        expect do
+          Pgbus::Serializer.locate_global_id(gid_uri)
+        end.to raise_error(ArgumentError, %r{must contain Class/Module objects})
+      end
+    end
+
     it "raises on invalid GlobalID strings" do
       expect do
         Pgbus::Serializer.locate_global_id("not-a-gid")

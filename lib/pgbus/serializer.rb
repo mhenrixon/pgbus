@@ -63,6 +63,11 @@ module Pgbus
               "GlobalID deserialization is disabled (allowed_global_id_models is empty). " \
               "Set to nil to allow all models, or add permitted classes."
       end
+      if allowed&.any? { |entry| !entry.is_a?(Class) && !entry.is_a?(Module) }
+        raise ArgumentError,
+              "allowed_global_id_models must contain Class/Module objects, " \
+              "got: #{allowed.map(&:class).uniq.join(", ")}"
+      end
       if allowed&.none? { |klass| gid.model_class <= klass }
         raise ArgumentError,
               "GlobalID model #{gid.model_class} is not in allowed_global_id_models. " \
