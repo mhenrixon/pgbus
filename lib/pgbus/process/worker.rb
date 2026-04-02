@@ -107,7 +107,7 @@ module Pgbus
       end
 
       # Returns an array of [queue_name, message] pairs so we always know
-      # which queue each message came from (PGMQ messages don't carry this).
+      # which queue each message came from.
       def fetch_messages(qty)
         active_queues = queues.reject { |q| @circuit_breaker.paused?(q) }
         active_queues = active_queues.select { |q| @queue_lock.try_lock(q) } if @single_active_consumer
@@ -120,10 +120,7 @@ module Pgbus
           messages = Pgbus.client.read_batch(queue, qty: qty) || []
           messages.map { |m| [queue, m] }
         else
-          per_queue = [(qty / active_queues.size.to_f).ceil, 1].max
-          active_queues.flat_map do |q|
-            (Pgbus.client.read_batch(q, qty: per_queue) || []).map { |m| [q, m] }
-          end.first(qty)
+          fetch_multi(active_queues, qty)
         end
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Error fetching messages: #{e.message}" }
@@ -145,6 +142,19 @@ module Pgbus
         end
 
         results
+      end
+
+      # Use pgmq-ruby's read_multi to read from all queues in a single
+      # SQL query (UNION ALL). Each returned message carries a queue_name
+      # field so we can map it back to the logical queue.
+      def fetch_multi(active_queues, qty)
+        messages = Pgbus.client.read_multi(active_queues, qty: qty) || []
+        prefix = "#{config.queue_prefix}_"
+
+        messages.map do |m|
+          logical = m.queue_name&.delete_prefix(prefix) || active_queues.first
+          [logical, m]
+        end
       end
 
       def priority_enabled?

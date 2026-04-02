@@ -136,6 +136,16 @@ module Pgbus
       end
     end
 
+    # Read from multiple queues in a single SQL query (UNION ALL).
+    # Each returned message includes a queue_name field identifying its source.
+    # queue_names should be logical names (prefix is added automatically).
+    def read_multi(queue_names, qty:, vt: nil)
+      full_names = queue_names.map { |q| config.queue_name(q) }
+      Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty) do
+        synchronized { @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty) }
+      end
+    end
+
     def delete_message(queue_name, msg_id)
       full_name = config.queue_name(queue_name)
       synchronized { @pgmq.delete(full_name, msg_id) }

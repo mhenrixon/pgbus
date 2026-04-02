@@ -92,11 +92,23 @@ RSpec.describe Pgbus::Process::Worker do
     context "with multiple queues" do
       let(:worker) { described_class.new(queues: %w[default priority], threads: 4) }
 
-      it "reads proportionally from each queue" do
-        allow(mock_client).to receive(:read_batch).and_return([])
+      it "uses read_multi to fetch from all queues in a single call" do
+        allow(mock_client).to receive(:read_multi).and_return([])
         worker.send(:fetch_messages, 4)
-        expect(mock_client).to have_received(:read_batch).with("default", qty: 2)
-        expect(mock_client).to have_received(:read_batch).with("priority", qty: 2)
+        expect(mock_client).to have_received(:read_multi).with(%w[default priority], qty: 4)
+      end
+
+      it "tags each message with its source queue from the queue_name field" do
+        prefix = worker.config.queue_prefix
+        msg1 = build_message_double(msg_id: 1, message: '{"a":1}')
+        msg2 = build_message_double(msg_id: 2, message: '{"b":2}')
+        allow(msg1).to receive(:queue_name).and_return("#{prefix}_default")
+        allow(msg2).to receive(:queue_name).and_return("#{prefix}_priority")
+
+        allow(mock_client).to receive(:read_multi).and_return([msg1, msg2])
+
+        results = worker.send(:fetch_messages, 4)
+        expect(results).to eq([["default", msg1], ["priority", msg2]])
       end
     end
 
@@ -235,8 +247,16 @@ RSpec.describe Pgbus::Process::Worker do
 
         worker.send(:claim_and_execute)
         expect(mock_client).not_to have_received(:read_batch).with("default", anything)
-        # With only one active queue, pool max_length (5) is the fetch qty
+        # With only one non-paused queue, falls back to single-queue read_batch
         expect(mock_client).to have_received(:read_batch).with("events", qty: 5)
+      end
+
+      it "uses read_multi when multiple queues are active" do
+        allow(circuit_breaker).to receive(:paused?).and_return(false)
+        allow(mock_client).to receive(:read_multi).and_return([])
+
+        worker.send(:claim_and_execute)
+        expect(mock_client).to have_received(:read_multi).with(%w[default events], qty: 5)
       end
     end
   end

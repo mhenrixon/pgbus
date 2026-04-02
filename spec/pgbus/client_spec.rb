@@ -247,6 +247,28 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#read_multi" do
+    it "reads from multiple prefixed queues in a single call" do
+      client.read_multi(%w[default urgent], qty: 10)
+
+      expect(mock_pgmq).to have_received(:read_multi).with(
+        %w[pgbus_test_default pgbus_test_urgent],
+        vt: config.visibility_timeout,
+        qty: 10
+      )
+    end
+
+    it "allows overriding the visibility timeout" do
+      client.read_multi(%w[default], qty: 5, vt: 60)
+
+      expect(mock_pgmq).to have_received(:read_multi).with(
+        %w[pgbus_test_default],
+        vt: 60,
+        qty: 5
+      )
+    end
+  end
+
   describe "#read_with_poll" do
     it "delegates to pgmq.read_with_poll with correct args" do
       client.read_with_poll("default", qty: 5, max_poll_seconds: 2, poll_interval_ms: 50)
