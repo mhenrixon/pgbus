@@ -23,10 +23,6 @@ RSpec.describe Pgbus::ApplicationController do
       it "only includes locales available in both pgbus and the host app" do
         expect(available_locales).to contain_exactly(:en, :de)
       end
-
-      it "excludes pgbus locales not available in the host app" do
-        expect(available_locales).not_to include(:pt, :fr, :ja)
-      end
     end
 
     context "when host app has all pgbus locales available" do
