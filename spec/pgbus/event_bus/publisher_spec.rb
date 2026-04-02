@@ -13,7 +13,7 @@ RSpec.describe Pgbus::EventBus::Publisher do
   end
 
   describe ".publish" do
-    it "publishes via publish_to_topic" do
+    it "publishes via publish_to_topic and never falls back to send_message" do
       described_class.publish("orders.created", { "order_id" => 1 })
 
       expect(mock_client).to have_received(:publish_to_topic).with(
@@ -22,6 +22,7 @@ RSpec.describe Pgbus::EventBus::Publisher do
         headers: nil,
         delay: 0
       )
+      expect(mock_client).not_to have_received(:send_message)
     end
 
     it "forwards headers" do

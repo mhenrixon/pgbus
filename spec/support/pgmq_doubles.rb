@@ -13,9 +13,7 @@ module PgmqDoubles
         read_with_poll: [],
         read_multi: [],
         delete: true,
-        delete_batch: [],
         archive: true,
-        archive_batch: [],
         set_vt: nil,
         metrics: nil,
         metrics_all: [],
@@ -25,6 +23,9 @@ module PgmqDoubles
         produce_topic: nil,
         close: nil
       )
+      # Batch operations echo back the ids to mirror pgmq-ruby behavior
+      allow(pgmq).to receive(:delete_batch) { |_queue, ids| ids.map(&:to_s) }
+      allow(pgmq).to receive(:archive_batch) { |_queue, ids| ids.map(&:to_s) }
       allow(pgmq).to receive(:transaction).and_yield(pgmq)
     end
   end
@@ -42,9 +43,7 @@ module PgmqDoubles
         read_batch: [],
         read_multi: [],
         delete_message: true,
-        delete_batch_from_queue: [],
         archive_message: true,
-        archive_batch: [],
         extend_visibility: nil,
         move_to_dead_letter: nil,
         metrics: nil,
@@ -55,6 +54,9 @@ module PgmqDoubles
         close: nil,
         transaction: nil
       )
+      # Batch operations echo back the ids to mirror pgmq-ruby behavior
+      allow(client).to receive(:delete_batch_from_queue) { |_queue, ids| ids.map(&:to_s) }
+      allow(client).to receive(:archive_batch) { |_queue, ids| ids.map(&:to_s) }
     end
   end
 
