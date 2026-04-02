@@ -3,7 +3,7 @@
 module Pgbus
   class InsightsController < ApplicationController
     def show
-      @minutes = (params[:minutes] || Pgbus.configuration.insights_default_minutes).to_i
+      @minutes = insights_minutes
       @summary = data_source.job_stats_summary(minutes: @minutes)
       @slowest = data_source.slowest_job_classes(minutes: @minutes)
     end

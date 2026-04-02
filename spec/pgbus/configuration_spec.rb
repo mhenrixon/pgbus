@@ -155,6 +155,16 @@ RSpec.describe Pgbus::Configuration do
       config.priority_levels = 3
       expect { config.validate! }.not_to raise_error
     end
+
+    it "rejects non-positive insights_default_minutes" do
+      config.insights_default_minutes = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
+
+    it "rejects negative insights_default_minutes" do
+      config.insights_default_minutes = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
   end
 
   describe "#connection_options" do

@@ -4,7 +4,7 @@ module Pgbus
   module Api
     class InsightsController < ApplicationController
       def show
-        minutes = (params[:minutes] || Pgbus.configuration.insights_default_minutes).to_i
+        minutes = insights_minutes
         render json: {
           summary: data_source.job_stats_summary(minutes: minutes),
           throughput: data_source.job_throughput(minutes: minutes),

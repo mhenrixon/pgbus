@@ -127,6 +127,18 @@ RSpec.describe Pgbus::ApplicationHelper do
     it "returns minutes for sub-hour ranges" do
       expect(helper.pgbus_time_range_label(15)).to eq("15 minutes")
     end
+
+    it "returns singular minute for 1" do
+      expect(helper.pgbus_time_range_label(1)).to eq("1 minute")
+    end
+
+    it "clamps zero to 1 minute" do
+      expect(helper.pgbus_time_range_label(0)).to eq("1 minute")
+    end
+
+    it "clamps negative to 1 minute" do
+      expect(helper.pgbus_time_range_label(-5)).to eq("1 minute")
+    end
   end
 
   describe "#pgbus_json_preview" do

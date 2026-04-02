@@ -3,13 +3,9 @@
     <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Insights</h1>
     <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Job performance metrics for the last <%= pgbus_time_range_label(@minutes) %></p>
   </div>
-  <nav class="inline-flex rounded-lg shadow-sm" role="group">
-    <% [
-      ["1h", 60],
-      ["24h", 1440],
-      ["7d", 10_080],
-      ["30d", 43_200],
-    ].each_with_index do |(label, mins), i| %>
+  <nav class="inline-flex rounded-lg shadow-sm" role="group" aria-label="Time range">
+    <% ranges = [["1h", 60], ["24h", 1440], ["7d", 10_080], ["30d", 43_200]] %>
+    <% ranges.each_with_index do |(label, mins), i| %>
       <%
         active = @minutes == mins
         base = "px-3 py-1.5 text-xs font-medium border border-gray-300 dark:border-gray-600 focus:z-10 focus:outline-none"
@@ -18,7 +14,7 @@
           "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
         rounded = case i
                   when 0 then "rounded-l-lg"
-                  when 3 then "rounded-r-lg"
+                  when ranges.length - 1 then "rounded-r-lg"
                   else "-ml-px"
                   end
       %>

@@ -132,9 +132,9 @@ module Pgbus
     end
 
     def pgbus_time_range_label(minutes)
-      minutes = minutes.to_i
+      minutes = [minutes.to_i, 1].max
       if minutes < 60
-        "#{minutes} minutes"
+        minutes == 1 ? "1 minute" : "#{minutes} minutes"
       elsif minutes <= 1440
         hours = minutes / 60
         hours == 1 ? "1 hour" : "#{hours} hours"
