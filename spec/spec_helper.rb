@@ -2,6 +2,10 @@
 
 require "active_record"
 require "pgbus"
+require "globalid"
+
+# GlobalID requires an app name to parse/create GIDs
+GlobalID.app = "pgbus-test"
 
 Dir[File.join(__dir__, "support/**/*.rb")].each { |f| require f }
 

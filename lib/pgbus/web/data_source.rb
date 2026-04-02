@@ -662,10 +662,7 @@ module Pgbus
       end
 
       def sanitize_name(name)
-        sanitized = name.gsub(/[^a-zA-Z0-9_]/, "")
-        raise ArgumentError, "Invalid queue name: #{name.inspect}" if sanitized.empty?
-
-        sanitized
+        QueueNameValidator.sanitize!(name)
       end
 
       def compute_throughput(queues)

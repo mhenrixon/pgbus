@@ -58,7 +58,8 @@ RSpec.describe Pgbus::EventBus::Handler do
 
     describe "GlobalID payload resolution" do
       let(:resolved_object) { double("User", id: 42) }
-      let(:global_id_payload) { { "_global_id" => "gid://app/User/42" } }
+      let(:gid_uri) { "gid://pgbus-test/User/42" }
+      let(:global_id_payload) { { "_global_id" => gid_uri } }
       let(:raw_message) do
         {
           "event_id" => event_id,
@@ -68,15 +69,14 @@ RSpec.describe Pgbus::EventBus::Handler do
       end
 
       before do
-        stub_const("GlobalID::Locator", double("GlobalID::Locator"))
-        allow(GlobalID::Locator).to receive(:locate).with("gid://app/User/42").and_return(resolved_object)
+        allow(GlobalID::Locator).to receive(:locate).and_return(resolved_object)
       end
 
       it "resolves GlobalID payloads via GlobalID::Locator" do
         handler.process(message)
 
         expect(handler.received_event.payload).to eq(resolved_object)
-        expect(GlobalID::Locator).to have_received(:locate).with("gid://app/User/42")
+        expect(GlobalID::Locator).to have_received(:locate)
       end
     end
 

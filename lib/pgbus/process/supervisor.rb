@@ -143,7 +143,7 @@ module Pgbus
         return true if config.recurring_tasks_file && File.exist?(config.recurring_tasks_file.to_s)
 
         # Check default location
-        if defined?(Rails)
+        if defined?(Rails) && Rails.respond_to?(:root) && Rails.root
           default_path = Rails.root.join("config", "recurring.yml")
           return File.exist?(default_path.to_s)
         end
@@ -155,7 +155,7 @@ module Pgbus
         return if config.recurring_tasks&.any?
 
         path = config.recurring_tasks_file
-        path ||= defined?(Rails) ? Rails.root.join("config", "recurring.yml") : nil
+        path ||= defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.join("config", "recurring.yml") : nil
         return unless path && File.exist?(path.to_s)
 
         config.recurring_tasks = Recurring::ConfigLoader.load(path)
@@ -289,7 +289,7 @@ module Pgbus
       end
 
       def load_rails_app
-        return unless defined?(Rails)
+        return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
         Rails.application.eager_load! if Rails.application.respond_to?(:eager_load!)
       end

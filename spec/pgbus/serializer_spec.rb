@@ -116,14 +116,15 @@ RSpec.describe Pgbus::Serializer do
 
     context "when payload contains _global_id" do
       it "resolves the object via GlobalID::Locator" do
+        gid_uri = "gid://pgbus-test/Order/42"
         resolved_object = double("Order", id: 42)
-        locator = double("GlobalID::Locator")
-        allow(locator).to receive(:locate).with("gid://app/Order/42").and_return(resolved_object)
-        stub_const("GlobalID::Locator", locator)
+
+        # Stub at the locator level — GlobalID.parse works with the real gem
+        allow(GlobalID::Locator).to receive(:locate).and_return(resolved_object)
 
         data = {
           "event_id" => "evt-gid",
-          "payload" => { "_global_id" => "gid://app/Order/42" },
+          "payload" => { "_global_id" => gid_uri },
           "published_at" => "2026-03-30T12:00:00.000000Z"
         }
 

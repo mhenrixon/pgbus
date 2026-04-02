@@ -8,7 +8,7 @@ module Pgbus
     module_function
 
     def load(path, env: nil)
-      env ||= defined?(Rails) ? Rails.env : ENV.fetch("PGBUS_ENV", "development")
+      env ||= (defined?(Rails) && Rails.respond_to?(:env) && Rails.env) || ENV.fetch("PGBUS_ENV", "development")
       raw = File.read(path)
       parsed = YAML.safe_load(ERB.new(raw).result, permitted_classes: [Symbol], aliases: true)
       config_hash = parsed.fetch(env, parsed)

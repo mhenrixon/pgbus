@@ -6,6 +6,7 @@ module Pgbus
 
     protect_from_forgery with: :exception
     before_action :set_locale
+    after_action :set_security_headers
 
     layout "pgbus/application"
 
@@ -20,6 +21,14 @@ module Pgbus
     helper_method :pgbus
 
     private
+
+    def set_security_headers
+      response.headers["X-Frame-Options"] = "SAMEORIGIN"
+      response.headers["X-Content-Type-Options"] = "nosniff"
+      response.headers["X-XSS-Protection"] = "0"
+      response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+      response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    end
 
     def set_locale
       I18n.locale = extract_locale || I18n.default_locale

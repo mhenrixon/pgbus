@@ -8,6 +8,7 @@ gem "irb"
 gem "rake", "~> 13.0"
 
 group :development do
+  gem "bundler-audit", "~> 0.9", require: false
   gem "i18n-tasks", "~> 1.0"
   gem "rubocop", "~> 1.21"
   gem "rubocop-rspec", "~> 3.0"
@@ -33,5 +34,6 @@ group :development, :test do
   gem "actioncable", ">= 7.1", "< 9.0"
   gem "activejob", ">= 7.1", "< 9.0"
   gem "activerecord", ">= 7.1", "< 9.0"
+  gem "globalid", ">= 1.0"
   gem "pg", "~> 1.5"
 end
