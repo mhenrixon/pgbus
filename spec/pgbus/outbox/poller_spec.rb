@@ -102,8 +102,9 @@ RSpec.describe Pgbus::Outbox::Poller do
 
       result = poller.poll_and_publish
 
+      # Fallback intentionally omits priority to match send_batch routing
       expect(mock_client).to have_received(:send_message).with(
-        "default", { "data" => "test" }, headers: nil, delay: 0, priority: 1
+        "default", { "data" => "test" }, headers: nil, delay: 0
       )
       expect(result).to eq(1)
     end

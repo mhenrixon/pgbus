@@ -119,13 +119,16 @@ module Pgbus
         succeeded
       end
 
+      # Fallback for individual publishing when a batch fails.
+      # Intentionally omits priority to match send_batch routing behavior
+      # (base queue only), ensuring consistent queue placement regardless
+      # of whether the batch or fallback path is used.
       def publish_single_queue(entry)
         Pgbus.client.send_message(
           entry.queue_name,
           entry.payload,
           headers: entry.headers,
-          delay: entry.delay || 0,
-          priority: entry.priority
+          delay: entry.delay || 0
         )
         entry.update!(published_at: Time.current)
         true
