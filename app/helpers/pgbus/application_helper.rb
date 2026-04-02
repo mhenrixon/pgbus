@@ -133,25 +133,13 @@ module Pgbus
 
     def pgbus_time_range_label(minutes)
       minutes = [minutes.to_i, 1].max
-      if minutes < 60
-        minutes == 1 ? "1 minute" : "#{minutes} minutes"
-      elsif minutes < 1440 || (minutes <= 1440 && (minutes % 60).zero?)
-        hours = minutes / 60
-        remainder = minutes % 60
-        if remainder.zero?
-          hours == 1 ? "1 hour" : "#{hours} hours"
-        else
-          "#{minutes} minutes"
-        end
+
+      if minutes > 1440 && (minutes % 1440).zero?
+        pgbus_pluralize_unit(minutes / 1440, "day")
+      elsif minutes >= 60 && (minutes % 60).zero?
+        pgbus_pluralize_unit(minutes / 60, "hour")
       else
-        days = minutes / 1440
-        remainder = minutes % 1440
-        if remainder.zero?
-          days == 1 ? "1 day" : "#{days} days"
-        else
-          hours = minutes / 60
-          hours == 1 ? "1 hour" : "#{hours} hours"
-        end
+        pgbus_pluralize_unit(minutes, "minute")
       end
     end
 
@@ -163,6 +151,12 @@ module Pgbus
               "rounded-md px-3 py-2 text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700"
             end
       link_to label, path, class: css
+    end
+
+    private
+
+    def pgbus_pluralize_unit(count, unit)
+      count == 1 ? "1 #{unit}" : "#{count} #{unit}s"
     end
   end
 end
