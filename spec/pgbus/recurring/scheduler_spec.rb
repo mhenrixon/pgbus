@@ -80,6 +80,44 @@ RSpec.describe Pgbus::Recurring::Scheduler do
     end
   end
 
+  describe "sync_recurring_tasks (private)" do
+    it "syncs recurring tasks from config on startup" do
+      scheduler = described_class.new(config: config)
+      allow(Pgbus::RecurringTask).to receive(:sync_from_config!)
+
+      scheduler.send(:sync_recurring_tasks)
+
+      expect(Pgbus::RecurringTask).to have_received(:sync_from_config!).with(config.recurring_tasks)
+    end
+
+    it "skips sync when no recurring tasks configured" do
+      config.recurring_tasks = nil
+      scheduler = described_class.new(config: config)
+      allow(Pgbus::RecurringTask).to receive(:sync_from_config!)
+
+      scheduler.send(:sync_recurring_tasks)
+
+      expect(Pgbus::RecurringTask).not_to have_received(:sync_from_config!)
+    end
+
+    it "syncs empty hash to remove stale tasks" do
+      config.recurring_tasks = {}
+      scheduler = described_class.new(config: config)
+      allow(Pgbus::RecurringTask).to receive(:sync_from_config!)
+
+      scheduler.send(:sync_recurring_tasks)
+
+      expect(Pgbus::RecurringTask).to have_received(:sync_from_config!).with({})
+    end
+
+    it "handles errors gracefully" do
+      scheduler = described_class.new(config: config)
+      allow(Pgbus::RecurringTask).to receive(:sync_from_config!).and_raise(StandardError, "DB error")
+
+      expect { scheduler.send(:sync_recurring_tasks) }.not_to raise_error
+    end
+  end
+
   describe "#task_statuses" do
     it "returns status information for all tasks" do
       scheduler = described_class.new(config: config)

@@ -17,6 +17,7 @@ module Pgbus
       def run
         setup_signals
         start_heartbeat
+        sync_recurring_tasks
 
         Pgbus.logger.info do
           "[Pgbus] Scheduler started: #{schedule.tasks.size} recurring tasks, " \
@@ -83,6 +84,16 @@ module Pgbus
       end
 
       private
+
+      def sync_recurring_tasks
+        tasks = config.recurring_tasks
+        return if tasks.nil?
+
+        RecurringTask.sync_from_config!(tasks)
+        Pgbus.logger.info { "[Pgbus] Synced #{tasks.size} recurring task(s) from configuration" }
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Failed to sync recurring tasks: #{e.class}: #{e.message}" }
+      end
 
       def start_heartbeat
         @heartbeat = Process::Heartbeat.new(
