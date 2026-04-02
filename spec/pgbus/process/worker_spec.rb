@@ -36,19 +36,31 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "#graceful_shutdown" do
+    before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
+    after { Pgbus.stopping = false }
+
     it "transitions to draining state" do
-      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
       worker.graceful_shutdown
       expect(worker.instance_variable_get(:@lifecycle).state).to eq(:draining)
+    end
+
+    it "sets Pgbus.stopping for ActiveJob::Continuation support" do
+      expect { worker.graceful_shutdown }.to change(Pgbus, :stopping).from(false).to(true)
     end
   end
 
   describe "#immediate_shutdown" do
+    before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
+    after { Pgbus.stopping = false }
+
     it "transitions to stopped state and kills the pool" do
-      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
       worker.immediate_shutdown
       expect(worker.instance_variable_get(:@lifecycle).state).to eq(:stopped)
       expect(pool).to have_received(:kill)
+    end
+
+    it "sets Pgbus.stopping for ActiveJob::Continuation support" do
+      expect { worker.immediate_shutdown }.to change(Pgbus, :stopping).from(false).to(true)
     end
   end
 

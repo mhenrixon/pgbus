@@ -12,6 +12,10 @@ module Pgbus
   class JobNotUnique < Error; end
   class SchemaNotReady < Error; end
 
+  # Process-global flag set by Worker#graceful_shutdown so the adapter
+  # can report stopping? to ActiveJob::Continuation (Rails 8.1+).
+  mattr_accessor :stopping, default: false
+
   class << self
     def loader
       @loader ||= begin
