@@ -36,7 +36,7 @@ module Pgbus
     attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size, :outbox_retention
 
     # Event bus
-    attr_accessor :idempotency_ttl
+    attr_accessor :idempotency_ttl, :allowed_global_id_models
 
     # Logging
     attr_accessor :logger
@@ -108,8 +108,9 @@ module Pgbus
       @outbox_retention = 24 * 3600 # 1 day
 
       @idempotency_ttl = 7 * 24 * 3600 # 7 days
+      @allowed_global_id_models = nil # nil = allow all (for backwards compat)
 
-      @logger = defined?(Rails) ? Rails.logger : Logger.new($stdout)
+      @logger = (defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger) || Logger.new($stdout)
 
       @listen_notify = true
       @notify_throttle_ms = 250
@@ -138,7 +139,9 @@ module Pgbus
     end
 
     def queue_name(name)
-      "#{queue_prefix}_#{name}"
+      full = "#{queue_prefix}_#{name}"
+      QueueNameValidator.validate!(full)
+      full
     end
 
     def dead_letter_queue_name(name)

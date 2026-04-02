@@ -35,11 +35,21 @@ RSpec.describe Pgbus::Web::Authentication do
 
   describe "#authenticate_pgbus!" do
     context "when web_auth is nil" do
-      before { Pgbus.configuration.web_auth = nil }
+      before do
+        Pgbus.configuration.web_auth = nil
+        described_class.auth_warned = false
+      end
 
       it "allows access" do
         controller.send(:authenticate_pgbus!)
         expect(controller.head_status).to be_nil
+      end
+
+      it "logs a warning once" do
+        allow(Pgbus.logger).to receive(:warn).and_yield
+        controller.send(:authenticate_pgbus!)
+        controller.send(:authenticate_pgbus!)
+        expect(Pgbus.logger).to have_received(:warn).once
       end
     end
 

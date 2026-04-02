@@ -216,7 +216,7 @@ module Pgbus
 
     def purge_archive(queue_name, older_than:, batch_size: 1000)
       full_name = config.queue_name(queue_name)
-      sanitized = full_name.gsub(/[^a-zA-Z0-9_]/, "")
+      sanitized = QueueNameValidator.sanitize!(full_name)
       total = 0
 
       sql = "DELETE FROM pgmq.a_#{sanitized} " \

@@ -80,7 +80,7 @@ module Pgbus
       private
 
       def execute_job(job)
-        if defined?(Rails) && Rails.application
+        if defined?(Rails) && Rails.respond_to?(:application) && Rails.application
           Rails.application.executor.wrap { job.perform_now }
         else
           job.perform_now

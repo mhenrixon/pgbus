@@ -24,7 +24,7 @@ module Pgbus
       end
 
       def detect_env
-        if defined?(Rails)
+        if defined?(Rails) && Rails.respond_to?(:env) && Rails.env
           Rails.env.to_s
         else
           ENV.fetch("PGBUS_ENV", "development")

@@ -41,13 +41,40 @@ module Pgbus
       data = JSON.parse(json_string)
       payload = data["payload"]
 
-      data["payload"] = GlobalID::Locator.locate(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
+      data["payload"] = locate_global_id(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
 
       Event.new(
         event_id: data["event_id"],
         payload: data["payload"],
         published_at: Time.parse(data["published_at"])
       )
+    end
+
+    # Locate a GlobalID with optional type restriction.
+    # When allowed_global_id_models is configured, only those model classes
+    # can be resolved — prevents loading arbitrary objects from crafted payloads.
+    def locate_global_id(gid_string)
+      gid = GlobalID.parse(gid_string)
+      raise ArgumentError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
+
+      allowed = Pgbus.configuration.allowed_global_id_models
+      if allowed&.empty?
+        raise ArgumentError,
+              "GlobalID deserialization is disabled (allowed_global_id_models is empty). " \
+              "Set to nil to allow all models, or add permitted classes."
+      end
+      if allowed&.any? { |entry| !entry.is_a?(Class) && !entry.is_a?(Module) }
+        raise ArgumentError,
+              "allowed_global_id_models must contain Class/Module objects, " \
+              "got: #{allowed.map(&:class).uniq.join(", ")}"
+      end
+      if allowed&.none? { |klass| gid.model_class <= klass }
+        raise ArgumentError,
+              "GlobalID model #{gid.model_class} is not in allowed_global_id_models. " \
+              "Add it to Pgbus.configuration.allowed_global_id_models to permit deserialization."
+      end
+
+      GlobalID::Locator.locate(gid)
     end
   end
 end
