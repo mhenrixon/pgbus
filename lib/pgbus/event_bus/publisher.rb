@@ -7,13 +7,7 @@ module Pgbus
 
       def publish(routing_key, payload, headers: nil, delay: 0)
         event_data = build_event_data(payload)
-
-        if Pgbus.client.pgmq.respond_to?(:produce_topic)
-          Pgbus.client.publish_to_topic(routing_key, event_data, headers: headers, delay: delay)
-        else
-          # Fallback: send directly to queues matching the routing key
-          Pgbus.client.send_message(routing_key, event_data, headers: headers, delay: delay)
-        end
+        Pgbus.client.publish_to_topic(routing_key, event_data, headers: headers, delay: delay)
       end
 
       def publish_later(routing_key, payload, delay:, headers: nil)
