@@ -57,8 +57,11 @@ module Pgbus
     end
 
     def available_locales
-      @available_locales ||= Dir[Pgbus::Engine.root.join("config", "locales", "*.yml")]
-                             .map { |f| File.basename(f, ".yml").to_sym }
+      @available_locales ||= begin
+        pgbus_locales = Dir[Pgbus::Engine.root.join("config", "locales", "*.yml")]
+                        .map { |f| File.basename(f, ".yml").to_sym }
+        pgbus_locales & I18n.available_locales
+      end
     end
     helper_method :available_locales
 
