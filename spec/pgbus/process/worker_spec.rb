@@ -131,6 +131,28 @@ RSpec.describe Pgbus::Process::Worker do
         expect(worker.send(:fetch_messages, 5)).to eq([])
       end
     end
+
+    context "when a queue table is missing (deleted queue)" do
+      let(:prefix) { worker.config.queue_prefix }
+      let(:error_message) do
+        "Database connection error: ERROR:  relation \"pgmq.q_#{prefix}_stale_queue\" does not exist"
+      end
+
+      before do
+        worker.instance_variable_set(:@queues, %w[default stale_queue])
+        allow(mock_client).to receive(:read_multi)
+          .and_raise(StandardError, error_message)
+      end
+
+      it "evicts the deleted queue from the worker queue list" do
+        worker.send(:fetch_messages, 5)
+        expect(worker.queues).to eq(%w[default])
+      end
+
+      it "returns an empty array" do
+        expect(worker.send(:fetch_messages, 5)).to eq([])
+      end
+    end
   end
 
   describe "prefetch flow control" do
@@ -302,6 +324,44 @@ RSpec.describe Pgbus::Process::Worker do
 
     it "exposes single_active_consumer in stats" do
       expect(worker.stats[:single_active_consumer]).to be true
+    end
+  end
+
+  describe "#refresh_wildcard_queues (private)" do
+    let(:worker) { described_class.new(queues: %w[*], threads: 5) }
+    let(:prefix) { worker.config.queue_prefix }
+    let(:conn) { double("connection") }
+
+    before do
+      allow(ActiveRecord::Base).to receive(:connection).and_return(conn)
+    end
+
+    it "is a no-op for non-wildcard workers" do
+      static_worker = described_class.new(queues: %w[default], threads: 5)
+      static_worker.send(:refresh_wildcard_queues)
+      expect(static_worker.queues).to eq(%w[default])
+    end
+
+    it "re-resolves when enough time has passed" do
+      allow(conn).to receive(:select_values).and_return(["#{prefix}_default", "#{prefix}_events"])
+      worker.send(:resolve_wildcard_queues)
+      expect(worker.queues).to eq(%w[default events])
+
+      # Simulate time passing and queues changing
+      worker.instance_variable_set(:@last_wildcard_resolve, Time.now - 60)
+      allow(conn).to receive(:select_values).and_return(["#{prefix}_default"])
+      worker.send(:refresh_wildcard_queues)
+      expect(worker.queues).to eq(%w[default])
+    end
+
+    it "skips re-resolve when interval has not elapsed" do
+      allow(conn).to receive(:select_values).and_return(["#{prefix}_default"])
+      worker.send(:resolve_wildcard_queues)
+
+      # Try to refresh immediately — should be a no-op
+      worker.send(:refresh_wildcard_queues)
+      # Only called once (the initial resolve)
+      expect(conn).to have_received(:select_values).once
     end
   end
 
