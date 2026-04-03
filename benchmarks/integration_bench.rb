@@ -34,13 +34,49 @@ end
 Pgbus.client.ensure_queue("default")
 Pgbus.client.ensure_dead_letter_queue("default")
 
-# Ensure pgbus tables exist
+# Self-bootstrap: create required tables if they don't exist.
+# This avoids requiring users to run full migrations just to benchmark.
 conn = ActiveRecord::Base.connection
-%w[pgbus_job_locks pgbus_semaphores pgbus_failed_events].each do |table|
-  next if conn.table_exists?(table)
 
-  abort "Table #{table} does not exist. Run the pgbus migrations first."
-end
+conn.execute(<<~SQL) unless conn.table_exists?("pgbus_job_locks")
+  CREATE TABLE pgbus_job_locks (
+    id BIGSERIAL PRIMARY KEY,
+    lock_key VARCHAR NOT NULL,
+    job_class VARCHAR NOT NULL,
+    job_id VARCHAR,
+    state VARCHAR NOT NULL DEFAULT 'queued',
+    owner_pid INTEGER,
+    owner_hostname VARCHAR,
+    locked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL
+  );
+  CREATE UNIQUE INDEX idx_pgbus_job_locks_key ON pgbus_job_locks (lock_key);
+SQL
+
+conn.execute(<<~SQL) unless conn.table_exists?("pgbus_semaphores")
+  CREATE TABLE pgbus_semaphores (
+    id BIGSERIAL PRIMARY KEY,
+    key VARCHAR NOT NULL,
+    value INTEGER NOT NULL DEFAULT 0,
+    max_value INTEGER NOT NULL DEFAULT 1,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_pgbus_semaphores_key ON pgbus_semaphores (key);
+SQL
+
+conn.execute(<<~SQL) unless conn.table_exists?("pgbus_processes")
+  CREATE TABLE pgbus_processes (
+    id BIGSERIAL PRIMARY KEY,
+    kind VARCHAR NOT NULL,
+    hostname VARCHAR,
+    pid INTEGER,
+    metadata JSONB DEFAULT '{}',
+    last_heartbeat_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+SQL
 
 # ─── Job classes ───
 # rubocop:disable Style/OneClassPerFile
