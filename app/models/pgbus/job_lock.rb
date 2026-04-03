@@ -16,42 +16,50 @@ module Pgbus
     # Atomically try to acquire a lock.
     # Cleans up expired locks for this key first (crash recovery at acquire time).
     # Returns true if acquired, false if already locked.
-    def self.acquire!(lock_key, job_class:, ttl:, job_id: nil, state: "queued", owner_pid: nil, owner_hostname: nil)
-      # Remove any expired lock for this key inline (last-resort TTL recovery)
-      where(lock_key: lock_key).where("expires_at < ?", Time.current).delete_all
+    #
+    # Uses raw SQL on the hot path to minimize ActiveRecord allocations
+    # (~29 objects vs ~304 per acquire+release cycle with AR query builder).
+    def self.acquire!(lock_key, job_class:, ttl:, job_id: nil, state: "queued", owner_pid: nil, owner_hostname: nil) # rubocop:disable Naming/PredicateMethod
+      expires_at = Time.current + ttl
 
-      result = insert(
-        {
-          lock_key: lock_key, job_class: job_class, job_id: job_id,
-          state: state, owner_pid: owner_pid, owner_hostname: owner_hostname,
-          expires_at: Time.current + ttl
-        },
-        unique_by: :lock_key
+      # Remove any expired lock for this key inline (last-resort TTL recovery)
+      connection.exec_delete(
+        "DELETE FROM #{table_name} WHERE lock_key = $1 AND expires_at < $2",
+        "JobLock Expire", [lock_key, Time.current]
+      )
+
+      result = connection.exec_query(
+        "INSERT INTO #{table_name} (lock_key, job_class, job_id, state, owner_pid, owner_hostname, expires_at) " \
+        "VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (lock_key) DO NOTHING RETURNING id",
+        "JobLock Acquire", [lock_key, job_class, job_id, state, owner_pid, owner_hostname, expires_at]
       )
       result.rows.any?
-    rescue ActiveRecord::RecordNotUnique
-      false
     end
 
     # Transition a queued lock to executing state and claim ownership.
     # Called when a worker starts executing a job that was locked at enqueue time.
     def self.claim_for_execution!(lock_key, owner_pid:, owner_hostname:, ttl:)
-      where(lock_key: lock_key).update_all(
-        state: "executing",
-        owner_pid: owner_pid,
-        owner_hostname: owner_hostname,
-        expires_at: Time.current + ttl
+      connection.exec_update(
+        "UPDATE #{table_name} SET state = $1, owner_pid = $2, owner_hostname = $3, expires_at = $4 " \
+        "WHERE lock_key = $5",
+        "JobLock Claim", ["executing", owner_pid, owner_hostname, Time.current + ttl, lock_key]
       )
     end
 
     # Release a lock by key.
     def self.release!(lock_key)
-      where(lock_key: lock_key).delete_all
+      connection.exec_delete(
+        "DELETE FROM #{table_name} WHERE lock_key = $1",
+        "JobLock Release", [lock_key]
+      )
     end
 
     # Check if a lock is currently held (regardless of expiry — reaper handles orphans).
     def self.locked?(lock_key)
-      where(lock_key: lock_key).exists?
+      result = connection.select_value(
+        "SELECT 1 FROM #{table_name} WHERE lock_key = $1 LIMIT 1", "JobLock Check", [lock_key]
+      )
+      !result.nil?
     end
 
     # Reap orphaned locks: locks in 'executing' state whose owner_pid
