@@ -60,4 +60,9 @@ Pgbus::Engine.routes.draw do
     get :stats, to: "stats#show"
     get :insights, to: "insights#show"
   end
+
+  scope :frontend, controller: :frontends, defaults: { version: Pgbus::VERSION.tr(".", "-") } do
+    get "modules/:version/:id", action: :module, as: :frontend_module, constraints: { format: "js" }
+    get "static/:version/:id", action: :static, as: :frontend_static
+  end
 end

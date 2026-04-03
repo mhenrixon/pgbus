@@ -4,63 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><%= t("pgbus.layout.title") %></title>
-  <style>
-    /* Prevent white flash during navigation in dark mode.
-       Applied before Tailwind CDN loads so the background is correct immediately. */
-    html.dark { background-color: #030712; } /* gray-950 */
-    html.dark body { background-color: #030712; }
+  <%= csrf_meta_tags %>
+  <%= csp_meta_tag %>
 
-    /* Responsive tables: stack rows as cards on small screens */
-    @media (max-width: 1023px) {
-      .pgbus-table thead { display: none; }
-      .pgbus-table tbody tr {
-        display: block;
-        margin-bottom: 0.75rem;
-        border-radius: 0.5rem;
-        padding: 0.75rem;
-        border: 1px solid #e5e7eb;
-      }
-      html.dark .pgbus-table tbody tr { border-color: #374151; }
-      .pgbus-table tbody td {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        padding: 0.25rem 0;
-        border: none;
-        text-align: right;
-      }
-      .pgbus-table tbody td::before {
-        content: attr(data-label);
-        font-weight: 600;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        color: #6b7280;
-        text-align: left;
-        margin-right: 1rem;
-        flex-shrink: 0;
-      }
-      html.dark .pgbus-table tbody td::before { color: #9ca3af; }
-      .pgbus-table tbody td[colspan] {
-        display: block;
-        text-align: center;
-      }
-      .pgbus-table tbody td[colspan]::before { display: none; }
-    }
-  </style>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = { darkMode: 'class' };
-    // Restore dark mode preference
+  <%# Prevent white flash in dark mode — must run before stylesheet loads %>
+  <script nonce="<%= content_security_policy_nonce %>">
     if (localStorage.getItem('pgbus-dark') === 'true' ||
         (!localStorage.getItem('pgbus-dark') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       document.documentElement.classList.add('dark');
     }
-    // Dark mode toggle — must be in non-module script for onclick access
     function toggleDarkMode() {
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('pgbus-dark', isDark);
     }
-    // Mobile menu toggle
     function toggleMobileMenu() {
       var menu = document.getElementById('pgbus-mobile-menu');
       var openIcon = document.getElementById('pgbus-menu-open');
@@ -69,7 +25,6 @@
       openIcon.classList.toggle('hidden');
       closeIcon.classList.toggle('hidden');
     }
-    // Close locale dropdown when clicking outside
     document.addEventListener('click', function(e) {
       var switcher = document.getElementById('pgbus-locale-switcher');
       var menu = document.getElementById('pgbus-locale-menu');
@@ -78,103 +33,27 @@
       }
     });
   </script>
-  <script type="module">
-    import * as Turbo from "https://esm.sh/@hotwired/turbo@8";
 
-    // -- Custom confirm dialog (replaces browser confirm) --
-    Turbo.config.forms.confirm = (message, element) => {
-      const dialog = document.getElementById("pgbus-confirm-dialog");
-      const messageEl = document.getElementById("pgbus-confirm-message");
-      const titleEl = document.getElementById("pgbus-confirm-title");
-      const confirmBtn = document.getElementById("pgbus-confirm-btn");
-      const iconEl = document.getElementById("pgbus-confirm-icon");
+  <%# Self-hosted assets — no external CDN dependencies %>
+  <%= tag.link rel: "stylesheet", href: frontend_static_path(:style, format: :css, locale: nil), nonce: content_security_policy_nonce %>
 
-      // Detect action type from the element
-      const turboMethod = element.getAttribute("data-turbo-method");
-      const isDelete = turboMethod === "delete";
+  <%# Importmap for ES modules %>
+  <% importmaps = Pgbus::FrontendsController.js_modules.keys.index_with { |mod| frontend_module_path(mod, format: :js, locale: nil) } %>
+  <%= tag.script({ imports: importmaps }.to_json.html_safe, type: "importmap", nonce: content_security_policy_nonce) %>
+  <%= tag.script("", src: frontend_static_path(:apexcharts, format: :js, locale: nil), nonce: content_security_policy_nonce) %>
 
-      // Set title based on action
-      titleEl.textContent = isDelete ? "<%= t("pgbus.dialogs.delete_title", default: "Delete") %>" : "<%= t("pgbus.dialogs.confirm_title", default: "Are you sure?") %>";
-      messageEl.textContent = message;
-
-      // Style confirm button based on action severity
-      confirmBtn.className = "rounded-md px-4 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2";
-      if (isDelete) {
-        confirmBtn.classList.add("bg-red-600", "hover:bg-red-500", "focus:ring-red-500");
-        confirmBtn.textContent = "<%= t("pgbus.dialogs.delete", default: "Delete") %>";
-        iconEl.className = "flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30";
-      } else {
-        confirmBtn.classList.add("bg-yellow-500", "hover:bg-yellow-400", "focus:ring-yellow-500");
-        confirmBtn.textContent = "<%= t("pgbus.dialogs.confirm", default: "Confirm") %>";
-        iconEl.className = "flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-yellow-100 dark:bg-yellow-900/30";
-      }
-
-      dialog.showModal();
-
-      return new Promise((resolve) => {
-        dialog.addEventListener("close", () => {
-          resolve(dialog.returnValue === "confirm");
-        }, { once: true });
-      });
-    };
-
-    // -- Toast notifications --
-    function showToast(message, type = "success") {
-      const container = document.getElementById("pgbus-toast-container");
-      const toast = document.createElement("div");
-
-      const colors = {
-        success: "bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-300 border-green-200 dark:border-green-800",
-        error: "bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-300 border-red-200 dark:border-red-800",
-        info: "bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800",
-      };
-
-      toast.className = `rounded-md border p-3 text-sm shadow-lg transition-all duration-300 ${colors[type] || colors.info}`;
-      toast.textContent = message;
-      container.appendChild(toast);
-
-      setTimeout(() => {
-        toast.style.opacity = "0";
-        toast.style.transform = "translateX(100%)";
-        setTimeout(() => toast.remove(), 300);
-      }, 5000);
-    }
-
-    // Render flash toasts from <template> tags.
-    // Must run on turbo:load as well — module scripts only execute once,
-    // but Turbo Drive replaces the body on navigation.
-    function renderFlashToasts() {
-      document.querySelectorAll("template[data-pgbus-toast]").forEach(tpl => {
-        showToast(tpl.content.textContent.trim(), tpl.dataset.pgbusToast);
-        tpl.remove();
-      });
-    }
-    renderFlashToasts();
-    document.addEventListener("turbo:load", renderFlashToasts);
-
-    <% if Pgbus.configuration.web_live_updates %>
-    const interval = <%= Pgbus.configuration.web_refresh_interval %>;
-    if (interval > 0) {
-      let timer;
-      function refreshFrames() {
-        if (document.hidden) return;
-        document.querySelectorAll("turbo-frame[data-auto-refresh]")
-          .forEach(frame => {
-            try {
-              if (!frame.src && frame.dataset.src) frame.src = frame.dataset.src;
-              if (frame.src) frame.reload();
-            } catch (_) { /* Turbo may abort in-flight fetches during navigation */ }
-          });
-      }
-      function start() { timer = setInterval(refreshFrames, interval); }
-      function stop() { clearInterval(timer); }
-      document.addEventListener("visibilitychange", () => document.hidden ? stop() : start());
-      start();
-    }
-    <% end %>
+  <script type="module" nonce="<%= content_security_policy_nonce %>">
+    import "application";
   </script>
 </head>
-<body class="h-full bg-gray-50 dark:bg-gray-950 transition-colors">
+<body class="h-full bg-gray-50 dark:bg-gray-950 transition-colors"
+      <% if Pgbus.configuration.web_live_updates %>data-pgbus-refresh-interval="<%= Pgbus.configuration.web_refresh_interval %>"<% end %>>
+  <%# i18n data for JS modules %>
+  <div id="pgbus-i18n" class="hidden"
+       data-delete-title="<%= t("pgbus.dialogs.delete_title", default: "Delete") %>"
+       data-confirm-title="<%= t("pgbus.dialogs.confirm_title", default: "Are you sure?") %>"
+       data-delete-label="<%= t("pgbus.dialogs.delete", default: "Delete") %>"
+       data-confirm-label="<%= t("pgbus.dialogs.confirm", default: "Confirm") %>"></div>
   <div class="min-h-full">
     <!-- Top nav -->
     <nav class="bg-gray-900 dark:bg-gray-950 border-b border-gray-800">
