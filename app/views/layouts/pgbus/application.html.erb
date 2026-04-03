@@ -9,6 +9,43 @@
        Applied before Tailwind CDN loads so the background is correct immediately. */
     html.dark { background-color: #030712; } /* gray-950 */
     html.dark body { background-color: #030712; }
+
+    /* Responsive tables: stack rows as cards on small screens */
+    @media (max-width: 1023px) {
+      .pgbus-table thead { display: none; }
+      .pgbus-table tbody tr {
+        display: block;
+        margin-bottom: 0.75rem;
+        border-radius: 0.5rem;
+        padding: 0.75rem;
+        border: 1px solid #e5e7eb;
+      }
+      html.dark .pgbus-table tbody tr { border-color: #374151; }
+      .pgbus-table tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 0.25rem 0;
+        border: none;
+        text-align: right;
+      }
+      .pgbus-table tbody td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: #6b7280;
+        text-align: left;
+        margin-right: 1rem;
+        flex-shrink: 0;
+      }
+      html.dark .pgbus-table tbody td::before { color: #9ca3af; }
+      .pgbus-table tbody td[colspan] {
+        display: block;
+        text-align: center;
+      }
+      .pgbus-table tbody td[colspan]::before { display: none; }
+    }
   </style>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -52,8 +89,10 @@
         if (document.hidden) return;
         document.querySelectorAll("turbo-frame[data-auto-refresh]")
           .forEach(frame => {
-            if (!frame.src && frame.dataset.src) frame.src = frame.dataset.src;
-            if (frame.src) frame.reload();
+            try {
+              if (!frame.src && frame.dataset.src) frame.src = frame.dataset.src;
+              if (frame.src) frame.reload();
+            } catch (_) { /* Turbo may abort in-flight fetches during navigation */ }
           });
       }
       function start() { timer = setInterval(refreshFrames, interval); }
