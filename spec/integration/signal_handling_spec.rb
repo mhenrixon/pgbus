@@ -114,17 +114,25 @@ RSpec.describe "Signal handling (integration)", :integration do
           config: Pgbus.configuration
         )
 
-        # Signal readiness before entering run loop
-        write_pipe.write("R")
-        write_pipe.flush
-        write_pipe.close
+        # Notify parent AFTER claim_and_execute is first called (signals are set up)
+        worker_started = false
+        original_run = worker.method(:claim_and_execute)
+        worker.define_singleton_method(:claim_and_execute) do
+          unless worker_started
+            worker_started = true
+            write_pipe.write("R")
+            write_pipe.flush
+            write_pipe.close
+          end
+          original_run.call
+        end
 
         worker.run
       end
 
       write_pipe.close
 
-      # Wait for worker to be ready
+      # Wait for worker to be ready (signals are set up, run loop entered)
       ready = read_pipe.wait_readable(10)
       expect(ready).to be_truthy, "Worker did not start within 10s"
       read_pipe.read(1)
