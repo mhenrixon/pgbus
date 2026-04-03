@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Responsive tables: stack rows as cards on small screens */
+@utility pgbus-table {
+  & thead {
+    @media (max-width: 1023px) {
+      display: none;
+    }
+  }
+  & tbody tr {
+    @media (max-width: 1023px) {
+      display: block;
+      margin-bottom: 0.75rem;
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      border: 1px solid #e5e7eb;
+    }
+  }
+  &:where(.dark, .dark *) tbody tr {
+    @media (max-width: 1023px) {
+      border-color: #374151;
+    }
+  }
+  & tbody td {
+    @media (max-width: 1023px) {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 0.25rem 0;
+      border: none;
+      text-align: right;
+    }
+  }
+  & tbody td::before {
+    @media (max-width: 1023px) {
+      content: attr(data-label);
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: #6b7280;
+      text-align: left;
+      margin-right: 1rem;
+      flex-shrink: 0;
+    }
+  }
+  &:where(.dark, .dark *) tbody td::before {
+    @media (max-width: 1023px) {
+      color: #9ca3af;
+    }
+  }
+  & tbody td[colspan] {
+    @media (max-width: 1023px) {
+      display: block;
+      text-align: center;
+    }
+  }
+  & tbody td[colspan]::before {
+    @media (max-width: 1023px) {
+      display: none;
+    }
+  }
+}

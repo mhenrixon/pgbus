@@ -93,91 +93,30 @@
   </table>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/apexcharts@4"></script>
-<script>
-(function() {
-  // IIFE prevents "redeclaration of let" when Turbo re-executes on navigation
-  var throughputChart, statusChart;
+<script type="module" nonce="<%= content_security_policy_nonce %>">
+  import { renderCharts, observeThemeChanges } from "charts";
 
-  function getThemeColors() {
-    var isDark = document.documentElement.classList.contains('dark');
-    return {
-      isDark: isDark,
-      text: isDark ? '#9ca3af' : '#6b7280',
-      grid: isDark ? '#374151' : '#e5e7eb',
-      tooltip: isDark ? 'dark' : 'light',
-      dataLabel: isDark ? '#fff' : '#000'
-    };
-  }
+  const i18n = {
+    seriesName: "<%= j(t("pgbus.insights.show.charts.series_name")) %>",
+    noData: "<%= j(t("pgbus.insights.show.charts.no_data")) %>",
+    failedToLoad: "<%= j(t("pgbus.insights.show.charts.failed_to_load")) %>",
+  };
 
-  function renderCharts(data) {
-    var t = getThemeColors();
-
-    if (throughputChart) throughputChart.destroy();
-    if (statusChart) statusChart.destroy();
-
-    var throughputData = data.throughput.map(function(p) {
-      return { x: new Date(p.time).getTime(), y: p.count };
-    });
-
-    throughputChart = new ApexCharts(document.querySelector('#throughput-chart'), {
-      series: [{ name: '<%= j(t("pgbus.insights.show.charts.series_name")) %>', data: throughputData }],
-      chart: { type: 'area', height: 280, toolbar: { show: false }, background: 'transparent', foreColor: t.text },
-      stroke: { curve: 'smooth', width: 2 },
-      fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 100] } },
-      colors: ['#6366f1'],
-      xaxis: { type: 'datetime', labels: { style: { colors: t.text } } },
-      yaxis: { labels: { style: { colors: t.text } } },
-      grid: { borderColor: t.grid },
-      tooltip: { theme: t.tooltip },
-      dataLabels: { enabled: false }
-    });
-    throughputChart.render();
-
-    var statusLabels = Object.keys(data.status_counts);
-    var statusValues = Object.values(data.status_counts);
-    var statusColors = statusLabels.map(function(s) {
-      if (s === 'success') return '#10b981';
-      if (s === 'failed') return '#ef4444';
-      if (s === 'dead_lettered') return '#f97316';
-      return '#6b7280';
-    });
-
-    if (statusLabels.length > 0) {
-      statusChart = new ApexCharts(document.querySelector('#status-chart'), {
-        series: statusValues, labels: statusLabels,
-        chart: { type: 'donut', height: 280, background: 'transparent', foreColor: t.text },
-        colors: statusColors,
-        legend: { position: 'bottom', labels: { colors: t.text } },
-        plotOptions: { pie: { donut: { size: '60%' } } },
-        dataLabels: { style: { colors: [t.dataLabel] } },
-        tooltip: { theme: t.tooltip }
-      });
-      statusChart.render();
-    } else {
-      document.querySelector('#status-chart').innerHTML =
-        '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.no_data")) %></p>';
-    }
-  }
-
-  var chartData = null;
-  fetch('<%= pgbus.api_insights_path(minutes: @minutes) %>')
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+  let chartData = null;
+  fetch("<%= pgbus.api_insights_path(minutes: @minutes) %>")
+    .then(r => {
+      if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     })
-    .then(function(data) { chartData = data; renderCharts(data); })
-    .catch(function(err) {
-      if (err.name === 'AbortError') return;
-      var msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.failed_to_load")) %></p>';
-      var el1 = document.querySelector('#throughput-chart');
-      var el2 = document.querySelector('#status-chart');
+    .then(data => { chartData = data; renderCharts(data, i18n); })
+    .catch(err => {
+      if (err.name === "AbortError") return;
+      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">' + i18n.failedToLoad + "</p>";
+      const el1 = document.querySelector("#throughput-chart");
+      const el2 = document.querySelector("#status-chart");
       if (el1) el1.innerHTML = msg;
       if (el2) el2.innerHTML = msg;
     });
 
-  new MutationObserver(function() {
-    if (chartData) renderCharts(chartData);
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-})();
+  observeThemeChanges(chartData, i18n);
 </script>
