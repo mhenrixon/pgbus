@@ -3,7 +3,7 @@
 Pgbus::Engine.routes.draw do
   root to: "dashboard#show"
 
-  resources :queues, only: %i[index show], param: :name do
+  resources :queues, only: %i[index show destroy], param: :name do
     member do
       post :purge
       post :pause

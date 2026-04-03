@@ -280,13 +280,19 @@ pt:
           queue: Fila
           total_ever: Total de todos os tempos
           visible: Visível
+        delete: Excluir
+        delete_confirm: Excluir permanentemente a fila %{name}? Esta ação não pode ser desfeita.
         pause: Pausar
         pause_confirm: Pausar processamento por %{name}?
         paused: Pausado
         purge: Limpar
         purge_confirm: Limpar todas as mensagens de %{name}?
         resume: Retomar
+      destroy:
+        success: Fila %{name} excluída.
       show:
+        delete_confirm: Excluir permanentemente esta fila? Esta ação não pode ser desfeita.
+        delete_queue: Excluir fila
         depth: 'Profundidade:'
         empty: Fila está vazia
         headers:
@@ -295,8 +301,11 @@ pt:
           payload: Carga útil
           reads: Leituras
           vt: VT
+        pause: Pausar
+        pause_confirm: Pausar processamento?
         purge_confirm: Limpar todas as mensagens?
         purge_queue: Limpar fila
+        resume: Retomar
         total: 'Total:'
         visible: 'Visível:'
     recurring_tasks:

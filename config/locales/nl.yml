@@ -280,13 +280,19 @@ nl:
           queue: Wachtrij
           total_ever: Totaal ooit
           visible: Zichtbaar
+        delete: Verwijderen
+        delete_confirm: Wachtrij %{name} permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren voor %{name}?
         paused: Gepauzeerd
         purge: Opschonen
         purge_confirm: Alle berichten verwijderen uit %{name}?
         resume: Hervatten
+      destroy:
+        success: Wachtrij %{name} verwijderd.
       show:
+        delete_confirm: Deze wachtrij permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
+        delete_queue: Wachtrij verwijderen
         depth: 'Diepte:'
         empty: Wachtrij is leeg
         headers:
@@ -295,8 +301,11 @@ nl:
           payload: Inhoud
           reads: Lezingen
           vt: VT
+        pause: Pauzeren
+        pause_confirm: Verwerking pauzeren?
         purge_confirm: Alle berichten verwijderen?
         purge_queue: Wachtrij opschonen
+        resume: Hervatten
         total: 'Totaal:'
         visible: 'Zichtbaar:'
     recurring_tasks:

@@ -280,13 +280,19 @@ da:
           queue: Kø
           total_ever: Total nogensinde
           visible: Synlig
+        delete: Slet
+        delete_confirm: Slet køen %{name} permanent? Dette kan ikke fortrydes.
         pause: Pause
         pause_confirm: Pause behandling i %{name}?
         paused: Pauset
         purge: Rens
         purge_confirm: Rens alle beskeder fra %{name}?
         resume: Genoptag
+      destroy:
+        success: Køen %{name} slettet.
       show:
+        delete_confirm: Slet denne kø permanent? Dette kan ikke fortrydes.
+        delete_queue: Slet kø
         depth: 'Dybde:'
         empty: Køen er tom
         headers:
@@ -295,8 +301,11 @@ da:
           payload: Indhold
           reads: Læsninger
           vt: VT
+        pause: Pause
+        pause_confirm: Pause behandling?
         purge_confirm: Rens alle beskeder?
         purge_queue: Rens kø
+        resume: Genoptag
         total: 'Total:'
         visible: 'Synlig:'
     recurring_tasks:

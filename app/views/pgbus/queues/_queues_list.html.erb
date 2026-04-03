@@ -43,6 +43,10 @@
                     method: :post,
                     class: "text-xs text-red-600 hover:text-red-800 font-medium",
                     data: { turbo_confirm: t("pgbus.queues.queues_list.purge_confirm", name: q[:name]), turbo_frame: "_top" } %>
+              <%= button_to t("pgbus.queues.queues_list.delete"), pgbus.queue_path(name: q[:name]),
+                    method: :delete,
+                    class: "text-xs text-red-600 hover:text-red-800 font-medium",
+                    data: { turbo_confirm: t("pgbus.queues.queues_list.delete_confirm", name: q[:name]), turbo_frame: "_top" } %>
             </td>
           </tr>
         <% end %>

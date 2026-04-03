@@ -215,6 +215,13 @@ module Pgbus
       synchronized { @pgmq.purge_queue(name) }
     end
 
+    def drop_queue(queue_name, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      result = synchronized { @pgmq.drop_queue(name) }
+      @queues_created.delete(name)
+      result
+    end
+
     def purge_archive(queue_name, older_than:, batch_size: 1000)
       full_name = config.queue_name(queue_name)
       sanitized = QueueNameValidator.sanitize!(full_name)

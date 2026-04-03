@@ -32,6 +32,10 @@ module Pgbus
       def registered_subscribers = @subscribers_list
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
       def purge_queue(_name) = true
+      def drop_queue(_name) = true
+      def queue_paused?(_name) = false
+      def pause_queue(_name, reason: nil) = true
+      def resume_queue(_name) = true
       def retry_failed_event(_id) = true
       def discard_failed_event(_id) = true
       def retry_all_failed = @failed_events_list.size

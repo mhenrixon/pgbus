@@ -60,6 +60,10 @@ module Pgbus
         @client.purge_queue(name, prefixed: false)
       end
 
+      def drop_queue(name)
+        @client.drop_queue(name, prefixed: false)
+      end
+
       def pause_queue(name, reason: nil)
         QueueState.pause!(logical_queue_name(name), reason: reason)
       rescue StandardError => e

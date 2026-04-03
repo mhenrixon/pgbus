@@ -280,13 +280,19 @@ sv:
           queue: Kö
           total_ever: Totalt någonsin
           visible: Synliga
+        delete: Ta bort
+        delete_confirm: Ta bort kön %{name} permanent? Detta kan inte ångras.
         pause: Pausa
         pause_confirm: Pausa bearbetning för %{name}?
         paused: Pausad
         purge: Rensa
         purge_confirm: Rensa alla meddelanden från %{name}?
         resume: Återuppta
+      destroy:
+        success: Kön %{name} borttagen.
       show:
+        delete_confirm: Ta bort denna kö permanent? Detta kan inte ångras.
+        delete_queue: Ta bort kö
         depth: 'Djup:'
         empty: Kön är tom
         headers:
@@ -295,8 +301,11 @@ sv:
           payload: Innehåll
           reads: Läsningar
           vt: VT
+        pause: Pausa
+        pause_confirm: Pausa bearbetning?
         purge_confirm: Rensa alla meddelanden?
         purge_queue: Rensa kö
+        resume: Återuppta
         total: 'Totalt:'
         visible: 'Synliga:'
     recurring_tasks:

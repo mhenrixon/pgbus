@@ -280,13 +280,19 @@ de:
           queue: Warteschlange
           total_ever: Insgesamt jemals
           visible: Sichtbar
+        delete: Löschen
+        delete_confirm: Warteschlange %{name} dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         pause: Pause
         pause_confirm: Verarbeitung für %{name} pausieren?
         paused: Pausiert
         purge: Bereinigen
         purge_confirm: Alle Nachrichten von %{name} löschen?
         resume: Fortsetzen
+      destroy:
+        success: Warteschlange %{name} gelöscht.
       show:
+        delete_confirm: Diese Warteschlange dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
+        delete_queue: Warteschlange löschen
         depth: 'Tiefe:'
         empty: Warteschlange ist leer
         headers:
@@ -295,8 +301,11 @@ de:
           payload: Nutzlast
           reads: Lesevorgänge
           vt: VT
+        pause: Pause
+        pause_confirm: Verarbeitung pausieren?
         purge_confirm: Alle Nachrichten löschen?
         purge_queue: Warteschlange bereinigen
+        resume: Fortsetzen
         total: 'Insgesamt:'
         visible: 'Sichtbar:'
     recurring_tasks:
