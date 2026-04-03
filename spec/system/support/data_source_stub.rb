@@ -6,6 +6,7 @@ module Pgbus
       attr_accessor :stats, :queues, :processes_list, :failed_events_list,
                     :dlq_messages_list, :events_list, :subscribers_list, :jobs_list,
                     :paused_queues
+      attr_reader :calls
 
       def initialize
         @stats = default_stats
@@ -17,6 +18,7 @@ module Pgbus
         @subscribers_list = []
         @jobs_list = []
         @paused_queues = []
+        @calls = Hash.new { |h, k| h[k] = [] }
       end
 
       def summary_stats = @stats
@@ -33,22 +35,32 @@ module Pgbus
       def processed_event(id) = @events_list.find { |e| e["id"].to_s == id.to_s }
       def registered_subscribers = @subscribers_list
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
-      def purge_queue(_name) = true
-      def drop_queue(_name) = true
       def queue_paused?(name) = @paused_queues.include?(name)
-      def pause_queue(_name, reason: nil) = true
-      def resume_queue(_name) = true
-      def retry_failed_event(_id) = true
-      def discard_failed_event(_id) = true
-      def retry_all_failed = @failed_events_list.size
-      def discard_all_failed = @failed_events_list.size
-      def retry_dlq_message(_queue_name, _msg_id) = true
-      def discard_dlq_message(_queue_name, _msg_id) = true
-      def retry_all_dlq = @dlq_messages_list.size
-      def discard_all_dlq = @dlq_messages_list.size
-      def replay_event(_event) = true
+
+      def purge_queue(name)          = record(:purge_queue, name)
+      def drop_queue(name)           = record(:drop_queue, name)
+      def pause_queue(name, reason: nil) = record(:pause_queue, name, reason)
+      def resume_queue(name) = record(:resume_queue, name)
+      def retry_job(queue_name, msg_id)   = record(:retry_job, queue_name, msg_id)
+      def discard_job(queue_name, msg_id) = record(:discard_job, queue_name, msg_id)
+      def retry_failed_event(id)     = record(:retry_failed_event, id)
+      def discard_failed_event(id)   = record(:discard_failed_event, id)
+      def retry_all_failed           = record(:retry_all_failed) && @failed_events_list.size
+      def discard_all_failed         = record(:discard_all_failed) && @failed_events_list.size
+      def retry_dlq_message(queue_name, msg_id) = record(:retry_dlq_message, queue_name, msg_id)
+      def discard_dlq_message(queue_name, msg_id) = record(:discard_dlq_message, queue_name, msg_id)
+      def retry_all_dlq              = record(:retry_all_dlq) && @dlq_messages_list.size
+      def discard_all_dlq            = record(:discard_all_dlq) && @dlq_messages_list.size
+      def replay_event(event)        = record(:replay_event, event)
+
+      def called?(method_name) = @calls.key?(method_name)
 
       private
+
+      def record(method_name, *args)
+        @calls[method_name] << args
+        true
+      end
 
       def default_stats
         { total_queues: 2, total_depth: 15, total_visible: 12,

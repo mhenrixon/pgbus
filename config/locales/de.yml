@@ -177,6 +177,10 @@ de:
           timezone: 'Zeitzone:'
           visible_at: 'Sichtbar ab:'
         title: Eingereihte Jobs
+        discard: Verwerfen
+        discard_confirm: Diese Nachricht verwerfen?
+        retry: Wiederholen
+        retry_confirm: Sichtbarkeits-Timeout zurücksetzen und erneut versuchen?
       failed_table:
         discard: Verwerfen
         discard_confirm: Diesen Job verwerfen?
@@ -301,18 +305,27 @@ de:
         delete_confirm: Diese Warteschlange dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         delete_queue: Warteschlange löschen
         depth: 'Tiefe:'
+        discard: Verwerfen
+        discard_confirm: Diese Nachricht verwerfen?
         empty: Warteschlange ist leer
         headers:
+          actions: Aktionen
           enqueued: Eingereiht
           id: ID
           payload: Nutzlast
           reads: Lesevorgänge
           vt: VT
+        message_discard_failed: Nachricht konnte nicht verworfen werden.
+        message_discarded: Nachricht verworfen.
+        message_retried: Sichtbarkeit der Nachricht zurückgesetzt.
+        message_retry_failed: Nachricht konnte nicht wiederholt werden.
         pause: Pause
         pause_confirm: Verarbeitung pausieren?
         purge_confirm: Alle Nachrichten löschen?
         purge_queue: Warteschlange bereinigen
         resume: Fortsetzen
+        retry: Wiederholen
+        retry_confirm: Sichtbarkeits-Timeout zurücksetzen und erneut versuchen?
         total: 'Insgesamt:'
         visible: 'Sichtbar:'
     recurring_tasks:

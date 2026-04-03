@@ -140,11 +140,17 @@
       }, 5000);
     }
 
-    // Render flash toasts from <template> tags
-    document.querySelectorAll("template[data-pgbus-toast]").forEach(tpl => {
-      showToast(tpl.content.textContent.trim(), tpl.dataset.pgbusToast);
-      tpl.remove();
-    });
+    // Render flash toasts from <template> tags.
+    // Must run on turbo:load as well — module scripts only execute once,
+    // but Turbo Drive replaces the body on navigation.
+    function renderFlashToasts() {
+      document.querySelectorAll("template[data-pgbus-toast]").forEach(tpl => {
+        showToast(tpl.content.textContent.trim(), tpl.dataset.pgbusToast);
+        tpl.remove();
+      });
+    }
+    renderFlashToasts();
+    document.addEventListener("turbo:load", renderFlashToasts);
 
     <% if Pgbus.configuration.web_live_updates %>
     const interval = <%= Pgbus.configuration.web_refresh_interval %>;
@@ -291,10 +297,10 @@
           </div>
         </div>
       </div>
-      <div class="flex justify-end space-x-3 px-6 py-4 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg">
+      <form method="dialog" class="flex justify-end space-x-3 px-6 py-4 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg">
         <button value="cancel" class="rounded-md px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500"><%= t("pgbus.dialogs.cancel", default: "Cancel") %></button>
         <button value="confirm" id="pgbus-confirm-btn" class="rounded-md px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500"><%= t("pgbus.dialogs.confirm", default: "Confirm") %></button>
-      </div>
+      </form>
     </dialog>
 
     <!-- Alert dialog -->
@@ -309,9 +315,9 @@
           <p class="text-sm text-gray-700 dark:text-gray-300" id="pgbus-alert-message"></p>
         </div>
       </div>
-      <div class="flex justify-end px-6 py-4 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg">
+      <form method="dialog" class="flex justify-end px-6 py-4 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg">
         <button value="ok" class="rounded-md px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"><%= t("pgbus.dialogs.ok", default: "OK") %></button>
-      </div>
+      </form>
     </dialog>
 
     <!-- Content -->

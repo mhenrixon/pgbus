@@ -177,6 +177,10 @@ fi:
           timezone: 'Aikavyöhyke:'
           visible_at: 'Näkyvissä:'
         title: Jonotetut työt
+        discard: Hylkää
+        discard_confirm: Hylätä tämä viesti?
+        retry: Yritä uudelleen
+        retry_confirm: Nollaa näkyvyysaika ja yritä uudelleen?
       failed_table:
         discard: Hylkää
         discard_confirm: Hylätäänkö tämä työ?
@@ -301,18 +305,27 @@ fi:
         delete_confirm: Poista tämä jono pysyvästi? Tätä ei voi kumota.
         delete_queue: Poista jono
         depth: 'Syvyys:'
+        discard: Hylkää
+        discard_confirm: Hylätä tämä viesti?
         empty: Jono on tyhjä
         headers:
+          actions: Toiminnot
           enqueued: Jonoon lisätty
           id: ID
           payload: Kuorma
           reads: Lukukerrat
           vt: VT
+        message_discard_failed: Viestiä ei voitu hylätä.
+        message_discarded: Viesti hylätty.
+        message_retried: Viestin näkyvyys nollattu.
+        message_retry_failed: Viestiä ei voitu yrittää uudelleen.
         pause: Tauko
         pause_confirm: Keskeytetäänkö käsittely?
         purge_confirm: Tyhjennetäänkö kaikki viestit?
         purge_queue: Tyhjennä jono
         resume: Jatka
+        retry: Yritä uudelleen
+        retry_confirm: Nollaa näkyvyysaika ja yritä uudelleen?
         total: 'Yhteensä:'
         visible: 'Näkyvissä:'
     recurring_tasks:

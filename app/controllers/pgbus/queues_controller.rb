@@ -33,5 +33,21 @@ module Pgbus
       data_source.resume_queue(params[:name])
       redirect_to queue_path(name: params[:name]), notice: "Queue resumed."
     end
+
+    def retry_message
+      if data_source.retry_job(params[:name], params[:msg_id])
+        redirect_back fallback_location: queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_retried")
+      else
+        redirect_back fallback_location: queue_path(name: params[:name]), alert: t("pgbus.queues.show.message_retry_failed")
+      end
+    end
+
+    def discard_message
+      if data_source.discard_job(params[:name], params[:msg_id])
+        redirect_back fallback_location: queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_discarded")
+      else
+        redirect_back fallback_location: queue_path(name: params[:name]), alert: t("pgbus.queues.show.message_discard_failed")
+      end
+    end
   end
 end

@@ -177,6 +177,10 @@ ja:
           timezone: タイムゾーン：
           visible_at: 表示可能日時：
         title: キューに入れられたジョブ
+        discard: 破棄
+        discard_confirm: このメッセージを破棄しますか？
+        retry: リトライ
+        retry_confirm: 可視性タイムアウトをリセットしてリトライしますか？
       failed_table:
         discard: 破棄
         discard_confirm: このジョブを破棄しますか？
@@ -301,18 +305,27 @@ ja:
         delete_confirm: このキューを完全に削除しますか？この操作は取り消せません。
         delete_queue: キューを削除
         depth: 深さ：
+        discard: 破棄
+        discard_confirm: このメッセージを破棄しますか？
         empty: キューは空です
         headers:
+          actions: アクション
           enqueued: エンキュー済み
           id: ID
           payload: ペイロード
           reads: 読み取り回数
           vt: VT
+        message_discard_failed: メッセージを破棄できませんでした。
+        message_discarded: メッセージを破棄しました。
+        message_retried: メッセージの可視性をリセットしました。
+        message_retry_failed: メッセージをリトライできませんでした。
         pause: 一時停止
         pause_confirm: 処理を一時停止しますか？
         purge_confirm: すべてのメッセージを削除しますか？
         purge_queue: キューをパージ
         resume: 再開
+        retry: リトライ
+        retry_confirm: 可視性タイムアウトをリセットしてリトライしますか？
         total: 合計：
         visible: 表示中：
     recurring_tasks:

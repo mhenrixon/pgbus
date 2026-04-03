@@ -177,6 +177,10 @@ pt:
           timezone: 'Fuso horário:'
           visible_at: 'Visível em:'
         title: Trabalhos Enfileirados
+        discard: Descartar
+        discard_confirm: Descartar esta mensagem?
+        retry: Tentar novamente
+        retry_confirm: Redefinir tempo de visibilidade e tentar novamente?
       failed_table:
         discard: Descartar
         discard_confirm: Descartar este trabalho?
@@ -301,18 +305,27 @@ pt:
         delete_confirm: Excluir permanentemente esta fila? Esta ação não pode ser desfeita.
         delete_queue: Excluir fila
         depth: 'Profundidade:'
+        discard: Descartar
+        discard_confirm: Descartar esta mensagem?
         empty: Fila está vazia
         headers:
+          actions: Ações
           enqueued: Enfileirado
           id: ID
           payload: Carga útil
           reads: Leituras
           vt: VT
+        message_discard_failed: Não foi possível descartar a mensagem.
+        message_discarded: Mensagem descartada.
+        message_retried: Visibilidade da mensagem redefinida.
+        message_retry_failed: Não foi possível tentar novamente a mensagem.
         pause: Pausar
         pause_confirm: Pausar processamento?
         purge_confirm: Limpar todas as mensagens?
         purge_queue: Limpar fila
         resume: Retomar
+        retry: Tentar novamente
+        retry_confirm: Redefinir tempo de visibilidade e tentar novamente?
         total: 'Total:'
         visible: 'Visível:'
     recurring_tasks:
