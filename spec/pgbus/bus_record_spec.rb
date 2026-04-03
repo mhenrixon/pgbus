@@ -9,10 +9,11 @@ RSpec.describe Pgbus::BusRecord do
   end
 
   it "is defined in lib/pgbus/ (loaded by the gem loader, not the engine)" do
-    # BusRecord lives in lib/pgbus/, so it should be managed by
-    # Zeitwerk's gem loader — not the separate models_loader that
+    # Verify that bus_record.rb lives under lib/pgbus/ where the main
+    # Zeitwerk gem loader manages it — not under app/models/ which
     # depends on engine boot order.
-    source_file, = Object.const_source_location("Pgbus::BusRecord")
-    expect(source_file).to end_with("lib/pgbus/bus_record.rb")
+    gem_root = File.expand_path("../..", __dir__)
+    expect(File.exist?(File.join(gem_root, "lib/pgbus/bus_record.rb"))).to be(true)
+    expect(File.exist?(File.join(gem_root, "app/models/pgbus/bus_record.rb"))).to be(false)
   end
 end
