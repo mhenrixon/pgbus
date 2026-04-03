@@ -132,7 +132,7 @@ RSpec.describe Pgbus do
         hash_including(:expires_at)
       ) do |args|
         # expires_at should be ~900 seconds from now
-        delta = args[:expires_at] - Time.now
+        delta = args[:expires_at] - Time.current
         expect(delta).to be_within(5).of(900)
       end
     end
@@ -145,7 +145,7 @@ RSpec.describe Pgbus do
       Pgbus::Concurrency::Semaphore.acquire("test-key", 1, 900)
 
       expect(Pgbus::Semaphore).to have_received(:acquire!) do |_key, _max, expires_at|
-        delta = expires_at - Time.now
+        delta = expires_at - Time.current
         expect(delta).to be_within(5).of(900)
       end
     end

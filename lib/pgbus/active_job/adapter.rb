@@ -34,7 +34,7 @@ module Pgbus
         # Jobs with uniqueness must go through individual enqueue to acquire locks
         unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
         unique.each do |j|
-          if j.scheduled_at && j.scheduled_at > Time.current
+          if scheduled_in_future?(j)
             enqueue_at(j, j.scheduled_at.to_f)
           else
             enqueue(j)
@@ -42,8 +42,8 @@ module Pgbus
         end
 
         bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
-          enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.current })
-          jobs.select { |j| j.scheduled_at && j.scheduled_at > Time.current }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
+          enqueue_immediate(queue, jobs.reject { |j| scheduled_in_future?(j) })
+          jobs.select { |j| scheduled_in_future?(j) }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
 
         active_jobs.count
@@ -157,6 +157,10 @@ module Pgbus
       rescue Pgbus::SchemaNotReady => e
         Pgbus.logger.error { "[Pgbus] #{e.message}" }
         raise
+      end
+
+      def scheduled_in_future?(job)
+        job.scheduled_at && job.scheduled_at > Time.current
       end
 
       def enqueue_after_transaction_commit?
