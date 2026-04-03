@@ -192,20 +192,23 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     end
 
     context "with job stat recording" do
-      let(:message) { build_message_double(msg_id: 1, message: message_json, read_ct: 1) }
+      let(:enqueued_at) { (Time.now.utc - 0.5).iso8601(6) } # 500ms ago
+      let(:message) { build_message_double(msg_id: 1, message: message_json, read_ct: 1, enqueued_at: enqueued_at) }
 
-      it "records a success stat after successful execution" do
+      it "records a success stat with enqueue latency and retry count" do
         executor.execute(message, queue_name)
 
         expect(Pgbus::JobStat).to have_received(:record!).with(
           job_class: "TestJob",
           queue_name: queue_name,
           status: "success",
-          duration_ms: an_instance_of(Integer)
+          duration_ms: an_instance_of(Integer),
+          enqueue_latency_ms: a_value >= 400,
+          retry_count: 0
         )
       end
 
-      it "records a failed stat when job raises" do
+      it "records a failed stat with enqueue latency" do
         allow(job_double).to receive(:perform_now).and_raise(StandardError, "boom")
 
         executor.execute(message, queue_name)
@@ -214,12 +217,17 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           job_class: "TestJob",
           queue_name: queue_name,
           status: "failed",
-          duration_ms: an_instance_of(Integer)
+          duration_ms: an_instance_of(Integer),
+          enqueue_latency_ms: a_value >= 400,
+          retry_count: 0
         )
       end
 
-      it "records a dead_lettered stat for DLQ routing" do
-        dlq_message = build_message_double(msg_id: 99, message: message_json, read_ct: config.max_retries + 1)
+      it "records a dead_lettered stat with retry count from read_ct" do
+        dlq_message = build_message_double(
+          msg_id: 99, message: message_json,
+          read_ct: config.max_retries + 1, enqueued_at: enqueued_at
+        )
 
         executor.execute(dlq_message, queue_name)
 
@@ -227,7 +235,19 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           job_class: "TestJob",
           queue_name: queue_name,
           status: "dead_lettered",
-          duration_ms: an_instance_of(Integer)
+          duration_ms: an_instance_of(Integer),
+          enqueue_latency_ms: a_value >= 400,
+          retry_count: config.max_retries
+        )
+      end
+
+      it "sets retry_count to read_ct minus 1 (first read is not a retry)" do
+        retry_message = build_message_double(msg_id: 50, message: message_json, read_ct: 3, enqueued_at: enqueued_at)
+
+        executor.execute(retry_message, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          hash_including(retry_count: 2)
         )
       end
 
@@ -239,6 +259,26 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(Pgbus::JobStat).not_to have_received(:record!)
       ensure
         config.stats_enabled = true
+      end
+
+      it "handles nil enqueued_at gracefully" do
+        nil_enqueued = build_message_double(msg_id: 60, message: message_json, read_ct: 1, enqueued_at: nil)
+
+        executor.execute(nil_enqueued, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          hash_including(enqueue_latency_ms: nil)
+        )
+      end
+
+      it "handles malformed enqueued_at gracefully" do
+        bad_enqueued = build_message_double(msg_id: 61, message: message_json, read_ct: 1, enqueued_at: "not-a-date")
+
+        executor.execute(bad_enqueued, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          hash_including(enqueue_latency_ms: nil)
+        )
       end
     end
   end

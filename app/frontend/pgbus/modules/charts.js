@@ -12,13 +12,14 @@ function getThemeColors() {
   };
 }
 
-let throughputChart, statusChart;
+let throughputChart, statusChart, latencyChart;
 
 export function renderCharts(data, i18n) {
   const t = getThemeColors();
 
   if (throughputChart) throughputChart.destroy();
   if (statusChart) statusChart.destroy();
+  if (latencyChart) latencyChart.destroy();
 
   const throughputData = data.throughput.map(p => ({
     x: new Date(p.time).getTime(),
@@ -63,6 +64,32 @@ export function renderCharts(data, i18n) {
   } else {
     const el = document.querySelector("#status-chart");
     if (el) el.innerHTML = `<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">${i18n.noData || "No data"}</p>`;
+  }
+
+  // Latency chart (only if data is available)
+  const latencyEl = document.querySelector("#latency-chart");
+  if (latencyEl && data.latency_trend && data.latency_trend.length > 0) {
+    const avgData = data.latency_trend.map(p => ({ x: new Date(p.time).getTime(), y: p.avg_ms }));
+    const p95Data = data.latency_trend.map(p => ({ x: new Date(p.time).getTime(), y: p.p95_ms }));
+
+    latencyChart = new ApexCharts(latencyEl, {
+      series: [
+        { name: i18n.latencyAvg || "Avg", data: avgData },
+        { name: i18n.latencyP95 || "P95", data: p95Data },
+      ],
+      chart: { type: "line", height: 280, toolbar: { show: false }, background: "transparent", foreColor: t.text },
+      stroke: { curve: "smooth", width: [2, 2], dashArray: [0, 5] },
+      colors: ["#6366f1", "#f59e0b"],
+      xaxis: { type: "datetime", labels: { style: { colors: t.text } } },
+      yaxis: { labels: { style: { colors: t.text }, formatter: v => Math.round(v) + "ms" } },
+      grid: { borderColor: t.grid },
+      tooltip: { theme: t.tooltip },
+      dataLabels: { enabled: false },
+      legend: { position: "top", labels: { colors: t.text } },
+    });
+    latencyChart.render();
+  } else if (latencyEl) {
+    latencyEl.innerHTML = `<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">${i18n.noData || "No data"}</p>`;
   }
 }
 

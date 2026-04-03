@@ -128,11 +128,22 @@ en:
       show:
         charts:
           failed_to_load: Failed to load chart data
+          latency: Queue Latency (ms)
+          latency_avg: Avg
+          latency_p95: P95
           no_data: No data yet
           series_name: Jobs/min
           status_distribution: Status Distribution
           throughput: Throughput (jobs/min)
         description_html: Job performance metrics for the last %{range}
+        latency_by_queue:
+          empty: No latency data yet
+          headers:
+            avg: Avg (ms)
+            count: Count
+            p95: P95 (ms)
+            queue: Queue
+          title: Latency by Queue
         slowest:
           empty: No job stats yet
           headers:
@@ -143,9 +154,14 @@ en:
           title: Slowest Job Classes (avg duration)
         summary:
           avg_duration: Avg Duration
+          avg_latency: Avg Latency
+          avg_retries: Avg Retries
           dead_lettered: Dead Lettered
           failed: Failed
           max_duration: Max Duration
+          p50_latency: P50 Latency
+          p95_latency: P95 Latency
+          p99_latency: P99 Latency
           succeeded: Succeeded
           total_jobs: Total Jobs
         time_ranges:

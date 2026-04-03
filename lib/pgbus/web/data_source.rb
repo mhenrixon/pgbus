@@ -552,6 +552,20 @@ module Pgbus
         []
       end
 
+      def latency_trend(minutes: 60)
+        JobStat.latency_trend(minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching latency trend: #{e.message}" }
+        []
+      end
+
+      def latency_by_queue(minutes: 60)
+        JobStat.avg_latency_by_queue(minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching latency by queue: #{e.message}" }
+        []
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|
