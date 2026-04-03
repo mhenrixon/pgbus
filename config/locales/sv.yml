@@ -179,6 +179,8 @@ sv:
         title: Köade jobb
         discard: Kassera
         discard_confirm: Kassera detta meddelande?
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera alla köade jobb och frigör deras lås? Detta kan inte ångras.
         retry: Försök igen
         retry_confirm: Återställ synlighetstimeout och försök igen?
       failed_table:
@@ -197,6 +199,7 @@ sv:
       index:
         discard_all: Kassera alla
         discard_all_confirm: Kassera alla misslyckade jobb?
+        discard_all_enqueued_notice: Kasserade %{count} köade jobb och frigjorde deras lås.
         retry_all: Försök igen alla
         retry_all_confirm: Försök igen alla misslyckade jobb?
         title: Jobb

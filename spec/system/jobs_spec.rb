@@ -71,6 +71,24 @@ RSpec.describe "Jobs", type: :system do
       expect(page).to have_button("Retry")
     end
 
+    it "shows Discard All button for enqueued jobs" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-enqueued") do
+        expect(page).to have_button("Discard All")
+      end
+    end
+
+    it "discard all enqueued: confirm and redirects with toast" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-enqueued") { click_button "Discard All" }
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Discarded")
+      expect(@stub_data_source).to be_called(:discard_all_enqueued)
+    end
+
     it "discard enqueued job: confirm and redirects with toast" do
       visit "/pgbus/jobs"
 

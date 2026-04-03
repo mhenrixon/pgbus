@@ -162,6 +162,8 @@ module Pgbus
 
       # Inject uniqueness metadata into the payload so the executor releases
       # the lock after the job completes.
+      # Only inject for :until_executed strategy — :while_executing locks are
+      # acquired at execution time by the executor, not by the scheduler.
       def inject_uniqueness_metadata(task, payload)
         return payload unless task.class_name
 
@@ -170,6 +172,7 @@ module Pgbus
 
         config = job_class.pgbus_uniqueness
         return payload unless config
+        return payload unless config[:strategy] == :until_executed
 
         key = resolve_uniqueness_key(config, task)
         return payload unless key

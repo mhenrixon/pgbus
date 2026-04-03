@@ -179,6 +179,8 @@ nb:
         title: Kølagte jobber
         discard: Forkast
         discard_confirm: Forkaste denne meldingen?
+        discard_all: Forkast alle
+        discard_all_confirm: Forkast alle køede jobber og frigi låsene? Dette kan ikke angres.
         retry: Prøv igjen
         retry_confirm: Tilbakestill synlighetstidsavbrudd og prøv igjen?
       failed_table:
@@ -197,6 +199,7 @@ nb:
       index:
         discard_all: Forkast alle
         discard_all_confirm: Forkast alle mislykkede jobber?
+        discard_all_enqueued_notice: Forkastet %{count} køede jobber og frigitt låsene.
         retry_all: Prøv alle på nytt
         retry_all_confirm: Prøv alle mislykkede jobber på nytt?
         title: Jobber

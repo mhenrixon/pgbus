@@ -179,6 +179,8 @@ it:
         title: Lavori in coda
         discard: Scarta
         discard_confirm: Scartare questo messaggio?
+        discard_all: Elimina tutti
+        discard_all_confirm: Eliminare tutti i lavori in coda e rilasciare i relativi blocchi? Questa azione non può essere annullata.
         retry: Riprova
         retry_confirm: Reimpostare il timeout di visibilità e riprovare?
       failed_table:
@@ -197,6 +199,7 @@ it:
       index:
         discard_all: Scarta Tutto
         discard_all_confirm: Scartare tutti i lavori falliti?
+        discard_all_enqueued_notice: Eliminati %{count} lavori in coda e rilasciati i relativi blocchi.
         retry_all: Riprova Tutto
         retry_all_confirm: Riprova tutti i lavori falliti?
         title: Lavori
