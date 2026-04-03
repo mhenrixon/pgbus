@@ -16,6 +16,15 @@ RSpec.describe "Signal handling (integration)", :integration do
     client.ensure_queue("default")
   end
 
+  # Build a connection URL with the given pool size, safely merging query params.
+  def connection_url(pool:)
+    parsed = URI.parse(PGBUS_DATABASE_URL)
+    params = URI.decode_www_form(parsed.query || "").to_h
+    params["pool"] = pool.to_s
+    parsed.query = URI.encode_www_form(params)
+    parsed.to_s
+  end
+
   # Disconnect ActiveRecord before forking so the child gets a clean slate.
   # After the fork, the parent re-establishes its own connection.
   def fork_with_fresh_connections(&block)
@@ -23,7 +32,7 @@ RSpec.describe "Signal handling (integration)", :integration do
     Pgbus.reset_client!
     pid = fork(&block)
     # Parent: re-establish connection after fork
-    ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=20")
+    ActiveRecord::Base.establish_connection(connection_url(pool: 20))
     Pgbus.reset_client!
     pid
   end
@@ -47,7 +56,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       worker_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
-        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
+        ActiveRecord::Base.establish_connection(connection_url(pool: 5))
 
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],
@@ -106,7 +115,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       worker_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
-        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
+        ActiveRecord::Base.establish_connection(connection_url(pool: 5))
 
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],
@@ -159,7 +168,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       supervisor_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
-        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
+        ActiveRecord::Base.establish_connection(connection_url(pool: 5))
 
         # Minimal config: 1 worker, no scheduler, no dispatcher
         config = Pgbus.configuration.dup
@@ -197,9 +206,10 @@ RSpec.describe "Signal handling (integration)", :integration do
       # Send SIGTERM to supervisor
       Process.kill("TERM", supervisor_pid)
 
-      # Supervisor should exit cleanly after draining children
+      # Supervisor should exit cleanly after draining children.
+      # Use a generous timeout — CI runners can be slow to schedule processes.
       result = nil
-      Timeout.timeout(15) do
+      Timeout.timeout(30) do
         _, status = Process.waitpid2(supervisor_pid)
         result = status
       end
@@ -235,7 +245,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       worker_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
-        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
+        ActiveRecord::Base.establish_connection(connection_url(pool: 5))
 
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],

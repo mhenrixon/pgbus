@@ -2,6 +2,7 @@
 
 require "active_record"
 require "tempfile"
+require "uri"
 require "pgbus"
 
 # Integration tests require a real PostgreSQL database with PGMQ installed.
@@ -25,8 +26,13 @@ RSpec.configure do |config|
     next
   end
 
-  # Connect ActiveRecord with a pool large enough for concurrent tests
-  ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=20")
+  # Connect ActiveRecord with a pool large enough for concurrent tests.
+  # Merge pool via URI parsing to avoid breaking URLs with existing query params.
+  parsed = URI.parse(PGBUS_DATABASE_URL)
+  url_params = URI.decode_www_form(parsed.query || "").to_h
+  url_params["pool"] = "20"
+  parsed.query = URI.encode_www_form(url_params)
+  ActiveRecord::Base.establish_connection(parsed.to_s)
 
   # Configure pgbus with the real database
   Pgbus.configure do |c|

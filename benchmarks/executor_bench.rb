@@ -3,6 +3,10 @@
 require_relative "bench_helper"
 require "active_job"
 
+# Silence ActiveJob's own logger — it's separate from Pgbus.logger
+# and produces ~500k lines of "Performing/Performed" noise per run.
+ActiveJob::Base.logger = Logger.new(IO::NULL)
+
 puts "=" * 60
 puts "Pgbus Executor Benchmarks (mocked PGMQ — measures gem overhead)"
 puts "=" * 60

@@ -31,7 +31,12 @@ namespace :bench do
     ruby "benchmarks/memory_profile.rb"
   end
 
-  desc "Run all benchmarks"
+  desc "Run integration benchmarks (requires PGBUS_DATABASE_URL)"
+  task :integration do
+    ruby "benchmarks/integration_bench.rb"
+  end
+
+  desc "Run all benchmarks (unit-level, no DB required)"
   task all: %i[serialization client executor]
 end
 
