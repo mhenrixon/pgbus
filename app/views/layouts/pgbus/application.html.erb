@@ -140,11 +140,17 @@
       }, 5000);
     }
 
-    // Render flash toasts from <template> tags
-    document.querySelectorAll("template[data-pgbus-toast]").forEach(tpl => {
-      showToast(tpl.content.textContent.trim(), tpl.dataset.pgbusToast);
-      tpl.remove();
-    });
+    // Render flash toasts from <template> tags.
+    // Must run on turbo:load as well — module scripts only execute once,
+    // but Turbo Drive replaces the body on navigation.
+    function renderFlashToasts() {
+      document.querySelectorAll("template[data-pgbus-toast]").forEach(tpl => {
+        showToast(tpl.content.textContent.trim(), tpl.dataset.pgbusToast);
+        tpl.remove();
+      });
+    }
+    renderFlashToasts();
+    document.addEventListener("turbo:load", renderFlashToasts);
 
     <% if Pgbus.configuration.web_live_updates %>
     const interval = <%= Pgbus.configuration.web_refresh_interval %>;

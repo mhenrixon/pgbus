@@ -39,5 +39,46 @@ RSpec.describe "Dead Letter Queue", type: :system do
       expect(page).to have_button("Retry")
       expect(page).to have_button("Discard")
     end
+
+    it "retry DLQ message: no confirm, shows toast" do
+      visit "/pgbus/dlq"
+
+      find("details summary").click
+      click_button "Retry"
+
+      expect(page).to have_toast("re-enqueued")
+      expect(@stub_data_source).to be_called(:retry_dlq_message)
+    end
+
+    it "discard DLQ message: confirm and shows toast" do
+      visit "/pgbus/dlq"
+
+      find("details summary").click
+      click_button "Discard"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("discarded")
+      expect(@stub_data_source).to be_called(:discard_dlq_message)
+    end
+
+    it "retry all: confirm and shows toast" do
+      visit "/pgbus/dlq"
+
+      click_button "Retry All"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Re-enqueued")
+      expect(@stub_data_source).to be_called(:retry_all_dlq)
+    end
+
+    it "discard all: confirm and shows toast" do
+      visit "/pgbus/dlq"
+
+      click_button "Discard All"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Discarded")
+      expect(@stub_data_source).to be_called(:discard_all_dlq)
+    end
   end
 end

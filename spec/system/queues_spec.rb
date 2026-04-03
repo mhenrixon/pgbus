@@ -113,4 +113,89 @@ RSpec.describe "Queues", type: :system do
       expect(page).to have_button("Retry", count: 1)
     end
   end
+
+  describe "queue actions" do
+    it "purge: confirm dialog accepts and shows toast" do
+      visit "/pgbus/queues/pgbus_default"
+
+      click_button "Purge Queue"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Queue purged")
+      expect(@stub_data_source).to be_called(:purge_queue)
+    end
+
+    it "purge: cancel dialog does not purge" do
+      visit "/pgbus/queues/pgbus_default"
+
+      click_button "Purge Queue"
+      dismiss_confirm_dialog
+
+      # Still on show page, no toast, no call
+      expect(page).to have_css("h1", text: "pgbus_default")
+      expect(@stub_data_source).not_to be_called(:purge_queue)
+    end
+
+    it "delete: confirm dialog deletes and redirects to index" do
+      visit "/pgbus/queues/pgbus_default"
+
+      click_button "Delete Queue"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("deleted")
+      expect(page).to have_css("h1", text: "Queues")
+      expect(@stub_data_source).to be_called(:drop_queue)
+    end
+
+    it "pause: confirm dialog pauses and shows toast" do
+      visit "/pgbus/queues/pgbus_default"
+
+      click_button "Pause"
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Queue paused")
+      expect(@stub_data_source).to be_called(:pause_queue)
+    end
+
+    it "resume: no confirm needed, shows toast" do
+      @stub_data_source.paused_queues = ["pgbus_default"]
+
+      visit "/pgbus/queues/pgbus_default"
+
+      click_button "Resume"
+
+      expect(page).to have_toast("Queue resumed")
+      expect(@stub_data_source).to be_called(:resume_queue)
+    end
+
+    context "with messages" do
+      before do
+        @stub_data_source.jobs_list = [
+          { msg_id: 42, queue_name: "pgbus_default", read_ct: 0,
+            enqueued_at: Time.now.utc.iso8601, vt: Time.now.utc.iso8601,
+            message: '{"job_class":"TestJob"}' }
+        ]
+      end
+
+      it "discard message: confirm and shows toast" do
+        visit "/pgbus/queues/pgbus_default"
+
+        within("tr", text: "42") { click_button "Discard" }
+        accept_confirm_dialog
+
+        expect(page).to have_toast("Message discarded")
+        expect(@stub_data_source).to be_called(:discard_job)
+      end
+
+      it "retry message: confirm and shows toast" do
+        visit "/pgbus/queues/pgbus_default"
+
+        within("tr", text: "42") { click_button "Retry" }
+        accept_confirm_dialog
+
+        expect(page).to have_toast("Message visibility reset")
+        expect(@stub_data_source).to be_called(:retry_job)
+      end
+    end
+  end
 end

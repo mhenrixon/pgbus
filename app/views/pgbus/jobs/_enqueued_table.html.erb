@@ -61,11 +61,11 @@
                       <%= button_to t("pgbus.jobs.enqueued_table.retry"), pgbus.retry_message_queue_path(name: j[:queue_name], msg_id: j[:msg_id]),
                             method: :post,
                             class: "rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500",
-                            data: { turbo_confirm: t("pgbus.jobs.enqueued_table.retry_confirm") } %>
+                            data: { turbo_confirm: t("pgbus.jobs.enqueued_table.retry_confirm"), turbo_frame: "_top" } %>
                       <%= button_to t("pgbus.jobs.enqueued_table.discard"), pgbus.discard_message_queue_path(name: j[:queue_name], msg_id: j[:msg_id]),
                             method: :post,
                             class: "rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500",
-                            data: { turbo_confirm: t("pgbus.jobs.enqueued_table.discard_confirm") } %>
+                            data: { turbo_confirm: t("pgbus.jobs.enqueued_table.discard_confirm"), turbo_frame: "_top" } %>
                     </div>
                   </div>
                 </details>
