@@ -87,7 +87,7 @@ RSpec.describe Pgbus::Process::Worker do
       before { worker.config.max_worker_lifetime = 60 }
 
       it "returns true when lifetime is exceeded" do
-        worker.instance_variable_set(:@started_at, Time.now - 120)
+        worker.instance_variable_set(:@started_at_monotonic, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 120)
         expect(worker.send(:recycle_needed?)).to be true
       end
     end

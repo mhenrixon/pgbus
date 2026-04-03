@@ -23,7 +23,8 @@ module Pgbus
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
         @in_flight = Concurrent::AtomicFixnum.new(0)
         @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
-        @started_at = monotonic_now
+        @started_at = Time.current
+        @started_at_monotonic = monotonic_now
         @executor = Pgbus::ActiveJob::Executor.new
         @pool = Concurrent::FixedThreadPool.new(threads)
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
@@ -271,7 +272,7 @@ module Pgbus
       end
 
       def exceeded_max_lifetime?
-        return false unless config.max_worker_lifetime && (monotonic_now - @started_at) > config.max_worker_lifetime
+        return false unless config.max_worker_lifetime && (monotonic_now - @started_at_monotonic) > config.max_worker_lifetime
 
         Pgbus.logger.info { "[Pgbus] Worker recycling: lifetime exceeded" }
         true
