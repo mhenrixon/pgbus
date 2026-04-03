@@ -94,11 +94,11 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
   end
 
-  describe "#run_maintenance (private)" do
-    def past_monotonic(seconds_ago)
-      Process.clock_gettime(Process::CLOCK_MONOTONIC) - seconds_ago
-    end
+  def past_monotonic(seconds_ago)
+    Process.clock_gettime(Process::CLOCK_MONOTONIC) - seconds_ago
+  end
 
+  describe "#run_maintenance (private)" do
     it "skips cleanup when interval not elapsed" do
       allow(dispatcher).to receive(:cleanup_processed_events)
       allow(dispatcher).to receive(:reap_stale_processes)
