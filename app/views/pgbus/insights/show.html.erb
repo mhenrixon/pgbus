@@ -182,9 +182,8 @@
     .then(data => { chartData = data; renderCharts(data, i18n); })
     .catch(err => {
       const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24">' + i18n.failedToLoad + "</p>";
-      const el1 = document.querySelector("#throughput-chart");
-      const el2 = document.querySelector("#status-chart");
-      if (el1) el1.innerHTML = msg;
-      if (el2) el2.innerHTML = msg;
+      document.querySelectorAll("#throughput-chart, #status-chart, #latency-chart").forEach(el => {
+        el.innerHTML = msg;
+      });
     });
 </script>

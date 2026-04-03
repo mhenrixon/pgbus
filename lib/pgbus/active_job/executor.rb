@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module Pgbus
   module ActiveJob
     class Executor
@@ -117,7 +119,7 @@ module Pgbus
         return unless enqueued_at_str
 
         enqueued_at = Time.parse(enqueued_at_str.to_s)
-        ((Time.now.utc - enqueued_at) * 1000).round
+        [((Time.now.utc - enqueued_at) * 1000).round, 0].max
       rescue ArgumentError, TypeError
         nil
       end

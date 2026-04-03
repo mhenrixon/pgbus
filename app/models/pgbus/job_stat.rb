@@ -143,7 +143,7 @@ module Pgbus
 
     # Average latency by queue
     def self.avg_latency_by_queue(minutes: 60)
-      return {} unless latency_columns?
+      return [] unless latency_columns?
 
       since(minutes.minutes.ago)
         .where.not(enqueue_latency_ms: nil)

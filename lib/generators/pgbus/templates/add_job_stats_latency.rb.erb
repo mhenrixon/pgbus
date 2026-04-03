@@ -1,6 +1,6 @@
 class AddPgbusJobStatsLatency < ActiveRecord::Migration<%= migration_version %>
   def change
-    add_column :pgbus_job_stats, :enqueue_latency_ms, :integer
+    add_column :pgbus_job_stats, :enqueue_latency_ms, :bigint
     add_column :pgbus_job_stats, :retry_count, :integer, default: 0
 
     add_index :pgbus_job_stats, [:queue_name, :created_at],

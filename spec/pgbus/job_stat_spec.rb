@@ -88,9 +88,9 @@ RSpec.describe Pgbus::JobStat do
   end
 
   describe ".avg_latency_by_queue" do
-    it "returns empty hash when latency columns are not available" do
+    it "returns empty array when latency columns are not available" do
       allow(described_class).to receive(:latency_columns?).and_return(false)
-      expect(described_class.avg_latency_by_queue).to eq({})
+      expect(described_class.avg_latency_by_queue).to eq([])
     end
   end
 end
