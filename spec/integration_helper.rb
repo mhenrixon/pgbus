@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_record"
+require "tempfile"
 require "pgbus"
 
 # Integration tests require a real PostgreSQL database with PGMQ installed.
