@@ -315,8 +315,10 @@ ja:
           payload: ペイロード
           reads: 読み取り回数
           vt: VT
+        message_discard_failed: メッセージを破棄できませんでした。
         message_discarded: メッセージを破棄しました。
         message_retried: メッセージの可視性をリセットしました。
+        message_retry_failed: メッセージをリトライできませんでした。
         pause: 一時停止
         pause_confirm: 処理を一時停止しますか？
         purge_confirm: すべてのメッセージを削除しますか？

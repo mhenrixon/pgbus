@@ -315,8 +315,10 @@ fr:
           payload: Charge utile
           reads: Lectures
           vt: VT
+        message_discard_failed: Impossible de rejeter le message.
         message_discarded: Message rejeté.
         message_retried: Visibilité du message réinitialisée.
+        message_retry_failed: Impossible de réessayer le message.
         pause: Pause
         pause_confirm: Mettre en pause le traitement ?
         purge_confirm: Purger tous les messages ?

@@ -315,8 +315,10 @@ en:
           payload: Payload
           reads: Reads
           vt: VT
+        message_discard_failed: Could not discard message.
         message_discarded: Message discarded.
         message_retried: Message visibility reset.
+        message_retry_failed: Could not retry message.
         pause: Pause
         pause_confirm: Pause processing?
         purge_confirm: Purge all messages?

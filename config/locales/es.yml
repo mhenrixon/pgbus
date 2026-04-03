@@ -315,8 +315,10 @@ es:
           payload: Carga útil
           reads: Lecturas
           vt: VT
+        message_discard_failed: No se pudo descartar el mensaje.
         message_discarded: Mensaje descartado.
         message_retried: Visibilidad del mensaje restablecida.
+        message_retry_failed: No se pudo reintentar el mensaje.
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento?"
         purge_confirm: "¿Purgar todos los mensajes?"

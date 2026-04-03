@@ -35,13 +35,19 @@ module Pgbus
     end
 
     def retry_message
-      data_source.retry_job(params[:name], params[:msg_id])
-      redirect_to queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_retried")
+      if data_source.retry_job(params[:name], params[:msg_id])
+        redirect_back fallback_location: queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_retried")
+      else
+        redirect_back fallback_location: queue_path(name: params[:name]), alert: t("pgbus.queues.show.message_retry_failed")
+      end
     end
 
     def discard_message
-      data_source.discard_job(params[:name], params[:msg_id])
-      redirect_to queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_discarded")
+      if data_source.discard_job(params[:name], params[:msg_id])
+        redirect_back fallback_location: queue_path(name: params[:name]), notice: t("pgbus.queues.show.message_discarded")
+      else
+        redirect_back fallback_location: queue_path(name: params[:name]), alert: t("pgbus.queues.show.message_discard_failed")
+      end
     end
   end
 end

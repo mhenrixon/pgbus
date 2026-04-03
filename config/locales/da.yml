@@ -315,8 +315,10 @@ da:
           payload: Indhold
           reads: Læsninger
           vt: VT
+        message_discard_failed: Kunne ikke kassere besked.
         message_discarded: Besked kasseret.
         message_retried: Beskedens synlighed nulstillet.
+        message_retry_failed: Kunne ikke prøve besked igen.
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle beskeder?

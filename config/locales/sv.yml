@@ -315,8 +315,10 @@ sv:
           payload: Innehåll
           reads: Läsningar
           vt: VT
+        message_discard_failed: Kunde inte kassera meddelandet.
         message_discarded: Meddelande kasserat.
         message_retried: Meddelandets synlighet återställd.
+        message_retry_failed: Kunde inte försöka igen med meddelandet.
         pause: Pausa
         pause_confirm: Pausa bearbetning?
         purge_confirm: Rensa alla meddelanden?

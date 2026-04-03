@@ -315,8 +315,10 @@ de:
           payload: Nutzlast
           reads: Lesevorgänge
           vt: VT
+        message_discard_failed: Nachricht konnte nicht verworfen werden.
         message_discarded: Nachricht verworfen.
         message_retried: Sichtbarkeit der Nachricht zurückgesetzt.
+        message_retry_failed: Nachricht konnte nicht wiederholt werden.
         pause: Pause
         pause_confirm: Verarbeitung pausieren?
         purge_confirm: Alle Nachrichten löschen?

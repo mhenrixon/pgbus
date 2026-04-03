@@ -315,8 +315,10 @@ nb:
           payload: Innhold
           reads: Lesninger
           vt: VT
+        message_discard_failed: Kunne ikke forkaste meldingen.
         message_discarded: Melding forkastet.
         message_retried: Meldingens synlighet tilbakestilt.
+        message_retry_failed: Kunne ikke prøve meldingen igjen.
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle meldinger?

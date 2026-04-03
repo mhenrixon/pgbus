@@ -315,8 +315,10 @@ fi:
           payload: Kuorma
           reads: Lukukerrat
           vt: VT
+        message_discard_failed: Viestiä ei voitu hylätä.
         message_discarded: Viesti hylätty.
         message_retried: Viestin näkyvyys nollattu.
+        message_retry_failed: Viestiä ei voitu yrittää uudelleen.
         pause: Tauko
         pause_confirm: Keskeytetäänkö käsittely?
         purge_confirm: Tyhjennetäänkö kaikki viestit?

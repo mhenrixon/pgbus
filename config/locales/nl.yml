@@ -315,8 +315,10 @@ nl:
           payload: Inhoud
           reads: Lezingen
           vt: VT
+        message_discard_failed: Kon bericht niet verwerpen.
         message_discarded: Bericht verworpen.
         message_retried: Zichtbaarheid van bericht gereset.
+        message_retry_failed: Kon bericht niet opnieuw proberen.
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren?
         purge_confirm: Alle berichten verwijderen?
