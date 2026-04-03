@@ -99,5 +99,18 @@ RSpec.describe "Queues", type: :system do
       expect(page).to have_text("42")
       expect(page).to have_text("3") # read_ct
     end
+
+    it "shows discard and retry buttons for each message" do
+      @stub_data_source.jobs_list = [
+        { msg_id: 42, queue_name: "pgbus_default", read_ct: 0,
+          enqueued_at: Time.now.utc.iso8601, vt: Time.now.utc.iso8601,
+          message: '{"job_class":"TestJob"}' }
+      ]
+
+      visit "/pgbus/queues/pgbus_default"
+
+      expect(page).to have_button("Discard", count: 1)
+      expect(page).to have_button("Retry", count: 1)
+    end
   end
 end

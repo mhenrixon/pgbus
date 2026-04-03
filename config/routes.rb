@@ -8,6 +8,8 @@ Pgbus::Engine.routes.draw do
       post :purge
       post :pause
       post :resume
+      post :retry_message
+      post :discard_message
     end
   end
 

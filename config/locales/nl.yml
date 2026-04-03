@@ -177,6 +177,10 @@ nl:
           timezone: 'Tijdzone:'
           visible_at: 'Zichtbaar op:'
         title: Taken in de wachtrij
+        discard: Verwerpen
+        discard_confirm: Dit bericht verwerpen?
+        retry: Opnieuw proberen
+        retry_confirm: Zichtbaarheidstimeout resetten en opnieuw proberen?
       failed_table:
         discard: Verwijderen
         discard_confirm: Deze taak verwijderen?
@@ -301,18 +305,25 @@ nl:
         delete_confirm: Deze wachtrij permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         delete_queue: Wachtrij verwijderen
         depth: 'Diepte:'
+        discard: Verwerpen
+        discard_confirm: Dit bericht verwerpen?
         empty: Wachtrij is leeg
         headers:
+          actions: Acties
           enqueued: In de wachtrij geplaatst
           id: ID
           payload: Inhoud
           reads: Lezingen
           vt: VT
+        message_discarded: Bericht verworpen.
+        message_retried: Zichtbaarheid van bericht gereset.
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren?
         purge_confirm: Alle berichten verwijderen?
         purge_queue: Wachtrij opschonen
         resume: Hervatten
+        retry: Opnieuw proberen
+        retry_confirm: Zichtbaarheidstimeout resetten en opnieuw proberen?
         total: 'Totaal:'
         visible: 'Zichtbaar:'
     recurring_tasks:

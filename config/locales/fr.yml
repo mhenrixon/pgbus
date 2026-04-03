@@ -177,6 +177,10 @@ fr:
           timezone: 'Fuseau horaire :'
           visible_at: 'Visible à :'
         title: Travaux en file d'attente
+        discard: Rejeter
+        discard_confirm: Rejeter ce message ?
+        retry: Réessayer
+        retry_confirm: Réinitialiser le délai de visibilité et réessayer ?
       failed_table:
         discard: Ignorer
         discard_confirm: Ignorer ce travail ?
@@ -301,18 +305,25 @@ fr:
         delete_confirm: Supprimer définitivement cette file d'attente ? Cette action est irréversible.
         delete_queue: Supprimer la file d'attente
         depth: 'Profondeur :'
+        discard: Rejeter
+        discard_confirm: Rejeter ce message ?
         empty: La file d'attente est vide
         headers:
+          actions: Actions
           enqueued: Enregistré
           id: ID
           payload: Charge utile
           reads: Lectures
           vt: VT
+        message_discarded: Message rejeté.
+        message_retried: Visibilité du message réinitialisée.
         pause: Pause
         pause_confirm: Mettre en pause le traitement ?
         purge_confirm: Purger tous les messages ?
         purge_queue: Purger la file d'attente
         resume: Reprendre
+        retry: Réessayer
+        retry_confirm: Réinitialiser le délai de visibilité et réessayer ?
         total: 'Total :'
         visible: 'Visible :'
     recurring_tasks:

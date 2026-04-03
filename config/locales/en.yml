@@ -176,6 +176,10 @@ en:
           scheduled: 'Scheduled:'
           timezone: 'Timezone:'
           visible_at: 'Visible at:'
+        discard: Discard
+        discard_confirm: Discard this message?
+        retry: Retry
+        retry_confirm: Reset visibility timeout and retry?
         title: Enqueued Jobs
       failed_table:
         discard: Discard
@@ -301,18 +305,25 @@ en:
         delete_confirm: Permanently delete this queue? This cannot be undone.
         delete_queue: Delete Queue
         depth: 'Depth:'
+        discard: Discard
+        discard_confirm: Discard this message?
         empty: Queue is empty
         headers:
+          actions: Actions
           enqueued: Enqueued
           id: ID
           payload: Payload
           reads: Reads
           vt: VT
+        message_discarded: Message discarded.
+        message_retried: Message visibility reset.
         pause: Pause
         pause_confirm: Pause processing?
         purge_confirm: Purge all messages?
         purge_queue: Purge Queue
         resume: Resume
+        retry: Retry
+        retry_confirm: Reset visibility timeout and retry?
         total: 'Total:'
         visible: 'Visible:'
     recurring_tasks:

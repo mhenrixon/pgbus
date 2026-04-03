@@ -177,6 +177,10 @@ sv:
           timezone: 'Tidszon:'
           visible_at: 'Synlig vid:'
         title: Köade jobb
+        discard: Kassera
+        discard_confirm: Kassera detta meddelande?
+        retry: Försök igen
+        retry_confirm: Återställ synlighetstimeout och försök igen?
       failed_table:
         discard: Kassera
         discard_confirm: Kassera detta jobb?
@@ -301,18 +305,25 @@ sv:
         delete_confirm: Ta bort denna kö permanent? Detta kan inte ångras.
         delete_queue: Ta bort kö
         depth: 'Djup:'
+        discard: Kassera
+        discard_confirm: Kassera detta meddelande?
         empty: Kön är tom
         headers:
+          actions: Åtgärder
           enqueued: Inlagd
           id: ID
           payload: Innehåll
           reads: Läsningar
           vt: VT
+        message_discarded: Meddelande kasserat.
+        message_retried: Meddelandets synlighet återställd.
         pause: Pausa
         pause_confirm: Pausa bearbetning?
         purge_confirm: Rensa alla meddelanden?
         purge_queue: Rensa kö
         resume: Återuppta
+        retry: Försök igen
+        retry_confirm: Återställ synlighetstimeout och försök igen?
         total: 'Totalt:'
         visible: 'Synliga:'
     recurring_tasks:

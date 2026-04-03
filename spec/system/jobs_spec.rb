@@ -61,5 +61,15 @@ RSpec.describe "Jobs", type: :system do
       expect(page).to have_text("42")
       expect(page).to have_text("TestJob")
     end
+
+    it "shows discard and retry buttons in expanded row" do
+      visit "/pgbus/jobs"
+
+      # Expand the details row
+      find("details summary").click
+
+      expect(page).to have_button("Discard")
+      expect(page).to have_button("Retry")
+    end
   end
 end

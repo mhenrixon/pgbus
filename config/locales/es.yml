@@ -177,6 +177,10 @@ es:
           timezone: 'Zona horaria:'
           visible_at: 'Visible en:'
         title: Trabajos en Cola
+        discard: Descartar
+        discard_confirm: "¿Descartar este mensaje?"
+        retry: Reintentar
+        retry_confirm: "¿Restablecer tiempo de visibilidad y reintentar?"
       failed_table:
         discard: Descartar
         discard_confirm: "¿Descartar este trabajo?"
@@ -301,18 +305,25 @@ es:
         delete_confirm: "¿Eliminar permanentemente esta cola? Esto no se puede deshacer."
         delete_queue: Eliminar cola
         depth: 'Profundidad:'
+        discard: Descartar
+        discard_confirm: "¿Descartar este mensaje?"
         empty: La cola está vacía
         headers:
+          actions: Acciones
           enqueued: Encolado
           id: ID
           payload: Carga útil
           reads: Lecturas
           vt: VT
+        message_discarded: Mensaje descartado.
+        message_retried: Visibilidad del mensaje restablecida.
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento?"
         purge_confirm: "¿Purgar todos los mensajes?"
         purge_queue: Purgar cola
         resume: Reanudar
+        retry: Reintentar
+        retry_confirm: "¿Restablecer tiempo de visibilidad y reintentar?"
         total: 'Total:'
         visible: 'Visible:'
     recurring_tasks:

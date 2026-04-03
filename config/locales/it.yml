@@ -177,6 +177,10 @@ it:
           timezone: 'Fuso orario:'
           visible_at: 'Visibile alle:'
         title: Lavori in coda
+        discard: Scarta
+        discard_confirm: Scartare questo messaggio?
+        retry: Riprova
+        retry_confirm: Reimpostare il timeout di visibilità e riprovare?
       failed_table:
         discard: Scarta
         discard_confirm: Scartare questo lavoro?
@@ -301,18 +305,25 @@ it:
         delete_confirm: Eliminare permanentemente questa coda? Questa azione non può essere annullata.
         delete_queue: Elimina coda
         depth: 'Profondità:'
+        discard: Scarta
+        discard_confirm: Scartare questo messaggio?
         empty: La coda è vuota
         headers:
+          actions: Azioni
           enqueued: In coda
           id: ID
           payload: Carico utile
           reads: Letture
           vt: VT
+        message_discarded: Messaggio scartato.
+        message_retried: Visibilità del messaggio reimpostata.
         pause: Pausa
         pause_confirm: Mettere in pausa l'elaborazione?
         purge_confirm: Eliminare tutti i messaggi?
         purge_queue: Pulisci coda
         resume: Riprendi
+        retry: Riprova
+        retry_confirm: Reimpostare il timeout di visibilità e riprovare?
         total: 'Totale:'
         visible: 'Visibile:'
     recurring_tasks:

@@ -46,6 +46,7 @@
         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.reads") %></th>
         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.vt") %></th>
         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.payload") %></th>
+        <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.show.headers.actions") %></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
@@ -58,10 +59,20 @@
           <td class="px-4 py-3 text-sm text-gray-600 font-mono text-xs max-w-md truncate">
             <%= pgbus_json_preview(m[:message]) %>
           </td>
+          <td class="px-4 py-3 text-sm text-right space-x-1 whitespace-nowrap">
+            <%= button_to t("pgbus.queues.show.retry"), pgbus.retry_message_queue_path(name: params[:name], msg_id: m[:msg_id]),
+                  method: :post,
+                  class: "text-xs text-indigo-600 hover:text-indigo-800 font-medium",
+                  data: { turbo_confirm: t("pgbus.queues.show.retry_confirm") } %>
+            <%= button_to t("pgbus.queues.show.discard"), pgbus.discard_message_queue_path(name: params[:name], msg_id: m[:msg_id]),
+                  method: :post,
+                  class: "text-xs text-red-600 hover:text-red-800 font-medium",
+                  data: { turbo_confirm: t("pgbus.queues.show.discard_confirm") } %>
+          </td>
         </tr>
       <% end %>
       <% if @messages.empty? %>
-        <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.queues.show.empty") %></td></tr>
+        <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.queues.show.empty") %></td></tr>
       <% end %>
     </tbody>
   </table>

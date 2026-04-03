@@ -177,6 +177,10 @@ nb:
           timezone: 'Tidssone:'
           visible_at: 'Synlig fra:'
         title: Kølagte jobber
+        discard: Forkast
+        discard_confirm: Forkaste denne meldingen?
+        retry: Prøv igjen
+        retry_confirm: Tilbakestill synlighetstidsavbrudd og prøv igjen?
       failed_table:
         discard: Forkast
         discard_confirm: Forkast denne jobben?
@@ -301,18 +305,25 @@ nb:
         delete_confirm: Slette denne køen permanent? Dette kan ikke angres.
         delete_queue: Slett kø
         depth: 'Dybde:'
+        discard: Forkast
+        discard_confirm: Forkaste denne meldingen?
         empty: Køen er tom
         headers:
+          actions: Handlinger
           enqueued: I kø
           id: ID
           payload: Innhold
           reads: Lesninger
           vt: VT
+        message_discarded: Melding forkastet.
+        message_retried: Meldingens synlighet tilbakestilt.
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle meldinger?
         purge_queue: Rens kø
         resume: Gjenoppta
+        retry: Prøv igjen
+        retry_confirm: Tilbakestill synlighetstidsavbrudd og prøv igjen?
         total: 'Totalt:'
         visible: 'Synlig:'
     recurring_tasks:
