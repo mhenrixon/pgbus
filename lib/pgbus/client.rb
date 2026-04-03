@@ -210,8 +210,9 @@ module Pgbus
       synchronized { @pgmq.list_queues }
     end
 
-    def purge_queue(queue_name)
-      synchronized { @pgmq.purge_queue(config.queue_name(queue_name)) }
+    def purge_queue(queue_name, prefixed: true)
+      name = prefixed ? config.queue_name(queue_name) : queue_name
+      synchronized { @pgmq.purge_queue(name) }
     end
 
     def purge_archive(queue_name, older_than:, batch_size: 1000)

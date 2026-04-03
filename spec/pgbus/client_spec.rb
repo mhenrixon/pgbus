@@ -423,6 +423,12 @@ RSpec.describe Pgbus::Client do
 
       expect(mock_pgmq).to have_received(:purge_queue).with("pgbus_test_default")
     end
+
+    it "skips prefixing when prefixed: false" do
+      client.purge_queue("pgbus_test_default", prefixed: false)
+
+      expect(mock_pgmq).to have_received(:purge_queue).with("pgbus_test_default")
+    end
   end
 
   describe "#purge_archive" do

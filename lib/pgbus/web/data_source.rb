@@ -57,7 +57,7 @@ module Pgbus
       end
 
       def purge_queue(name)
-        @client.purge_queue(name)
+        @client.purge_queue(name, prefixed: false)
       end
 
       def pause_queue(name, reason: nil)

@@ -90,6 +90,16 @@ RSpec.describe Pgbus::Web::DataSource do
     end
   end
 
+  describe "#purge_queue" do
+    it "passes the queue name directly without re-prefixing" do
+      allow(mock_client).to receive(:purge_queue)
+
+      data_source.purge_queue("pgbus_default")
+
+      expect(mock_client).to have_received(:purge_queue).with("pgbus_default", prefixed: false)
+    end
+  end
+
   describe "#registered_subscribers" do
     it "returns subscriber info from registry" do
       handler_class = Class.new(Pgbus::EventBus::Handler)
