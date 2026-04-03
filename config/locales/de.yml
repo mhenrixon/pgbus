@@ -217,6 +217,7 @@ de:
         processes: Prozesse
         queues: Warteschlangen
         recurring: Wiederkehrend
+      return_to_app: Zurück zur App
       title: Pgbus Dashboard
       toggle_dark_mode: Dunkelmodus umschalten
     locks:

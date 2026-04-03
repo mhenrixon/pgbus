@@ -217,6 +217,7 @@ sv:
         processes: Processer
         queues: Köer
         recurring: Återkommande
+      return_to_app: Tillbaka till appen
       title: Pgbus-instrumentpanel
       toggle_dark_mode: Växla mörkt läge
     locks:

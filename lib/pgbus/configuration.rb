@@ -64,7 +64,7 @@ module Pgbus
 
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
-                  :insights_default_minutes, :base_controller_class
+                  :insights_default_minutes, :base_controller_class, :return_to_app_url
 
     def initialize
       @database_url = nil
@@ -137,6 +137,7 @@ module Pgbus
       @web_data_source = nil
       @insights_default_minutes = 30 * 24 * 60 # 30 days
       @base_controller_class = "::ActionController::Base"
+      @return_to_app_url = nil
     end
 
     def queue_name(name)

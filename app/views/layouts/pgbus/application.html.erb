@@ -62,10 +62,19 @@
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div class="flex h-14 items-center justify-between">
           <div class="flex items-center space-x-8">
-            <%= link_to pgbus.root_path, class: "flex items-center space-x-2" do %>
-              <span class="text-lg font-bold text-white"><%= t("pgbus.layout.brand") %></span>
-              <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300"><%= Pgbus::VERSION %></span>
-            <% end %>
+            <div class="flex items-center space-x-3">
+              <% if Pgbus.configuration.return_to_app_url %>
+                <a href="<%= Pgbus.configuration.return_to_app_url %>" class="rounded-md p-1.5 text-gray-400 hover:text-white hover:bg-gray-700" title="<%= t("pgbus.layout.return_to_app") %>">
+                  <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/>
+                  </svg>
+                </a>
+              <% end %>
+              <%= link_to pgbus.root_path, class: "flex items-center space-x-2" do %>
+                <span class="text-lg font-bold text-white"><%= t("pgbus.layout.brand") %></span>
+                <span class="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-300"><%= Pgbus::VERSION %></span>
+              <% end %>
+            </div>
 
             <div class="flex space-x-1">
               <%= pgbus_nav_link t("pgbus.layout.nav.dashboard"), pgbus.root_path %>

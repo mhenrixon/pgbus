@@ -217,6 +217,7 @@ da:
         processes: Processer
         queues: Køer
         recurring: Gentagende
+      return_to_app: Tilbage til app
       title: Pgbus Dashboard
       toggle_dark_mode: Skift til mørk tilstand
     locks:

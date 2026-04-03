@@ -217,6 +217,7 @@ en:
         processes: Processes
         queues: Queues
         recurring: Recurring
+      return_to_app: Back to app
       title: Pgbus Dashboard
       toggle_dark_mode: Toggle dark mode
     locks:

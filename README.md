@@ -231,6 +231,14 @@ end
 
 When `base_controller_class` is set, all dashboard controllers inherit from that class instead of `ActionController::Base`. This is the recommended approach when mounting the dashboard inside an authenticated namespace -- your base controller's `before_action` filters, helper methods, and authentication logic apply automatically without monkey-patching.
 
+Add a "back to app" button in the dashboard nav to return to your main application:
+
+```ruby
+Pgbus.configure do |config|
+  config.return_to_app_url = "/admin"
+end
+```
+
 ## Concurrency controls
 
 Limit how many jobs with the same key can run concurrently:
@@ -635,6 +643,7 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `outbox_retention` | `86400` | Seconds to keep published outbox entries (1 day) |
 | `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
 | `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
+| `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |

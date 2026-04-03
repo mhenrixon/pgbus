@@ -217,6 +217,7 @@ nl:
         processes: Processen
         queues: Wachtrijen
         recurring: Terugkerend
+      return_to_app: Terug naar app
       title: Pgbus Dashboard
       toggle_dark_mode: Donkere modus schakelen
     locks:

@@ -217,6 +217,7 @@ fi:
         processes: Prosessit
         queues: Jonot
         recurring: Toistuva
+      return_to_app: Takaisin sovellukseen
       title: Pgbus-hallintapaneeli
       toggle_dark_mode: Vaihda tumma tila
     locks:
