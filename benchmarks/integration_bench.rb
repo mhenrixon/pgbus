@@ -7,6 +7,7 @@
 require "benchmark/ips"
 require "memory_profiler"
 require "json"
+require "uri"
 require "securerandom"
 require "active_record"
 require "active_job"
@@ -18,7 +19,12 @@ DATABASE_URL = ENV.fetch("PGBUS_DATABASE_URL") do
   abort "PGBUS_DATABASE_URL not set. Example: postgres://pgbus:pgbus@localhost:5432/pgbus_test"
 end
 
-ActiveRecord::Base.establish_connection("#{DATABASE_URL}?pool=20")
+# Merge pool size safely via URI parsing to avoid breaking URLs with existing query params.
+parsed_url = URI.parse(DATABASE_URL)
+params = URI.decode_www_form(parsed_url.query || "").to_h
+params["pool"] = "20"
+parsed_url.query = URI.encode_www_form(params)
+ActiveRecord::Base.establish_connection(parsed_url.to_s)
 
 Pgbus.configure do |c|
   c.database_url = DATABASE_URL
@@ -106,17 +112,21 @@ end
 
 # ─── Helpers ───
 
+# Define the message struct once to avoid per-call anonymous class allocation.
+BenchMessage = Struct.new(:msg_id, :message, :read_ct, :headers, :enqueued_at)
+
 def purge_queue!
   Pgbus.client.purge_queue("default")
   Pgbus::JobLock.delete_all
-rescue StandardError
-  nil
+rescue StandardError => e
+  warn "[bench] purge_queue! failed: #{e.class}: #{e.message}"
 end
 
-def build_message(payload_hash)
-  json = JSON.generate(payload_hash)
-  Struct.new(:msg_id, :message, :read_ct, :headers, :enqueued_at)
-        .new(1, json, 1, nil, Time.now.utc.iso8601)
+# Enqueue a message and read it back as a real PGMQ message object.
+# This exercises the full DB path: INSERT → SELECT FOR UPDATE SKIP LOCKED.
+def enqueue_and_read(client, payload)
+  client.send_message("default", payload)
+  client.read_batch("default", qty: 1, vt: 300).first
 end
 
 client = Pgbus.client
@@ -188,45 +198,43 @@ end
 purge_queue!
 
 # ═══════════════════════════════════════════════════════════════════════
-# 3. Execute throughput (read → deserialize → perform → archive)
+# 3. Execute throughput (enqueue → read → deserialize → perform → archive)
 # ═══════════════════════════════════════════════════════════════════════
 
 puts "\n--- Executor#execute (full path, real DB) ---"
 
-# Pre-enqueue messages to read back
+# Build payloads
 plain_payload = PlainBenchJob.new(42).serialize
-plain_msg = build_message(plain_payload)
 
 ue_payload = UniqueUntilExecutedJob.new(42).serialize
 ue_payload[Pgbus::Uniqueness::METADATA_KEY] = "bench-exec-ue"
 ue_payload[Pgbus::Uniqueness::STRATEGY_KEY] = "until_executed"
 ue_payload[Pgbus::Uniqueness::TTL_KEY] = 3600
-ue_msg = build_message(ue_payload)
 
 we_payload = UniqueWhileExecutingJob.new(42).serialize
 we_payload[Pgbus::Uniqueness::METADATA_KEY] = "bench-exec-we"
 we_payload[Pgbus::Uniqueness::STRATEGY_KEY] = "while_executing"
 we_payload[Pgbus::Uniqueness::TTL_KEY] = 3600
-we_msg = build_message(we_payload)
 
 Benchmark.ips do |x|
   x.config(time: 5, warmup: 2)
 
   x.report("execute: plain job") do
-    executor.execute(plain_msg, "default")
+    msg = enqueue_and_read(client, plain_payload)
+    executor.execute(msg, "default")
   end
 
   x.report("execute: until_executed") do
-    # Ensure lock exists for claim_for_execution
     Pgbus::JobLock.acquire!("bench-exec-ue", job_class: "UniqueUntilExecutedJob",
                                              job_id: "b1", state: "queued", ttl: 3600)
-    executor.execute(ue_msg, "default")
+    msg = enqueue_and_read(client, ue_payload)
+    executor.execute(msg, "default")
   end
 
   x.report("execute: while_executing") do
-    # Release any prior lock so acquire succeeds
     Pgbus::JobLock.release!("bench-exec-we")
-    executor.execute(we_msg, "default")
+    msg = enqueue_and_read(client, we_payload)
+    executor.execute(msg, "default")
   end
 
   x.compare!
@@ -291,8 +299,8 @@ puts "\n--- Memory: 500 enqueue+execute cycles (plain) ---"
 purge_queue!
 report = MemoryProfiler.report do
   500.times do
-    client.send_message("default", plain_payload)
-    executor.execute(plain_msg, "default")
+    msg = enqueue_and_read(client, plain_payload)
+    executor.execute(msg, "default")
   end
 end
 puts "Total allocated: #{report.total_allocated_memsize} bytes (#{report.total_allocated} objects)"
@@ -307,8 +315,7 @@ report = MemoryProfiler.report do
     payload = ue_payload.merge(Pgbus::Uniqueness::METADATA_KEY => key)
     Pgbus::JobLock.acquire!(key, job_class: "UniqueUntilExecutedJob", job_id: "m#{i}",
                                  state: "queued", ttl: 3600)
-    client.send_message("default", payload)
-    msg = build_message(payload)
+    msg = enqueue_and_read(client, payload)
     executor.execute(msg, "default")
   end
 end
