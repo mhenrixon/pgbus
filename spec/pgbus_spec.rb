@@ -25,6 +25,24 @@ RSpec.describe Pgbus do
     end
   end
 
+  describe ".logger" do
+    it "reads from configuration" do
+      expect(described_class.logger).to eq(described_class.configuration.logger)
+    end
+  end
+
+  describe ".logger=" do
+    it "writes to configuration" do
+      custom_logger = Logger.new(IO::NULL)
+      original = described_class.configuration.logger
+
+      described_class.logger = custom_logger
+      expect(described_class.configuration.logger).to be(custom_logger)
+    ensure
+      described_class.configuration.logger = original
+    end
+  end
+
   describe ".reset!" do
     it "clears configuration" do
       old_config = described_class.configuration
