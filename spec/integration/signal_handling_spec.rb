@@ -214,22 +214,18 @@ RSpec.describe "Signal handling (integration)", :integration do
       marker_path = marker.path
       marker.close!
 
-      # Separate file to signal "job started" so we don't rely on sleep
-      started = Tempfile.new("pgbus_signal_started")
-      started_path = started.path
-      started.close!
-
       # Enqueue a "job" with a marker path
       payload = {
         "job_class" => "TestJob",
         "job_id" => SecureRandom.uuid,
         "arguments" => [],
-        "marker_path" => marker_path,
-        "started_path" => started_path
+        "marker_path" => marker_path
       }
       client.send_message("default", payload)
 
+      read_pipe, write_pipe = IO.pipe
       worker_pid = fork_with_fresh_connections do
+        read_pipe.close
         Pgbus.reset_client!
         ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
 
@@ -239,36 +235,37 @@ RSpec.describe "Signal handling (integration)", :integration do
           config: Pgbus.configuration
         )
 
-        # Override process_message to simulate work and write marker
-        worker.define_singleton_method(:process_message) do |message, queue_name, _source_queue: nil|
+        # Override process_message to write marker instead of running ActiveJob.
+        # Must accept source_queue: keyword to match the call site in claim_and_execute.
+        worker.define_singleton_method(:process_message) do |message, queue_name, **_kwargs|
           parsed = begin
             JSON.parse(message.message)
           rescue StandardError
             {}
           end
           if parsed["marker_path"]
-            # Signal that the job started processing
-            File.write(parsed["started_path"], "started") if parsed["started_path"]
+            write_pipe.write("J") # Signal job picked up
+            write_pipe.flush
             sleep 1 # Simulate work — long enough for parent to send SIGTERM
             File.write(parsed["marker_path"], "completed")
           end
-          # Archive the message
           Pgbus.client.archive_message(queue_name, message.msg_id)
+        rescue StandardError => e
+          warn "[child] process_message error: #{e.class}: #{e.message}"
+        ensure
+          @in_flight&.decrement # rubocop:disable RSpec/InstanceVariable
         end
 
         worker.run
+        write_pipe.close
       end
 
-      # Wait for the worker to actually pick up the job (poll for started file)
-      started_seen = false
-      20.times do
-        if File.exist?(started_path)
-          started_seen = true
-          break
-        end
-        sleep 0.5
-      end
-      expect(started_seen).to be(true), "Worker did not pick up the job within 10s"
+      write_pipe.close
+
+      # Wait for the worker to pick up the job via pipe
+      job_started = read_pipe.wait_readable(15)
+      expect(job_started).to be_truthy, "Worker did not pick up the job within 15s"
+      expect(read_pipe.read(1)).to eq("J")
 
       # Send SIGTERM while job is in-flight (worker is sleeping 1s)
       Process.kill("TERM", worker_pid)
@@ -276,6 +273,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       Timeout.timeout(15) do
         Process.waitpid2(worker_pid)
       end
+      read_pipe.close
 
       # The marker file should exist with expected content if the job completed
       expect(File.exist?(marker_path)).to be true
@@ -283,7 +281,6 @@ RSpec.describe "Signal handling (integration)", :integration do
     ensure
       force_kill(worker_pid) if worker_pid
       File.delete(marker_path) if marker_path && File.exist?(marker_path)
-      File.delete(started_path) if started_path && File.exist?(started_path)
     end
   end
 end
