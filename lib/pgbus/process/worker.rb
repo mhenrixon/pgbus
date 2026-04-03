@@ -194,7 +194,7 @@ module Pgbus
 
       # Resolve "*" to all non-DLQ queues from pgmq.meta, stripping the prefix.
       def resolve_wildcard_queues
-        return unless @queues.include?("*") || @wildcard
+        return unless @wildcard
 
         dlq_suffix = config.dead_letter_queue_suffix
         prefix = "#{config.queue_prefix}_"
@@ -215,7 +215,7 @@ module Pgbus
           @queues = resolved
           Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" } unless @last_wildcard_resolve
         end
-        @last_wildcard_resolve = Time.now
+        @last_wildcard_resolve = monotonic_now
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
         @queues = [config.default_queue] unless @last_wildcard_resolve
@@ -225,7 +225,7 @@ module Pgbus
       # drop deleted ones without requiring a worker restart.
       def refresh_wildcard_queues
         return unless @wildcard
-        return if @last_wildcard_resolve && (Time.now - @last_wildcard_resolve) < WILDCARD_REFRESH_INTERVAL
+        return if @last_wildcard_resolve && (monotonic_now - @last_wildcard_resolve) < WILDCARD_REFRESH_INTERVAL
 
         resolve_wildcard_queues
       end
@@ -321,6 +321,10 @@ module Pgbus
         @heartbeat&.stop
         restore_signals
         Pgbus.logger.info { "[Pgbus] Worker stopped. Processed: #{@jobs_processed.value}, Failed: #{@jobs_failed.value}" }
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
     end
   end

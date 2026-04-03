@@ -348,7 +348,7 @@ RSpec.describe Pgbus::Process::Worker do
       expect(worker.queues).to eq(%w[default events])
 
       # Simulate time passing and queues changing
-      worker.instance_variable_set(:@last_wildcard_resolve, Time.now - 60)
+      worker.instance_variable_set(:@last_wildcard_resolve, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 60)
       allow(conn).to receive(:select_values).and_return(["#{prefix}_default"])
       worker.send(:refresh_wildcard_queues)
       expect(worker.queues).to eq(%w[default])
