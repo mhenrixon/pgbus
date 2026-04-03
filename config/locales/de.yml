@@ -179,6 +179,8 @@ de:
         title: Eingereihte Jobs
         discard: Verwerfen
         discard_confirm: Diese Nachricht verwerfen?
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle eingereihten Jobs verwerfen und ihre Sperren freigeben? Dies kann nicht rückgängig gemacht werden.
         retry: Wiederholen
         retry_confirm: Sichtbarkeits-Timeout zurücksetzen und erneut versuchen?
       failed_table:
@@ -197,6 +199,7 @@ de:
       index:
         discard_all: Alle verwerfen
         discard_all_confirm: Alle fehlgeschlagenen Jobs verwerfen?
+        discard_all_enqueued_notice: "%{count} eingereihte Jobs verworfen und Sperren freigegeben."
         retry_all: Alle wiederholen
         retry_all_confirm: Alle fehlgeschlagenen Jobs wiederholen?
         title: Jobs

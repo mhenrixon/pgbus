@@ -189,6 +189,23 @@ jobs:
                 ON pgbus_recurring_executions (task_key, run_at);
               CREATE INDEX IF NOT EXISTS idx_pgbus_recurring_executions_cleanup
                 ON pgbus_recurring_executions (run_at);
+
+              CREATE TABLE IF NOT EXISTS pgbus_failed_events (
+                id BIGSERIAL PRIMARY KEY,
+                queue_name VARCHAR NOT NULL,
+                msg_id BIGINT,
+                payload JSONB,
+                headers JSONB,
+                error_class VARCHAR,
+                error_message TEXT,
+                backtrace TEXT,
+                retry_count INTEGER DEFAULT 0,
+                failed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+              CREATE INDEX IF NOT EXISTS idx_pgbus_failed_events_queue
+                ON pgbus_failed_events (queue_name);
+              CREATE INDEX IF NOT EXISTS idx_pgbus_failed_events_time
+                ON pgbus_failed_events (failed_at);
             SQL
             conn.close
           "

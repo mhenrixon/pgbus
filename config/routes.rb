@@ -21,6 +21,7 @@ Pgbus::Engine.routes.draw do
     collection do
       post :retry_all
       post :discard_all
+      post :discard_all_enqueued
     end
   end
 

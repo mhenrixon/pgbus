@@ -65,7 +65,11 @@ end
 
 def cleanup_tables
   conn = ActiveRecord::Base.connection
-  %w[pgbus_semaphores pgbus_blocked_executions pgbus_job_locks pgbus_processes pgbus_recurring_executions].each do |table|
+  tables = %w[
+    pgbus_semaphores pgbus_blocked_executions pgbus_job_locks
+    pgbus_processes pgbus_recurring_executions pgbus_failed_events
+  ]
+  tables.each do |table|
     conn.execute("DELETE FROM #{table}")
   end
 rescue StandardError => e

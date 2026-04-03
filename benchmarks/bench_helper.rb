@@ -30,6 +30,8 @@ module BenchStubs
       client.instance_variable_set(:@pgmq_mutex, Mutex.new)
       client.instance_variable_set(:@queues_created, Concurrent::Map.new.tap { |m| m["pgbus_bench_default"] = true })
       client.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
+      client.instance_variable_set(:@schema_ensured, true)
+      client.instance_variable_set(:@shared_connection, false)
     end
   end
 

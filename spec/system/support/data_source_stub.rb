@@ -47,6 +47,7 @@ module Pgbus
       def discard_failed_event(id)   = record(:discard_failed_event, id)
       def retry_all_failed           = record(:retry_all_failed) && @failed_events_list.size
       def discard_all_failed         = record(:discard_all_failed) && @failed_events_list.size
+      def discard_all_enqueued       = record(:discard_all_enqueued) && @jobs_list.size
       def retry_dlq_message(queue_name, msg_id) = record(:retry_dlq_message, queue_name, msg_id)
       def discard_dlq_message(queue_name, msg_id) = record(:discard_dlq_message, queue_name, msg_id)
       def retry_all_dlq              = record(:retry_all_dlq) && @dlq_messages_list.size

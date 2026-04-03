@@ -179,6 +179,8 @@ ja:
         title: キューに入れられたジョブ
         discard: 破棄
         discard_confirm: このメッセージを破棄しますか？
+        discard_all: すべて破棄
+        discard_all_confirm: キュー内のすべてのジョブを破棄し、ロックを解放しますか？この操作は元に戻せません。
         retry: リトライ
         retry_confirm: 可視性タイムアウトをリセットしてリトライしますか？
       failed_table:
@@ -197,6 +199,7 @@ ja:
       index:
         discard_all: すべて破棄
         discard_all_confirm: すべての失敗したジョブを破棄しますか？
+        discard_all_enqueued_notice: "%{count}件のキュー内ジョブを破棄し、ロックを解放しました。"
         retry_all: すべてリトライ
         retry_all_confirm: すべての失敗したジョブをリトライしますか？
         title: ジョブ

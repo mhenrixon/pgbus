@@ -113,7 +113,29 @@ module Pgbus
       end
 
       def discard_job(queue_name, msg_id)
+        release_lock_for_message(queue_name, msg_id)
         @client.archive_message(queue_name, msg_id.to_i, prefixed: false)
+      end
+
+      def discard_all_enqueued
+        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        queues = queues_with_metrics.reject { |q| q[:name].end_with?(dlq_suffix) }
+        total = 0
+
+        queues.each do |q|
+          messages = query_queue_messages_raw(q[:name], 10_000, 0)
+          next if messages.empty?
+
+          release_locks_for_messages(messages)
+
+          ids = messages.map { |m| m[:msg_id].to_i }
+          @client.archive_batch(q[:name], ids, prefixed: false)
+          total += ids.size
+        rescue StandardError => e
+          Pgbus.logger.debug { "[Pgbus::Web] Error discarding enqueued messages from #{q[:name]}: #{e.message}" }
+        end
+
+        total
       end
 
       # Failed events
@@ -170,6 +192,9 @@ module Pgbus
       end
 
       def discard_failed_event(id)
+        event = failed_event(id)
+        release_lock_for_payload(event["payload"]) if event
+
         connection.exec_delete(
           "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
         )
@@ -207,6 +232,8 @@ module Pgbus
       end
 
       def discard_all_failed
+        release_locks_for_failed_events
+
         result = connection.execute("DELETE FROM pgbus_failed_events")
         result.cmd_tuples
       rescue StandardError => e
@@ -273,6 +300,7 @@ module Pgbus
 
       def discard_dlq_message(queue_name, msg_id)
         # queue_name here is the full DLQ name (already prefixed)
+        release_lock_for_message(queue_name, msg_id)
         @client.delete_message(queue_name, msg_id.to_i, prefixed: false)
         true
       rescue StandardError => e
@@ -295,6 +323,8 @@ module Pgbus
       def discard_all_dlq
         messages = dlq_messages(page: 1, per_page: 1000)
         return 0 if messages.empty?
+
+        release_locks_for_messages(messages)
 
         # Group by queue for batch delete — one call per DLQ instead of N calls
         messages.group_by { |m| m[:queue_name] }.sum do |queue_name, msgs|
@@ -732,6 +762,69 @@ module Pgbus
       rescue JSON::ParserError => e
         Pgbus.logger.debug { "[Pgbus::Web] Invalid recurring task arguments JSON: #{e.message}" }
         []
+      end
+
+      # --- Lock cleanup helpers ---
+
+      # Extract uniqueness key from a queue message and release its lock.
+      def release_lock_for_message(queue_name, msg_id)
+        row = connection.select_one(
+          "SELECT * FROM pgmq.q_#{sanitize_name(queue_name)} WHERE msg_id = $1",
+          "Pgbus Job Detail",
+          [msg_id.to_i]
+        )
+        return unless row
+
+        release_lock_for_payload(row["message"])
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error releasing lock for message #{msg_id}: #{e.message}" }
+      end
+
+      # Extract uniqueness key from a JSON payload string and release its lock.
+      def release_lock_for_payload(payload_str)
+        return unless payload_str
+
+        payload = payload_str.is_a?(String) ? JSON.parse(payload_str) : payload_str
+        key = payload[Uniqueness::METADATA_KEY]
+        JobLock.release!(key) if key
+      rescue JSON::ParserError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error parsing payload for lock release: #{e.message}" }
+      end
+
+      # Extract uniqueness keys from a collection of formatted messages and
+      # release all associated locks in a single query.
+      def release_locks_for_messages(messages)
+        keys = messages.filter_map do |m|
+          payload = m[:message]
+          next unless payload
+
+          parsed = payload.is_a?(String) ? JSON.parse(payload) : payload
+          parsed[Uniqueness::METADATA_KEY]
+        rescue JSON::ParserError
+          nil
+        end
+
+        JobLock.where(lock_key: keys).delete_all if keys.any?
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for messages: #{e.message}" }
+      end
+
+      # Collect uniqueness keys from all failed events and release their locks.
+      def release_locks_for_failed_events
+        rows = connection.select_all(
+          "SELECT payload FROM pgbus_failed_events", "Pgbus Collect Failed Keys"
+        )
+
+        keys = rows.to_a.filter_map do |row|
+          payload = JSON.parse(row["payload"])
+          payload[Uniqueness::METADATA_KEY]
+        rescue JSON::ParserError
+          nil
+        end
+
+        JobLock.where(lock_key: keys).delete_all if keys.any?
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for failed events: #{e.message}" }
       end
     end
   end

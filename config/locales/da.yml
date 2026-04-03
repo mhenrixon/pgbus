@@ -179,6 +179,8 @@ da:
         title: Job i kø
         discard: Kassér
         discard_confirm: Kassér denne besked?
+        discard_all: Kassér alle
+        discard_all_confirm: Kassér alle ventende jobs og frigiv deres låse? Dette kan ikke fortrydes.
         retry: Prøv igen
         retry_confirm: Nulstil synlighedstimeout og prøv igen?
       failed_table:
@@ -197,6 +199,7 @@ da:
       index:
         discard_all: Kassér alle
         discard_all_confirm: Kassér alle mislykkede job?
+        discard_all_enqueued_notice: Kasserede %{count} ventende jobs og frigav deres låse.
         retry_all: Forsøg alle igen
         retry_all_confirm: Forsøg alle mislykkede job igen?
         title: Job

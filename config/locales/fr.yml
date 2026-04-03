@@ -179,6 +179,8 @@ fr:
         title: Travaux en file d'attente
         discard: Rejeter
         discard_confirm: Rejeter ce message ?
+        discard_all: Tout supprimer
+        discard_all_confirm: Supprimer tous les travaux en file d'attente et libérer leurs verrous ? Cette action est irréversible.
         retry: Réessayer
         retry_confirm: Réinitialiser le délai de visibilité et réessayer ?
       failed_table:
@@ -197,6 +199,7 @@ fr:
       index:
         discard_all: Tout ignorer
         discard_all_confirm: Ignorer tous les travaux échoués ?
+        discard_all_enqueued_notice: "%{count} travaux en file d'attente supprimés et verrous libérés."
         retry_all: Tout réessayer
         retry_all_confirm: Réessayer tous les travaux échoués ?
         title: Travaux

@@ -186,4 +186,124 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(data_source.toggle_recurring_task(99)).to be false
     end
   end
+
+  describe "#discard_job" do
+    it "archives the message and releases the uniqueness lock" do
+      allow(mock_client).to receive(:archive_message)
+
+      # Mock reading the message to extract uniqueness key
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"job_class":"ImportJob","pgbus_uniqueness_key":"import-42"}',
+                      "headers" => nil, "last_read_at" => nil
+                    })
+
+      allow(Pgbus::JobLock).to receive(:release!)
+
+      data_source.discard_job("pgbus_default", 42)
+
+      expect(mock_client).to have_received(:archive_message).with("pgbus_default", 42, prefixed: false)
+      expect(Pgbus::JobLock).to have_received(:release!).with("import-42")
+    end
+
+    it "does not release lock when message has no uniqueness key" do
+      allow(mock_client).to receive(:archive_message)
+
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"job_class":"PlainJob"}',
+                      "headers" => nil, "last_read_at" => nil
+                    })
+
+      allow(Pgbus::JobLock).to receive(:release!)
+
+      data_source.discard_job("pgbus_default", 42)
+
+      expect(Pgbus::JobLock).not_to have_received(:release!)
+    end
+  end
+
+  describe "#discard_failed_event" do
+    it "deletes the event and releases the uniqueness lock" do
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Failed Event", [1])
+        .and_return({
+                      "id" => 1,
+                      "payload" => '{"job_class":"FailedJob","pgbus_uniqueness_key":"failed-1"}'
+                    })
+
+      allow(mock_connection).to receive(:exec_delete)
+      allow(Pgbus::JobLock).to receive(:release!)
+
+      data_source.discard_failed_event(1)
+
+      expect(mock_connection).to have_received(:exec_delete)
+      expect(Pgbus::JobLock).to have_received(:release!).with("failed-1")
+    end
+  end
+
+  describe "#discard_all_failed" do
+    it "collects uniqueness keys before deleting and releases locks" do
+      allow(mock_connection).to receive(:select_all)
+        .with("SELECT payload FROM pgbus_failed_events", "Pgbus Collect Failed Keys")
+        .and_return([
+                      { "payload" => '{"pgbus_uniqueness_key":"k1"}' },
+                      { "payload" => '{"pgbus_uniqueness_key":"k2"}' },
+                      { "payload" => '{"job_class":"PlainJob"}' }
+                    ])
+
+      result_double = double("result", cmd_tuples: 3)
+      allow(mock_connection).to receive(:execute)
+        .with("DELETE FROM pgbus_failed_events")
+        .and_return(result_double)
+
+      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 2))
+
+      count = data_source.discard_all_failed
+
+      expect(count).to eq(3)
+      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: %w[k1 k2])
+    end
+  end
+
+  describe "#discard_all_enqueued" do
+    before do
+      allow(mock_connection).to receive(:select_values).and_return(["pgbus_default"])
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Queue Metrics")
+        .and_return({
+                      "queue_length" => 2, "queue_visible_length" => 2,
+                      "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil,
+                      "total_messages" => 10
+                    })
+
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus Queue Messages", anything)
+        .and_return([
+                      { "msg_id" => 1, "read_ct" => 0, "enqueued_at" => Time.now.to_s,
+                        "vt" => Time.now.to_s, "last_read_at" => nil, "headers" => nil,
+                        "message" => '{"job_class":"ImportJob","pgbus_uniqueness_key":"k1"}' },
+                      { "msg_id" => 2, "read_ct" => 0, "enqueued_at" => Time.now.to_s,
+                        "vt" => Time.now.to_s, "last_read_at" => nil, "headers" => nil,
+                        "message" => '{"job_class":"PlainJob"}' }
+                    ])
+
+      allow(mock_client).to receive(:archive_batch).and_return([1, 2])
+      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 1))
+    end
+
+    it "archives all messages from non-DLQ queues and releases locks" do
+      count = data_source.discard_all_enqueued
+
+      expect(count).to eq(2)
+      expect(mock_client).to have_received(:archive_batch).with("pgbus_default", [1, 2], prefixed: false)
+      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: ["k1"])
+    end
+  end
 end

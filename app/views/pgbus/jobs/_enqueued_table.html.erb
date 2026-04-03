@@ -1,6 +1,13 @@
 <turbo-frame id="jobs-enqueued" data-auto-refresh data-src="<%= pgbus.jobs_path(request.query_parameters.merge(frame: 'enqueued')) %>">
   <div>
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3"><%= t("pgbus.jobs.enqueued_table.title") %></h2>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-semibold text-gray-900 dark:text-white"><%= t("pgbus.jobs.enqueued_table.title") %></h2>
+      <% if @jobs.any? %>
+        <%= button_to t("pgbus.jobs.enqueued_table.discard_all"), pgbus.discard_all_enqueued_jobs_path, method: :post,
+              class: "rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500",
+              data: { turbo_confirm: t("pgbus.jobs.enqueued_table.discard_all_confirm"), turbo_frame: "_top" } %>
+      <% end %>
+    </div>
     <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
       <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead class="bg-gray-50 dark:bg-gray-900">

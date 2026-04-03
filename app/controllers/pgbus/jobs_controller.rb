@@ -44,5 +44,10 @@ module Pgbus
       count = data_source.discard_all_failed
       redirect_to jobs_path, notice: "Discarded #{count} jobs."
     end
+
+    def discard_all_enqueued
+      count = data_source.discard_all_enqueued
+      redirect_to jobs_path, notice: t("pgbus.jobs.index.discard_all_enqueued_notice", count: count)
+    end
   end
 end

@@ -179,6 +179,8 @@ fi:
         title: Jonotetut työt
         discard: Hylkää
         discard_confirm: Hylätä tämä viesti?
+        discard_all: Hylkää kaikki
+        discard_all_confirm: Hylkää kaikki jonossa olevat tehtävät ja vapauta lukot? Tätä ei voi perua.
         retry: Yritä uudelleen
         retry_confirm: Nollaa näkyvyysaika ja yritä uudelleen?
       failed_table:
@@ -197,6 +199,7 @@ fi:
       index:
         discard_all: Hylkää kaikki
         discard_all_confirm: Hylätäänkö kaikki epäonnistuneet työt?
+        discard_all_enqueued_notice: Hylättiin %{count} jonossa olevaa tehtävää ja vapautettiin lukot.
         retry_all: Yritä uudelleen kaikki
         retry_all_confirm: Yritetäänkö uudelleen kaikki epäonnistuneet työt?
         title: Työt

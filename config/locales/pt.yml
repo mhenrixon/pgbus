@@ -179,6 +179,8 @@ pt:
         title: Trabalhos Enfileirados
         discard: Descartar
         discard_confirm: Descartar esta mensagem?
+        discard_all: Descartar todos
+        discard_all_confirm: Descartar todos os trabalhos na fila e liberar seus bloqueios? Esta ação não pode ser desfeita.
         retry: Tentar novamente
         retry_confirm: Redefinir tempo de visibilidade e tentar novamente?
       failed_table:
@@ -197,6 +199,7 @@ pt:
       index:
         discard_all: Descartar Todos
         discard_all_confirm: Descartar todos os trabalhos falhados?
+        discard_all_enqueued_notice: Descartados %{count} trabalhos na fila e bloqueios liberados.
         retry_all: Tentar Novamente Todos
         retry_all_confirm: Tentar novamente todos os trabalhos falhados?
         title: Trabalhos

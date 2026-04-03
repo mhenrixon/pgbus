@@ -193,6 +193,8 @@ en:
           timezone: 'Timezone:'
           visible_at: 'Visible at:'
         discard: Discard
+        discard_all: Discard All
+        discard_all_confirm: Discard all enqueued jobs and release their locks? This cannot be undone.
         discard_confirm: Discard this message?
         retry: Retry
         retry_confirm: Reset visibility timeout and retry?
@@ -213,6 +215,7 @@ en:
       index:
         discard_all: Discard All
         discard_all_confirm: Discard all failed jobs?
+        discard_all_enqueued_notice: Discarded %{count} enqueued jobs and released their locks.
         retry_all: Retry All
         retry_all_confirm: Retry all failed jobs?
         title: Jobs

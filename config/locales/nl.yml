@@ -179,6 +179,8 @@ nl:
         title: Taken in de wachtrij
         discard: Verwerpen
         discard_confirm: Dit bericht verwerpen?
+        discard_all: Alles verwijderen
+        discard_all_confirm: Alle taken in de wachtrij verwijderen en hun vergrendelingen vrijgeven? Dit kan niet ongedaan worden gemaakt.
         retry: Opnieuw proberen
         retry_confirm: Zichtbaarheidstimeout resetten en opnieuw proberen?
       failed_table:
@@ -197,6 +199,7 @@ nl:
       index:
         discard_all: Alles Verwijderen
         discard_all_confirm: Alle mislukte taken verwijderen?
+        discard_all_enqueued_notice: "%{count} taken in de wachtrij verwijderd en vergrendelingen vrijgegeven."
         retry_all: Alles Opnieuw Proberen
         retry_all_confirm: Alle mislukte taken opnieuw proberen?
         title: Taken
