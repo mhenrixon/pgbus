@@ -1,7 +1,13 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class ApplicationController < ActionController::Base
+  class ApplicationController < Pgbus.configuration.base_controller_class.constantize
+    # Ensure core ActionController modules are available even when the
+    # base controller is a slim subclass that may not include them all.
+    ActionController::Base::MODULES.each do |mod|
+      include mod unless self < mod
+    end
+
     include Web::Authentication
 
     protect_from_forgery with: :exception
@@ -10,7 +16,7 @@ module Pgbus
 
     layout "pgbus/application"
 
-    helper Pgbus::ApplicationHelper
+    helper Pgbus::ApplicationHelper unless self < Pgbus::ApplicationHelper
 
     # Make `pgbus` route proxy available in views (e.g. pgbus.root_path).
     # With isolate_namespace, the non-prefixed helpers (root_path) work inside
