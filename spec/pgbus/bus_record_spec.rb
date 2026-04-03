@@ -12,11 +12,7 @@ RSpec.describe Pgbus::BusRecord do
     # BusRecord lives in lib/pgbus/, so it should be managed by
     # Zeitwerk's gem loader — not the separate models_loader that
     # depends on engine boot order.
-    source_file = Pgbus.loader.cpath(described_class.name)
+    source_file, = Object.const_source_location("Pgbus::BusRecord")
     expect(source_file).to end_with("lib/pgbus/bus_record.rb")
-  rescue NoMethodError
-    # Zeitwerk API varies by version; fall back to file existence check
-    path = File.expand_path("../../lib/pgbus/bus_record.rb", __dir__)
-    expect(File.exist?(path)).to be(true)
   end
 end
