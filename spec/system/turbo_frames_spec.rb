@@ -43,4 +43,17 @@ RSpec.describe "Turbo Frames", type: :system do
     expect(page).to have_css("turbo-frame#dashboard-stats")
     expect(page).not_to have_css("nav")
   end
+
+  it "has custom confirm dialog element" do
+    visit "/pgbus"
+
+    expect(page).to have_css("dialog#pgbus-confirm-dialog", visible: :hidden)
+    expect(page).to have_css("dialog#pgbus-alert-dialog", visible: :hidden)
+  end
+
+  it "has toast container" do
+    visit "/pgbus"
+
+    expect(page).to have_css("#pgbus-toast-container")
+  end
 end

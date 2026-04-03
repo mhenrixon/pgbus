@@ -1,6 +1,13 @@
 ---
 fr:
   pgbus:
+    dialogs:
+      cancel: Annuler
+      confirm: Confirmer
+      confirm_title: "Êtes-vous sûr ?"
+      delete: Supprimer
+      delete_title: Supprimer
+      ok: OK
     dashboard:
       processes_table:
         empty: Aucun processus en cours d'exécution
@@ -280,13 +287,19 @@ fr:
           queue: File d'attente
           total_ever: Total jamais
           visible: Visible
+        delete: Supprimer
+        delete_confirm: Supprimer définitivement la file d'attente %{name} ? Cette action est irréversible.
         pause: Pause
         pause_confirm: Mettre en pause le traitement pour %{name} ?
         paused: En pause
         purge: Purger
         purge_confirm: Purger tous les messages de %{name} ?
         resume: Reprendre
+      destroy:
+        success: File d'attente %{name} supprimée.
       show:
+        delete_confirm: Supprimer définitivement cette file d'attente ? Cette action est irréversible.
+        delete_queue: Supprimer la file d'attente
         depth: 'Profondeur :'
         empty: La file d'attente est vide
         headers:
@@ -295,8 +308,11 @@ fr:
           payload: Charge utile
           reads: Lectures
           vt: VT
+        pause: Pause
+        pause_confirm: Mettre en pause le traitement ?
         purge_confirm: Purger tous les messages ?
         purge_queue: Purger la file d'attente
+        resume: Reprendre
         total: 'Total :'
         visible: 'Visible :'
     recurring_tasks:

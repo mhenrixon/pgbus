@@ -1,6 +1,13 @@
 ---
 it:
   pgbus:
+    dialogs:
+      cancel: Annulla
+      confirm: Conferma
+      confirm_title: Sei sicuro?
+      delete: Elimina
+      delete_title: Elimina
+      ok: OK
     dashboard:
       processes_table:
         empty: Nessun processo in esecuzione
@@ -280,13 +287,19 @@ it:
           queue: Coda
           total_ever: Totale mai
           visible: Visibile
+        delete: Elimina
+        delete_confirm: Eliminare permanentemente la coda %{name}? Questa azione non può essere annullata.
         pause: Pausa
         pause_confirm: Mettere in pausa l'elaborazione per %{name}?
         paused: In pausa
         purge: Pulisci
         purge_confirm: Eliminare tutti i messaggi da %{name}?
         resume: Riprendi
+      destroy:
+        success: Coda %{name} eliminata.
       show:
+        delete_confirm: Eliminare permanentemente questa coda? Questa azione non può essere annullata.
+        delete_queue: Elimina coda
         depth: 'Profondità:'
         empty: La coda è vuota
         headers:
@@ -295,8 +308,11 @@ it:
           payload: Carico utile
           reads: Letture
           vt: VT
+        pause: Pausa
+        pause_confirm: Mettere in pausa l'elaborazione?
         purge_confirm: Eliminare tutti i messaggi?
         purge_queue: Pulisci coda
+        resume: Riprendi
         total: 'Totale:'
         visible: 'Visibile:'
     recurring_tasks:

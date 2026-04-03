@@ -707,7 +707,7 @@ pgbus help      # Show help
 The dashboard is a mountable Rails engine at `/pgbus` with:
 
 - **Overview** -- queue depths, enqueued count, active processes, failure count, throughput rate
-- **Queues** -- per-queue metrics, purge/pause/resume actions
+- **Queues** -- per-queue metrics, purge/pause/resume/delete actions
 - **Jobs** -- enqueued and failed jobs, retry/discard actions
 - **Dead letter** -- DLQ messages with retry/discard, bulk actions
 - **Processes** -- active workers/dispatcher/consumers with heartbeat status
@@ -716,7 +716,17 @@ The dashboard is a mountable Rails engine at `/pgbus` with:
 - **Locks** -- active job uniqueness locks with state (queued/executing), owner PID@hostname, age
 - **Insights** -- throughput chart (jobs/min), status distribution donut, slowest job classes table
 
-All tables use Turbo Frames for periodic auto-refresh without page reloads.
+All tables use Turbo Frames for periodic auto-refresh without page reloads. Destructive actions use styled confirmation dialogs (not browser `confirm()`), and flash messages appear as auto-dismissing toast notifications.
+
+### Queue management
+
+The queues page lets you manage PGMQ queues directly:
+
+- **Purge** -- removes all messages from the queue (the queue itself remains)
+- **Delete** -- permanently drops the queue from PGMQ (removes the queue table and metadata)
+- **Pause / Resume** -- pauses or resumes job processing for a queue
+
+All destructive actions require confirmation. Pause/resume and delete are available on both the queue index and detail pages.
 
 ### Dark mode
 

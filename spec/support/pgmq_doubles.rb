@@ -19,6 +19,7 @@ module PgmqDoubles
         metrics_all: [],
         list_queues: [],
         purge_queue: nil,
+        drop_queue: true,
         bind_topic: nil,
         produce_topic: nil,
         close: nil
@@ -49,6 +50,7 @@ module PgmqDoubles
         metrics: nil,
         list_queues: [],
         purge_queue: nil,
+        drop_queue: true,
         bind_topic: nil,
         publish_to_topic: nil,
         close: nil,

@@ -4,7 +4,8 @@ module Pgbus
   module Test
     class StubDataSource
       attr_accessor :stats, :queues, :processes_list, :failed_events_list,
-                    :dlq_messages_list, :events_list, :subscribers_list, :jobs_list
+                    :dlq_messages_list, :events_list, :subscribers_list, :jobs_list,
+                    :paused_queues
 
       def initialize
         @stats = default_stats
@@ -15,6 +16,7 @@ module Pgbus
         @events_list = []
         @subscribers_list = []
         @jobs_list = []
+        @paused_queues = []
       end
 
       def summary_stats = @stats
@@ -32,6 +34,10 @@ module Pgbus
       def registered_subscribers = @subscribers_list
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
       def purge_queue(_name) = true
+      def drop_queue(_name) = true
+      def queue_paused?(name) = @paused_queues.include?(name)
+      def pause_queue(_name, reason: nil) = true
+      def resume_queue(_name) = true
       def retry_failed_event(_id) = true
       def discard_failed_event(_id) = true
       def retry_all_failed = @failed_events_list.size

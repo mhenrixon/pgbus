@@ -1,6 +1,13 @@
 ---
 es:
   pgbus:
+    dialogs:
+      cancel: Cancelar
+      confirm: Confirmar
+      confirm_title: "¿Estás seguro?"
+      delete: Eliminar
+      delete_title: Eliminar
+      ok: Aceptar
     dashboard:
       processes_table:
         empty: No hay procesos en ejecución
@@ -280,13 +287,19 @@ es:
           queue: Cola
           total_ever: Total acumulado
           visible: Visible
+        delete: Eliminar
+        delete_confirm: "¿Eliminar permanentemente la cola %{name}? Esto no se puede deshacer."
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento de %{name}?"
         paused: Pausado
         purge: Purgar
         purge_confirm: "¿Purgar todos los mensajes de %{name}?"
         resume: Reanudar
+      destroy:
+        success: Cola %{name} eliminada.
       show:
+        delete_confirm: "¿Eliminar permanentemente esta cola? Esto no se puede deshacer."
+        delete_queue: Eliminar cola
         depth: 'Profundidad:'
         empty: La cola está vacía
         headers:
@@ -295,8 +308,11 @@ es:
           payload: Carga útil
           reads: Lecturas
           vt: VT
+        pause: Pausar
+        pause_confirm: "¿Pausar el procesamiento?"
         purge_confirm: "¿Purgar todos los mensajes?"
         purge_queue: Purgar cola
+        resume: Reanudar
         total: 'Total:'
         visible: 'Visible:'
     recurring_tasks:

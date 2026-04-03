@@ -1,6 +1,13 @@
 ---
 ja:
   pgbus:
+    dialogs:
+      cancel: キャンセル
+      confirm: 確認
+      confirm_title: よろしいですか？
+      delete: 削除
+      delete_title: 削除
+      ok: OK
     dashboard:
       processes_table:
         empty: 実行中のプロセスはありません
@@ -280,13 +287,19 @@ ja:
           queue: キュー
           total_ever: 合計数
           visible: 表示中
+        delete: 削除
+        delete_confirm: キュー %{name} を完全に削除しますか？この操作は取り消せません。
         pause: 一時停止
         pause_confirm: "%{name} の処理を一時停止しますか？"
         paused: 一時停止中
         purge: パージ
         purge_confirm: "%{name} からすべてのメッセージを削除しますか？"
         resume: 再開
+      destroy:
+        success: キュー %{name} を削除しました。
       show:
+        delete_confirm: このキューを完全に削除しますか？この操作は取り消せません。
+        delete_queue: キューを削除
         depth: 深さ：
         empty: キューは空です
         headers:
@@ -295,8 +308,11 @@ ja:
           payload: ペイロード
           reads: 読み取り回数
           vt: VT
+        pause: 一時停止
+        pause_confirm: 処理を一時停止しますか？
         purge_confirm: すべてのメッセージを削除しますか？
         purge_queue: キューをパージ
+        resume: 再開
         total: 合計：
         visible: 表示中：
     recurring_tasks:

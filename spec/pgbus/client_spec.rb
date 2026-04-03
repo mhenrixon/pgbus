@@ -423,6 +423,34 @@ RSpec.describe Pgbus::Client do
 
       expect(mock_pgmq).to have_received(:purge_queue).with("pgbus_test_default")
     end
+
+    it "skips prefixing when prefixed: false" do
+      client.purge_queue("pgbus_test_default", prefixed: false)
+
+      expect(mock_pgmq).to have_received(:purge_queue).with("pgbus_test_default")
+    end
+  end
+
+  describe "#drop_queue" do
+    it "drops the prefixed queue" do
+      client.drop_queue("default")
+
+      expect(mock_pgmq).to have_received(:drop_queue).with("pgbus_test_default")
+    end
+
+    it "skips prefixing when prefixed: false" do
+      client.drop_queue("pgbus_test_default", prefixed: false)
+
+      expect(mock_pgmq).to have_received(:drop_queue).with("pgbus_test_default")
+    end
+
+    it "removes the queue from the created cache" do
+      client.ensure_queue("default")
+      client.drop_queue("default")
+
+      # Verify the queue is no longer in the cache
+      expect(client.instance_variable_get(:@queues_created)["pgbus_test_default"]).to be_nil
+    end
   end
 
   describe "#purge_archive" do

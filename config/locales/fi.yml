@@ -1,6 +1,13 @@
 ---
 fi:
   pgbus:
+    dialogs:
+      cancel: Peruuta
+      confirm: Vahvista
+      confirm_title: Oletko varma?
+      delete: Poista
+      delete_title: Poista
+      ok: OK
     dashboard:
       processes_table:
         empty: Ei käynnissä olevia prosesseja
@@ -280,13 +287,19 @@ fi:
           queue: Jono
           total_ever: Yhteensä koskaan
           visible: Näkyvissä
+        delete: Poista
+        delete_confirm: Poista jono %{name} pysyvästi? Tätä ei voi kumota.
         pause: Tauko
         pause_confirm: Keskeytä käsittely %{name} ajan?
         paused: Keskeytetty
         purge: Tyhjennä
         purge_confirm: Tyhjennä kaikki viestit %{name}:sta?
         resume: Jatka
+      destroy:
+        success: Jono %{name} poistettu.
       show:
+        delete_confirm: Poista tämä jono pysyvästi? Tätä ei voi kumota.
+        delete_queue: Poista jono
         depth: 'Syvyys:'
         empty: Jono on tyhjä
         headers:
@@ -295,8 +308,11 @@ fi:
           payload: Kuorma
           reads: Lukukerrat
           vt: VT
+        pause: Tauko
+        pause_confirm: Keskeytetäänkö käsittely?
         purge_confirm: Tyhjennetäänkö kaikki viestit?
         purge_queue: Tyhjennä jono
+        resume: Jatka
         total: 'Yhteensä:'
         visible: 'Näkyvissä:'
     recurring_tasks:

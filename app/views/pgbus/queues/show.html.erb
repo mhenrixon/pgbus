@@ -1,6 +1,11 @@
 <div class="flex items-center justify-between mb-6">
   <div>
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= @queue&.dig(:name) || params[:name] %></h1>
+    <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+      <%= @queue&.dig(:name) || params[:name] %>
+      <% if @paused %>
+        <span class="inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800"><%= t("pgbus.queues.queues_list.paused") %></span>
+      <% end %>
+    </h1>
     <% if @queue %>
       <p class="text-sm text-gray-500 mt-1">
         <%= t("pgbus.queues.show.depth") %> <span class="font-mono"><%= @queue[:queue_length] %></span> |
@@ -10,10 +15,24 @@
     <% end %>
   </div>
   <div class="flex space-x-2">
+    <% if @paused %>
+      <%= button_to t("pgbus.queues.show.resume"), pgbus.resume_queue_path(name: params[:name]),
+            method: :post,
+            class: "rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-500" %>
+    <% else %>
+      <%= button_to t("pgbus.queues.show.pause"), pgbus.pause_queue_path(name: params[:name]),
+            method: :post,
+            class: "rounded-md bg-yellow-500 px-3 py-2 text-sm font-medium text-white hover:bg-yellow-400",
+            data: { turbo_confirm: t("pgbus.queues.show.pause_confirm") } %>
+    <% end %>
     <%= button_to t("pgbus.queues.show.purge_queue"), pgbus.purge_queue_path(name: params[:name]),
           method: :post,
           class: "rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500",
           data: { turbo_confirm: t("pgbus.queues.show.purge_confirm") } %>
+    <%= button_to t("pgbus.queues.show.delete_queue"), pgbus.queue_path(name: params[:name]),
+          method: :delete,
+          class: "rounded-md bg-red-800 px-3 py-2 text-sm font-medium text-white hover:bg-red-700",
+          data: { turbo_confirm: t("pgbus.queues.show.delete_confirm") } %>
   </div>
 </div>
 
