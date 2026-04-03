@@ -178,6 +178,17 @@ jobs:
                 ON pgbus_job_locks (expires_at);
               CREATE INDEX IF NOT EXISTS idx_pgbus_job_locks_reaper
                 ON pgbus_job_locks (state, owner_pid);
+
+              CREATE TABLE IF NOT EXISTS pgbus_recurring_executions (
+                id BIGSERIAL PRIMARY KEY,
+                task_key VARCHAR NOT NULL,
+                run_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              );
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_recurring_executions_dedup
+                ON pgbus_recurring_executions (task_key, run_at);
+              CREATE INDEX IF NOT EXISTS idx_pgbus_recurring_executions_cleanup
+                ON pgbus_recurring_executions (run_at);
             SQL
             conn.close
           "

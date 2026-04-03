@@ -29,9 +29,6 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
         "queue" => "maintenance"
       }
     }
-
-    Pgbus::RecurringExecution.delete_all
-    Pgbus::JobLock.delete_all
   end
 
   describe "first enqueue acquires lock and sends message" do
