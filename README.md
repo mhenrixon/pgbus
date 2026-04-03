@@ -211,13 +211,31 @@ mount Pgbus::Engine => "/pgbus"
 
 The dashboard shows queues, jobs, processes, failures, dead letter messages, and event subscribers. It auto-refreshes via Turbo Frames with no WebSocket dependency.
 
-Protect it in production:
+Protect it in production with a simple auth lambda:
 
 ```ruby
 Pgbus.configure do |config|
   config.web_auth = ->(request) {
     request.env["warden"].user&.admin?
   }
+end
+```
+
+Or inherit from your own authenticated controller (like mission_control-jobs):
+
+```ruby
+Pgbus.configure do |config|
+  config.base_controller_class = "Admin::BaseController"
+end
+```
+
+When `base_controller_class` is set, all dashboard controllers inherit from that class instead of `ActionController::Base`. This is the recommended approach when mounting the dashboard inside an authenticated namespace -- your base controller's `before_action` filters, helper methods, and authentication logic apply automatically without monkey-patching.
+
+Add a "back to app" button in the dashboard nav to return to your main application:
+
+```ruby
+Pgbus.configure do |config|
+  config.return_to_app_url = "/admin"
 end
 ```
 
@@ -624,6 +642,8 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
 | `outbox_retention` | `86400` | Seconds to keep published outbox entries (1 day) |
 | `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
+| `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
+| `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |

@@ -217,8 +217,10 @@ ja:
         processes: プロセス
         queues: キュー
         recurring: 定期実行
+      return_to_app: アプリに戻る
       title: Pgbus ダッシュボード
       toggle_dark_mode: ダークモード切替
+      toggle_menu: メニュー切替
     locks:
       index:
         description: 重複ジョブ実行を防ぐアクティブなユニークロック

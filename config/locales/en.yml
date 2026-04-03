@@ -217,8 +217,10 @@ en:
         processes: Processes
         queues: Queues
         recurring: Recurring
+      return_to_app: Back to app
       title: Pgbus Dashboard
       toggle_dark_mode: Toggle dark mode
+      toggle_menu: Toggle menu
     locks:
       index:
         description: Active uniqueness locks preventing duplicate job execution

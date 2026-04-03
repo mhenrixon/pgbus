@@ -217,8 +217,10 @@ es:
         processes: Procesos
         queues: Colas
         recurring: Recurrente
+      return_to_app: Volver a la app
       title: Panel de Pgbus
       toggle_dark_mode: Alternar modo oscuro
+      toggle_menu: Alternar menú
     locks:
       index:
         description: Bloqueos de unicidad activos que impiden la ejecución duplicada del trabajo

@@ -68,7 +68,7 @@
   <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
     <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300"><%= t("pgbus.insights.show.slowest.title") %></h3>
   </div>
-  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+  <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
     <thead class="bg-gray-50 dark:bg-gray-900">
       <tr>
         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.slowest.headers.job_class") %></th>
@@ -80,10 +80,10 @@
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
       <% @slowest.each do |row| %>
         <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-          <td class="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300"><%= row[:job_class] %></td>
-          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_number(row[:count]) %></td>
-          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:avg_ms]) %></td>
-          <td class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:max_ms]) %></td>
+          <td data-label="Job Class" class="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300"><%= row[:job_class] %></td>
+          <td data-label="Count" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_number(row[:count]) %></td>
+          <td data-label="Avg" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:avg_ms]) %></td>
+          <td data-label="Max" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:max_ms]) %></td>
         </tr>
       <% end %>
       <% if @slowest.empty? %>
@@ -95,12 +95,14 @@
 
 <script src="https://cdn.jsdelivr.net/npm/apexcharts@4"></script>
 <script>
-  let throughputChart, statusChart;
+(function() {
+  // IIFE prevents "redeclaration of let" when Turbo re-executes on navigation
+  var throughputChart, statusChart;
 
   function getThemeColors() {
-    const isDark = document.documentElement.classList.contains('dark');
+    var isDark = document.documentElement.classList.contains('dark');
     return {
-      isDark,
+      isDark: isDark,
       text: isDark ? '#9ca3af' : '#6b7280',
       grid: isDark ? '#374151' : '#e5e7eb',
       tooltip: isDark ? 'dark' : 'light',
@@ -109,16 +111,14 @@
   }
 
   function renderCharts(data) {
-    const t = getThemeColors();
+    var t = getThemeColors();
 
-    // Destroy existing charts before re-rendering
     if (throughputChart) throughputChart.destroy();
     if (statusChart) statusChart.destroy();
 
-    // Throughput chart
-    const throughputData = data.throughput.map(p => ({
-      x: new Date(p.time).getTime(), y: p.count
-    }));
+    var throughputData = data.throughput.map(function(p) {
+      return { x: new Date(p.time).getTime(), y: p.count };
+    });
 
     throughputChart = new ApexCharts(document.querySelector('#throughput-chart'), {
       series: [{ name: '<%= j(t("pgbus.insights.show.charts.series_name")) %>', data: throughputData }],
@@ -134,10 +134,9 @@
     });
     throughputChart.render();
 
-    // Status distribution chart
-    const statusLabels = Object.keys(data.status_counts);
-    const statusValues = Object.values(data.status_counts);
-    const statusColors = statusLabels.map(s => {
+    var statusLabels = Object.keys(data.status_counts);
+    var statusValues = Object.values(data.status_counts);
+    var statusColors = statusLabels.map(function(s) {
       if (s === 'success') return '#10b981';
       if (s === 'failed') return '#ef4444';
       if (s === 'dead_lettered') return '#f97316';
@@ -161,21 +160,24 @@
     }
   }
 
-  // Fetch data and render
-  let chartData = null;
+  var chartData = null;
   fetch('<%= pgbus.api_insights_path(minutes: @minutes) %>')
-    .then(r => r.json())
-    .then(data => { chartData = data; renderCharts(data); })
-    .catch(() => {
-      const msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.failed_to_load")) %></p>';
-      document.querySelector('#throughput-chart').innerHTML = msg;
-      document.querySelector('#status-chart').innerHTML = msg;
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(data) { chartData = data; renderCharts(data); })
+    .catch(function(err) {
+      if (err.name === 'AbortError') return;
+      var msg = '<p class="text-center text-sm text-gray-400 dark:text-gray-500 pt-24"><%= j(t("pgbus.insights.show.charts.failed_to_load")) %></p>';
+      var el1 = document.querySelector('#throughput-chart');
+      var el2 = document.querySelector('#status-chart');
+      if (el1) el1.innerHTML = msg;
+      if (el2) el2.innerHTML = msg;
     });
 
-  // Re-render charts when dark mode toggles.
-  // Listen for class changes on <html> instead of wrapping the toggle function,
-  // so it works regardless of script loading order.
   new MutationObserver(function() {
     if (chartData) renderCharts(chartData);
   }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+})();
 </script>

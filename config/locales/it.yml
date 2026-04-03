@@ -217,8 +217,10 @@ it:
         processes: Processi
         queues: Code
         recurring: Ricorrente
+      return_to_app: Torna all'app
       title: Cruscotto Pgbus
       toggle_dark_mode: Attiva/disattiva modalità scura
+      toggle_menu: Attiva/disattiva menu
     locks:
       index:
         description: Blocchi di unicità attivi che impediscono l'esecuzione duplicata del lavoro

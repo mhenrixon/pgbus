@@ -217,8 +217,10 @@ pt:
         processes: Processos
         queues: Filas
         recurring: Recorrente
+      return_to_app: Voltar ao aplicativo
       title: Painel Pgbus
       toggle_dark_mode: Alternar modo escuro
+      toggle_menu: Alternar menu
     locks:
       index:
         description: Bloqueios de exclusividade ativos impedindo a execução duplicada do trabalho
