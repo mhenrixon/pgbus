@@ -220,6 +220,7 @@ nl:
       return_to_app: Terug naar app
       title: Pgbus Dashboard
       toggle_dark_mode: Donkere modus schakelen
+      toggle_menu: Menu wisselen
     locks:
       index:
         description: Actieve uniekheidsvergrendelingen voorkomen dubbele taakuitvoering

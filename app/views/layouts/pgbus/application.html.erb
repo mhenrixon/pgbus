@@ -23,6 +23,15 @@
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('pgbus-dark', isDark);
     }
+    // Mobile menu toggle
+    function toggleMobileMenu() {
+      var menu = document.getElementById('pgbus-mobile-menu');
+      var openIcon = document.getElementById('pgbus-menu-open');
+      var closeIcon = document.getElementById('pgbus-menu-close');
+      menu.classList.toggle('hidden');
+      openIcon.classList.toggle('hidden');
+      closeIcon.classList.toggle('hidden');
+    }
     // Close locale dropdown when clicking outside
     document.addEventListener('click', function(e) {
       var switcher = document.getElementById('pgbus-locale-switcher');
@@ -61,6 +70,7 @@
     <nav class="bg-gray-900 dark:bg-gray-950 border-b border-gray-800">
       <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div class="flex h-14 items-center justify-between">
+          <!-- Left: brand + desktop nav -->
           <div class="flex items-center space-x-8">
             <div class="flex items-center space-x-3">
               <% if Pgbus.configuration.return_to_app_url %>
@@ -76,7 +86,8 @@
               <% end %>
             </div>
 
-            <div class="flex space-x-1">
+            <!-- Desktop nav links (hidden on small screens) -->
+            <div class="hidden lg:flex space-x-1">
               <%= pgbus_nav_link t("pgbus.layout.nav.dashboard"), pgbus.root_path %>
               <%= pgbus_nav_link t("pgbus.layout.nav.queues"), pgbus.queues_path %>
               <%= pgbus_nav_link t("pgbus.layout.nav.jobs"), pgbus.jobs_path %>
@@ -90,6 +101,7 @@
             </div>
           </div>
 
+          <!-- Right: locale, dark mode, hamburger -->
           <div class="flex items-center space-x-2">
             <!-- Locale switcher -->
             <div class="relative" id="pgbus-locale-switcher">
@@ -107,15 +119,44 @@
               </div>
             </div>
 
-          <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
-            <svg class="h-5 w-5 hidden dark:block" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
-            </svg>
-            <svg class="h-5 w-5 block dark:hidden" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
-            </svg>
-          </button>
+            <!-- Dark mode toggle -->
+            <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
+              <svg class="h-5 w-5 hidden dark:block" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
+              </svg>
+              <svg class="h-5 w-5 block dark:hidden" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"/>
+              </svg>
+            </button>
+
+            <!-- Mobile menu button (hidden on large screens) -->
+            <button onclick="toggleMobileMenu()" class="lg:hidden rounded-md p-2 text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="<%= t("pgbus.layout.toggle_menu") %>">
+              <!-- Hamburger icon -->
+              <svg id="pgbus-menu-open" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
+              </svg>
+              <!-- Close icon (hidden by default) -->
+              <svg id="pgbus-menu-close" class="hidden h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/>
+              </svg>
+            </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Mobile menu (hidden by default, shown on small screens when toggled) -->
+      <div id="pgbus-mobile-menu" class="hidden lg:hidden border-t border-gray-800">
+        <div class="space-y-1 px-3 py-3">
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.dashboard"), pgbus.root_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.queues"), pgbus.queues_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.jobs"), pgbus.jobs_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.recurring"), pgbus.recurring_tasks_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.processes"), pgbus.processes_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.events"), pgbus.events_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.dlq"), pgbus.dead_letter_index_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.outbox"), pgbus.outbox_index_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.locks"), pgbus.locks_path %>
+          <%= pgbus_mobile_nav_link t("pgbus.layout.nav.insights"), pgbus.insights_path %>
         </div>
       </div>
     </nav>

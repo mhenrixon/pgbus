@@ -220,6 +220,7 @@ de:
       return_to_app: Zurück zur App
       title: Pgbus Dashboard
       toggle_dark_mode: Dunkelmodus umschalten
+      toggle_menu: Menü umschalten
     locks:
       index:
         description: Aktive Einzigartigkeitssperren verhindern doppelte Auftragserstellung

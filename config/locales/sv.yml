@@ -220,6 +220,7 @@ sv:
       return_to_app: Tillbaka till appen
       title: Pgbus-instrumentpanel
       toggle_dark_mode: Växla mörkt läge
+      toggle_menu: Växla meny
     locks:
       index:
         description: Aktiva unika lås som förhindrar duplicerad jobbexekvering

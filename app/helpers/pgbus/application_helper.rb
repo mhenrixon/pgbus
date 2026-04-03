@@ -158,6 +158,16 @@ module Pgbus
       link_to label, path, class: css
     end
 
+    def pgbus_mobile_nav_link(label, path)
+      active = request.path == path || (path != pgbus.root_path && request.path.start_with?(path))
+      css = if active
+              "block rounded-md px-3 py-2 text-base font-medium text-white bg-gray-800"
+            else
+              "block rounded-md px-3 py-2 text-base font-medium text-gray-300 hover:text-white hover:bg-gray-700"
+            end
+      link_to label, path, class: css
+    end
+
     LOCALE_NAMES = {
       da: "Dansk",
       de: "Deutsch",

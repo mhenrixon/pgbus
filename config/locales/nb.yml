@@ -220,6 +220,7 @@ nb:
       return_to_app: Tilbake til appen
       title: Pgbus-dashbord
       toggle_dark_mode: Bytt til mørk modus
+      toggle_menu: Veksle meny
     locks:
       index:
         description: Aktive unike låser som forhindrer duplisert jobbkjøring

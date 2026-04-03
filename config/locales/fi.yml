@@ -220,6 +220,7 @@ fi:
       return_to_app: Takaisin sovellukseen
       title: Pgbus-hallintapaneeli
       toggle_dark_mode: Vaihda tumma tila
+      toggle_menu: Vaihda valikko
     locks:
       index:
         description: Aktiiviset ainutlaatuisuuden lukot estävät päällekkäisen työn suorittamisen

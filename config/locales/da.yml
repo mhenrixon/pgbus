@@ -220,6 +220,7 @@ da:
       return_to_app: Tilbage til app
       title: Pgbus Dashboard
       toggle_dark_mode: Skift til mørk tilstand
+      toggle_menu: Skift menu
     locks:
       index:
         description: Aktive unikke låse forhindrer duplikeret jobudførelse

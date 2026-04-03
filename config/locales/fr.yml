@@ -220,6 +220,7 @@ fr:
       return_to_app: Retour à l'application
       title: Tableau de bord Pgbus
       toggle_dark_mode: Basculer en mode sombre
+      toggle_menu: Basculer le menu
     locks:
       index:
         description: Verrous d'unicité actifs empêchant l'exécution de travaux en double
