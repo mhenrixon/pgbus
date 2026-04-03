@@ -125,7 +125,7 @@ module Pgbus
         return false unless config
         return false unless config[:strategy] == :until_executed
 
-        key = resolve_uniqueness_key(job_class, config, task)
+        key = resolve_uniqueness_key(config, task)
         return false unless key
 
         # Try to acquire the lock. If it fails, the lock is already held.
@@ -146,7 +146,7 @@ module Pgbus
 
       # Resolve the uniqueness key for a recurring task.
       # For no-argument recurring jobs, the key defaults to the class name.
-      def resolve_uniqueness_key(job_class, config, task)
+      def resolve_uniqueness_key(config, task)
         key_proc = config[:key]
         args = task.arguments || []
 
@@ -166,12 +166,12 @@ module Pgbus
         return payload unless task.class_name
 
         job_class = task.class_name.safe_constantize
-        return payload unless job_class&.respond_to?(:pgbus_uniqueness)
+        return payload unless job_class.respond_to?(:pgbus_uniqueness)
 
         config = job_class.pgbus_uniqueness
         return payload unless config
 
-        key = resolve_uniqueness_key(job_class, config, task)
+        key = resolve_uniqueness_key(config, task)
         return payload unless key
 
         payload.merge(
