@@ -112,9 +112,6 @@ end
 
 # ─── Helpers ───
 
-# Define the message struct once to avoid per-call anonymous class allocation.
-BenchMessage = Struct.new(:msg_id, :message, :read_ct, :headers, :enqueued_at)
-
 def purge_queue!
   Pgbus.client.purge_queue("default")
   Pgbus::JobLock.delete_all
