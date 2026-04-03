@@ -8,7 +8,7 @@ require "active_job"
 # time source (Time.current vs Time.now.utc) by checking the actual values
 # passed to dependencies. The integration tests in spec/integration/timezone_spec.rb
 # exercise the full AR round-trip with a real database and default_timezone = :local.
-RSpec.describe "Timezone handling (unit)" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe Pgbus do
   # Set Time.zone to a timezone with a significant UTC offset so that
   # any confusion between Time.now (system) and Time.current (Rails zone)
   # produces a measurable difference.
