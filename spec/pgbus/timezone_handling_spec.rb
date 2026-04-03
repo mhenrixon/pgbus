@@ -31,7 +31,7 @@ RSpec.describe Pgbus do
     end
 
     before do
-      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(described_class).to receive(:client).and_return(mock_client)
       allow(Pgbus::Serializer).to receive(:serialize_job_hash).and_return(serialized_hash)
       allow(mock_client).to receive(:send_message).and_return(1)
     end
@@ -57,7 +57,7 @@ RSpec.describe Pgbus do
     end
 
     before do
-      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(described_class).to receive(:client).and_return(mock_client)
       allow(Pgbus::Serializer).to receive(:serialize_job_hash).and_return(serialized_hash)
       allow(mock_client).to receive_messages(send_message: 1, send_batch: [1])
     end
@@ -78,7 +78,7 @@ RSpec.describe Pgbus do
     subject(:executor) { Pgbus::ActiveJob::Executor.new(client: mock_client, config: config) }
 
     let(:mock_client) { build_mock_client }
-    let(:config) { Pgbus.configuration }
+    let(:config) { described_class.configuration }
     let(:job_id) { SecureRandom.uuid }
     let(:job_payload) do
       { "job_class" => "TestJob", "job_id" => job_id, "queue_name" => "default", "arguments" => [] }
@@ -153,7 +153,7 @@ RSpec.describe Pgbus do
 
   describe "Recurring::Schedule timezone awareness" do
     it "evaluates cron schedules with TimeWithZone objects" do
-      schedule = Pgbus::Recurring::Schedule.new(config: Pgbus.configuration)
+      schedule = Pgbus::Recurring::Schedule.new(config: described_class.configuration)
       expect { schedule.due_tasks(Time.current) }.not_to raise_error
     end
   end

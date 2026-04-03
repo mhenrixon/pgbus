@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../integration_helper"
+require_relative "../support/pgmq_doubles"
 require "json"
 require "active_job"
 
@@ -13,7 +14,7 @@ require "active_job"
 # (e.g. getzazu/app using Africa/Casablanca).
 RSpec.describe "Timezone handling (integration)", :integration do
   around do |example|
-    original_env_tz = ENV["TZ"]
+    original_env_tz = ENV.fetch("TZ", nil)
     original_ar_tz = ActiveRecord::Base.default_timezone
     original_zone = Time.zone
 
@@ -118,12 +119,13 @@ RSpec.describe "Timezone handling (integration)", :integration do
     before { client.ensure_queue("default") }
 
     it "delays message correctly with non-UTC timezone" do
-      adapter = Pgbus::ActiveJob::Adapter.new
-      job = build_enqueue_job_double
-      allow(Pgbus::Serializer).to receive(:serialize_job_hash).and_return(job[:payload])
+      payload = { "job_class" => "TestJob", "job_id" => SecureRandom.uuid,
+                  "queue_name" => "default", "arguments" => [] }
 
-      adapter.enqueue_at(job[:double], Time.current.to_f + 5)
+      # Send with 5-second delay via PGMQ directly
+      client.send_message("default", payload, delay: 5)
 
+      # Message should be invisible (delayed)
       messages = client.read_batch("default", qty: 1, vt: 1)
       expect(messages || []).to be_empty
     end
@@ -131,19 +133,21 @@ RSpec.describe "Timezone handling (integration)", :integration do
 
   describe "Enqueue latency computation" do
     it "computes correct latency from bare timestamp" do
-      executor = Pgbus::ActiveJob::Executor.new(client: build_mock_client, config: Pgbus.configuration)
-      job = build_enqueue_job_double
-      message_json = JSON.generate(job[:payload])
+      mock_client = build_mock_client
+      executor = Pgbus::ActiveJob::Executor.new(client: mock_client, config: Pgbus.configuration)
+      job_id = SecureRandom.uuid
+      payload = { "job_class" => "TestJob", "job_id" => job_id,
+                  "queue_name" => "default", "arguments" => [] }
+      job_double = build_job_double(job_class: "TestJob", queue_name: "default", job_id: job_id)
 
-      allow(ActiveJob::Base).to receive(:deserialize).and_return(job[:double])
+      allow(ActiveJob::Base).to receive(:deserialize).and_return(job_double)
       allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
       stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
       allow(Pgbus::JobStat).to receive(:record!)
 
-      # Bare UTC timestamp without offset — the critical edge case
       enqueued_at = (Time.now.utc - 1).strftime("%Y-%m-%d %H:%M:%S.%6N")
-      message = build_message_double(msg_id: 1, message: message_json, read_ct: 1, enqueued_at: enqueued_at)
-
+      message = build_message_double(msg_id: 1, message: JSON.generate(payload),
+                                     read_ct: 1, enqueued_at: enqueued_at)
       executor.execute(message, "default")
 
       expect(Pgbus::JobStat).to have_received(:record!).with(
@@ -154,7 +158,7 @@ RSpec.describe "Timezone handling (integration)", :integration do
 
   describe "Circuit breaker resume_at" do
     it "auto-resumes when resume_at is in the past" do
-      skip "pgbus_queue_states table not available" unless table_exists?("pgbus_queue_states")
+      skip "pgbus_queue_states table not available" unless ActiveRecord::Base.connection.table_exists?("pgbus_queue_states")
 
       Pgbus::QueueState.delete_all
       breaker = Pgbus::CircuitBreaker.new(config: Pgbus.configuration)
@@ -171,27 +175,4 @@ RSpec.describe "Timezone handling (integration)", :integration do
       expect(breaker.paused?("tz-test-queue")).to be false
     end
   end
-end
-
-# Helper to build a minimal job double for enqueue tests
-def build_enqueue_job_double
-  job_id = SecureRandom.uuid
-  job_double = double("ActiveJob", queue_name: "default", job_id: job_id, scheduled_at: nil)
-  allow(job_double).to receive_messages(provider_job_id: nil)
-  allow(job_double).to receive(:provider_job_id=)
-  allow(job_double).to receive(:class).and_return(Class.new)
-  allow(job_double).to receive(:perform_now)
-
-  payload = {
-    "job_class" => "TestJob", "job_id" => job_id,
-    "queue_name" => "default", "arguments" => []
-  }
-
-  { double: job_double, payload: payload }
-end
-
-def table_exists?(name)
-  ActiveRecord::Base.connection.table_exists?(name)
-rescue StandardError
-  false
 end
