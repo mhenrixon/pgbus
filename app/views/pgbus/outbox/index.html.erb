@@ -19,7 +19,7 @@
 </div>
 
 <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+  <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
     <thead class="bg-gray-50 dark:bg-gray-900">
       <tr>
         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.outbox.index.headers.id") %></th>
@@ -33,18 +33,18 @@
     <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
       <% @entries.each do |entry| %>
         <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900">
-          <td class="px-4 py-3 text-sm font-mono text-gray-700"><%= entry.id %></td>
-          <td class="px-4 py-3 text-sm text-gray-700"><%= entry.routing_key || entry.queue_name %></td>
-          <td class="px-4 py-3 text-sm text-gray-500 max-w-xs truncate"><%= pgbus_json_preview(entry.payload) %></td>
-          <td class="px-4 py-3 text-sm text-right text-gray-500"><%= entry.priority %></td>
-          <td class="px-4 py-3 text-sm text-right">
+          <td data-label="ID" class="px-4 py-3 text-sm font-mono text-gray-700"><%= entry.id %></td>
+          <td data-label="Routing Key" class="px-4 py-3 text-sm text-gray-700"><%= entry.routing_key || entry.queue_name %></td>
+          <td data-label="Payload" class="px-4 py-3 text-sm text-gray-500 max-w-xs truncate"><%= pgbus_json_preview(entry.payload) %></td>
+          <td data-label="Priority" class="px-4 py-3 text-sm text-right text-gray-500"><%= entry.priority %></td>
+          <td data-label="Status" class="px-4 py-3 text-sm text-right">
             <% if entry.published_at %>
               <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800"><%= t("pgbus.outbox.index.published") %></span>
             <% else %>
               <span class="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"><%= t("pgbus.outbox.index.pending") %></span>
             <% end %>
           </td>
-          <td class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_time_ago(entry.created_at) %></td>
+          <td data-label="Created" class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_time_ago(entry.created_at) %></td>
         </tr>
       <% end %>
       <% if @entries.empty? %>

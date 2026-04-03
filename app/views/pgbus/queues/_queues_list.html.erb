@@ -1,6 +1,6 @@
 <turbo-frame id="queues-list" data-auto-refresh data-src="<%= pgbus.queues_path(frame: 'list') %>">
   <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
-    <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+    <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
       <thead class="bg-gray-50 dark:bg-gray-900">
         <tr>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.queue") %></th>
@@ -15,19 +15,19 @@
       <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
         <% @queues.each do |q| %>
           <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900">
-            <td class="px-4 py-3 text-sm">
+            <td data-label="Queue" class="px-4 py-3 text-sm">
               <%= link_to q[:name], pgbus.queue_path(name: q[:name]), class: "font-medium text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
               <%= pgbus_queue_badge(q[:name]) %>
               <% if q[:paused] %>
                 <span class="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800"><%= t("pgbus.queues.queues_list.paused") %></span>
               <% end %>
             </td>
-            <td class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_length]) %></td>
-            <td class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_visible_length]) %></td>
-            <td class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:oldest_msg_age_sec] || "—" %></td>
-            <td class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:newest_msg_age_sec] || "—" %></td>
-            <td class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_number(q[:total_messages]) %></td>
-            <td class="px-4 py-3 text-sm text-right space-x-2">
+            <td data-label="Depth" class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_length]) %></td>
+            <td data-label="Visible" class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_visible_length]) %></td>
+            <td data-label="Oldest" class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:oldest_msg_age_sec] || "—" %></td>
+            <td data-label="Newest" class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:newest_msg_age_sec] || "—" %></td>
+            <td data-label="Total" class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_number(q[:total_messages]) %></td>
+            <td data-label="Actions" class="px-4 py-3 text-sm text-right space-x-2">
               <% if q[:paused] %>
                 <%= button_to t("pgbus.queues.queues_list.resume"), pgbus.resume_queue_path(name: q[:name]),
                       method: :post,

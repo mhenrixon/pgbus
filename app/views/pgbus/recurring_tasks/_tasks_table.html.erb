@@ -6,7 +6,7 @@
         <p class="mt-1 text-sm"><%= t("pgbus.recurring_tasks.tasks_table.empty_hint") %></p>
       </div>
     <% else %>
-      <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+      <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
         <thead class="bg-gray-50 dark:bg-gray-900">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase"><%= t("pgbus.recurring_tasks.tasks_table.headers.task") %></th>
@@ -21,7 +21,7 @@
         <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
           <% @recurring_tasks.each do |task| %>
             <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900">
-              <td class="px-4 py-3">
+              <td data-label="Task" class="px-4 py-3">
                 <div>
                   <%= link_to task[:key], pgbus.recurring_task_path(task[:id]),
                       class: "text-sm font-medium text-blue-600 hover:text-blue-800" %>
@@ -31,26 +31,26 @@
                   <div class="text-xs text-gray-400 mt-0.5"><%= task[:description] %></div>
                 <% end %>
               </td>
-              <td class="px-4 py-3">
+              <td data-label="Schedule" class="px-4 py-3">
                 <div class="text-sm text-gray-900 dark:text-white"><%= task[:schedule] %></div>
                 <% if task[:human_schedule] && task[:human_schedule] != task[:schedule] %>
                   <div class="text-xs text-gray-400"><%= task[:human_schedule] %></div>
                 <% end %>
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td data-label="Queue" class="px-4 py-3 text-sm text-gray-600">
                 <%= task[:queue_name] || t("pgbus.recurring_tasks.tasks_table.default_queue") %>
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td data-label="Last Run" class="px-4 py-3 text-sm text-gray-600">
                 <%= task[:last_run_at] ? pgbus_time_ago(task[:last_run_at]) : t("pgbus.recurring_tasks.tasks_table.never") %>
               </td>
-              <td class="px-4 py-3 text-sm text-gray-600">
+              <td data-label="Next Run" class="px-4 py-3 text-sm text-gray-600">
                 <% if task[:enabled] && task[:next_run_at] %>
                   <%= pgbus_time_ago_future(task[:next_run_at]) %>
                 <% else %>
                   <span class="text-gray-400">—</span>
                 <% end %>
               </td>
-              <td class="px-4 py-3">
+              <td data-label="Status" class="px-4 py-3">
                 <% if task[:enabled] %>
                   <%= pgbus_recurring_health_badge(task) %>
                 <% else %>
@@ -59,7 +59,7 @@
                   </span>
                 <% end %>
               </td>
-              <td class="px-4 py-3 text-right space-x-1">
+              <td data-label="Actions" class="px-4 py-3 text-right space-x-1">
                 <%= button_to task[:enabled] ? t("pgbus.recurring_tasks.tasks_table.disable") : t("pgbus.recurring_tasks.tasks_table.enable"),
                     pgbus.toggle_recurring_task_path(task[:id]),
                     class: "inline-flex items-center rounded px-2 py-1 text-xs font-medium " \
