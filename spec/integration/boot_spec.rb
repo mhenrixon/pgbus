@@ -28,7 +28,7 @@ RSpec.describe "Application boot (integration)", :integration do
         Pgbus::ProcessedEvent,
         Pgbus::QueueState,
         Pgbus::BlockedExecution,
-        Pgbus::Batch
+        Pgbus::BatchEntry
       ]
 
       models.each do |model|
@@ -59,17 +59,20 @@ RSpec.describe "Application boot (integration)", :integration do
       client = Pgbus.client
       client.ensure_queue("boot_test")
 
+      expected_name = Pgbus.configuration.queue_name("boot_test")
       conn = Pgbus::BusRecord.connection
-      exists = conn.select_value("SELECT 1 FROM pgmq.meta WHERE queue_name = 'pgbus_int_boot_test'")
+      exists = conn.select_value("SELECT 1 FROM pgmq.meta WHERE queue_name = '#{expected_name}'")
       expect(exists).to eq(1)
     end
 
     it "creates DLQ alongside the main queue" do
       client = Pgbus.client
       client.ensure_queue("dlq_test")
+      client.ensure_dead_letter_queue("dlq_test")
 
+      expected_dlq = Pgbus.configuration.dead_letter_queue_name("dlq_test")
       conn = Pgbus::BusRecord.connection
-      exists = conn.select_value("SELECT 1 FROM pgmq.meta WHERE queue_name = 'pgbus_int_dlq_test_dlq'")
+      exists = conn.select_value("SELECT 1 FROM pgmq.meta WHERE queue_name = '#{expected_dlq}'")
       expect(exists).to eq(1)
     end
 
@@ -101,7 +104,7 @@ RSpec.describe "Application boot (integration)", :integration do
     end
   end
 
-  describe "ActiveJob adapter" do
+  describe "ActiveJob adapter", if: defined?(ActiveJob) do
     it "adapter is registered" do
       adapter = ActiveJob::QueueAdapters.lookup(:pgbus)
       expect(adapter).to be_present

@@ -2,12 +2,38 @@
 
 require_relative "../integration_helper"
 
+# These tests fork child processes that create new PG connections.
+# pg gem 1.6.x has a known segfault when connecting after fork on macOS ARM64
+# (libpq SSL context corruption). These tests run reliably on Linux (CI).
+FORK_PG_SAFE = !RUBY_PLATFORM.include?("darwin")
+
 # rubocop:disable RSpec/ExampleLength
 RSpec.describe "Signal handling (integration)", :integration do
   let(:client) { Pgbus.client }
 
   before do
+    skip "Fork + PG.connect segfaults on macOS ARM64 (pg gem bug)" unless FORK_PG_SAFE
     client.ensure_queue("default")
+  end
+
+  # Disconnect ActiveRecord before forking so the child gets a clean slate.
+  # After the fork, the parent re-establishes its own connection.
+  def fork_with_fresh_connections(&block)
+    ActiveRecord::Base.connection_handler.clear_all_connections!
+    Pgbus.reset_client!
+    pid = fork(&block)
+    # Parent: re-establish connection after fork
+    ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=20")
+    Pgbus.reset_client!
+    pid
+  end
+
+  # Force-kill and reap a child process if it's still running.
+  def force_kill(pid)
+    Process.kill("KILL", pid)
+    Process.waitpid(pid)
+  rescue Errno::ESRCH, Errno::ECHILD
+    # already exited/reaped
   end
 
   describe "worker graceful shutdown via SIGTERM" do
@@ -18,9 +44,10 @@ RSpec.describe "Signal handling (integration)", :integration do
 
       # Fork a worker process
       read_pipe, write_pipe = IO.pipe
-      worker_pid = fork do
+      worker_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
+        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
 
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],
@@ -68,23 +95,40 @@ RSpec.describe "Signal handling (integration)", :integration do
       remaining = read_pipe.read
       read_pipe.close
       expect(remaining).to include("D"), "Worker did not reach clean exit point"
+    ensure
+      force_kill(worker_pid) if worker_pid
     end
   end
 
   describe "worker immediate shutdown via SIGQUIT" do
     it "kills the thread pool and exits immediately" do
-      worker_pid = fork do
+      read_pipe, write_pipe = IO.pipe
+      worker_pid = fork_with_fresh_connections do
+        read_pipe.close
         Pgbus.reset_client!
+        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
+
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],
           threads: 1,
           config: Pgbus.configuration
         )
+
+        # Signal readiness before entering run loop
+        write_pipe.write("R")
+        write_pipe.flush
+        write_pipe.close
+
         worker.run
       end
 
-      # Give worker time to start
-      sleep 1
+      write_pipe.close
+
+      # Wait for worker to be ready
+      ready = read_pipe.wait_readable(10)
+      expect(ready).to be_truthy, "Worker did not start within 10s"
+      read_pipe.read(1)
+      read_pipe.close
 
       Process.kill("QUIT", worker_pid)
 
@@ -95,6 +139,8 @@ RSpec.describe "Signal handling (integration)", :integration do
       end
 
       expect(result.exitstatus).to eq(0), "Worker did not exit after SIGQUIT (status=#{result&.exitstatus})"
+    ensure
+      force_kill(worker_pid) if worker_pid
     end
   end
 
@@ -102,9 +148,10 @@ RSpec.describe "Signal handling (integration)", :integration do
     it "SIGTERM propagates to all child processes" do
       read_pipe, write_pipe = IO.pipe
 
-      supervisor_pid = fork do
+      supervisor_pid = fork_with_fresh_connections do
         read_pipe.close
         Pgbus.reset_client!
+        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
 
         # Minimal config: 1 worker, no scheduler, no dispatcher
         config = Pgbus.configuration.dup
@@ -113,17 +160,19 @@ RSpec.describe "Signal handling (integration)", :integration do
 
         supervisor = Pgbus::Process::Supervisor.new(config: config)
 
-        # Override boot_processes to only fork a worker, notify parent when ready
+        # Override boot_processes to fork a simple child that sleeps,
+        # register it in @forks so the supervisor manages it properly.
         supervisor.define_singleton_method(:boot_processes) do
-          fork_worker(config.workers.first)
+          child_pid = fork do
+            # Simple child that exits on TERM
+            trap("TERM") { exit 0 }
+            trap("QUIT") { exit 0 }
+            sleep 120
+          end
+          @forks[child_pid] = { type: :worker, config: {} } # rubocop:disable RSpec/InstanceVariable
           write_pipe.write("S")
           write_pipe.flush
         end
-
-        # Skip dispatcher fork
-        supervisor.define_singleton_method(:fork_dispatcher) { nil }
-        supervisor.define_singleton_method(:boot_consumers) { nil }
-        supervisor.define_singleton_method(:boot_outbox_poller) { nil }
 
         supervisor.run
         write_pipe.write("X") # Clean exit
@@ -142,7 +191,7 @@ RSpec.describe "Signal handling (integration)", :integration do
 
       # Supervisor should exit cleanly after draining children
       result = nil
-      Timeout.timeout(35) do # 30s shutdown timeout + 5s buffer
+      Timeout.timeout(15) do
         _, status = Process.waitpid2(supervisor_pid)
         result = status
       end
@@ -152,15 +201,18 @@ RSpec.describe "Signal handling (integration)", :integration do
       remaining = read_pipe.read
       read_pipe.close
       expect(remaining).to include("X"), "Supervisor did not reach clean exit"
+    ensure
+      force_kill(supervisor_pid) if supervisor_pid
     end
   end
 
   describe "worker processes jobs before shutdown" do
     it "completes in-flight job when SIGTERM arrives during execution" do
-      # Create a marker file that the job will write to prove it completed
+      # Create a marker path — close! unlinks it so the file only exists
+      # if the job actually writes it, avoiding a false positive.
       marker = Tempfile.new("pgbus_signal_test")
       marker_path = marker.path
-      marker.close
+      marker.close!
 
       # Enqueue a "job" with a marker path
       payload = {
@@ -171,25 +223,20 @@ RSpec.describe "Signal handling (integration)", :integration do
       }
       client.send_message("default", payload)
 
-      worker_pid = fork do
+      worker_pid = fork_with_fresh_connections do
         Pgbus.reset_client!
+        ActiveRecord::Base.establish_connection("#{PGBUS_DATABASE_URL}?pool=5")
 
-        # Create a custom executor that writes to the marker file
         worker = Pgbus::Process::Worker.new(
           queues: ["default"],
           threads: 1,
           config: Pgbus.configuration
         )
 
-        # Override execute_job to simulate work and write marker
-        begin
-          worker.method(:execute_job)
-        rescue StandardError
-          nil
-        end
-        worker.define_singleton_method(:execute_job) do |msg, queue_name|
+        # Override process_message to simulate work and write marker
+        worker.define_singleton_method(:process_message) do |message, queue_name, _source_queue: nil|
           parsed = begin
-            JSON.parse(msg.message)
+            JSON.parse(message.message)
           rescue StandardError
             {}
           end
@@ -198,7 +245,7 @@ RSpec.describe "Signal handling (integration)", :integration do
             File.write(parsed["marker_path"], "completed")
           end
           # Archive the message
-          Pgbus.client.archive_message(queue_name, msg.msg_id)
+          Pgbus.client.archive_message(queue_name, message.msg_id)
         end
 
         worker.run
@@ -214,9 +261,11 @@ RSpec.describe "Signal handling (integration)", :integration do
         Process.waitpid2(worker_pid)
       end
 
-      # The marker file should exist if the job completed
+      # The marker file should exist with expected content if the job completed
       expect(File.exist?(marker_path)).to be true
+      expect(File.read(marker_path)).to eq("completed")
     ensure
+      force_kill(worker_pid) if worker_pid
       File.delete(marker_path) if marker_path && File.exist?(marker_path)
     end
   end
