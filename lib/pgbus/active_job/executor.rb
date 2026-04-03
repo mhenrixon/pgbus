@@ -118,8 +118,13 @@ module Pgbus
         enqueued_at_str = message.enqueued_at
         return unless enqueued_at_str
 
-        enqueued_at = Time.zone ? Time.zone.parse(enqueued_at_str.to_s) : Time.parse(enqueued_at_str.to_s)
-        [((Time.current - enqueued_at) * 1000).round, 0].max
+        str = enqueued_at_str.to_s
+        # PGMQ enqueued_at is TIMESTAMPTZ (always UTC internally).
+        # If the string lacks an explicit offset, assume UTC to avoid
+        # misinterpretation when the system timezone is non-UTC.
+        str = "#{str} UTC" unless str.match?(/[+-]\d{2}:?\d{2}\s*$|Z\s*$/i)
+        enqueued_at = Time.parse(str)
+        [((Time.now.utc - enqueued_at) * 1000).round, 0].max
       rescue ArgumentError, TypeError
         nil
       end
