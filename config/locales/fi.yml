@@ -1,6 +1,13 @@
 ---
 fi:
   pgbus:
+    dialogs:
+      cancel: Peruuta
+      confirm: Vahvista
+      confirm_title: Oletko varma?
+      delete: Poista
+      delete_title: Poista
+      ok: OK
     dashboard:
       processes_table:
         empty: Ei käynnissä olevia prosesseja

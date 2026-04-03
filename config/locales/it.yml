@@ -1,6 +1,13 @@
 ---
 it:
   pgbus:
+    dialogs:
+      cancel: Annulla
+      confirm: Conferma
+      confirm_title: Sei sicuro?
+      delete: Elimina
+      delete_title: Elimina
+      ok: OK
     dashboard:
       processes_table:
         empty: Nessun processo in esecuzione

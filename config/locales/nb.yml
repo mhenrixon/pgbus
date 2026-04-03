@@ -1,6 +1,13 @@
 ---
 nb:
   pgbus:
+    dialogs:
+      cancel: Avbryt
+      confirm: Bekreft
+      confirm_title: Er du sikker?
+      delete: Slett
+      delete_title: Slett
+      ok: OK
     dashboard:
       processes_table:
         empty: Ingen prosesser kjører

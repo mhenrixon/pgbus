@@ -1,6 +1,13 @@
 ---
 nl:
   pgbus:
+    dialogs:
+      cancel: Annuleren
+      confirm: Bevestigen
+      confirm_title: Weet u het zeker?
+      delete: Verwijderen
+      delete_title: Verwijderen
+      ok: OK
     dashboard:
       processes_table:
         empty: Geen processen actief

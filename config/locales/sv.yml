@@ -1,6 +1,13 @@
 ---
 sv:
   pgbus:
+    dialogs:
+      cancel: Avbryt
+      confirm: Bekräfta
+      confirm_title: Är du säker?
+      delete: Ta bort
+      delete_title: Ta bort
+      ok: OK
     dashboard:
       processes_table:
         empty: Inga processer körs

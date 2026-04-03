@@ -1,6 +1,13 @@
 ---
 ja:
   pgbus:
+    dialogs:
+      cancel: キャンセル
+      confirm: 確認
+      confirm_title: よろしいですか？
+      delete: 削除
+      delete_title: 削除
+      ok: OK
     dashboard:
       processes_table:
         empty: 実行中のプロセスはありません
