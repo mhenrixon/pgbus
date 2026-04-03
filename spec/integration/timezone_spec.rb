@@ -13,13 +13,30 @@ require "active_job"
 # This combination is common in apps that store timestamps in local time
 # (e.g. getzazu/app using Africa/Casablanca).
 RSpec.describe "Timezone handling (integration)", :integration do
+  # Rails 8.1 moved default_timezone from ActiveRecord::Base to ActiveRecord module.
+  def ar_default_timezone
+    if ActiveRecord.respond_to?(:default_timezone)
+      ActiveRecord.default_timezone
+    else
+      ActiveRecord::Base.default_timezone
+    end
+  end
+
+  def ar_default_timezone=(value)
+    if ActiveRecord.respond_to?(:default_timezone=)
+      ActiveRecord.default_timezone = value
+    else
+      ActiveRecord::Base.default_timezone = value
+    end
+  end
+
   around do |example|
     original_env_tz = ENV.fetch("TZ", nil)
-    original_ar_tz = ActiveRecord::Base.default_timezone
+    original_ar_tz = ar_default_timezone
     original_zone = Time.zone
 
     ENV["TZ"] = "Africa/Johannesburg"
-    ActiveRecord::Base.default_timezone = :local
+    self.ar_default_timezone = :local
     Time.zone = "Africa/Johannesburg"
 
     # Force PG session timezone to match the new setting
@@ -30,7 +47,7 @@ RSpec.describe "Timezone handling (integration)", :integration do
     example.run
   ensure
     ENV["TZ"] = original_env_tz
-    ActiveRecord::Base.default_timezone = original_ar_tz
+    self.ar_default_timezone = original_ar_tz
     Time.zone = original_zone
     ActiveRecord::Base.connection.execute("SET SESSION timezone = 'UTC'")
   end
