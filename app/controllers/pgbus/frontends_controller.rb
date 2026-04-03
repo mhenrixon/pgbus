@@ -27,11 +27,16 @@ module Pgbus
                                    .merge(MODULE_OVERRIDES)
     end
 
+    CURRENT_VERSION = Pgbus::VERSION.tr(".", "-").freeze
+
     before_action do
       expires_in 1.year, public: true
     end
 
+    after_action :set_asset_security_headers
+
     def static
+      validate_version!
       file = STATIC_ASSETS.dig(params[:format]&.to_sym, params[:id]&.to_sym)
       raise ActionController::RoutingError, "Not Found" unless file&.exist?
 
@@ -39,12 +44,25 @@ module Pgbus
     end
 
     def module
+      validate_version!
       raise ActionController::RoutingError, "Not Found" if params[:format] != "js"
 
       file = self.class.js_modules[params[:id]&.to_sym]
       raise ActionController::RoutingError, "Not Found" unless file&.exist?
 
       render file: file
+    end
+
+    private
+
+    def validate_version!
+      return if params[:version] == CURRENT_VERSION
+
+      raise ActionController::RoutingError, "Not Found"
+    end
+
+    def set_asset_security_headers
+      response.headers["X-Content-Type-Options"] = "nosniff"
     end
   end
 end

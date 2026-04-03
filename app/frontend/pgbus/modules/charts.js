@@ -66,8 +66,14 @@ export function renderCharts(data, i18n) {
   }
 }
 
-export function observeThemeChanges(data, i18n) {
-  new MutationObserver(() => {
+let themeObserver = null;
+
+export function observeThemeChanges(getDataFn, i18n) {
+  if (themeObserver) themeObserver.disconnect();
+
+  themeObserver = new MutationObserver(() => {
+    const data = typeof getDataFn === "function" ? getDataFn() : getDataFn;
     if (data) renderCharts(data, i18n);
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 }

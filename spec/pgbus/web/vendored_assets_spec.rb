@@ -24,7 +24,7 @@ RSpec.describe "Vendored frontend assets" do # rubocop:disable RSpec/DescribeCla
     it "has vendored ApexCharts" do
       apexcharts = frontend_dir.join("vendor", "apexcharts.js")
       expect(apexcharts).to exist
-      content = apexcharts.read(nil, 200)
+      content = File.binread(apexcharts.to_s, 200)
       expect(content).to include("ApexCharts")
     end
   end

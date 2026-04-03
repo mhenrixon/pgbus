@@ -45,16 +45,15 @@
   <script type="module" nonce="<%= content_security_policy_nonce %>">
     import "application";
   </script>
-
+</head>
+<body class="h-full bg-gray-50 dark:bg-gray-950 transition-colors"
+      <% if Pgbus.configuration.web_live_updates %>data-pgbus-refresh-interval="<%= Pgbus.configuration.web_refresh_interval %>"<% end %>>
   <%# i18n data for JS modules %>
   <div id="pgbus-i18n" class="hidden"
        data-delete-title="<%= t("pgbus.dialogs.delete_title", default: "Delete") %>"
        data-confirm-title="<%= t("pgbus.dialogs.confirm_title", default: "Are you sure?") %>"
        data-delete-label="<%= t("pgbus.dialogs.delete", default: "Delete") %>"
        data-confirm-label="<%= t("pgbus.dialogs.confirm", default: "Confirm") %>"></div>
-</head>
-<body class="h-full bg-gray-50 dark:bg-gray-950 transition-colors"
-      <% if Pgbus.configuration.web_live_updates %>data-pgbus-refresh-interval="<%= Pgbus.configuration.web_refresh_interval %>"<% end %>>
   <div class="min-h-full">
     <!-- Top nav -->
     <nav class="bg-gray-900 dark:bg-gray-950 border-b border-gray-800">
