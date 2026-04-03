@@ -12,11 +12,13 @@ module Pgbus
       def initialize(queues:, threads: 5, config: Pgbus.configuration,
                      single_active_consumer: false, consumer_priority: 0)
         @queues = Array(queues)
+        @wildcard = @queues.include?("*")
         @threads = threads
         @config = config
         @single_active_consumer = single_active_consumer
         @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
+        @last_wildcard_resolve = nil
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
         @in_flight = Concurrent::AtomicFixnum.new(0)
@@ -53,6 +55,7 @@ module Pgbus
         loop do
           process_signals
           check_recycle
+          refresh_wildcard_queues
 
           break if @lifecycle.stopped?
           break if @lifecycle.draining? && @pool.queue_length.zero?
@@ -78,6 +81,8 @@ module Pgbus
         @wake_signal.notify!
         @pool.kill
       end
+
+      WILDCARD_REFRESH_INTERVAL = 30 # seconds
 
       private
 
@@ -125,7 +130,11 @@ module Pgbus
           fetch_multi(active_queues, qty)
         end
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Error fetching messages: #{e.message}" }
+        if e.message.include?("does not exist") && e.message.include?("pgmq.q_")
+          evict_missing_queues(e)
+        else
+          Pgbus.logger.error { "[Pgbus] Error fetching messages: #{e.message}" }
+        end
         []
       end
 
@@ -184,9 +193,8 @@ module Pgbus
       end
 
       # Resolve "*" to all non-DLQ queues from pgmq.meta, stripping the prefix.
-      # Called once at startup. If no wildcard, this is a no-op.
       def resolve_wildcard_queues
-        return unless @queues.include?("*")
+        return unless @wildcard
 
         dlq_suffix = config.dead_letter_queue_suffix
         prefix = "#{config.queue_prefix}_"
@@ -201,12 +209,39 @@ module Pgbus
           Pgbus.logger.warn { "[Pgbus] Wildcard queue '*' resolved to no queues — falling back to default" }
           @queues = [config.default_queue]
         else
+          if @last_wildcard_resolve && resolved != @queues
+            Pgbus.logger.info { "[Pgbus] Wildcard queues changed: #{@queues.join(", ")} → #{resolved.join(", ")}" }
+          end
           @queues = resolved
-          Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" }
+          Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" } unless @last_wildcard_resolve
         end
+        @last_wildcard_resolve = monotonic_now
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
-        @queues = [config.default_queue]
+        @queues = [config.default_queue] unless @last_wildcard_resolve
+      end
+
+      # Periodically re-resolve wildcard queues to pick up new queues and
+      # drop deleted ones without requiring a worker restart.
+      def refresh_wildcard_queues
+        return unless @wildcard
+        return if @last_wildcard_resolve && (monotonic_now - @last_wildcard_resolve) < WILDCARD_REFRESH_INTERVAL
+
+        resolve_wildcard_queues
+      end
+
+      # When a "relation does not exist" error occurs, the queue was deleted.
+      # Extract the queue name from the error and remove it from the active list.
+      def evict_missing_queues(error)
+        prefix = "#{config.queue_prefix}_"
+        if error.message =~ /pgmq\.q_(\w+)/
+          physical_name = Regexp.last_match(1)
+          logical_name = physical_name.delete_prefix(prefix)
+          if @queues.delete(logical_name)
+            Pgbus.logger.warn { "[Pgbus] Evicted deleted queue '#{logical_name}' (#{physical_name}) from worker" }
+          end
+        end
+        Pgbus.logger.error { "[Pgbus] Queue table missing: #{error.message}" }
       end
 
       def check_recycle
@@ -286,6 +321,10 @@ module Pgbus
         @heartbeat&.stop
         restore_signals
         Pgbus.logger.info { "[Pgbus] Worker stopped. Processed: #{@jobs_processed.value}, Failed: #{@jobs_failed.value}" }
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
     end
   end
