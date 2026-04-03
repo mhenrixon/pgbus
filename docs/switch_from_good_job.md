@@ -119,27 +119,20 @@ end
 ```
 
 ```ruby
-# After
+# After: Pgbus equivalent (auto-included, no explicit include needed)
 class ProcessOrderJob < ApplicationJob
+  limits_concurrency to: 1,
+                     key: -> { "ProcessOrder-#{arguments.first.id}" },
+                     duration: 15.minutes,
+                     on_conflict: :block
+
   def perform(order)
     # ...
   end
 end
 ```
 
-> Pgbus supports concurrency controls via `Pgbus::Concurrency`:
-> ```ruby
-> class ProcessOrderJob < ApplicationJob
->   include Pgbus::Concurrency
->   limits_concurrency to: 1,
->                      key: -> { "ProcessOrder-#{arguments.first.id}" },
->                      duration: 15.minutes,
->                      on_conflict: :block
->   def perform(order)
->     # ...
->   end
-> end
-> ```
+Pgbus's `limits_concurrency` is auto-included into `ActiveJob::Base` by the engine. Note that GoodJob's `total_limit`, `enqueue_limit`, `perform_limit`, and throttle options don't have direct equivalents -- Pgbus uses a single `to:` limit with conflict strategies (`:block`, `:discard`, `:raise`).
 
 ## Step 5: Migrate batches
 
@@ -156,17 +149,22 @@ GoodJob::Batch.enqueue(
 end
 ```
 
-Pgbus does not yet have batch support. Workaround using a coordinator job:
+Pgbus has built-in batch support with callbacks:
 
 ```ruby
-# After: Coordinator pattern
-class ImportUsersJob < ApplicationJob
-  def perform(user_ids)
-    user_ids.each { |id| ImportUserJob.perform_later(id) }
-    # Track completion via a counter in the database or Redis
-  end
+# After: Pgbus batch
+batch = Pgbus::Batch.new(
+  on_finish: BatchCallbackJob,
+  on_success: SuccessNotifyJob,
+  description: "Import users"
+)
+
+batch.enqueue do
+  users.each { |u| ImportUserJob.perform_later(u) }
 end
 ```
+
+Pgbus additionally supports `on_discard` callbacks (fired when any job is dead-lettered) and batch `properties` for passing context to callbacks.
 
 ## Step 6: Migrate cron / recurring jobs
 
@@ -187,26 +185,22 @@ config.good_job.cron = {
 }
 ```
 
-Pgbus does not yet have built-in recurring task support. Options:
+Pgbus supports recurring tasks via `config/recurring.yml` with cron and human-readable syntax:
 
-1. **Use the `whenever` gem**:
-   ```ruby
-   # config/schedule.rb
-   every 1.day, at: "2:00 am" do
-     runner "CleanupJob.perform_later"
-   end
-   every :hour do
-     runner "SyncJob.perform_later(42)"
-   end
-   ```
+```yaml
+# After: config/recurring.yml
+production:
+  daily_cleanup:
+    class: CleanupJob
+    schedule: "0 2 * * *"
+    queue: maintenance
+  hourly_sync:
+    class: SyncJob
+    schedule: "0 * * * *"
+    args: [42]
+```
 
-2. **Use system cron** directly:
-   ```cron
-   0 2 * * * cd /app && bin/rails runner "CleanupJob.perform_later"
-   0 * * * * cd /app && bin/rails runner "SyncJob.perform_later(42)"
-   ```
-
-3. Wait for Pgbus recurring task support (planned).
+Pgbus parses both standard cron (`0 2 * * *`) and human-readable (`every day at 2am`) syntax via Fugit. The scheduler runs as part of the supervisor process and deduplicates executions via a `pgbus_recurring_executions` table.
 
 ## Step 7: Replace the dashboard
 
@@ -216,6 +210,15 @@ mount GoodJob::Engine => "good_job"
 
 # After:
 mount Pgbus::Engine => "/pgbus"
+```
+
+If you mount the dashboard inside an authenticated namespace:
+
+```ruby
+Pgbus.configure do |config|
+  config.base_controller_class = "Admin::BaseController"
+  config.return_to_app_url = "/admin"  # optional: adds a back button in the dashboard nav
+end
 ```
 
 ## Step 8: Update process management
@@ -254,17 +257,18 @@ end
 - **PGMQ** -- purpose-built message queue extension with atomic read/archive/delete, visibility timeouts, and `SKIP LOCKED` under the hood.
 - **Supervisor/fork model** -- isolated worker processes. A memory leak or crash in one worker doesn't affect others.
 
-## What you lose (for now)
+## Feature comparison
 
-| GoodJob feature | Status in Pgbus |
+| GoodJob feature | Pgbus equivalent |
 |-----------------|-----------------|
-| Concurrency controls (`good_job_control_concurrency_with`) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
-| Throttling (`enqueue_throttle`, `perform_throttle`) | Planned |
-| Batches (`GoodJob::Batch`) | `Pgbus::Batch` with on_finish/on_success/on_discard callbacks |
-| Cron / recurring jobs | Planned |
+| Concurrency controls (`good_job_control_concurrency_with`) | `limits_concurrency` DSL (auto-included, similar API) |
+| Throttling (`enqueue_throttle`, `perform_throttle`) | Use `limits_concurrency` for most cases; sliding-window throttling not yet built |
+| Batches (`GoodJob::Batch`) | `Pgbus::Batch` with `on_finish` / `on_success` / `on_discard` callbacks |
+| Cron / recurring jobs | `config/recurring.yml` with cron + human-readable syntax via Fugit |
 | Async execution mode (in-process) | Not planned (forked processes only) |
 | Capsules (isolated thread pools) | Workers are isolated by design (forked processes) |
 | Advisory locks | Replaced by PGMQ visibility timeouts |
+| `ActiveJob::Continuation` (Rails 8.1+) | Supported -- `stopping?` wired to worker lifecycle |
 
 ## Gotchas
 

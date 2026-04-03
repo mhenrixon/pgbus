@@ -92,9 +92,9 @@ production:
 | `queues: "a,b"` (string) | `queues: [a, b]` (array) | Different format |
 | `queues: "*"` (wildcard) | List queues explicitly | PGMQ queues are explicit |
 
-## Step 4: Remove concurrency controls
+## Step 4: Migrate concurrency controls
 
-SolidQueue's `limits_concurrency` is a SolidQueue-specific mixin. Remove it from your jobs:
+SolidQueue's `limits_concurrency` has a near-identical API in Pgbus. The DSL is auto-included into `ActiveJob::Base` by the engine -- no explicit `include` needed:
 
 ```ruby
 # Before: SolidQueue concurrency control
@@ -111,27 +111,20 @@ end
 ```
 
 ```ruby
-# After: Remove the SolidQueue mixin
+# After: Same DSL, works unchanged
 class ProcessOrderJob < ApplicationJob
+  limits_concurrency to: 1,
+                     key: ->(order) { order.account_id },
+                     duration: 15.minutes,
+                     on_conflict: :block
+
   def perform(order)
     # ...
   end
 end
 ```
 
-> Pgbus supports concurrency controls via `Pgbus::Concurrency`:
-> ```ruby
-> class ProcessOrderJob < ApplicationJob
->   include Pgbus::Concurrency
->   limits_concurrency to: 1,
->                      key: ->(order) { order.account_id },
->                      duration: 15.minutes,
->                      on_conflict: :block
->   def perform(order)
->     # ...
->   end
-> end
-> ```
+The `limits_concurrency` DSL is identical. Pgbus additionally supports `on_conflict: :discard` and `on_conflict: :raise` strategies that SolidQueue does not offer.
 
 ## Step 5: Migrate recurring tasks
 
@@ -160,6 +153,19 @@ mount MissionControl::Jobs::Engine, at: "/jobs"
 
 # After:
 mount Pgbus::Engine => "/pgbus"
+```
+
+If you used `mission_control-jobs`' `base_controller_class` for authentication, Pgbus supports the same pattern:
+
+```ruby
+# Before: MissionControl
+MissionControl::Jobs.base_controller_class = "Admin::BaseController"
+
+# After: Pgbus
+Pgbus.configure do |config|
+  config.base_controller_class = "Admin::BaseController"
+  config.return_to_app_url = "/admin"  # optional: adds a back button in the dashboard nav
+end
 ```
 
 ## Step 7: Update process management
@@ -206,9 +212,9 @@ end
 
 | SolidQueue feature | Pgbus equivalent |
 |--------------------|-----------------|
-| `limits_concurrency` | `Pgbus::Concurrency` with `limits_concurrency` DSL (add `include Pgbus::Concurrency`) |
+| `limits_concurrency` | `limits_concurrency` DSL (auto-included, same API) |
 | `config/recurring.yml` | Supported -- same YAML format, cron + human-readable syntax via Fugit |
-| Queue pausing (`SolidQueue::Queue.pause`) | Planned |
+| Queue pausing (`SolidQueue::Queue.pause`) | Supported -- dashboard pause/resume + circuit breaker auto-pause |
 | Separate queue database (`connects_to`) | Supported -- `Pgbus.configure { \|c\| c.connects_to = { database: { writing: :pgbus } } }` |
 | Numeric job priorities | Supported -- configurable priority levels with per-queue subqueues |
 | `ActiveJob::Continuation` (Rails 8.1+) | Supported -- `stopping?` wired to worker lifecycle |

@@ -162,7 +162,9 @@ mount Sidekiq::Web => "/sidekiq"
 mount Pgbus::Engine => "/pgbus"
 ```
 
-If you used `Sidekiq::Web`'s authentication:
+If you used `Sidekiq::Web`'s authentication, you have two options:
+
+**Option A: Simple auth lambda** (like Sidekiq's `Sidekiq::Web` constraint):
 
 ```ruby
 Pgbus.configure do |config|
@@ -171,6 +173,17 @@ Pgbus.configure do |config|
   }
 end
 ```
+
+**Option B: Inherit from your authenticated controller** (recommended for admin namespaces):
+
+```ruby
+Pgbus.configure do |config|
+  config.base_controller_class = "Admin::BaseController"
+  config.return_to_app_url = "/admin"  # adds a back button in the dashboard nav
+end
+```
+
+This is the equivalent of Sidekiq's `Sidekiq::Web` authentication constraint but more flexible -- your base controller's `before_action` filters, helpers, and layout apply automatically.
 
 ## Step 7: Update process management
 
@@ -205,8 +218,8 @@ Once all Sidekiq jobs have drained and you've verified Pgbus is processing corre
 | Sidekiq feature | Pgbus equivalent |
 |-----------------|-----------------|
 | Batches (Pro) | `Pgbus::Batch` with `on_finish` / `on_success` / `on_discard` callbacks |
-| Concurrency controls (Enterprise) | `Pgbus::Concurrency` with `limits_concurrency` DSL |
-| Unique jobs (Enterprise / `sidekiq-unique-jobs`) | `Pgbus::Uniqueness` with `until_executed` / `while_executing` strategies |
+| Concurrency controls (Enterprise) | `limits_concurrency` DSL (auto-included into ActiveJob::Base) |
+| Unique jobs (Enterprise / `sidekiq-unique-jobs`) | `ensures_uniqueness` DSL (auto-included into ActiveJob::Base) |
 | Cron / recurring jobs (`sidekiq-cron`) | `config/recurring.yml` with cron syntax (Fugit) |
 | Rate limiting (Enterprise) | Use `limits_concurrency` for most cases; sliding-window rate limiting not yet built |
 | Real-time metrics (Sidekiq Web) | Pgbus dashboard covers queue depth, failures, processes, recurring tasks |
