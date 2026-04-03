@@ -42,8 +42,9 @@ module Pgbus
         end
 
         bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
-          enqueue_immediate(queue, jobs.reject { |j| scheduled_in_future?(j) })
-          jobs.select { |j| scheduled_in_future?(j) }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
+          immediate, scheduled = jobs.partition { |j| !scheduled_in_future?(j) }
+          enqueue_immediate(queue, immediate)
+          scheduled.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
 
         active_jobs.count
