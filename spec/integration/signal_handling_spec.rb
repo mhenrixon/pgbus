@@ -214,12 +214,18 @@ RSpec.describe "Signal handling (integration)", :integration do
       marker_path = marker.path
       marker.close!
 
+      # Separate file to signal "job started" so we don't rely on sleep
+      started = Tempfile.new("pgbus_signal_started")
+      started_path = started.path
+      started.close!
+
       # Enqueue a "job" with a marker path
       payload = {
         "job_class" => "TestJob",
         "job_id" => SecureRandom.uuid,
         "arguments" => [],
-        "marker_path" => marker_path
+        "marker_path" => marker_path,
+        "started_path" => started_path
       }
       client.send_message("default", payload)
 
@@ -241,7 +247,9 @@ RSpec.describe "Signal handling (integration)", :integration do
             {}
           end
           if parsed["marker_path"]
-            sleep 0.5 # Simulate work
+            # Signal that the job started processing
+            File.write(parsed["started_path"], "started") if parsed["started_path"]
+            sleep 1 # Simulate work — long enough for parent to send SIGTERM
             File.write(parsed["marker_path"], "completed")
           end
           # Archive the message
@@ -251,10 +259,18 @@ RSpec.describe "Signal handling (integration)", :integration do
         worker.run
       end
 
-      # Give worker time to pick up the job
-      sleep 2
+      # Wait for the worker to actually pick up the job (poll for started file)
+      started_seen = false
+      20.times do
+        if File.exist?(started_path)
+          started_seen = true
+          break
+        end
+        sleep 0.5
+      end
+      expect(started_seen).to be(true), "Worker did not pick up the job within 10s"
 
-      # Send SIGTERM while job might still be processing
+      # Send SIGTERM while job is in-flight (worker is sleeping 1s)
       Process.kill("TERM", worker_pid)
 
       Timeout.timeout(15) do
@@ -267,6 +283,7 @@ RSpec.describe "Signal handling (integration)", :integration do
     ensure
       force_kill(worker_pid) if worker_pid
       File.delete(marker_path) if marker_path && File.exist?(marker_path)
+      File.delete(started_path) if started_path && File.exist?(started_path)
     end
   end
 end
