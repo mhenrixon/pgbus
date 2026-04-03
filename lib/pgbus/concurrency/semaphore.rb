@@ -7,7 +7,7 @@ module Pgbus
         # Attempt to acquire a slot in the semaphore for the given key.
         # Returns :acquired if a slot was available, :blocked if the limit is reached.
         def acquire(key, max_value, duration)
-          expires_at = Time.now.utc + duration
+          expires_at = Time.current + duration
           Pgbus::Semaphore.acquire!(key, max_value, expires_at)
         end
 
@@ -23,7 +23,7 @@ module Pgbus
           result = Pgbus::Semaphore.connection.exec_query(
             "DELETE FROM pgbus_semaphores WHERE expires_at < $1 RETURNING key",
             "Pgbus Semaphore Expire",
-            [Time.now.utc]
+            [Time.current]
           )
           result.rows.map { |row| { "key" => row[0] } }
         end

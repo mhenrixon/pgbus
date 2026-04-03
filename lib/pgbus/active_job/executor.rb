@@ -118,8 +118,8 @@ module Pgbus
         enqueued_at_str = message.enqueued_at
         return unless enqueued_at_str
 
-        enqueued_at = Time.parse(enqueued_at_str.to_s)
-        [((Time.now.utc - enqueued_at) * 1000).round, 0].max
+        enqueued_at = Time.zone ? Time.zone.parse(enqueued_at_str.to_s) : Time.parse(enqueued_at_str.to_s)
+        [((Time.current - enqueued_at) * 1000).round, 0].max
       rescue ArgumentError, TypeError
         nil
       end

@@ -23,7 +23,7 @@ module Pgbus
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
-        delay = [(timestamp - Time.now.to_f).ceil, 0].max
+        delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
         return active_job if uniqueness_rejected?(active_job, payload_hash)
 
@@ -34,7 +34,7 @@ module Pgbus
         # Jobs with uniqueness must go through individual enqueue to acquire locks
         unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
         unique.each do |j|
-          if j.scheduled_at && j.scheduled_at > Time.now
+          if j.scheduled_at && j.scheduled_at > Time.current
             enqueue_at(j, j.scheduled_at.to_f)
           else
             enqueue(j)
@@ -42,8 +42,8 @@ module Pgbus
         end
 
         bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
-          enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.now })
-          jobs.select { |j| j.scheduled_at && j.scheduled_at > Time.now }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
+          enqueue_immediate(queue, jobs.reject { |j| j.scheduled_at && j.scheduled_at > Time.current })
+          jobs.select { |j| j.scheduled_at && j.scheduled_at > Time.current }.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
 
         active_jobs.count

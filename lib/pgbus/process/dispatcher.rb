@@ -21,15 +21,15 @@ module Pgbus
       def initialize(config: Pgbus.configuration)
         @config = config
         @shutting_down = false
-        @last_cleanup_at = Time.now
-        @last_reap_at = Time.now
-        @last_concurrency_at = Time.now
-        @last_batch_cleanup_at = Time.now
-        @last_recurring_cleanup_at = Time.now
-        @last_archive_compaction_at = Time.now
-        @last_outbox_cleanup_at = Time.now
-        @last_job_lock_cleanup_at = Time.now
-        @last_stats_cleanup_at = Time.now
+        @last_cleanup_at = monotonic_now
+        @last_reap_at = monotonic_now
+        @last_concurrency_at = monotonic_now
+        @last_batch_cleanup_at = monotonic_now
+        @last_recurring_cleanup_at = monotonic_now
+        @last_archive_compaction_at = monotonic_now
+        @last_outbox_cleanup_at = monotonic_now
+        @last_job_lock_cleanup_at = monotonic_now
+        @last_stats_cleanup_at = monotonic_now
       end
 
       def run
@@ -65,7 +65,7 @@ module Pgbus
       private
 
       def run_maintenance
-        now = Time.now
+        now = monotonic_now
 
         run_if_due(now, :@last_cleanup_at, CLEANUP_INTERVAL) { cleanup_processed_events }
         run_if_due(now, :@last_reap_at, REAP_INTERVAL) { reap_stale_processes }
@@ -93,7 +93,7 @@ module Pgbus
         ttl = config.idempotency_ttl
         return unless ttl&.positive?
 
-        deleted = ProcessedEvent.expired(Time.now.utc - ttl).delete_all
+        deleted = ProcessedEvent.expired(Time.current - ttl).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
@@ -101,7 +101,7 @@ module Pgbus
 
       def reap_stale_processes
         threshold = Heartbeat::ALIVE_THRESHOLD
-        deleted = ProcessEntry.stale(Time.now.utc - threshold).delete_all
+        deleted = ProcessEntry.stale(Time.current - threshold).delete_all
         Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
@@ -127,7 +127,7 @@ module Pgbus
       end
 
       def cleanup_batches
-        deleted = Batch.cleanup(older_than: Time.now.utc - (7 * 24 * 3600)) # 7 days
+        deleted = Batch.cleanup(older_than: Time.current - (7 * 24 * 3600)) # 7 days
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
@@ -139,7 +139,7 @@ module Pgbus
         retention = config.stats_retention
         return unless retention&.positive?
 
-        deleted = JobStat.cleanup!(older_than: Time.now.utc - retention)
+        deleted = JobStat.cleanup!(older_than: Time.current - retention)
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old job stats" } if deleted.positive?
       end
 
@@ -162,7 +162,7 @@ module Pgbus
         retention = config.outbox_retention
         return unless retention&.positive?
 
-        deleted = OutboxEntry.published_before(Time.now.utc - retention).delete_all
+        deleted = OutboxEntry.published_before(Time.current - retention).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} published outbox entries" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
@@ -176,7 +176,7 @@ module Pgbus
         retention = config.archive_retention
         return unless retention&.positive?
 
-        cutoff = Time.now.utc - retention
+        cutoff = Time.current - retention
         batch_size = config.archive_compaction_batch_size || 1000
         prefix = config.queue_prefix
 
@@ -200,10 +200,14 @@ module Pgbus
         retention = config.recurring_execution_retention
         return unless retention&.positive?
 
-        deleted = RecurringExecution.older_than(Time.now.utc - retention).delete_all
+        deleted = RecurringExecution.older_than(Time.current - retention).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old recurring executions" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Recurring execution cleanup failed: #{e.message}" }
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
 
       def start_heartbeat

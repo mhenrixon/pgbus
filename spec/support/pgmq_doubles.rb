@@ -63,7 +63,7 @@ module PgmqDoubles
   end
 
   def build_message_double(msg_id: 1, message: "{}", read_ct: 0, headers: nil, enqueued_at: :default)
-    enqueued_at = Time.now.utc.iso8601(6) if enqueued_at == :default
+    enqueued_at = Time.current.utc.iso8601(6) if enqueued_at == :default
     double("PGMQ::Message", msg_id: msg_id, message: message, read_ct: read_ct,
                             headers: headers, enqueued_at: enqueued_at)
   end

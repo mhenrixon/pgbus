@@ -10,7 +10,7 @@ module Pgbus
     # Atomic dequeue: DELETE the highest-priority non-expired row with FOR UPDATE SKIP LOCKED.
     # Returns { queue_name:, payload: } or nil.
     def self.release_next!(concurrency_key)
-      now = Time.now.utc
+      now = Time.current
       result = connection.exec_query(
         <<~SQL,
           DELETE FROM pgbus_blocked_executions

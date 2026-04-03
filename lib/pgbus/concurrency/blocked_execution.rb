@@ -13,7 +13,7 @@ module Pgbus
             queue_name: queue_name,
             payload: JSON.generate(payload),
             priority: priority,
-            expires_at: Time.now.utc + duration
+            expires_at: Time.current + duration
           )
         end
 
@@ -45,7 +45,7 @@ module Pgbus
         # Delete blocked executions that have expired.
         # Returns the count of deleted rows.
         def expire_stale
-          Pgbus::BlockedExecution.expired(Time.now.utc).delete_all
+          Pgbus::BlockedExecution.expired(Time.current).delete_all
         end
 
         # Count blocked executions for a given key. Useful for testing/monitoring.
@@ -59,7 +59,7 @@ module Pgbus
           scheduled_at = payload["scheduled_at"]
           return default_delay unless scheduled_at
 
-          [Time.parse(scheduled_at).to_f - Time.now.to_f, 0].max.ceil
+          [Time.parse(scheduled_at).to_f - Time.current.to_f, 0].max.ceil
         rescue StandardError
           default_delay
         end
