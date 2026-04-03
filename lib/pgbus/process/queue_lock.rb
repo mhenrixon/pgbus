@@ -77,7 +77,7 @@ module Pgbus
 
       def connection
         if Pgbus.configuration.connects_to
-          Pgbus::ApplicationRecord.connection
+          Pgbus::BusRecord.connection
         else
           ActiveRecord::Base.connection
         end

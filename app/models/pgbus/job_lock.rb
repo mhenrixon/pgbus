@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class JobLock < Pgbus::ApplicationRecord
+  class JobLock < Pgbus::BusRecord
     self.table_name = "pgbus_job_locks"
 
     # States:

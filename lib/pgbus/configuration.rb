@@ -201,7 +201,7 @@ module Pgbus
         connection_params
       elsif defined?(ActiveRecord::Base)
         if connects_to
-          -> { Pgbus::ApplicationRecord.connection.raw_connection }
+          -> { Pgbus::BusRecord.connection.raw_connection }
         else
           -> { ActiveRecord::Base.connection.raw_connection }
         end

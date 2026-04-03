@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class BatchEntry < ApplicationRecord
+  class BatchEntry < BusRecord
     self.table_name = "pgbus_batches"
 
     COUNTER_COLUMNS = %w[completed_jobs discarded_jobs].freeze

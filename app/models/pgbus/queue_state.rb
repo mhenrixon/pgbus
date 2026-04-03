@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class QueueState < Pgbus::ApplicationRecord
+  class QueueState < Pgbus::BusRecord
     self.table_name = "pgbus_queue_states"
 
     scope :paused, -> { where(paused: true) }

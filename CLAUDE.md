@@ -68,7 +68,8 @@ ActiveRecord models live in `app/models/pgbus/` and inherit from `Pgbus::Applica
 
 | Model Class | Table | Why not the obvious name |
 |---|---|---|
-| `Pgbus::ApplicationRecord` | (abstract) | Standard Rails base model convention |
+| `Pgbus::BusRecord` | (abstract) | Base class in `lib/pgbus/` — loaded by Zeitwerk gem loader, avoids engine boot-order issues |
+| `Pgbus::ApplicationRecord` | (abstract) | Backward-compatible alias for `BusRecord` in `app/models/` |
 | `Pgbus::BatchEntry` | `pgbus_batches` | `Pgbus::Batch` is the batch API class |
 | `Pgbus::BlockedExecution` | `pgbus_blocked_executions` | — |
 | `Pgbus::ProcessEntry` | `pgbus_processes` | `Process` conflicts with Ruby's `Process` module |

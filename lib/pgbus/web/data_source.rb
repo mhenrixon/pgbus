@@ -561,7 +561,7 @@ module Pgbus
       private
 
       def connection
-        Pgbus::ApplicationRecord.connection
+        Pgbus::BusRecord.connection
       end
 
       # name is the full PGMQ queue name (already prefixed)

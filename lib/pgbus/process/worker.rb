@@ -191,7 +191,7 @@ module Pgbus
         dlq_suffix = config.dead_letter_queue_suffix
         prefix = "#{config.queue_prefix}_"
 
-        conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+        conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         all_queues = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
         resolved = all_queues
                    .reject { |q| q.end_with?(dlq_suffix) }
