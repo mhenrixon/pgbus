@@ -142,6 +142,130 @@ RSpec.describe Pgbus::Recurring::Schedule do
     end
   end
 
+  describe "uniqueness integration" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:task) { schedule.tasks.first }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+    let(:job_lock_class) { stub_const("Pgbus::JobLock", Class.new) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      job_lock_class
+      allow(Pgbus::JobLock).to receive_messages(acquire!: true, release!: 1, locked?: false)
+    end
+
+    context "when job class has ensures_uniqueness" do
+      let(:unique_job_class) do
+        Class.new do
+          include Pgbus::Uniqueness
+
+          def self.name
+            "CleanupJob"
+          end
+
+          ensures_uniqueness strategy: :until_executed, on_conflict: :discard
+        end
+      end
+
+      before do
+        stub_const("CleanupJob", unique_job_class)
+      end
+
+      it "skips enqueue when uniqueness lock is already held" do
+        allow(Pgbus::JobLock).to receive(:acquire!).and_return(false)
+
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(mock_client).not_to have_received(:send_message)
+        expect(Pgbus::JobLock).to have_received(:acquire!).with(
+          "CleanupJob",
+          job_class: "CleanupJob",
+          job_id: "recurring-daily_cleanup",
+          state: "queued",
+          ttl: anything
+        )
+      end
+
+      it "enqueues and acquires lock when no lock is held" do
+        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(mock_client).to have_received(:send_message)
+        expect(Pgbus::JobLock).to have_received(:acquire!).with(
+          "CleanupJob",
+          job_class: "CleanupJob",
+          job_id: "recurring-daily_cleanup",
+          state: "queued",
+          ttl: anything
+        )
+      end
+
+      it "injects uniqueness metadata into the payload" do
+        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(mock_client).to have_received(:send_message).with(
+          anything,
+          hash_including(
+            Pgbus::Uniqueness::METADATA_KEY => "CleanupJob",
+            Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
+          ),
+          headers: anything
+        )
+      end
+    end
+
+    context "when job class does not have ensures_uniqueness" do
+      before do
+        plain_job = Class.new do
+          def self.name
+            "CleanupJob"
+          end
+        end
+        stub_const("CleanupJob", plain_job)
+      end
+
+      it "enqueues without checking locks" do
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(mock_client).to have_received(:send_message)
+      end
+
+      it "does not inject uniqueness metadata" do
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(mock_client).to have_received(:send_message).with(
+          anything,
+          hash_not_including(Pgbus::Uniqueness::METADATA_KEY),
+          headers: anything
+        )
+      end
+    end
+
+    context "when job class cannot be constantized" do
+      before do
+        config.recurring_tasks = {
+          "missing_class" => {
+            "class" => "NonexistentJob",
+            "schedule" => "0 * * * *"
+          }
+        }
+      end
+
+      it "enqueues without uniqueness check (fail open)" do
+        schedule_with_missing = described_class.new(config: config)
+        task_missing = schedule_with_missing.tasks.first
+        allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+
+        schedule_with_missing.enqueue_task(task_missing, run_at: run_at)
+
+        expect(mock_client).to have_received(:send_message)
+      end
+    end
+  end
+
   describe "#build_payload" do
     let(:schedule) { described_class.new(config: config) }
 

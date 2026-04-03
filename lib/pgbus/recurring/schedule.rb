@@ -17,9 +17,23 @@ module Pgbus
       def enqueue_task(task, run_at:)
         queue = resolve_queue(task)
 
+        # Check uniqueness lock before enqueuing. If the job class declares
+        # ensures_uniqueness, we acquire the lock here so duplicate recurring
+        # enqueues are rejected while a previous instance is still queued or running.
+        if uniqueness_locked?(task)
+          Pgbus.logger.debug do
+            "[Pgbus] Recurring task #{task.key} skipped: uniqueness lock held"
+          end
+          return
+        end
+
         RecurringExecution.record(task.key, run_at) do
           payload = build_payload(task)
           headers = build_headers(task, run_at)
+
+          # Inject uniqueness metadata into the payload so the worker knows
+          # to release the lock after execution.
+          payload = inject_uniqueness_metadata(task, payload)
 
           Pgbus.client.ensure_queue(queue)
           Pgbus.client.send_message(queue, payload, headers: headers)
@@ -96,6 +110,75 @@ module Pgbus
           "pgbus.recurring_run_at" => run_at.iso8601,
           "pgbus.recurring_schedule" => task.schedule
         }
+      end
+
+      # Check if the job class has ensures_uniqueness and if its lock is currently held.
+      # Returns true if the lock is held (skip enqueue), false otherwise.
+      def uniqueness_locked?(task)
+        return false unless task.class_name
+
+        job_class = task.class_name.safe_constantize
+        return false unless job_class
+        return false unless job_class.respond_to?(:pgbus_uniqueness)
+
+        config = job_class.pgbus_uniqueness
+        return false unless config
+        return false unless config[:strategy] == :until_executed
+
+        key = resolve_uniqueness_key(config, task)
+        return false unless key
+
+        # Try to acquire the lock. If it fails, the lock is already held.
+        acquired = JobLock.acquire!(
+          key,
+          job_class: task.class_name,
+          job_id: "recurring-#{task.key}",
+          state: "queued",
+          ttl: config[:lock_ttl]
+        )
+        # If we acquired it, great — the message will be enqueued with the lock held.
+        # If not, a previous instance is still queued/running.
+        !acquired
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Uniqueness check failed for #{task.key}: #{e.message}" }
+        false # Fail open — allow enqueue if uniqueness check errors
+      end
+
+      # Resolve the uniqueness key for a recurring task.
+      # For no-argument recurring jobs, the key defaults to the class name.
+      def resolve_uniqueness_key(config, task)
+        key_proc = config[:key]
+        args = task.arguments || []
+
+        if args.empty?
+          key_proc.call
+        else
+          key_proc.call(*args)
+        end
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Could not resolve uniqueness key for #{task.key}: #{e.message}" }
+        nil
+      end
+
+      # Inject uniqueness metadata into the payload so the executor releases
+      # the lock after the job completes.
+      def inject_uniqueness_metadata(task, payload)
+        return payload unless task.class_name
+
+        job_class = task.class_name.safe_constantize
+        return payload unless job_class.respond_to?(:pgbus_uniqueness)
+
+        config = job_class.pgbus_uniqueness
+        return payload unless config
+
+        key = resolve_uniqueness_key(config, task)
+        return payload unless key
+
+        payload.merge(
+          Pgbus::Uniqueness::METADATA_KEY => key,
+          Pgbus::Uniqueness::STRATEGY_KEY => config[:strategy].to_s,
+          Pgbus::Uniqueness::TTL_KEY => config[:lock_ttl]
+        )
       end
     end
   end
