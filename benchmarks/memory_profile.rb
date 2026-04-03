@@ -3,6 +3,8 @@
 require_relative "bench_helper"
 require "active_job"
 
+ActiveJob::Base.logger = Logger.new(IO::NULL)
+
 puts "=" * 60
 puts "Pgbus Memory Profile — Detailed Allocation Analysis"
 puts "=" * 60
