@@ -83,6 +83,10 @@ module Pgbus
     def logger
       configuration.logger
     end
+
+    def logger=(value)
+      configuration.logger = value
+    end
   end
 
   loader.setup

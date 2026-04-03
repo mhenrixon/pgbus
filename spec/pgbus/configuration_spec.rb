@@ -195,11 +195,11 @@ RSpec.describe Pgbus::Configuration do
 
       before do
         config.connects_to = { database: { writing: :pgbus } }
-        stub_const("Pgbus::ApplicationRecord", Class.new)
-        allow(Pgbus::ApplicationRecord).to receive(:connection).and_return(ar_connection)
+        stub_const("Pgbus::BusRecord", Class.new)
+        allow(Pgbus::BusRecord).to receive(:connection).and_return(ar_connection)
       end
 
-      it "returns a lambda that uses Pgbus::ApplicationRecord connection" do
+      it "returns a lambda that uses Pgbus::BusRecord connection" do
         result = config.connection_options
         expect(result).to be_a(Proc)
         expect(result.call).to eq(raw_connection)

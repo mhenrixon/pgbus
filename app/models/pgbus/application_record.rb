@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class ApplicationRecord < ActiveRecord::Base
+  # Backward-compatible alias — host apps that subclassed
+  # Pgbus::ApplicationRecord will continue to work.
+  # New code should inherit from Pgbus::BusRecord directly.
+  class ApplicationRecord < BusRecord
     self.abstract_class = true
   end
 end

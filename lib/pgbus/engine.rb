@@ -27,7 +27,7 @@ module Pgbus
 
     initializer "pgbus.db" do
       ActiveSupport.on_load(:active_record) do
-        Pgbus::ApplicationRecord.connects_to(**Pgbus.configuration.connects_to) if Pgbus.configuration.connects_to
+        Pgbus::BusRecord.connects_to(**Pgbus.configuration.connects_to) if Pgbus.configuration.connects_to
       end
     end
 

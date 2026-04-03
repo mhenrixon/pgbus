@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Pgbus
-  class JobStat < Pgbus::ApplicationRecord
+  class JobStat < BusRecord
     self.table_name = "pgbus_job_stats"
 
     scope :since, ->(time) { where("created_at >= ?", time) }

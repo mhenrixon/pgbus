@@ -27,7 +27,7 @@ module Pgbus
       # that share at least one queue with the given queue list,
       # excluding the current worker (by PID).
       def self.max_active_priority(queues, my_pid)
-        conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+        conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         rows = conn.select_all(
           "SELECT metadata FROM pgbus_processes WHERE kind = 'worker' AND pid != $1 AND last_heartbeat_at > $2",
           "Pgbus ConsumerPriority",

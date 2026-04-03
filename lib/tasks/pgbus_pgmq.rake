@@ -12,7 +12,7 @@ namespace :pgbus do
       latest = Pgbus::PgmqSchema.latest_version
       puts "Vendored version:  #{latest}"
 
-      conn = Pgbus.configuration.connects_to ? Pgbus::ApplicationRecord.connection : ActiveRecord::Base.connection
+      conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
 
       if conn.table_exists?("pgbus_pgmq_schema_versions")
         row = conn.select_one(
