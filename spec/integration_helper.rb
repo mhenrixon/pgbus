@@ -10,6 +10,22 @@ require "pgbus"
 #   export PGBUS_DATABASE_URL=postgres://pgbus:pgbus@localhost:5432/pgbus_test
 PGBUS_DATABASE_URL = ENV.fetch("PGBUS_DATABASE_URL", nil)
 
+def bootstrap_integration_tables(conn)
+  unless conn.table_exists?("pgbus_uniqueness_keys")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_uniqueness_keys (
+        lock_key VARCHAR NOT NULL,
+        queue_name VARCHAR NOT NULL,
+        msg_id BIGINT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
+    SQL
+  end
+rescue StandardError => e
+  warn "[pgbus integration] Bootstrap warning: #{e.message}"
+end
+
 RSpec.configure do |config|
   config.example_status_persistence_file_path = ".rspec_integration_status"
   config.disable_monkey_patching!
@@ -85,20 +101,4 @@ def cleanup_tables
   end
 rescue StandardError => e
   warn "[pgbus integration] Table cleanup warning: #{e.message}"
-end
-
-def bootstrap_integration_tables(conn)
-  unless conn.table_exists?("pgbus_uniqueness_keys")
-    conn.execute(<<~SQL)
-      CREATE TABLE pgbus_uniqueness_keys (
-        lock_key VARCHAR NOT NULL,
-        queue_name VARCHAR NOT NULL,
-        msg_id BIGINT NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE UNIQUE INDEX idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
-    SQL
-  end
-rescue StandardError => e
-  warn "[pgbus integration] Bootstrap warning: #{e.message}"
 end
