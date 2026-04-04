@@ -29,6 +29,7 @@
             <% if @jobs.any? %>
               <th class="w-10 px-4 py-3">
                 <input type="checkbox" data-bulk-select-all
+                       aria-label="<%= t("pgbus.helpers.bulk_select_all") %>"
                        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
               </th>
             <% end %>
@@ -45,6 +46,7 @@
             <tr>
               <td class="w-10 px-4 py-3 align-top">
                 <input type="checkbox" data-bulk-item
+                       aria-label="<%= t("pgbus.helpers.bulk_select_row", id: j[:msg_id]) %>"
                        data-queue-name="<%= j[:queue_name] %>" data-msg-id="<%= j[:msg_id] %>"
                        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1"
                        onchange="this.nextElementSibling.disabled = !this.checked; this.nextElementSibling.nextElementSibling.disabled = !this.checked">
