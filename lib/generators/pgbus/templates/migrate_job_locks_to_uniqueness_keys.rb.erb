@@ -1,0 +1,33 @@
+class MigratePgbusJobLocksToUniquenessKeys < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Create the new lightweight uniqueness keys table
+    unless table_exists?(:pgbus_uniqueness_keys)
+      create_table :pgbus_uniqueness_keys, id: false do |t|
+        t.string :lock_key, null: false
+        t.string :queue_name, null: false
+        t.bigint :msg_id, null: false
+        t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+      end
+
+      add_index :pgbus_uniqueness_keys, :lock_key,
+        unique: true, name: "idx_pgbus_uniqueness_keys_key"
+    end
+
+    # Drop the old table. Require it to be empty — active locks should be
+    # drained before migrating (stop workers, let VT expire, restart).
+    if table_exists?(:pgbus_job_locks)
+      count = execute("SELECT COUNT(*) FROM pgbus_job_locks").first["count"].to_i
+      if count > 0
+        raise "pgbus_job_locks has #{count} active lock(s). " \
+              "Drain workers and wait for locks to clear before migrating."
+      end
+
+      drop_table :pgbus_job_locks
+    end
+  end
+
+  def down
+    raise ActiveRecord::IrreversibleMigration,
+          "Cannot safely reconstruct pgbus_job_locks from pgbus_uniqueness_keys"
+  end
+end

@@ -7,9 +7,10 @@ module Pgbus
     class Executor
       attr_reader :client, :config
 
-      def initialize(client: Pgbus.client, config: Pgbus.configuration)
+      def initialize(client: Pgbus.client, config: Pgbus.configuration, stat_buffer: nil)
         @client = client
         @config = config
+        @stat_buffer = stat_buffer
       end
 
       def execute(message, queue_name, source_queue: nil)
@@ -29,15 +30,14 @@ module Pgbus
         job_class = payload["job_class"]
         uniqueness_key = Uniqueness.extract_key(payload)
         uniqueness_strategy = Uniqueness.extract_strategy(payload)
-        uniqueness_ttl = payload[Uniqueness::TTL_KEY] || Uniqueness::DEFAULT_LOCK_TTL
 
         if uniqueness_key
           case uniqueness_strategy
           when :until_executed
-            # Transition the queued lock to executing state with our PID.
-            # The lock was acquired at enqueue time — now we claim ownership
-            # so the reaper can correlate it with our heartbeat.
-            Uniqueness.claim_for_execution!(uniqueness_key, ttl: uniqueness_ttl)
+            # No claim step needed — PGMQ's visibility timeout is the execution lock.
+            # The uniqueness key row was inserted at enqueue time and will be
+            # released on completion or DLQ.
+            nil
           when :while_executing
             # Acquire the lock now. If another worker is already executing
             # this job, skip it — VT will expire and it'll be retried.
@@ -96,18 +96,20 @@ module Pgbus
       def record_stat(payload, queue_name, status, start_time, message: nil)
         return unless config.stats_enabled
 
-        duration_ms = ((monotonic_now - start_time) * 1000).round
-        enqueue_latency_ms = compute_enqueue_latency(message)
-        retry_count = message ? [message.read_ct.to_i - 1, 0].max : 0
-
-        JobStat.record!(
+        attrs = {
           job_class: payload&.dig("job_class") || "unknown",
           queue_name: queue_name,
           status: status,
-          duration_ms: duration_ms,
-          enqueue_latency_ms: enqueue_latency_ms,
-          retry_count: retry_count
-        )
+          duration_ms: ((monotonic_now - start_time) * 1000).round,
+          enqueue_latency_ms: compute_enqueue_latency(message),
+          retry_count: message ? [message.read_ct.to_i - 1, 0].max : 0
+        }
+
+        if @stat_buffer
+          @stat_buffer.push(attrs)
+        else
+          JobStat.record!(**attrs)
+        end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus] Stat recording failed: #{e.message}" }
       end
@@ -115,18 +117,30 @@ module Pgbus
       def compute_enqueue_latency(message)
         return unless message
 
-        enqueued_at_str = message.enqueued_at
-        return unless enqueued_at_str
+        enqueued_at = message.enqueued_at
+        return unless enqueued_at
 
-        str = enqueued_at_str.to_s
+        # Fast path: numeric epoch (float seconds) avoids Time.parse entirely.
+        # PGMQ returns enqueued_at as a Time or string depending on the driver.
+        case enqueued_at
+        when Numeric
+          [((Time.now.to_f - enqueued_at) * 1000).round, 0].max
+        when Time
+          [((Time.now.utc - enqueued_at.utc) * 1000).round, 0].max
+        else
+          parse_enqueue_latency_from_string(enqueued_at.to_s)
+        end
+      rescue ArgumentError, TypeError
+        nil
+      end
+
+      def parse_enqueue_latency_from_string(str)
         # PGMQ enqueued_at is TIMESTAMPTZ (always UTC internally).
         # If the string lacks an explicit offset, assume UTC to avoid
         # misinterpretation when the system timezone is non-UTC.
         str = "#{str} UTC" unless str.match?(/[+-]\d{2}:?\d{2}\s*$|Z\s*$/i)
         enqueued_at = Time.parse(str)
         [((Time.now.utc - enqueued_at) * 1000).round, 0].max
-      rescue ArgumentError, TypeError
-        nil
       end
 
       def handle_failure(_message, _queue_name, error)

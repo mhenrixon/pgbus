@@ -57,10 +57,12 @@ module Pgbus
       end
 
       def purge_queue(name)
+        release_uniqueness_keys_for_queue(name)
         @client.purge_queue(name, prefixed: false)
       end
 
       def drop_queue(name)
+        release_uniqueness_keys_for_queue(name)
         @client.drop_queue(name, prefixed: false)
       end
 
@@ -535,7 +537,7 @@ module Pgbus
 
       # Lock management
       def discard_lock(lock_key)
-        JobLock.where(lock_key: lock_key).delete_all
+        UniquenessKey.where(lock_key: lock_key).delete_all
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error discarding lock #{lock_key}: #{e.message}" }
         0
@@ -544,36 +546,32 @@ module Pgbus
       def discard_locks(lock_keys)
         return 0 if lock_keys.empty?
 
-        JobLock.where(lock_key: lock_keys).delete_all
+        UniquenessKey.where(lock_key: lock_keys).delete_all
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error discarding locks: #{e.message}" }
         0
       end
 
       def discard_all_locks
-        JobLock.delete_all
+        UniquenessKey.delete_all
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error discarding all locks: #{e.message}" }
         0
       end
 
-      # Job locks
+      # Job uniqueness keys
       def job_locks
-        JobLock.order(locked_at: :desc).limit(100).map do |lock|
+        UniquenessKey.order(created_at: :desc).limit(100).map do |key|
           {
-            lock_key: lock.lock_key,
-            job_class: lock.job_class,
-            job_id: lock.job_id,
-            state: lock.state,
-            owner_pid: lock.owner_pid,
-            owner_hostname: lock.owner_hostname,
-            locked_at: lock.locked_at,
-            expires_at: lock.expires_at,
-            age_seconds: lock.locked_at ? (Time.current - lock.locked_at).to_i : nil
+            lock_key: key.lock_key,
+            queue_name: key.queue_name,
+            msg_id: key.msg_id,
+            created_at: key.created_at,
+            age_seconds: key.created_at ? (Time.current - key.created_at).to_i : nil
           }
         end
       rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus::Web] Error fetching job locks: #{e.message}" }
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching uniqueness keys: #{e.message}" }
         []
       end
 
@@ -810,7 +808,7 @@ module Pgbus
 
         payload = payload_str.is_a?(String) ? JSON.parse(payload_str) : payload_str
         key = payload[Uniqueness::METADATA_KEY]
-        JobLock.release!(key) if key
+        UniquenessKey.release!(key) if key
       rescue JSON::ParserError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error parsing payload for lock release: #{e.message}" }
       end
@@ -828,7 +826,7 @@ module Pgbus
           nil
         end
 
-        JobLock.where(lock_key: keys).delete_all if keys.any?
+        UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for messages: #{e.message}" }
       end
@@ -846,9 +844,18 @@ module Pgbus
           nil
         end
 
-        JobLock.where(lock_key: keys).delete_all if keys.any?
+        UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for failed events: #{e.message}" }
+      end
+
+      # Release all uniqueness keys associated with a queue before purge/drop.
+      # Scans queue messages for uniqueness metadata and deletes matching rows.
+      def release_uniqueness_keys_for_queue(queue_name)
+        messages = query_queue_messages_raw(queue_name, 10_000, 0)
+        release_locks_for_messages(messages)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error releasing uniqueness keys for queue #{queue_name}: #{e.message}" }
       end
     end
   end

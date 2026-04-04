@@ -239,16 +239,12 @@ nb:
       index:
         description: Aktive unike låser som forhindrer duplisert jobbkjøring
         empty: Ingen aktive låser
-        executing: Utfører
         headers:
           age: Alder
-          expires: Utløper
-          job_class: Jobbklasse
           lock_key: Låsenøkkel
-          owner: Eier
-          state: Status
-        queued: I kø
-        title: Jobblåser
+          msg_id: Meldings-ID
+          queue_name: Kø
+        title: Unikhetsnøkler
     outbox:
       index:
         description: Transaksjonelle utgående postkasseoppføringer som venter på publisering til PGMQ

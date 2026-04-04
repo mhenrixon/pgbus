@@ -6,21 +6,17 @@ RSpec.describe "Locks", type: :system do
   it "shows empty state" do
     visit "/pgbus/locks"
 
-    expect(page).to have_css("h1", text: "Job Locks")
+    expect(page).to have_css("h1", text: "Uniqueness Keys")
     expect(page).to have_text("No active locks")
   end
 
   context "with locks" do
     before do
       @stub_data_source.locks_list = [
-        { lock_key: "import-42", job_class: "ImportJob", job_id: "j1",
-          state: "executing", owner_pid: 12_345, owner_hostname: "worker-1",
-          locked_at: Time.now.utc, expires_at: (Time.now.utc + 3600),
-          age_seconds: 120 },
-        { lock_key: "export-99", job_class: "ExportJob", job_id: "j2",
-          state: "queued", owner_pid: nil, owner_hostname: nil,
-          locked_at: Time.now.utc, expires_at: (Time.now.utc + 7200),
-          age_seconds: 60 }
+        { lock_key: "import-42", queue_name: "default", msg_id: 123,
+          created_at: Time.now.utc, age_seconds: 120 },
+        { lock_key: "export-99", queue_name: "urgent", msg_id: 456,
+          created_at: Time.now.utc, age_seconds: 60 }
       ]
     end
 
@@ -29,10 +25,8 @@ RSpec.describe "Locks", type: :system do
 
       expect(page).to have_text("import-42")
       expect(page).to have_text("export-99")
-      expect(page).to have_text("ImportJob")
-      expect(page).to have_text("ExportJob")
-      expect(page).to have_text("Executing")
-      expect(page).to have_text("Queued")
+      expect(page).to have_text("default")
+      expect(page).to have_text("urgent")
     end
 
     it "shows per-lock discard buttons" do

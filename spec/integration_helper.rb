@@ -10,6 +10,22 @@ require "pgbus"
 #   export PGBUS_DATABASE_URL=postgres://pgbus:pgbus@localhost:5432/pgbus_test
 PGBUS_DATABASE_URL = ENV.fetch("PGBUS_DATABASE_URL", nil)
 
+def bootstrap_integration_tables(conn)
+  unless conn.table_exists?("pgbus_uniqueness_keys")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_uniqueness_keys (
+        lock_key VARCHAR NOT NULL,
+        queue_name VARCHAR NOT NULL,
+        msg_id BIGINT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
+    SQL
+  end
+rescue StandardError => e
+  warn "[pgbus integration] Bootstrap warning: #{e.message}"
+end
+
 RSpec.configure do |config|
   config.example_status_persistence_file_path = ".rspec_integration_status"
   config.disable_monkey_patching!
@@ -44,6 +60,9 @@ RSpec.configure do |config|
     c.listen_notify = false
   end
 
+  # Bootstrap tables that may not exist in the CI database
+  bootstrap_integration_tables(ActiveRecord::Base.connection)
+
   # Purge all integration queues BEFORE each test so no stale messages leak
   config.before do
     Pgbus.reset_client!
@@ -72,11 +91,13 @@ end
 def cleanup_tables
   conn = ActiveRecord::Base.connection
   tables = %w[
-    pgbus_semaphores pgbus_blocked_executions pgbus_job_locks
+    pgbus_semaphores pgbus_blocked_executions pgbus_uniqueness_keys
     pgbus_processes pgbus_recurring_executions pgbus_failed_events
   ]
   tables.each do |table|
     conn.execute("DELETE FROM #{table}")
+  rescue StandardError
+    nil
   end
 rescue StandardError => e
   warn "[pgbus integration] Table cleanup warning: #{e.message}"

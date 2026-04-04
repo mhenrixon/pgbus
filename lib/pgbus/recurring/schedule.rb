@@ -125,13 +125,7 @@ module Pgbus
         key = resolve_uniqueness_key(config, task)
         return nil unless key
 
-        acquired = JobLock.acquire!(
-          key,
-          job_class: task.class_name,
-          job_id: "recurring-#{task.key}",
-          state: "queued",
-          ttl: config[:lock_ttl]
-        )
+        acquired = UniquenessKey.acquire!(key, queue_name: resolve_queue(task), msg_id: 0)
 
         if acquired
           key
@@ -148,7 +142,7 @@ module Pgbus
       def release_uniqueness_lock(key)
         return if key.nil? || key == :already_locked
 
-        JobLock.release!(key)
+        UniquenessKey.release!(key)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{e.message}" }
       end

@@ -239,16 +239,12 @@ nl:
       index:
         description: Actieve uniekheidsvergrendelingen voorkomen dubbele taakuitvoering
         empty: Geen actieve vergrendelingen
-        executing: Uitvoeren
         headers:
           age: Leeftijd
-          expires: Verloopt
-          job_class: Taakklasse
           lock_key: Vergrendelingssleutel
-          owner: Eigenaar
-          state: Status
-        queued: In wachtrij
-        title: Taakvergrendelingen
+          msg_id: Bericht-ID
+          queue_name: Wachtrij
+        title: Uniciteitsleutels
     outbox:
       index:
         description: Transactionele uitgaande berichten wachten op publicatie naar PGMQ

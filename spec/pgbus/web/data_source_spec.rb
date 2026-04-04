@@ -93,6 +93,7 @@ RSpec.describe Pgbus::Web::DataSource do
   describe "#purge_queue" do
     it "passes the queue name directly without re-prefixing" do
       allow(mock_client).to receive(:purge_queue)
+      allow(mock_connection).to receive(:select_all).and_return([])
 
       data_source.purge_queue("pgbus_default")
 
@@ -103,6 +104,7 @@ RSpec.describe Pgbus::Web::DataSource do
   describe "#drop_queue" do
     it "passes the queue name directly without re-prefixing" do
       allow(mock_client).to receive(:drop_queue)
+      allow(mock_connection).to receive(:select_all).and_return([])
 
       data_source.drop_queue("pgbus_default")
 
@@ -201,12 +203,12 @@ RSpec.describe Pgbus::Web::DataSource do
                       "headers" => nil, "last_read_at" => nil
                     })
 
-      allow(Pgbus::JobLock).to receive(:release!)
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
 
       data_source.discard_job("pgbus_default", 42)
 
       expect(mock_client).to have_received(:archive_message).with("pgbus_default", 42, prefixed: false)
-      expect(Pgbus::JobLock).to have_received(:release!).with("import-42")
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("import-42")
     end
 
     it "does not release lock when message has no uniqueness key" do
@@ -221,11 +223,11 @@ RSpec.describe Pgbus::Web::DataSource do
                       "headers" => nil, "last_read_at" => nil
                     })
 
-      allow(Pgbus::JobLock).to receive(:release!)
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
 
       data_source.discard_job("pgbus_default", 42)
 
-      expect(Pgbus::JobLock).not_to have_received(:release!)
+      expect(Pgbus::UniquenessKey).not_to have_received(:release!)
     end
   end
 
@@ -239,12 +241,12 @@ RSpec.describe Pgbus::Web::DataSource do
                     })
 
       allow(mock_connection).to receive(:exec_delete)
-      allow(Pgbus::JobLock).to receive(:release!)
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
 
       data_source.discard_failed_event(1)
 
       expect(mock_connection).to have_received(:exec_delete)
-      expect(Pgbus::JobLock).to have_received(:release!).with("failed-1")
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("failed-1")
     end
   end
 
@@ -263,12 +265,12 @@ RSpec.describe Pgbus::Web::DataSource do
         .with("DELETE FROM pgbus_failed_events")
         .and_return(result_double)
 
-      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 2))
+      allow(Pgbus::UniquenessKey).to receive(:where).and_return(double(delete_all: 2))
 
       count = data_source.discard_all_failed
 
       expect(count).to eq(3)
-      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: %w[k1 k2])
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: %w[k1 k2])
     end
   end
 
@@ -295,7 +297,7 @@ RSpec.describe Pgbus::Web::DataSource do
                     ])
 
       allow(mock_client).to receive(:archive_batch).and_return([1, 2])
-      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 1))
+      allow(Pgbus::UniquenessKey).to receive(:where).and_return(double(delete_all: 1))
     end
 
     it "archives all messages from non-DLQ queues and releases locks" do
@@ -303,22 +305,22 @@ RSpec.describe Pgbus::Web::DataSource do
 
       expect(count).to eq(2)
       expect(mock_client).to have_received(:archive_batch).with("pgbus_default", [1, 2], prefixed: false)
-      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: ["k1"])
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: ["k1"])
     end
   end
 
   describe "#discard_lock" do
     it "deletes the lock by key" do
-      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 1))
+      allow(Pgbus::UniquenessKey).to receive(:where).and_return(double(delete_all: 1))
 
       result = data_source.discard_lock("import-42")
 
       expect(result).to eq(1)
-      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: "import-42")
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: "import-42")
     end
 
     it "returns 0 on error" do
-      allow(Pgbus::JobLock).to receive(:where).and_raise(StandardError)
+      allow(Pgbus::UniquenessKey).to receive(:where).and_raise(StandardError)
 
       expect(data_source.discard_lock("import-42")).to eq(0)
     end
@@ -326,12 +328,12 @@ RSpec.describe Pgbus::Web::DataSource do
 
   describe "#discard_locks" do
     it "deletes multiple locks by keys" do
-      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 3))
+      allow(Pgbus::UniquenessKey).to receive(:where).and_return(double(delete_all: 3))
 
       result = data_source.discard_locks(%w[k1 k2 k3])
 
       expect(result).to eq(3)
-      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: %w[k1 k2 k3])
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: %w[k1 k2 k3])
     end
 
     it "returns 0 for empty array" do
@@ -339,7 +341,7 @@ RSpec.describe Pgbus::Web::DataSource do
     end
 
     it "returns 0 on error" do
-      allow(Pgbus::JobLock).to receive(:where).and_raise(StandardError)
+      allow(Pgbus::UniquenessKey).to receive(:where).and_raise(StandardError)
 
       expect(data_source.discard_locks(%w[k1])).to eq(0)
     end
@@ -347,16 +349,16 @@ RSpec.describe Pgbus::Web::DataSource do
 
   describe "#discard_all_locks" do
     it "deletes all locks" do
-      allow(Pgbus::JobLock).to receive(:delete_all).and_return(5)
+      allow(Pgbus::UniquenessKey).to receive(:delete_all).and_return(5)
 
       result = data_source.discard_all_locks
 
       expect(result).to eq(5)
-      expect(Pgbus::JobLock).to have_received(:delete_all)
+      expect(Pgbus::UniquenessKey).to have_received(:delete_all)
     end
 
     it "returns 0 on error" do
-      allow(Pgbus::JobLock).to receive(:delete_all).and_raise(StandardError)
+      allow(Pgbus::UniquenessKey).to receive(:delete_all).and_raise(StandardError)
 
       expect(data_source.discard_all_locks).to eq(0)
     end

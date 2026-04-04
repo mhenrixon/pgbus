@@ -9,7 +9,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
   let(:full_queue) { Pgbus.configuration.queue_name(queue_name) }
 
   before do
-    Pgbus::JobLock.delete_all
+    Pgbus::UniquenessKey.delete_all
     client.ensure_queue(queue_name)
   end
 
@@ -26,8 +26,8 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
       client.send_message(queue_name, payload)
 
       # Simulate the lock that was acquired at enqueue time
-      Pgbus::JobLock.acquire!("import-42", job_class: "ImportJob", job_id: "j1", ttl: 86_400)
-      expect(Pgbus::JobLock.locked?("import-42")).to be true
+      Pgbus::UniquenessKey.acquire!("import-42", queue_name: queue_name, msg_id: 0)
+      expect(Pgbus::UniquenessKey.locked?("import-42")).to be true
 
       # Read message to get msg_id
       msg = client.read_batch(queue_name, qty: 1, vt: 0).first
@@ -36,7 +36,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
       data_source.discard_job(full_queue, msg.msg_id)
 
       # Lock should be released
-      expect(Pgbus::JobLock.locked?("import-42")).to be false
+      expect(Pgbus::UniquenessKey.locked?("import-42")).to be false
     end
 
     it "does nothing for messages without uniqueness metadata" do
@@ -61,16 +61,16 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
           Pgbus::Uniqueness::TTL_KEY => 86_400
         }
         client.send_message(queue_name, payload)
-        Pgbus::JobLock.acquire!("import-#{i}", job_class: "ImportJob", job_id: "j#{i}", ttl: 86_400)
+        Pgbus::UniquenessKey.acquire!("import-#{i}", queue_name: queue_name, msg_id: 0)
       end
 
-      expect(Pgbus::JobLock.count).to eq(3)
+      expect(Pgbus::UniquenessKey.count).to eq(3)
 
       count = data_source.discard_all_enqueued
       expect(count).to eq(3)
 
       # All locks should be released
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
 
       # Queue should be empty
       messages = client.read_batch(queue_name, qty: 10, vt: 0)
@@ -92,17 +92,17 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         Pgbus::Uniqueness::TTL_KEY => 86_400
       }
       client.send_message(queue_name, payload)
-      Pgbus::JobLock.acquire!("import-1", job_class: "ImportJob", job_id: "j1", ttl: 86_400)
+      Pgbus::UniquenessKey.acquire!("import-1", queue_name: queue_name, msg_id: 0)
 
       # Create an unrelated lock (e.g., from a different system)
-      Pgbus::JobLock.acquire!("unrelated-lock", job_class: "OtherJob", job_id: "j99", ttl: 86_400)
+      Pgbus::UniquenessKey.acquire!("unrelated-lock", queue_name: "other", msg_id: 0)
 
       data_source.discard_all_enqueued
 
       # The enqueued message's lock should be cleared
-      expect(Pgbus::JobLock.locked?("import-1")).to be false
+      expect(Pgbus::UniquenessKey.locked?("import-1")).to be false
       # The unrelated lock should remain
-      expect(Pgbus::JobLock.locked?("unrelated-lock")).to be true
+      expect(Pgbus::UniquenessKey.locked?("unrelated-lock")).to be true
     end
   end
 
@@ -117,13 +117,13 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
     end
 
     it "releases the lock when discarding a failed event" do
-      Pgbus::JobLock.acquire!("failed-1", job_class: "FailedJob", job_id: "j1", ttl: 86_400)
-      expect(Pgbus::JobLock.locked?("failed-1")).to be true
+      Pgbus::UniquenessKey.acquire!("failed-1", queue_name: queue_name, msg_id: 0)
+      expect(Pgbus::UniquenessKey.locked?("failed-1")).to be true
 
       event = data_source.failed_events.first
       data_source.discard_failed_event(event["id"])
 
-      expect(Pgbus::JobLock.locked?("failed-1")).to be false
+      expect(Pgbus::UniquenessKey.locked?("failed-1")).to be false
     end
   end
 
@@ -136,16 +136,16 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
                   '{"job_class":"FailedJob","arguments":[#{i}],"pgbus_uniqueness_key":"failed-#{i}","pgbus_uniqueness_strategy":"until_executed"}',
                   '{}', 'RuntimeError', 'boom #{i}', NOW())
         SQL
-        Pgbus::JobLock.acquire!("failed-#{i}", job_class: "FailedJob", job_id: "j#{i}", ttl: 86_400)
+        Pgbus::UniquenessKey.acquire!("failed-#{i}", queue_name: queue_name, msg_id: 0)
       end
     end
 
     it "releases all locks for discarded failed events" do
-      expect(Pgbus::JobLock.count).to eq(3)
+      expect(Pgbus::UniquenessKey.count).to eq(3)
 
       data_source.discard_all_failed
 
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
     end
   end
 
@@ -170,13 +170,13 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         "INSERT INTO pgmq.q_#{full_dlq} (vt, message) VALUES (NOW(), '#{JSON.generate(payload)}')"
       )
 
-      Pgbus::JobLock.acquire!("dlq-1", job_class: "DlqJob", job_id: "j1", ttl: 86_400)
-      expect(Pgbus::JobLock.locked?("dlq-1")).to be true
+      Pgbus::UniquenessKey.acquire!("dlq-1", queue_name: queue_name, msg_id: 0)
+      expect(Pgbus::UniquenessKey.locked?("dlq-1")).to be true
 
       msg = ActiveRecord::Base.connection.select_one("SELECT msg_id FROM pgmq.q_#{full_dlq} LIMIT 1")
       data_source.discard_dlq_message(full_dlq, msg["msg_id"])
 
-      expect(Pgbus::JobLock.locked?("dlq-1")).to be false
+      expect(Pgbus::UniquenessKey.locked?("dlq-1")).to be false
     end
   end
 
@@ -200,14 +200,14 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         ActiveRecord::Base.connection.execute(
           "INSERT INTO pgmq.q_#{full_dlq} (vt, message) VALUES (NOW(), '#{JSON.generate(payload)}')"
         )
-        Pgbus::JobLock.acquire!("dlq-#{i}", job_class: "DlqJob", job_id: "j#{i}", ttl: 86_400)
+        Pgbus::UniquenessKey.acquire!("dlq-#{i}", queue_name: queue_name, msg_id: 0)
       end
 
-      expect(Pgbus::JobLock.count).to eq(3)
+      expect(Pgbus::UniquenessKey.count).to eq(3)
 
       data_source.discard_all_dlq
 
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
     end
   end
 end

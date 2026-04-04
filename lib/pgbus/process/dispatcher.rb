@@ -144,16 +144,39 @@ module Pgbus
       end
 
       def cleanup_job_locks
-        # Primary: reap orphaned locks whose owner worker is no longer alive.
-        # Cross-references (owner_pid, owner_hostname) against pgbus_processes heartbeats.
-        reaped = JobLock.reap_orphaned!
-        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned job locks" } if reaped.positive?
+        # Clean up orphaned uniqueness keys whose msg_id no longer exists
+        # in any PGMQ queue. This handles the rare case where a message is
+        # lost (e.g., queue table truncated) but the uniqueness key remains.
+        reaped = reap_orphaned_uniqueness_keys
+        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
+      end
 
-        # Last resort: clean up locks with expired TTL (handles case where
-        # even the reaper/supervisor is dead and locks are truly abandoned).
-        expired = JobLock.cleanup_expired!
-        Pgbus.logger.debug { "[Pgbus] Cleaned up #{expired} expired job locks" } if expired.positive?
-        # No rescue here — let run_if_due handle the error and retry next tick
+      def reap_orphaned_uniqueness_keys
+        keys = UniquenessKey.all.to_a
+        return 0 if keys.empty?
+
+        threshold = Time.current - (config.visibility_timeout * 2)
+
+        orphaned = keys.select do |key|
+          # msg_id == 0 means pre-produce placeholder or :while_executing lock.
+          # These are live locks — never reap them based on msg_id alone.
+          # Only reap if old enough that the job is certainly gone.
+          next false if key.msg_id.zero? && (!key.created_at || key.created_at >= threshold)
+          next true if key.msg_id.zero? && key.created_at && key.created_at < threshold
+
+          # For real msg_ids, only reap if stale (old enough that VT has
+          # long expired). The message itself may still be in the queue
+          # awaiting retry — age is the only safe signal without scanning
+          # every queue table.
+          key.created_at && key.created_at < threshold
+        end
+
+        return 0 if orphaned.empty?
+
+        UniquenessKey.where(lock_key: orphaned.map(&:lock_key)).delete_all
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
+        0
       end
 
       def cleanup_outbox

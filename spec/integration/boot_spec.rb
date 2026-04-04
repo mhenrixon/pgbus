@@ -20,7 +20,7 @@ RSpec.describe "Application boot (integration)", :integration do
     it "all pgbus models inherit from BusRecord" do
       models = [
         Pgbus::ProcessEntry,
-        Pgbus::JobLock,
+        Pgbus::UniquenessKey,
         Pgbus::JobStat,
         Pgbus::Semaphore,
         Pgbus::RecurringTask,

@@ -146,12 +146,12 @@ RSpec.describe Pgbus::Recurring::Schedule do
     let(:schedule) { described_class.new(config: config) }
     let(:task) { schedule.tasks.first }
     let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
-    let(:job_lock_class) { stub_const("Pgbus::JobLock", Class.new) }
+    let(:uniqueness_key_class) { stub_const("Pgbus::UniquenessKey", Class.new) }
 
     before do
       allow(Pgbus::RecurringExecution).to receive(:record).and_yield
-      job_lock_class
-      allow(Pgbus::JobLock).to receive_messages(acquire!: true, release!: 1, locked?: false)
+      uniqueness_key_class
+      allow(Pgbus::UniquenessKey).to receive_messages(acquire!: true, release!: 1, locked?: false)
     end
 
     context "when job class has ensures_uniqueness" do
@@ -172,59 +172,51 @@ RSpec.describe Pgbus::Recurring::Schedule do
       end
 
       it "skips enqueue when uniqueness lock is already held" do
-        allow(Pgbus::JobLock).to receive(:acquire!).and_return(false)
+        allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(false)
 
         schedule.enqueue_task(task, run_at: run_at)
 
         expect(mock_client).not_to have_received(:send_message)
-        expect(Pgbus::JobLock).to have_received(:acquire!).with(
-          "CleanupJob",
-          job_class: "CleanupJob",
-          job_id: "recurring-daily_cleanup",
-          state: "queued",
-          ttl: anything
+        expect(Pgbus::UniquenessKey).to have_received(:acquire!).with(
+          "CleanupJob", queue_name: "maintenance", msg_id: 0
         )
       end
 
       it "enqueues and acquires lock when no lock is held" do
-        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
 
         schedule.enqueue_task(task, run_at: run_at)
 
         expect(mock_client).to have_received(:send_message)
-        expect(Pgbus::JobLock).to have_received(:acquire!).with(
-          "CleanupJob",
-          job_class: "CleanupJob",
-          job_id: "recurring-daily_cleanup",
-          state: "queued",
-          ttl: anything
+        expect(Pgbus::UniquenessKey).to have_received(:acquire!).with(
+          "CleanupJob", queue_name: "maintenance", msg_id: 0
         )
       end
 
       it "releases the lock when send_message raises" do
-        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
         allow(mock_client).to receive(:send_message).and_raise(StandardError, "connection refused")
 
         expect do
           schedule.enqueue_task(task, run_at: run_at)
         end.to raise_error(StandardError, "connection refused")
 
-        expect(Pgbus::JobLock).to have_received(:release!).with("CleanupJob")
+        expect(Pgbus::UniquenessKey).to have_received(:release!).with("CleanupJob")
       end
 
       it "releases the lock when execution already recorded" do
-        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
         allow(Pgbus::RecurringExecution).to receive(:record)
           .and_raise(Pgbus::Recurring::AlreadyRecorded)
 
         schedule.enqueue_task(task, run_at: run_at)
 
-        expect(Pgbus::JobLock).to have_received(:release!).with("CleanupJob")
+        expect(Pgbus::UniquenessKey).to have_received(:release!).with("CleanupJob")
         expect(mock_client).not_to have_received(:send_message)
       end
 
       it "injects uniqueness metadata into the payload" do
-        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
 
         schedule.enqueue_task(task, run_at: run_at)
 

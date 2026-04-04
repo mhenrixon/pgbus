@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "active_support/concern"
-require "socket"
 
 module Pgbus
   # Job uniqueness guarantees: prevent duplicate jobs from running concurrently.
@@ -10,14 +9,16 @@ module Pgbus
   # uniqueness ensures AT MOST ONE job with a given key exists in the system
   # at any time — from enqueue through completion.
   #
-  # Lock lifecycle:
-  #   1. Enqueue: lock acquired (state: queued), no owner yet
-  #   2. Execution start: lock transitions to (state: executing, owner_pid: PID)
-  #   3. Completion/DLQ: lock released (row deleted)
-  #   4. Crash recovery: reaper detects orphaned locks by cross-referencing
-  #      owner_pid against pgbus_processes heartbeats
-  #   5. Last resort: expires_at TTL (default 24h) handles the case where
-  #      even the reaper can't run (entire supervisor dead)
+  # Lock lifecycle (advisory lock + thin lookup table):
+  #   1. Enqueue: pg_advisory_xact_lock serializes concurrent attempts,
+  #      then INSERT INTO pgbus_uniqueness_keys ON CONFLICT DO NOTHING.
+  #      The lock row lives as long as the job is in the queue or executing.
+  #   2. Execution: PGMQ's visibility timeout is the execution lock —
+  #      no separate claim_for_execution step needed.
+  #   3. Completion/DLQ: DELETE FROM pgbus_uniqueness_keys WHERE lock_key = ?.
+  #   4. Crash recovery: if a worker dies, VT expires, the message becomes
+  #      readable again. The uniqueness key row stays (correctly — the job
+  #      hasn't finished). The next worker picks it up and executes.
   #
   # Strategies:
   #   :until_executed  — Lock acquired at enqueue, held through execution, released on
@@ -44,7 +45,8 @@ module Pgbus
     STRATEGY_KEY = "pgbus_uniqueness_strategy"
     TTL_KEY = "pgbus_uniqueness_lock_ttl"
 
-    # 24 hours — last-resort fallback only. The reaper handles normal crash recovery.
+    # TTL is kept for metadata compatibility but no longer drives lock expiry.
+    # The lock exists until the job completes or is dead-lettered.
     DEFAULT_LOCK_TTL = 24 * 60 * 60
 
     VALID_STRATEGIES = %i[until_executed while_executing].freeze
@@ -115,54 +117,37 @@ module Pgbus
       end
 
       # Acquire the uniqueness lock at enqueue time (:until_executed only).
-      # Lock state: queued, no owner_pid yet.
-      # Returns :acquired or :locked.
-      def acquire_enqueue_lock(key, active_job)
+      # Uses pg_advisory_xact_lock to serialize concurrent attempts.
+      # Returns :acquired, :locked, or :no_lock.
+      def acquire_enqueue_lock(key, active_job, queue_name: nil, msg_id: nil)
         config = uniqueness_config(active_job)
         return :no_lock unless config
         return :no_lock unless config[:strategy] == :until_executed
 
-        acquired = JobLock.acquire!(
-          key,
-          job_class: active_job.class.name,
-          job_id: active_job.job_id,
-          state: "queued",
-          ttl: config[:lock_ttl]
-        )
+        acquired = if msg_id && queue_name
+                     UniquenessKey.acquire!(key, queue_name: queue_name, msg_id: msg_id)
+                   else
+                     # Pre-produce check: use advisory lock + ON CONFLICT
+                     UniquenessKey.acquire!(key, queue_name: queue_name || "pending", msg_id: msg_id || 0)
+                   end
         acquired ? :acquired : :locked
       end
 
-      # Transition a queued lock to executing state when the worker picks it up.
-      # Called for :until_executed jobs at execution start.
-      def claim_for_execution!(key, ttl:)
-        JobLock.claim_for_execution!(key, owner_pid: ::Process.pid, owner_hostname: Socket.gethostname, ttl: ttl)
-      end
-
       # Acquire the uniqueness lock at execution time (:while_executing only).
-      # Lock state: executing with owner_pid.
       # Returns true if acquired, false if another instance is running.
       def acquire_execution_lock(key, payload)
         strategy = extract_strategy(payload)
         return true unless strategy == :while_executing
 
-        ttl = payload[TTL_KEY] || DEFAULT_LOCK_TTL
-
-        JobLock.acquire!(
-          key,
-          job_class: payload["job_class"],
-          job_id: payload["job_id"],
-          state: "executing",
-          owner_pid: ::Process.pid,
-          owner_hostname: Socket.gethostname,
-          ttl: ttl
-        )
+        queue_name = payload["queue_name"] || "unknown"
+        UniquenessKey.acquire!(key, queue_name: queue_name, msg_id: 0)
       end
 
       # Release the uniqueness lock after execution completes.
       def release_lock(key)
         return unless key
 
-        JobLock.release!(key)
+        UniquenessKey.release!(key)
       end
     end
   end

@@ -239,16 +239,12 @@ fi:
       index:
         description: Aktiiviset ainutlaatuisuuden lukot estävät päällekkäisen työn suorittamisen
         empty: Ei aktiivisia lukkoja
-        executing: Suoritetaan
         headers:
           age: Ikä
-          expires: Vanhenee
-          job_class: Työluokka
           lock_key: Lukon avain
-          owner: Omistaja
-          state: Tila
-        queued: Jonossa
-        title: Työn lukot
+          msg_id: Viestin tunnus
+          queue_name: Jono
+        title: Yksikäsitteisyysavaimet
     outbox:
       index:
         description: Transaktionaaliset lähetyslaatikon merkinnät odottavat julkaisua PGMQ:lle

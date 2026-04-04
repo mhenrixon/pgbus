@@ -280,6 +280,28 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           hash_including(enqueue_latency_ms: nil)
         )
       end
+
+      it "computes latency from numeric epoch enqueued_at" do
+        epoch_enqueued = build_message_double(msg_id: 62, message: message_json, read_ct: 1,
+                                              enqueued_at: Time.now.to_f - 0.5)
+
+        executor.execute(epoch_enqueued, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          hash_including(enqueue_latency_ms: a_value >= 400)
+        )
+      end
+
+      it "computes latency from Time object enqueued_at" do
+        time_enqueued = build_message_double(msg_id: 63, message: message_json, read_ct: 1,
+                                             enqueued_at: Time.now.utc - 0.5)
+
+        executor.execute(time_enqueued, queue_name)
+
+        expect(Pgbus::JobStat).to have_received(:record!).with(
+          hash_including(enqueue_latency_ms: a_value >= 400)
+        )
+      end
     end
   end
 end
