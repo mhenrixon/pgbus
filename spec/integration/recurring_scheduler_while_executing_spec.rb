@@ -38,7 +38,7 @@ RSpec.describe "Recurring scheduler with :while_executing strategy (integration)
       schedule.enqueue_task(task, run_at: run_at)
 
       # No lock should exist — :while_executing locks are only acquired at execution time
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
 
       # Message should be in the queue
       messages = Pgbus.client.read_batch("default", qty: 10)
@@ -72,7 +72,7 @@ RSpec.describe "Recurring scheduler with :while_executing strategy (integration)
       messages = Pgbus.client.read_batch("default", qty: 10, vt: 0)
       expect(messages.size).to eq(2)
 
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
     end
   end
 end

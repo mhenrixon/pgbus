@@ -32,17 +32,15 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
   end
 
   describe "first enqueue acquires lock and sends message" do
-    it "creates a job lock row and enqueues the message" do
+    it "creates a uniqueness key row and enqueues the message" do
       task = schedule.tasks.first
 
       schedule.enqueue_task(task, run_at: run_at)
 
       # Lock should exist in the database
-      lock = Pgbus::JobLock.find_by(lock_key: "UniqueRecurringJob")
-      expect(lock).to be_present
-      expect(lock.state).to eq("queued")
-      expect(lock.job_class).to eq("UniqueRecurringJob")
-      expect(lock.job_id).to eq("recurring-unique_cleanup")
+      key = Pgbus::UniquenessKey.find_by(lock_key: "UniqueRecurringJob")
+      expect(key).to be_present
+      expect(key.queue_name).to eq("maintenance")
 
       # Message should be in the queue
       messages = Pgbus.client.read_batch("maintenance", qty: 10)
@@ -72,8 +70,8 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
       expect(messages.size).to eq(1)
 
       # Only one lock should exist
-      locks = Pgbus::JobLock.where(lock_key: "UniqueRecurringJob")
-      expect(locks.count).to eq(1)
+      keys = Pgbus::UniquenessKey.where(lock_key: "UniqueRecurringJob")
+      expect(keys.count).to eq(1)
     end
   end
 
@@ -85,45 +83,19 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
       schedule.enqueue_task(task, run_at: run_at)
 
       # Simulate job completion — release the lock
-      Pgbus::JobLock.release!("UniqueRecurringJob")
+      Pgbus::UniquenessKey.release!("UniqueRecurringJob")
 
       # Second enqueue should now succeed
       second_run_at = Time.utc(2026, 4, 2, 2, 0, 0)
       schedule.enqueue_task(task, run_at: second_run_at)
 
       # Two messages should be in the queue (first is invisible due to VT, read again)
-      # Read with VT=0 to see all
       messages = Pgbus.client.read_batch("maintenance", qty: 10, vt: 0)
       expect(messages.size).to eq(2)
 
       # New lock should exist
-      lock = Pgbus::JobLock.find_by(lock_key: "UniqueRecurringJob")
-      expect(lock).to be_present
-    end
-  end
-
-  describe "expired lock is cleaned up on next acquire" do
-    it "replaces an expired lock and enqueues successfully" do
-      task = schedule.tasks.first
-
-      # Manually create an expired lock (TTL in the past)
-      Pgbus::JobLock.acquire!(
-        "UniqueRecurringJob",
-        job_class: "UniqueRecurringJob",
-        job_id: "old-run",
-        state: "executing",
-        ttl: -1
-      )
-
-      # Enqueue should succeed because acquire! cleans up expired locks first
-      schedule.enqueue_task(task, run_at: run_at)
-
-      messages = Pgbus.client.read_batch("maintenance", qty: 10)
-      expect(messages.size).to eq(1)
-
-      lock = Pgbus::JobLock.find_by(lock_key: "UniqueRecurringJob")
-      expect(lock.job_id).to eq("recurring-unique_cleanup")
-      expect(lock.state).to eq("queued")
+      key = Pgbus::UniquenessKey.find_by(lock_key: "UniqueRecurringJob")
+      expect(key).to be_present
     end
   end
 
@@ -151,7 +123,7 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
       task = plain_schedule.tasks.first
       plain_schedule.enqueue_task(task, run_at: run_at)
 
-      expect(Pgbus::JobLock.count).to eq(0)
+      expect(Pgbus::UniquenessKey.count).to eq(0)
 
       messages = Pgbus.client.read_batch("default", qty: 10)
       expect(messages.size).to eq(1)
@@ -197,8 +169,8 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
       threads.each(&:join)
 
       # Only one lock should exist
-      locks = Pgbus::JobLock.where(lock_key: "UniqueRecurringJob")
-      expect(locks.count).to eq(1)
+      keys = Pgbus::UniquenessKey.where(lock_key: "UniqueRecurringJob")
+      expect(keys.count).to eq(1)
 
       # Only one message should have been enqueued
       messages = Pgbus.client.read_batch("maintenance", qty: 10, vt: 0)

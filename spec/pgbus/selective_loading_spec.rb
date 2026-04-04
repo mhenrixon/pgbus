@@ -29,7 +29,7 @@ RSpec.describe "Selective railtie loading" do # rubocop:disable RSpec/DescribeCl
       "Semaphore" => "pgbus_semaphores",
       "OutboxEntry" => "pgbus_outbox_entries",
       "QueueState" => "pgbus_queue_states",
-      "JobLock" => "pgbus_job_locks",
+      "UniquenessKey" => "pgbus_uniqueness_keys",
       "JobStat" => "pgbus_job_stats"
     }.each do |class_name, table_name|
       it "#{class_name} inherits from BusRecord and uses #{table_name}" do
