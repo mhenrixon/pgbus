@@ -242,8 +242,8 @@ pt:
         headers:
           age: Idade
           lock_key: Chave de Bloqueio
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: ID da mensagem
+          queue_name: Fila
         title: Chaves de unicidade
     outbox:
       index:

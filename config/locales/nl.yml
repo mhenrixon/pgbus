@@ -242,8 +242,8 @@ nl:
         headers:
           age: Leeftijd
           lock_key: Vergrendelingssleutel
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Bericht-ID
+          queue_name: Wachtrij
         title: Uniciteitsleutels
     outbox:
       index:

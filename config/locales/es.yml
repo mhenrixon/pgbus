@@ -242,8 +242,8 @@ es:
         headers:
           age: Antigüedad
           lock_key: Clave de bloqueo
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: ID de mensaje
+          queue_name: Cola
         title: Claves de unicidad
     outbox:
       index:

@@ -242,8 +242,8 @@ nb:
         headers:
           age: Alder
           lock_key: Låsenøkkel
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Meldings-ID
+          queue_name: Kø
         title: Unikhetsnøkler
     outbox:
       index:

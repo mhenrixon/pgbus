@@ -5,10 +5,8 @@ module Pgbus
     self.table_name = "pgbus_uniqueness_keys"
     self.primary_key = "lock_key"
 
-    # Atomically acquire a uniqueness lock within a PGMQ transaction.
-    # Uses pg_advisory_xact_lock to serialize concurrent attempts for the
-    # same key, then checks + inserts in the same transaction.
-    #
+    # Atomically try to acquire a uniqueness lock via INSERT ... ON CONFLICT.
+    # PostgreSQL's unique index on lock_key guarantees at most one caller wins.
     # Returns true if acquired (row inserted), false if already locked.
     def self.acquire!(lock_key, queue_name:, msg_id:) # rubocop:disable Naming/PredicateMethod
       connection.exec_query(

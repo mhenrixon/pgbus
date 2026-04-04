@@ -242,8 +242,8 @@ sv:
         headers:
           age: Ålder
           lock_key: Låsningsnyckel
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Meddelande-ID
+          queue_name: Kö
         title: Unikhetsnycklar
     outbox:
       index:

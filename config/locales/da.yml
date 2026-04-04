@@ -242,8 +242,8 @@ da:
         headers:
           age: Alder
           lock_key: Låsenøgle
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Besked-ID
+          queue_name: Kø
         title: Unikhedsnøgler
     outbox:
       index:

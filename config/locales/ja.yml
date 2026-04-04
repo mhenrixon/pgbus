@@ -242,8 +242,8 @@ ja:
         headers:
           age: 経過時間
           lock_key: ロックキー
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: メッセージID
+          queue_name: キュー
         title: 一意性キー
     outbox:
       index:

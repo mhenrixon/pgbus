@@ -155,11 +155,20 @@ module Pgbus
         keys = UniquenessKey.all.to_a
         return 0 if keys.empty?
 
-        orphaned = keys.select do |key|
-          next true if key.msg_id.zero? # placeholder from pre-produce check
-          next false unless stale_uniqueness_key?(key)
+        threshold = Time.current - (config.visibility_timeout * 2)
 
-          true
+        orphaned = keys.select do |key|
+          # msg_id == 0 means pre-produce placeholder or :while_executing lock.
+          # These are live locks — never reap them based on msg_id alone.
+          # Only reap if old enough that the job is certainly gone.
+          next false if key.msg_id.zero? && (!key.created_at || key.created_at >= threshold)
+          next true if key.msg_id.zero? && key.created_at && key.created_at < threshold
+
+          # For real msg_ids, only reap if stale (old enough that VT has
+          # long expired). The message itself may still be in the queue
+          # awaiting retry — age is the only safe signal without scanning
+          # every queue table.
+          key.created_at && key.created_at < threshold
         end
 
         return 0 if orphaned.empty?
@@ -168,14 +177,6 @@ module Pgbus
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
         0
-      end
-
-      # A key is stale if it's older than 2x the visibility timeout and its
-      # msg_id=0 (placeholder). Keys with real msg_ids are only stale if the
-      # message no longer exists in the queue (checked via PGMQ metrics).
-      def stale_uniqueness_key?(key)
-        threshold = config.visibility_timeout * 2
-        key.created_at && key.created_at < Time.current - threshold
       end
 
       def cleanup_outbox

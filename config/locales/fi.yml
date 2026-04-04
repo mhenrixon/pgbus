@@ -242,8 +242,8 @@ fi:
         headers:
           age: Ikä
           lock_key: Lukon avain
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Viestin tunnus
+          queue_name: Jono
         title: Yksikäsitteisyysavaimet
     outbox:
       index:

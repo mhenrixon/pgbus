@@ -242,8 +242,8 @@ fr:
         headers:
           age: Âge
           lock_key: Clé de verrou
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: ID du message
+          queue_name: File
         title: Clés d'unicité
     outbox:
       index:

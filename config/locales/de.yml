@@ -242,8 +242,8 @@ de:
         headers:
           age: Alter
           lock_key: Sperrschlüssel
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: Nachrichten-ID
+          queue_name: Warteschlange
         title: Eindeutigkeitsschlüssel
     outbox:
       index:

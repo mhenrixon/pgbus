@@ -57,10 +57,12 @@ module Pgbus
       end
 
       def purge_queue(name)
+        release_uniqueness_keys_for_queue(name)
         @client.purge_queue(name, prefixed: false)
       end
 
       def drop_queue(name)
+        release_uniqueness_keys_for_queue(name)
         @client.drop_queue(name, prefixed: false)
       end
 
@@ -845,6 +847,15 @@ module Pgbus
         UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for failed events: #{e.message}" }
+      end
+
+      # Release all uniqueness keys associated with a queue before purge/drop.
+      # Scans queue messages for uniqueness metadata and deletes matching rows.
+      def release_uniqueness_keys_for_queue(queue_name)
+        messages = query_queue_messages_raw(queue_name, 10_000, 0)
+        release_locks_for_messages(messages)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error releasing uniqueness keys for queue #{queue_name}: #{e.message}" }
       end
     end
   end

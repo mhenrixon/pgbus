@@ -93,6 +93,7 @@ RSpec.describe Pgbus::Web::DataSource do
   describe "#purge_queue" do
     it "passes the queue name directly without re-prefixing" do
       allow(mock_client).to receive(:purge_queue)
+      allow(mock_connection).to receive(:select_all).and_return([])
 
       data_source.purge_queue("pgbus_default")
 
@@ -103,6 +104,7 @@ RSpec.describe Pgbus::Web::DataSource do
   describe "#drop_queue" do
     it "passes the queue name directly without re-prefixing" do
       allow(mock_client).to receive(:drop_queue)
+      allow(mock_connection).to receive(:select_all).and_return([])
 
       data_source.drop_queue("pgbus_default")
 

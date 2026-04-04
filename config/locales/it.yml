@@ -242,8 +242,8 @@ it:
         headers:
           age: Età
           lock_key: Chiave di blocco
-          msg_id: Message ID
-          queue_name: Queue
+          msg_id: ID messaggio
+          queue_name: Coda
         title: Chiavi di unicità
     outbox:
       index:
