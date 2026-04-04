@@ -1,13 +1,6 @@
 ---
 sv:
   pgbus:
-    dialogs:
-      cancel: Avbryt
-      confirm: Bekräfta
-      confirm_title: Är du säker?
-      delete: Ta bort
-      delete_title: Ta bort
-      ok: OK
     dashboard:
       processes_table:
         empty: Inga processer körs
@@ -90,6 +83,13 @@ sv:
         payload: Innehåll
         retry: Försök igen
         title: 'DLQ-meddelande #%{id}'
+    dialogs:
+      cancel: Avbryt
+      confirm: Bekräfta
+      confirm_title: Är du säker?
+      delete: Ta bort
+      delete_title: Ta bort
+      ok: OK
     events:
       index:
         processed_empty: Inga händelser behandlade än
@@ -157,6 +157,10 @@ sv:
     jobs:
       enqueued_table:
         arguments: Argument
+        discard: Kassera
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera alla köade jobb och frigör deras lås? Detta kan inte ångras.
+        discard_confirm: Kassera detta meddelande?
         empty: Inga köade jobb
         full_json_payload: Fullständig JSON-payload
         headers:
@@ -176,13 +180,9 @@ sv:
           scheduled: 'Schemalagt:'
           timezone: 'Tidszon:'
           visible_at: 'Synlig vid:'
-        title: Köade jobb
-        discard: Kassera
-        discard_confirm: Kassera detta meddelande?
-        discard_all: Kassera alla
-        discard_all_confirm: Kassera alla köade jobb och frigör deras lås? Detta kan inte ångras.
         retry: Försök igen
         retry_confirm: Återställ synlighetstimeout och försök igen?
+        title: Köade jobb
       failed_table:
         discard: Kassera
         discard_confirm: Kassera detta jobb?
@@ -282,9 +282,13 @@ sv:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Kön %{name} borttagen.
       index:
         title: Köer
       queues_list:
+        delete: Ta bort
+        delete_confirm: Ta bort kön %{name} permanent? Detta kan inte ångras.
         empty: Inga köer hittades
         headers:
           actions: Åtgärder
@@ -294,16 +298,12 @@ sv:
           queue: Kö
           total_ever: Totalt någonsin
           visible: Synliga
-        delete: Ta bort
-        delete_confirm: Ta bort kön %{name} permanent? Detta kan inte ångras.
         pause: Pausa
         pause_confirm: Pausa bearbetning för %{name}?
         paused: Pausad
         purge: Rensa
         purge_confirm: Rensa alla meddelanden från %{name}?
         resume: Återuppta
-      destroy:
-        success: Kön %{name} borttagen.
       show:
         delete_confirm: Ta bort denna kö permanent? Detta kan inte ångras.
         delete_queue: Ta bort kö

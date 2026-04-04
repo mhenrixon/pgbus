@@ -1,13 +1,6 @@
 ---
 ja:
   pgbus:
-    dialogs:
-      cancel: キャンセル
-      confirm: 確認
-      confirm_title: よろしいですか？
-      delete: 削除
-      delete_title: 削除
-      ok: OK
     dashboard:
       processes_table:
         empty: 実行中のプロセスはありません
@@ -90,6 +83,13 @@ ja:
         payload: ペイロード
         retry: 再試行
         title: 'DLQメッセージ #%{id}'
+    dialogs:
+      cancel: キャンセル
+      confirm: 確認
+      confirm_title: よろしいですか？
+      delete: 削除
+      delete_title: 削除
+      ok: OK
     events:
       index:
         processed_empty: まだ処理されたイベントはありません
@@ -157,6 +157,10 @@ ja:
     jobs:
       enqueued_table:
         arguments: 引数
+        discard: 破棄
+        discard_all: すべて破棄
+        discard_all_confirm: キュー内のすべてのジョブを破棄し、ロックを解放しますか？この操作は元に戻せません。
+        discard_confirm: このメッセージを破棄しますか？
         empty: キューに入っているジョブはありません
         full_json_payload: 完全なJSONペイロード
         headers:
@@ -176,13 +180,9 @@ ja:
           scheduled: スケジュール済み：
           timezone: タイムゾーン：
           visible_at: 表示可能日時：
-        title: キューに入れられたジョブ
-        discard: 破棄
-        discard_confirm: このメッセージを破棄しますか？
-        discard_all: すべて破棄
-        discard_all_confirm: キュー内のすべてのジョブを破棄し、ロックを解放しますか？この操作は元に戻せません。
         retry: リトライ
         retry_confirm: 可視性タイムアウトをリセットしてリトライしますか？
+        title: キューに入れられたジョブ
       failed_table:
         discard: 破棄
         discard_confirm: このジョブを破棄しますか？
@@ -282,9 +282,13 @@ ja:
           pid: PID
           status: ステータス
     queues:
+      destroy:
+        success: キュー %{name} を削除しました。
       index:
         title: キュー
       queues_list:
+        delete: 削除
+        delete_confirm: キュー %{name} を完全に削除しますか？この操作は取り消せません。
         empty: キューが見つかりません
         headers:
           actions: アクション
@@ -294,16 +298,12 @@ ja:
           queue: キュー
           total_ever: 合計数
           visible: 表示中
-        delete: 削除
-        delete_confirm: キュー %{name} を完全に削除しますか？この操作は取り消せません。
         pause: 一時停止
         pause_confirm: "%{name} の処理を一時停止しますか？"
         paused: 一時停止中
         purge: パージ
         purge_confirm: "%{name} からすべてのメッセージを削除しますか？"
         resume: 再開
-      destroy:
-        success: キュー %{name} を削除しました。
       show:
         delete_confirm: このキューを完全に削除しますか？この操作は取り消せません。
         delete_queue: キューを削除

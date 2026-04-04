@@ -1,13 +1,6 @@
 ---
 fr:
   pgbus:
-    dialogs:
-      cancel: Annuler
-      confirm: Confirmer
-      confirm_title: "Êtes-vous sûr ?"
-      delete: Supprimer
-      delete_title: Supprimer
-      ok: OK
     dashboard:
       processes_table:
         empty: Aucun processus en cours d'exécution
@@ -90,6 +83,13 @@ fr:
         payload: Charge utile
         retry: Réessayer
         title: Message DLQ n°%{id}
+    dialogs:
+      cancel: Annuler
+      confirm: Confirmer
+      confirm_title: Êtes-vous sûr ?
+      delete: Supprimer
+      delete_title: Supprimer
+      ok: OK
     events:
       index:
         processed_empty: Aucun événement traité pour le moment
@@ -157,6 +157,10 @@ fr:
     jobs:
       enqueued_table:
         arguments: Arguments
+        discard: Rejeter
+        discard_all: Tout supprimer
+        discard_all_confirm: Supprimer tous les travaux en file d'attente et libérer leurs verrous ? Cette action est irréversible.
+        discard_confirm: Rejeter ce message ?
         empty: Aucun travail en file d'attente
         full_json_payload: Charge utile JSON complète
         headers:
@@ -176,13 +180,9 @@ fr:
           scheduled: 'Planifié :'
           timezone: 'Fuseau horaire :'
           visible_at: 'Visible à :'
-        title: Travaux en file d'attente
-        discard: Rejeter
-        discard_confirm: Rejeter ce message ?
-        discard_all: Tout supprimer
-        discard_all_confirm: Supprimer tous les travaux en file d'attente et libérer leurs verrous ? Cette action est irréversible.
         retry: Réessayer
         retry_confirm: Réinitialiser le délai de visibilité et réessayer ?
+        title: Travaux en file d'attente
       failed_table:
         discard: Ignorer
         discard_confirm: Ignorer ce travail ?
@@ -282,9 +282,13 @@ fr:
           pid: PID
           status: Statut
     queues:
+      destroy:
+        success: File d'attente %{name} supprimée.
       index:
         title: Files d'attente
       queues_list:
+        delete: Supprimer
+        delete_confirm: Supprimer définitivement la file d'attente %{name} ? Cette action est irréversible.
         empty: Aucune file d'attente trouvée
         headers:
           actions: Actions
@@ -294,16 +298,12 @@ fr:
           queue: File d'attente
           total_ever: Total jamais
           visible: Visible
-        delete: Supprimer
-        delete_confirm: Supprimer définitivement la file d'attente %{name} ? Cette action est irréversible.
         pause: Pause
         pause_confirm: Mettre en pause le traitement pour %{name} ?
         paused: En pause
         purge: Purger
         purge_confirm: Purger tous les messages de %{name} ?
         resume: Reprendre
-      destroy:
-        success: File d'attente %{name} supprimée.
       show:
         delete_confirm: Supprimer définitivement cette file d'attente ? Cette action est irréversible.
         delete_queue: Supprimer la file d'attente

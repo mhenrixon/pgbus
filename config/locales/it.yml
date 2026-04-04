@@ -1,13 +1,6 @@
 ---
 it:
   pgbus:
-    dialogs:
-      cancel: Annulla
-      confirm: Conferma
-      confirm_title: Sei sicuro?
-      delete: Elimina
-      delete_title: Elimina
-      ok: OK
     dashboard:
       processes_table:
         empty: Nessun processo in esecuzione
@@ -90,6 +83,13 @@ it:
         payload: Payload
         retry: Riprova
         title: 'Messaggio DLQ #%{id}'
+    dialogs:
+      cancel: Annulla
+      confirm: Conferma
+      confirm_title: Sei sicuro?
+      delete: Elimina
+      delete_title: Elimina
+      ok: OK
     events:
       index:
         processed_empty: Nessun evento elaborato ancora
@@ -157,6 +157,10 @@ it:
     jobs:
       enqueued_table:
         arguments: Argomenti
+        discard: Scarta
+        discard_all: Scarta tutti
+        discard_all_confirm: Scartare tutti i lavori in coda e rilasciare i relativi blocchi? Questa azione non può essere annullata.
+        discard_confirm: Scartare questo messaggio?
         empty: Nessun lavoro in coda
         full_json_payload: Payload JSON completo
         headers:
@@ -176,13 +180,9 @@ it:
           scheduled: 'Programmato:'
           timezone: 'Fuso orario:'
           visible_at: 'Visibile alle:'
-        title: Lavori in coda
-        discard: Scarta
-        discard_confirm: Scartare questo messaggio?
-        discard_all: Scarta tutti
-        discard_all_confirm: Scartare tutti i lavori in coda e rilasciare i relativi blocchi? Questa azione non può essere annullata.
         retry: Riprova
         retry_confirm: Reimpostare il timeout di visibilità e riprovare?
+        title: Lavori in coda
       failed_table:
         discard: Scarta
         discard_confirm: Scartare questo lavoro?
@@ -282,9 +282,13 @@ it:
           pid: PID
           status: Stato
     queues:
+      destroy:
+        success: Coda %{name} eliminata.
       index:
         title: Code
       queues_list:
+        delete: Elimina
+        delete_confirm: Eliminare permanentemente la coda %{name}? Questa azione non può essere annullata.
         empty: Nessuna coda trovata
         headers:
           actions: Azioni
@@ -294,16 +298,12 @@ it:
           queue: Coda
           total_ever: Totale mai
           visible: Visibile
-        delete: Elimina
-        delete_confirm: Eliminare permanentemente la coda %{name}? Questa azione non può essere annullata.
         pause: Pausa
         pause_confirm: Mettere in pausa l'elaborazione per %{name}?
         paused: In pausa
         purge: Pulisci
         purge_confirm: Eliminare tutti i messaggi da %{name}?
         resume: Riprendi
-      destroy:
-        success: Coda %{name} eliminata.
       show:
         delete_confirm: Eliminare permanentemente questa coda? Questa azione non può essere annullata.
         delete_queue: Elimina coda

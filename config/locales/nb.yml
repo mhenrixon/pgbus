@@ -1,13 +1,6 @@
 ---
 nb:
   pgbus:
-    dialogs:
-      cancel: Avbryt
-      confirm: Bekreft
-      confirm_title: Er du sikker?
-      delete: Slett
-      delete_title: Slett
-      ok: OK
     dashboard:
       processes_table:
         empty: Ingen prosesser kjører
@@ -90,6 +83,13 @@ nb:
         payload: Innhold
         retry: Prøv igjen
         title: 'DLQ-melding #%{id}'
+    dialogs:
+      cancel: Avbryt
+      confirm: Bekreft
+      confirm_title: Er du sikker?
+      delete: Slett
+      delete_title: Slett
+      ok: OK
     events:
       index:
         processed_empty: Ingen hendelser behandlet ennå
@@ -157,6 +157,10 @@ nb:
     jobs:
       enqueued_table:
         arguments: Argumenter
+        discard: Forkast
+        discard_all: Forkast alle
+        discard_all_confirm: Forkast alle køede jobber og frigi låsene? Dette kan ikke angres.
+        discard_confirm: Forkaste denne meldingen?
         empty: Ingen kølagte jobber
         full_json_payload: Full JSON-payload
         headers:
@@ -176,13 +180,9 @@ nb:
           scheduled: 'Planlagt:'
           timezone: 'Tidssone:'
           visible_at: 'Synlig fra:'
-        title: Kølagte jobber
-        discard: Forkast
-        discard_confirm: Forkaste denne meldingen?
-        discard_all: Forkast alle
-        discard_all_confirm: Forkast alle køede jobber og frigi låsene? Dette kan ikke angres.
         retry: Prøv igjen
         retry_confirm: Tilbakestill synlighetstidsavbrudd og prøv igjen?
+        title: Kølagte jobber
       failed_table:
         discard: Forkast
         discard_confirm: Forkast denne jobben?
@@ -282,9 +282,13 @@ nb:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Køen %{name} slettet.
       index:
         title: Køer
       queues_list:
+        delete: Slett
+        delete_confirm: Slette køen %{name} permanent? Dette kan ikke angres.
         empty: Ingen køer funnet
         headers:
           actions: Handlinger
@@ -294,16 +298,12 @@ nb:
           queue: Kø
           total_ever: Totalt noensinne
           visible: Synlig
-        delete: Slett
-        delete_confirm: Slette køen %{name} permanent? Dette kan ikke angres.
         pause: Pause
         pause_confirm: Pause behandling for %{name}?
         paused: Pauset
         purge: Rens
         purge_confirm: Rens alle meldinger fra %{name}?
         resume: Gjenoppta
-      destroy:
-        success: Køen %{name} slettet.
       show:
         delete_confirm: Slette denne køen permanent? Dette kan ikke angres.
         delete_queue: Slett kø
