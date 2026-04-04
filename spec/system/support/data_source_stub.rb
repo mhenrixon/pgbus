@@ -5,7 +5,7 @@ module Pgbus
     class StubDataSource
       attr_accessor :stats, :queues, :processes_list, :failed_events_list,
                     :dlq_messages_list, :events_list, :subscribers_list, :jobs_list,
-                    :paused_queues
+                    :paused_queues, :locks_list
       attr_reader :calls
 
       def initialize
@@ -18,6 +18,7 @@ module Pgbus
         @subscribers_list = []
         @jobs_list = []
         @paused_queues = []
+        @locks_list = []
         @calls = Hash.new { |h, k| h[k] = [] }
       end
 
@@ -35,6 +36,7 @@ module Pgbus
       def processed_event(id) = @events_list.find { |e| e["id"].to_s == id.to_s }
       def registered_subscribers = @subscribers_list
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
+      def job_locks = @locks_list
       def queue_paused?(name) = @paused_queues.include?(name)
 
       def purge_queue(name)          = record(:purge_queue, name)
@@ -53,6 +55,9 @@ module Pgbus
       def retry_all_dlq              = record(:retry_all_dlq) && @dlq_messages_list.size
       def discard_all_dlq            = record(:discard_all_dlq) && @dlq_messages_list.size
       def replay_event(event)        = record(:replay_event, event)
+      def discard_lock(key)          = record(:discard_lock, key) && 1
+      def discard_locks(keys)        = record(:discard_locks, keys) && keys.size
+      def discard_all_locks          = record(:discard_all_locks) && @locks_list.size
 
       def called?(method_name) = @calls.key?(method_name)
 

@@ -49,5 +49,34 @@ module Pgbus
       count = data_source.discard_all_enqueued
       redirect_to jobs_path, notice: t("pgbus.jobs.index.discard_all_enqueued_notice", count: count)
     end
+
+    def discard_selected_failed
+      ids = Array(params[:ids]).map(&:to_i).reject(&:zero?)
+      if ids.empty?
+        redirect_to jobs_path, alert: t("pgbus.jobs.index.none_selected")
+        return
+      end
+
+      count = 0
+      ids.each do |id|
+        count += 1 if data_source.discard_failed_event(id)
+      end
+      redirect_to jobs_path, notice: t("pgbus.jobs.index.discarded_selected", count: count)
+    end
+
+    def discard_selected_enqueued
+      selections = Array(params[:messages]).reject { |s| s[:queue_name].blank? || s[:msg_id].blank? }
+      if selections.empty?
+        redirect_to jobs_path, alert: t("pgbus.jobs.index.none_selected")
+        return
+      end
+
+      count = 0
+      selections.each do |sel|
+        data_source.discard_job(sel[:queue_name], sel[:msg_id])
+        count += 1
+      end
+      redirect_to jobs_path, notice: t("pgbus.jobs.index.discarded_selected", count: count)
+    end
   end
 end

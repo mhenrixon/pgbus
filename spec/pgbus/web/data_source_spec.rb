@@ -306,4 +306,59 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(Pgbus::JobLock).to have_received(:where).with(lock_key: ["k1"])
     end
   end
+
+  describe "#discard_lock" do
+    it "deletes the lock by key" do
+      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 1))
+
+      result = data_source.discard_lock("import-42")
+
+      expect(result).to eq(1)
+      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: "import-42")
+    end
+
+    it "returns 0 on error" do
+      allow(Pgbus::JobLock).to receive(:where).and_raise(StandardError)
+
+      expect(data_source.discard_lock("import-42")).to eq(0)
+    end
+  end
+
+  describe "#discard_locks" do
+    it "deletes multiple locks by keys" do
+      allow(Pgbus::JobLock).to receive(:where).and_return(double(delete_all: 3))
+
+      result = data_source.discard_locks(%w[k1 k2 k3])
+
+      expect(result).to eq(3)
+      expect(Pgbus::JobLock).to have_received(:where).with(lock_key: %w[k1 k2 k3])
+    end
+
+    it "returns 0 for empty array" do
+      expect(data_source.discard_locks([])).to eq(0)
+    end
+
+    it "returns 0 on error" do
+      allow(Pgbus::JobLock).to receive(:where).and_raise(StandardError)
+
+      expect(data_source.discard_locks(%w[k1])).to eq(0)
+    end
+  end
+
+  describe "#discard_all_locks" do
+    it "deletes all locks" do
+      allow(Pgbus::JobLock).to receive(:delete_all).and_return(5)
+
+      result = data_source.discard_all_locks
+
+      expect(result).to eq(5)
+      expect(Pgbus::JobLock).to have_received(:delete_all)
+    end
+
+    it "returns 0 on error" do
+      allow(Pgbus::JobLock).to receive(:delete_all).and_raise(StandardError)
+
+      expect(data_source.discard_all_locks).to eq(0)
+    end
+  end
 end

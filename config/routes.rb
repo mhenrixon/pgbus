@@ -22,6 +22,8 @@ Pgbus::Engine.routes.draw do
       post :retry_all
       post :discard_all
       post :discard_all_enqueued
+      post :discard_selected_failed
+      post :discard_selected_enqueued
     end
   end
 
@@ -48,11 +50,20 @@ Pgbus::Engine.routes.draw do
     collection do
       post :retry_all
       post :discard_all
+      post :discard_selected
     end
   end
 
   resources :outbox, only: [:index], controller: "outbox"
-  resources :locks, only: [:index]
+  resources :locks, only: [:index] do
+    member do
+      post :discard
+    end
+    collection do
+      post :discard_selected
+      post :discard_all
+    end
+  end
   resource :insights, only: [:show], controller: "insights"
 
   get :set_locale, to: "locale#update"

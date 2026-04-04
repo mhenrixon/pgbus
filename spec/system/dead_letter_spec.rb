@@ -40,6 +40,13 @@ RSpec.describe "Dead Letter Queue", type: :system do
       expect(page).to have_button("Discard")
     end
 
+    it "shows checkboxes for DLQ messages" do
+      visit "/pgbus/dlq"
+
+      expect(page).to have_css("input[data-bulk-item]", count: 1)
+      expect(page).to have_css("input[data-bulk-select-all]")
+    end
+
     it "retry DLQ message: no confirm, shows toast" do
       visit "/pgbus/dlq"
 

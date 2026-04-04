@@ -44,6 +44,10 @@ en:
       index:
         discard_all: Discard All
         discard_all_confirm: Permanently discard all DLQ messages?
+        discard_selected: Discard Selected
+        discard_selected_confirm: Discard selected DLQ messages?
+        discarded_selected: Discarded %{count} DLQ messages.
+        none_selected: No messages selected.
         retry_all: Retry All
         retry_all_confirm: Retry all DLQ messages?
         title: Dead Letter Queue
@@ -216,6 +220,10 @@ en:
         discard_all: Discard All
         discard_all_confirm: Discard all failed jobs?
         discard_all_enqueued_notice: Discarded %{count} enqueued jobs and released their locks.
+        discard_selected: Discard Selected
+        discard_selected_confirm: Discard selected items?
+        discarded_selected: Discarded %{count} selected items.
+        none_selected: No items selected.
         retry_all: Retry All
         retry_all_confirm: Retry all failed jobs?
         title: Jobs
@@ -253,7 +261,14 @@ en:
       toggle_menu: Toggle menu
     locks:
       index:
+        all_locks_discarded: Discarded %{count} locks.
         description: Active uniqueness locks preventing duplicate job execution
+        discard: Discard
+        discard_all: Discard All
+        discard_all_confirm: Permanently discard all locks? This may allow duplicate job execution.
+        discard_confirm: Discard this lock? The associated job may be enqueued again.
+        discard_selected: Discard Selected
+        discard_selected_confirm: Discard selected locks?
         empty: No active locks
         executing: Executing
         headers:
@@ -263,6 +278,10 @@ en:
           lock_key: Lock Key
           owner: Owner
           state: State
+        lock_discard_failed: Could not discard lock.
+        lock_discarded: Lock discarded.
+        locks_discarded: Discarded %{count} locks.
+        none_selected: No locks selected.
         queued: Queued
         title: Job Locks
     outbox:

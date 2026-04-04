@@ -1,8 +1,18 @@
 <turbo-frame id="dlq-messages" data-auto-refresh data-src="<%= pgbus.dead_letter_index_path(frame: 'list') %>">
-  <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+  <%# Bulk form outside table to avoid nested form issues %>
+  <form id="bulk-discard-dlq-form" action="<%= pgbus.discard_selected_dead_letter_index_path %>" method="post" data-turbo-frame="_top" class="hidden">
+    <%= hidden_field_tag :authenticity_token, form_authenticity_token %>
+  </form>
+  <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700" data-bulk-scope="dlq">
     <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
       <thead class="bg-gray-50 dark:bg-gray-900">
         <tr>
+          <% if @messages.any? %>
+            <th class="w-10 px-4 py-3">
+              <input type="checkbox" data-bulk-select-all
+                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
+            </th>
+          <% end %>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.dead_letter.messages_table.headers.id") %></th>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.dead_letter.messages_table.headers.job_class") %></th>
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.dead_letter.messages_table.headers.source_queue") %></th>
@@ -16,6 +26,14 @@
           <% dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix %>
           <% source_queue = m[:queue_name].to_s.delete_suffix(dlq_suffix) %>
           <tr>
+            <td class="w-10 px-4 py-3 align-top">
+              <input type="checkbox" data-bulk-item
+                     data-queue-name="<%= m[:queue_name] %>" data-msg-id="<%= m[:msg_id] %>"
+                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1"
+                     onchange="this.nextElementSibling.disabled = !this.checked; this.nextElementSibling.nextElementSibling.disabled = !this.checked">
+              <input type="hidden" name="messages[][queue_name]" value="<%= m[:queue_name] %>" form="bulk-discard-dlq-form" disabled>
+              <input type="hidden" name="messages[][msg_id]" value="<%= m[:msg_id] %>" form="bulk-discard-dlq-form" disabled>
+            </td>
             <td colspan="5" class="p-0">
               <details class="group">
                 <summary class="flex cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900 list-none">
@@ -69,7 +87,7 @@
           </tr>
         <% end %>
         <% if @messages.empty? %>
-          <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.dead_letter.messages_table.empty") %></td></tr>
+          <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.dead_letter.messages_table.empty") %></td></tr>
         <% end %>
       </tbody>
     </table>
