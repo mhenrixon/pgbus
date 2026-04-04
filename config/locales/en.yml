@@ -46,7 +46,9 @@ en:
         discard_all_confirm: Permanently discard all DLQ messages?
         discard_selected: Discard Selected
         discard_selected_confirm: Discard selected DLQ messages?
-        discarded_selected: Discarded %{count} DLQ messages.
+        discarded_selected:
+          one: Discarded 1 DLQ message.
+          other: Discarded %{count} DLQ messages.
         none_selected: No messages selected.
         retry_all: Retry All
         retry_all_confirm: Retry all DLQ messages?
@@ -118,6 +120,8 @@ en:
         not_found: Event not found
         title: Event %{event_id}
     helpers:
+      bulk_select_all: Select all
+      bulk_select_row: Select %{id}
       bulk_selected: selected
       paused_badge: Paused
       queue_badge:
@@ -223,7 +227,9 @@ en:
         discard_all_enqueued_notice: Discarded %{count} enqueued jobs and released their locks.
         discard_selected: Discard Selected
         discard_selected_confirm: Discard selected items?
-        discarded_selected: Discarded %{count} selected items.
+        discarded_selected:
+          one: Discarded 1 selected item.
+          other: Discarded %{count} selected items.
         none_selected: No items selected.
         retry_all: Retry All
         retry_all_confirm: Retry all failed jobs?
@@ -262,7 +268,9 @@ en:
       toggle_menu: Toggle menu
     locks:
       index:
-        all_locks_discarded: Discarded %{count} locks.
+        all_locks_discarded:
+          one: Discarded 1 lock.
+          other: Discarded %{count} locks.
         description: Active uniqueness locks preventing duplicate job execution
         discard: Discard
         discard_all: Discard All
@@ -281,7 +289,9 @@ en:
           state: State
         lock_discard_failed: Could not discard lock.
         lock_discarded: Lock discarded.
-        locks_discarded: Discarded %{count} locks.
+        locks_discarded:
+          one: Discarded 1 lock.
+          other: Discarded %{count} locks.
         none_selected: No locks selected.
         queued: Queued
         title: Job Locks

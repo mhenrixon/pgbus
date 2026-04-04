@@ -32,6 +32,7 @@
         <% if @locks.any? %>
           <th class="w-10 px-4 py-3">
             <input type="checkbox" data-bulk-select-all
+                   aria-label="<%= t("pgbus.helpers.bulk_select_all") %>"
                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
           </th>
         <% end %>
@@ -51,6 +52,7 @@
         <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
           <td class="w-10 px-4 py-3">
             <input type="checkbox" name="lock_keys[]" value="<%= lock[:lock_key] %>"
+                   aria-label="<%= t("pgbus.helpers.bulk_select_row", id: lock[:lock_key]) %>"
                    form="bulk-discard-locks-form" data-bulk-item
                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
           </td>

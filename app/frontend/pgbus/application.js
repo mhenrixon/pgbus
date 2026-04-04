@@ -72,6 +72,9 @@ document.addEventListener("turbo:load", renderFlashToasts);
 // -- Bulk checkbox selection --
 function initBulkSelect() {
   document.querySelectorAll("[data-bulk-select-all]").forEach(selectAll => {
+    if (selectAll.dataset.bulkInitialized === "true") return;
+    selectAll.dataset.bulkInitialized = "true";
+
     const scope = selectAll.closest("[data-bulk-scope]") || document;
     const checkboxes = () => scope.querySelectorAll("input[data-bulk-item]");
     // Look for bulk-actions in the parent page container (outside the table scope)
