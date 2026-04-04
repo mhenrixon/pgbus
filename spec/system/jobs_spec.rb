@@ -45,6 +45,40 @@ RSpec.describe "Jobs", type: :system do
       expect(page).to have_button("Retry", minimum: 2)
       expect(page).to have_button("Discard", minimum: 2)
     end
+
+    it "shows checkboxes for each failed job" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-failed") do
+        expect(page).to have_css("input[data-bulk-item]", count: 2)
+        expect(page).to have_css("input[data-bulk-select-all]")
+      end
+    end
+
+    it "select all checkbox toggles all failed job checkboxes" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-failed") do
+        find("input[data-bulk-select-all]").check
+
+        expect(all("input[data-bulk-item]")).to all(be_checked)
+      end
+    end
+
+    it "bulk select and discard selected failed jobs" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-failed") do
+        find("input[data-bulk-select-all]").click
+        expect(page).to have_css("input[data-bulk-item]:checked", count: 2)
+      end
+
+      expect(page).to have_button("Discard Selected")
+      click_button "Discard Selected", match: :first
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Discarded 2 selected")
+    end
   end
 
   context "with enqueued jobs" do
@@ -77,6 +111,30 @@ RSpec.describe "Jobs", type: :system do
       within("turbo-frame#jobs-enqueued") do
         expect(page).to have_button("Discard All")
       end
+    end
+
+    it "shows checkboxes for enqueued jobs" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-enqueued") do
+        expect(page).to have_css("input[data-bulk-item]", count: 1)
+        expect(page).to have_css("input[data-bulk-select-all]")
+      end
+    end
+
+    it "bulk select and discard selected enqueued jobs" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-enqueued") do
+        find("input[data-bulk-select-all]").click
+        expect(page).to have_css("input[data-bulk-item]:checked", count: 1)
+      end
+
+      expect(page).to have_button("Discard Selected")
+      click_button "Discard Selected", match: :first
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Discarded 1 selected")
     end
 
     it "discard all enqueued: confirm and redirects with toast" do

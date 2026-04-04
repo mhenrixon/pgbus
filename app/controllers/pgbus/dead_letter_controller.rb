@@ -46,5 +46,22 @@ module Pgbus
       count = data_source.discard_all_dlq
       redirect_to dead_letter_index_path, notice: "Discarded #{count} DLQ messages."
     end
+
+    def discard_selected
+      selections = Array(params[:messages]).reject { |s| s[:queue_name].blank? || s[:msg_id].blank? }
+      if selections.empty?
+        redirect_to dead_letter_index_path, alert: t("pgbus.dead_letter.index.none_selected")
+        return
+      end
+
+      count = 0
+      selections.each do |sel|
+        queue_name = sel[:queue_name].to_s
+        next unless queue_name.end_with?(Pgbus.configuration.dead_letter_queue_suffix)
+
+        count += 1 if data_source.discard_dlq_message(queue_name, sel[:msg_id])
+      end
+      redirect_to dead_letter_index_path, notice: t("pgbus.dead_letter.index.discarded_selected", count: count)
+    end
   end
 end

@@ -69,6 +69,48 @@ function renderFlashToasts() {
 renderFlashToasts();
 document.addEventListener("turbo:load", renderFlashToasts);
 
+// -- Bulk checkbox selection --
+function initBulkSelect() {
+  document.querySelectorAll("[data-bulk-select-all]").forEach(selectAll => {
+    const scope = selectAll.closest("[data-bulk-scope]") || document;
+    const checkboxes = () => scope.querySelectorAll("input[data-bulk-item]");
+    // Look for bulk-actions in the parent page container (outside the table scope)
+    const pageScope = scope.closest("[data-bulk-page]") || scope.closest("turbo-frame") || scope.parentElement?.closest("div") || document;
+    const countEl = pageScope.querySelector("[data-bulk-count]");
+    const actions = pageScope.querySelector("[data-bulk-actions]");
+
+    function updateUI() {
+      const checked = scope.querySelectorAll("input[data-bulk-item]:checked");
+      if (countEl) countEl.textContent = checked.length;
+      if (actions) actions.classList.toggle("hidden", checked.length === 0);
+
+      const all = checkboxes();
+      selectAll.checked = all.length > 0 && checked.length === all.length;
+      selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
+
+    let inSelectAll = false;
+    selectAll.addEventListener("change", () => {
+      inSelectAll = true;
+      checkboxes().forEach(cb => {
+        cb.checked = selectAll.checked;
+        // Dispatch change event so inline onchange handlers fire (e.g., hidden input sync)
+        cb.dispatchEvent(new Event("change", { bubbles: false }));
+      });
+      inSelectAll = false;
+      updateUI();
+    });
+
+    scope.addEventListener("change", (e) => {
+      if (e.target.matches("input[data-bulk-item]")) updateUI();
+    });
+  });
+
+}
+initBulkSelect();
+document.addEventListener("turbo:load", initBulkSelect);
+document.addEventListener("turbo:frame-load", initBulkSelect);
+
 // -- Auto-refresh --
 const refreshInterval = parseInt(document.body?.dataset.pgbusRefreshInterval || "0", 10);
 if (refreshInterval > 0) {

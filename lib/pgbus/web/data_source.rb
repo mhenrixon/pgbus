@@ -533,6 +533,30 @@ module Pgbus
         []
       end
 
+      # Lock management
+      def discard_lock(lock_key)
+        JobLock.where(lock_key: lock_key).delete_all
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding lock #{lock_key}: #{e.message}" }
+        0
+      end
+
+      def discard_locks(lock_keys)
+        return 0 if lock_keys.empty?
+
+        JobLock.where(lock_key: lock_keys).delete_all
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding locks: #{e.message}" }
+        0
+      end
+
+      def discard_all_locks
+        JobLock.delete_all
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error discarding all locks: #{e.message}" }
+        0
+      end
+
       # Job locks
       def job_locks
         JobLock.order(locked_at: :desc).limit(100).map do |lock|
