@@ -4,11 +4,11 @@ require "spec_helper"
 require "active_job"
 
 RSpec.describe Pgbus::Uniqueness do
-  let(:job_lock_class) { stub_const("Pgbus::JobLock", Class.new) }
+  let(:uniqueness_key_class) { stub_const("Pgbus::UniquenessKey", Class.new) }
 
   before do
-    job_lock_class
-    allow(Pgbus::JobLock).to receive_messages(acquire!: true, release!: 1, locked?: false)
+    uniqueness_key_class
+    allow(Pgbus::UniquenessKey).to receive_messages(acquire!: true, release!: 1, locked?: false)
   end
 
   describe ".ensures_uniqueness" do
@@ -123,8 +123,8 @@ RSpec.describe Pgbus::Uniqueness do
 
       result = described_class.acquire_enqueue_lock("test-key", job)
       expect(result).to eq(:acquired)
-      expect(Pgbus::JobLock).to have_received(:acquire!).with(
-        "test-key", job_class: "LockJob", job_id: job.job_id, state: "queued", ttl: 600
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!).with(
+        "test-key", queue_name: "pending", msg_id: 0
       )
     end
 
@@ -138,11 +138,11 @@ RSpec.describe Pgbus::Uniqueness do
 
       result = described_class.acquire_enqueue_lock("test-key", job)
       expect(result).to eq(:no_lock)
-      expect(Pgbus::JobLock).not_to have_received(:acquire!)
+      expect(Pgbus::UniquenessKey).not_to have_received(:acquire!)
     end
 
     it "returns :locked when lock is already held" do
-      allow(Pgbus::JobLock).to receive(:acquire!).and_return(false)
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(false)
 
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
@@ -159,12 +159,12 @@ RSpec.describe Pgbus::Uniqueness do
   describe ".release_lock" do
     it "releases the lock" do
       described_class.release_lock("test-key")
-      expect(Pgbus::JobLock).to have_received(:release!).with("test-key")
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("test-key")
     end
 
     it "does nothing for nil key" do
       described_class.release_lock(nil)
-      expect(Pgbus::JobLock).not_to have_received(:release!)
+      expect(Pgbus::UniquenessKey).not_to have_received(:release!)
     end
   end
 end

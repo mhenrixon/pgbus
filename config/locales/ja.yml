@@ -239,16 +239,12 @@ ja:
       index:
         description: 重複ジョブ実行を防ぐアクティブなユニークロック
         empty: アクティブなロックはありません
-        executing: 実行中
         headers:
           age: 経過時間
-          expires: 有効期限
-          job_class: ジョブクラス
           lock_key: ロックキー
-          owner: 所有者
-          state: 状態
-        queued: キューに追加済み
-        title: ジョブロック
+          msg_id: Message ID
+          queue_name: Queue
+        title: 一意性キー
     outbox:
       index:
         description: PGMQへの公開待ちのトランザクショナルアウトボックスエントリ

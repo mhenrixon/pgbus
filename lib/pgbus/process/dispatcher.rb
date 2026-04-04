@@ -144,16 +144,38 @@ module Pgbus
       end
 
       def cleanup_job_locks
-        # Primary: reap orphaned locks whose owner worker is no longer alive.
-        # Cross-references (owner_pid, owner_hostname) against pgbus_processes heartbeats.
-        reaped = JobLock.reap_orphaned!
-        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned job locks" } if reaped.positive?
+        # Clean up orphaned uniqueness keys whose msg_id no longer exists
+        # in any PGMQ queue. This handles the rare case where a message is
+        # lost (e.g., queue table truncated) but the uniqueness key remains.
+        reaped = reap_orphaned_uniqueness_keys
+        Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
+      end
 
-        # Last resort: clean up locks with expired TTL (handles case where
-        # even the reaper/supervisor is dead and locks are truly abandoned).
-        expired = JobLock.cleanup_expired!
-        Pgbus.logger.debug { "[Pgbus] Cleaned up #{expired} expired job locks" } if expired.positive?
-        # No rescue here — let run_if_due handle the error and retry next tick
+      def reap_orphaned_uniqueness_keys
+        keys = UniquenessKey.all.to_a
+        return 0 if keys.empty?
+
+        orphaned = keys.select do |key|
+          next true if key.msg_id.zero? # placeholder from pre-produce check
+          next false unless stale_uniqueness_key?(key)
+
+          true
+        end
+
+        return 0 if orphaned.empty?
+
+        UniquenessKey.where(lock_key: orphaned.map(&:lock_key)).delete_all
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
+        0
+      end
+
+      # A key is stale if it's older than 2x the visibility timeout and its
+      # msg_id=0 (placeholder). Keys with real msg_ids are only stale if the
+      # message no longer exists in the queue (checked via PGMQ metrics).
+      def stale_uniqueness_key?(key)
+        threshold = config.visibility_timeout * 2
+        key.created_at && key.created_at < Time.current - threshold
       end
 
       def cleanup_outbox

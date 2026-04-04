@@ -25,7 +25,8 @@ module Pgbus
         @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
         @started_at = Time.current
         @started_at_monotonic = monotonic_now
-        @executor = Pgbus::ActiveJob::Executor.new
+        @stat_buffer = config.stats_enabled ? Pgbus::StatBuffer.new : nil
+        @executor = Pgbus::ActiveJob::Executor.new(stat_buffer: @stat_buffer)
         @pool = Concurrent::FixedThreadPool.new(threads)
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @queue_lock = QueueLock.new if @single_active_consumer
@@ -62,6 +63,7 @@ module Pgbus
           break if @lifecycle.draining? && @pool.queue_length.zero?
 
           claim_and_execute if @lifecycle.can_process?
+          @stat_buffer&.flush_if_due
           @wake_signal.wait(timeout: config.polling_interval) if @lifecycle.draining? || @lifecycle.paused?
         end
 
@@ -318,6 +320,7 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
         @pool.shutdown
         @pool.wait_for_termination(30)
+        @stat_buffer&.stop
         @queue_lock&.unlock_all
         @heartbeat&.stop
         restore_signals

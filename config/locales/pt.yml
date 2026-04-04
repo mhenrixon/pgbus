@@ -239,16 +239,12 @@ pt:
       index:
         description: Bloqueios de exclusividade ativos impedindo a execução duplicada do trabalho
         empty: Nenhum bloqueio ativo
-        executing: Executando
         headers:
           age: Idade
-          expires: Expira
-          job_class: Classe do Trabalho
           lock_key: Chave de Bloqueio
-          owner: Proprietário
-          state: Estado
-        queued: Na fila
-        title: Bloqueios de Trabalho
+          msg_id: Message ID
+          queue_name: Queue
+        title: Chaves de unicidade
     outbox:
       index:
         description: Entradas da caixa de saída transacional pendentes de publicação para PGMQ

@@ -239,16 +239,12 @@ sv:
       index:
         description: Aktiva unika lås som förhindrar duplicerad jobbexekvering
         empty: Inga aktiva lås
-        executing: Utför
         headers:
           age: Ålder
-          expires: Upphör
-          job_class: Jobbklass
           lock_key: Låsningsnyckel
-          owner: Ägare
-          state: Status
-        queued: I kö
-        title: Jobblås
+          msg_id: Message ID
+          queue_name: Queue
+        title: Unikhetsnycklar
     outbox:
       index:
         description: Transaktionella utboxposter som väntar på publicering till PGMQ

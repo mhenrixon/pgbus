@@ -239,16 +239,12 @@ da:
       index:
         description: Aktive unikke låse forhindrer duplikeret jobudførelse
         empty: Ingen aktive låse
-        executing: Udfører
         headers:
           age: Alder
-          expires: Udløber
-          job_class: Jobklasse
           lock_key: Låsenøgle
-          owner: Ejer
-          state: Status
-        queued: I kø
-        title: Joblåse
+          msg_id: Message ID
+          queue_name: Queue
+        title: Unikhedsnøgler
     outbox:
       index:
         description: Transaktionelle udbakke-poster, der venter på publicering til PGMQ

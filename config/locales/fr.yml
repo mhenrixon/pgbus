@@ -239,16 +239,12 @@ fr:
       index:
         description: Verrous d'unicité actifs empêchant l'exécution de travaux en double
         empty: Aucun verrou actif
-        executing: Exécution
         headers:
           age: Âge
-          expires: Expire
-          job_class: Classe de travail
           lock_key: Clé de verrou
-          owner: Propriétaire
-          state: État
-        queued: En file d'attente
-        title: Verrous de travail
+          msg_id: Message ID
+          queue_name: Queue
+        title: Clés d'unicité
     outbox:
       index:
         description: Entrées de boîte d'envoi transactionnelle en attente de publication vers PGMQ

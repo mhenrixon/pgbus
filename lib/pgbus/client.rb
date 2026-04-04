@@ -76,8 +76,7 @@ module Pgbus
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
       ensure_queue(queue_name)
-      serialized = payloads.map { |p| serialize(p) }
-      serialized_headers = headers&.map { |h| h.nil? ? nil : serialize(h) }
+      serialized, serialized_headers = serialize_batch(payloads, headers)
       Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
         synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
       end
@@ -377,6 +376,23 @@ module Pgbus
       else
         JSON.generate(data)
       end
+    end
+
+    # Single-pass serialization of payloads and optional headers.
+    # Avoids two separate .map iterations over the same index range.
+    def serialize_batch(payloads, headers)
+      serialized = Array.new(payloads.size)
+      serialized_headers = headers ? Array.new(headers.size) : nil
+
+      payloads.each_with_index do |p, i|
+        serialized[i] = serialize(p)
+        if serialized_headers && i < headers.size
+          h = headers[i]
+          serialized_headers[i] = h.nil? ? nil : serialize(h)
+        end
+      end
+
+      [serialized, serialized_headers]
     end
   end
 end

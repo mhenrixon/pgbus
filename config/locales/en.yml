@@ -279,22 +279,18 @@ en:
         discard_selected: Discard Selected
         discard_selected_confirm: Discard selected locks?
         empty: No active locks
-        executing: Executing
         headers:
           age: Age
-          expires: Expires
-          job_class: Job Class
           lock_key: Lock Key
-          owner: Owner
-          state: State
+          msg_id: Message ID
+          queue_name: Queue
         lock_discard_failed: Could not discard lock.
         lock_discarded: Lock discarded.
         locks_discarded:
           one: Discarded 1 lock.
           other: Discarded %{count} locks.
         none_selected: No locks selected.
-        queued: Queued
-        title: Job Locks
+        title: Uniqueness Keys
     outbox:
       index:
         description: Transactional outbox entries pending publication to PGMQ

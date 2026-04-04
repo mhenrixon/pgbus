@@ -1,0 +1,13 @@
+class AddPgbusUniquenessKeys < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_uniqueness_keys, id: false do |t|
+      t.string :lock_key, null: false
+      t.string :queue_name, null: false
+      t.bigint :msg_id, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_uniqueness_keys, :lock_key,
+      unique: true, name: "idx_pgbus_uniqueness_keys_key"
+  end
+end

@@ -239,16 +239,12 @@ es:
       index:
         description: Bloqueos de unicidad activos que impiden la ejecución duplicada del trabajo
         empty: No hay bloqueos activos
-        executing: Ejecutando
         headers:
           age: Antigüedad
-          expires: Expira
-          job_class: Clase de trabajo
           lock_key: Clave de bloqueo
-          owner: Propietario
-          state: Estado
-        queued: En cola
-        title: Bloqueos de trabajo
+          msg_id: Message ID
+          queue_name: Queue
+        title: Claves de unicidad
     outbox:
       index:
         description: Entradas de bandeja de salida transaccional pendientes de publicación en PGMQ

@@ -1,0 +1,50 @@
+class MigratePgbusJobLocksToUniquenessKeys < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Create the new lightweight uniqueness keys table
+    unless table_exists?(:pgbus_uniqueness_keys)
+      create_table :pgbus_uniqueness_keys, id: false do |t|
+        t.string :lock_key, null: false
+        t.string :queue_name, null: false
+        t.bigint :msg_id, null: false
+        t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+      end
+
+      add_index :pgbus_uniqueness_keys, :lock_key,
+        unique: true, name: "idx_pgbus_uniqueness_keys_key"
+    end
+
+    # Migrate existing locks to the new table
+    if table_exists?(:pgbus_job_locks)
+      execute <<~SQL
+        INSERT INTO pgbus_uniqueness_keys (lock_key, queue_name, msg_id, created_at)
+        SELECT lock_key, 'migrated', 0, locked_at
+        FROM pgbus_job_locks
+        ON CONFLICT (lock_key) DO NOTHING
+      SQL
+
+      drop_table :pgbus_job_locks
+    end
+  end
+
+  def down
+    create_table :pgbus_job_locks do |t|
+      t.string :lock_key, null: false
+      t.string :job_class, null: false
+      t.string :job_id
+      t.string :state, null: false, default: "queued"
+      t.integer :owner_pid
+      t.string :owner_hostname
+      t.datetime :locked_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+      t.datetime :expires_at, null: false
+    end
+
+    add_index :pgbus_job_locks, :lock_key,
+      unique: true, name: "idx_pgbus_job_locks_key"
+    add_index :pgbus_job_locks, :expires_at,
+      name: "idx_pgbus_job_locks_expires"
+    add_index :pgbus_job_locks, [:state, :owner_pid],
+      name: "idx_pgbus_job_locks_reaper"
+
+    drop_table :pgbus_uniqueness_keys
+  end
+end

@@ -239,16 +239,12 @@ de:
       index:
         description: Aktive Einzigartigkeitssperren verhindern doppelte Auftragserstellung
         empty: Keine aktiven Sperren
-        executing: Ausführen
         headers:
           age: Alter
-          expires: Läuft ab
-          job_class: Auftragsklasse
           lock_key: Sperrschlüssel
-          owner: Besitzer
-          state: Status
-        queued: In Warteschlange
-        title: Auftragssperren
+          msg_id: Message ID
+          queue_name: Queue
+        title: Eindeutigkeitsschlüssel
     outbox:
       index:
         description: Transaktionale Postausgangseinträge ausstehend zur Veröffentlichung an PGMQ

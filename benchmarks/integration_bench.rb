@@ -44,19 +44,14 @@ Pgbus.client.ensure_dead_letter_queue("default")
 # This avoids requiring users to run full migrations just to benchmark.
 conn = ActiveRecord::Base.connection
 
-conn.execute(<<~SQL) unless conn.table_exists?("pgbus_job_locks")
-  CREATE TABLE pgbus_job_locks (
-    id BIGSERIAL PRIMARY KEY,
+conn.execute(<<~SQL) unless conn.table_exists?("pgbus_uniqueness_keys")
+  CREATE TABLE pgbus_uniqueness_keys (
     lock_key VARCHAR NOT NULL,
-    job_class VARCHAR NOT NULL,
-    job_id VARCHAR,
-    state VARCHAR NOT NULL DEFAULT 'queued',
-    owner_pid INTEGER,
-    owner_hostname VARCHAR,
-    locked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP NOT NULL
+    queue_name VARCHAR NOT NULL,
+    msg_id BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_pgbus_job_locks_key ON pgbus_job_locks (lock_key);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
 SQL
 
 conn.execute(<<~SQL) unless conn.table_exists?("pgbus_semaphores")
@@ -114,7 +109,7 @@ end
 
 def purge_queue!
   Pgbus.client.purge_queue("default")
-  Pgbus::JobLock.delete_all
+  Pgbus::UniquenessKey.delete_all
 rescue StandardError => e
   warn "[bench] purge_queue! failed: #{e.class}: #{e.message}"
 end
@@ -158,7 +153,7 @@ Benchmark.ips do |x|
         Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
         Pgbus::Uniqueness::TTL_KEY => 3600
       }
-      Pgbus::JobLock.acquire!(key, job_class: "UniqueUntilExecutedJob", job_id: "b#{i}", ttl: 3600)
+      Pgbus::UniquenessKey.acquire!(key, queue_name: "default", msg_id: 0)
       client.send_message("default", payload)
     end
   end
@@ -222,14 +217,13 @@ Benchmark.ips do |x|
   end
 
   x.report("execute: until_executed") do
-    Pgbus::JobLock.acquire!("bench-exec-ue", job_class: "UniqueUntilExecutedJob",
-                                             job_id: "b1", state: "queued", ttl: 3600)
+    Pgbus::UniquenessKey.acquire!("bench-exec-ue", queue_name: "default", msg_id: 0)
     msg = enqueue_and_read(client, ue_payload)
     executor.execute(msg, "default")
   end
 
   x.report("execute: while_executing") do
-    Pgbus::JobLock.release!("bench-exec-we")
+    Pgbus::UniquenessKey.release!("bench-exec-we")
     msg = enqueue_and_read(client, we_payload)
     executor.execute(msg, "default")
   end
@@ -262,8 +256,8 @@ purge_queue!
 # 5. Lock operations (raw)
 # ═══════════════════════════════════════════════════════════════════════
 
-puts "\n--- JobLock operations (real DB) ---"
-Pgbus::JobLock.delete_all
+puts "\n--- UniquenessKey operations (real DB) ---"
+Pgbus::UniquenessKey.delete_all
 
 Benchmark.ips do |x|
   x.config(time: 5, warmup: 2)
@@ -271,22 +265,22 @@ Benchmark.ips do |x|
   x.report("acquire + release") do |times|
     times.times do |i|
       key = "bench-lock-#{i}-#{SecureRandom.hex(4)}"
-      Pgbus::JobLock.acquire!(key, job_class: "BenchJob", job_id: "j#{i}", ttl: 3600)
-      Pgbus::JobLock.release!(key)
+      Pgbus::UniquenessKey.acquire!(key, queue_name: "default", msg_id: i)
+      Pgbus::UniquenessKey.release!(key)
     end
   end
 
   x.report("acquire (conflict)") do |times|
-    Pgbus::JobLock.acquire!("conflict-key", job_class: "BenchJob", job_id: "j0", ttl: 86_400)
+    Pgbus::UniquenessKey.acquire!("conflict-key", queue_name: "default", msg_id: 0)
     times.times do
-      Pgbus::JobLock.acquire!("conflict-key", job_class: "BenchJob", job_id: "j1", ttl: 3600)
+      Pgbus::UniquenessKey.acquire!("conflict-key", queue_name: "default", msg_id: 1)
     end
-    Pgbus::JobLock.release!("conflict-key")
+    Pgbus::UniquenessKey.release!("conflict-key")
   end
 
   x.compare!
 end
-Pgbus::JobLock.delete_all
+Pgbus::UniquenessKey.delete_all
 
 # ═══════════════════════════════════════════════════════════════════════
 # 6. Memory profile — full enqueue+execute cycle
@@ -310,8 +304,7 @@ report = MemoryProfiler.report do
   500.times do |i|
     key = "mem-ue-#{i}"
     payload = ue_payload.merge(Pgbus::Uniqueness::METADATA_KEY => key)
-    Pgbus::JobLock.acquire!(key, job_class: "UniqueUntilExecutedJob", job_id: "m#{i}",
-                                 state: "queued", ttl: 3600)
+    Pgbus::UniquenessKey.acquire!(key, queue_name: "default", msg_id: 0)
     msg = enqueue_and_read(client, payload)
     executor.execute(msg, "default")
   end

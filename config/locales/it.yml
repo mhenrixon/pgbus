@@ -239,16 +239,12 @@ it:
       index:
         description: Blocchi di unicità attivi che impediscono l'esecuzione duplicata del lavoro
         empty: Nessun blocco attivo
-        executing: In esecuzione
         headers:
           age: Età
-          expires: Scade
-          job_class: Classe del lavoro
           lock_key: Chiave di blocco
-          owner: Proprietario
-          state: Stato
-        queued: In coda
-        title: Blocchi del lavoro
+          msg_id: Message ID
+          queue_name: Queue
+        title: Chiavi di unicità
     outbox:
       index:
         description: Voci dell'outbox transazionali in attesa di pubblicazione su PGMQ
