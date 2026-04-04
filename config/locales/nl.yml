@@ -1,13 +1,6 @@
 ---
 nl:
   pgbus:
-    dialogs:
-      cancel: Annuleren
-      confirm: Bevestigen
-      confirm_title: Weet u het zeker?
-      delete: Verwijderen
-      delete_title: Verwijderen
-      ok: OK
     dashboard:
       processes_table:
         empty: Geen processen actief
@@ -90,6 +83,13 @@ nl:
         payload: Inhoud
         retry: Opnieuw proberen
         title: 'DLQ Bericht #%{id}'
+    dialogs:
+      cancel: Annuleren
+      confirm: Bevestigen
+      confirm_title: Weet u het zeker?
+      delete: Verwijderen
+      delete_title: Verwijderen
+      ok: OK
     events:
       index:
         processed_empty: Nog geen gebeurtenissen verwerkt
@@ -157,6 +157,10 @@ nl:
     jobs:
       enqueued_table:
         arguments: Argumenten
+        discard: Verwerpen
+        discard_all: Alles verwijderen
+        discard_all_confirm: Alle taken in de wachtrij verwijderen en hun vergrendelingen vrijgeven? Dit kan niet ongedaan worden gemaakt.
+        discard_confirm: Dit bericht verwerpen?
         empty: Geen in de wachtrij geplaatste taken
         full_json_payload: Volledige JSON payload
         headers:
@@ -176,13 +180,9 @@ nl:
           scheduled: 'Gepland:'
           timezone: 'Tijdzone:'
           visible_at: 'Zichtbaar op:'
-        title: Taken in de wachtrij
-        discard: Verwerpen
-        discard_confirm: Dit bericht verwerpen?
-        discard_all: Alles verwijderen
-        discard_all_confirm: Alle taken in de wachtrij verwijderen en hun vergrendelingen vrijgeven? Dit kan niet ongedaan worden gemaakt.
         retry: Opnieuw proberen
         retry_confirm: Zichtbaarheidstimeout resetten en opnieuw proberen?
+        title: Taken in de wachtrij
       failed_table:
         discard: Verwijderen
         discard_confirm: Deze taak verwijderen?
@@ -282,9 +282,13 @@ nl:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Wachtrij %{name} verwijderd.
       index:
         title: Wachtrijen
       queues_list:
+        delete: Verwijderen
+        delete_confirm: Wachtrij %{name} permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         empty: Geen wachtrijen gevonden
         headers:
           actions: Acties
@@ -294,16 +298,12 @@ nl:
           queue: Wachtrij
           total_ever: Totaal ooit
           visible: Zichtbaar
-        delete: Verwijderen
-        delete_confirm: Wachtrij %{name} permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren voor %{name}?
         paused: Gepauzeerd
         purge: Opschonen
         purge_confirm: Alle berichten verwijderen uit %{name}?
         resume: Hervatten
-      destroy:
-        success: Wachtrij %{name} verwijderd.
       show:
         delete_confirm: Deze wachtrij permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         delete_queue: Wachtrij verwijderen

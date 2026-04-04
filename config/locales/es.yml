@@ -1,13 +1,6 @@
 ---
 es:
   pgbus:
-    dialogs:
-      cancel: Cancelar
-      confirm: Confirmar
-      confirm_title: "¿Estás seguro?"
-      delete: Eliminar
-      delete_title: Eliminar
-      ok: Aceptar
     dashboard:
       processes_table:
         empty: No hay procesos en ejecución
@@ -90,6 +83,13 @@ es:
         payload: Carga útil
         retry: Reintentar
         title: 'Mensaje DLQ #%{id}'
+    dialogs:
+      cancel: Cancelar
+      confirm: Confirmar
+      confirm_title: "¿Estás seguro?"
+      delete: Eliminar
+      delete_title: Eliminar
+      ok: Aceptar
     events:
       index:
         processed_empty: No se han procesado eventos aún
@@ -157,6 +157,10 @@ es:
     jobs:
       enqueued_table:
         arguments: Argumentos
+        discard: Descartar
+        discard_all: Descartar todos
+        discard_all_confirm: "¿Descartar todos los trabajos en cola y liberar sus bloqueos? Esta acción no se puede deshacer."
+        discard_confirm: "¿Descartar este mensaje?"
         empty: No hay trabajos en cola
         full_json_payload: Carga JSON completa
         headers:
@@ -176,13 +180,9 @@ es:
           scheduled: 'Programado:'
           timezone: 'Zona horaria:'
           visible_at: 'Visible en:'
-        title: Trabajos en Cola
-        discard: Descartar
-        discard_confirm: "¿Descartar este mensaje?"
-        discard_all: Descartar todos
-        discard_all_confirm: "¿Descartar todos los trabajos en cola y liberar sus bloqueos? Esta acción no se puede deshacer."
         retry: Reintentar
         retry_confirm: "¿Restablecer tiempo de visibilidad y reintentar?"
+        title: Trabajos en Cola
       failed_table:
         discard: Descartar
         discard_confirm: "¿Descartar este trabajo?"
@@ -282,9 +282,13 @@ es:
           pid: PID
           status: Estado
     queues:
+      destroy:
+        success: Cola %{name} eliminada.
       index:
         title: Colas
       queues_list:
+        delete: Eliminar
+        delete_confirm: "¿Eliminar permanentemente la cola %{name}? Esto no se puede deshacer."
         empty: No se encontraron colas
         headers:
           actions: Acciones
@@ -294,16 +298,12 @@ es:
           queue: Cola
           total_ever: Total acumulado
           visible: Visible
-        delete: Eliminar
-        delete_confirm: "¿Eliminar permanentemente la cola %{name}? Esto no se puede deshacer."
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento de %{name}?"
         paused: Pausado
         purge: Purgar
         purge_confirm: "¿Purgar todos los mensajes de %{name}?"
         resume: Reanudar
-      destroy:
-        success: Cola %{name} eliminada.
       show:
         delete_confirm: "¿Eliminar permanentemente esta cola? Esto no se puede deshacer."
         delete_queue: Eliminar cola

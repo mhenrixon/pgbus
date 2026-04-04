@@ -1,13 +1,6 @@
 ---
 en:
   pgbus:
-    dialogs:
-      cancel: Cancel
-      confirm: Confirm
-      confirm_title: Are you sure?
-      delete: Delete
-      delete_title: Delete
-      ok: OK
     dashboard:
       processes_table:
         empty: No processes running
@@ -90,6 +83,13 @@ en:
         payload: Payload
         retry: Retry
         title: 'DLQ Message #%{id}'
+    dialogs:
+      cancel: Cancel
+      confirm: Confirm
+      confirm_title: Are you sure?
+      delete: Delete
+      delete_title: Delete
+      ok: OK
     events:
       index:
         processed_empty: No events processed yet
@@ -173,6 +173,10 @@ en:
     jobs:
       enqueued_table:
         arguments: Arguments
+        discard: Discard
+        discard_all: Discard All
+        discard_all_confirm: Discard all enqueued jobs and release their locks? This cannot be undone.
+        discard_confirm: Discard this message?
         empty: No enqueued jobs
         full_json_payload: Full JSON payload
         headers:
@@ -192,10 +196,6 @@ en:
           scheduled: 'Scheduled:'
           timezone: 'Timezone:'
           visible_at: 'Visible at:'
-        discard: Discard
-        discard_all: Discard All
-        discard_all_confirm: Discard all enqueued jobs and release their locks? This cannot be undone.
-        discard_confirm: Discard this message?
         retry: Retry
         retry_confirm: Reset visibility timeout and retry?
         title: Enqueued Jobs
@@ -298,9 +298,13 @@ en:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Queue %{name} deleted.
       index:
         title: Queues
       queues_list:
+        delete: Delete
+        delete_confirm: Permanently delete queue %{name}? This cannot be undone.
         empty: No queues found
         headers:
           actions: Actions
@@ -310,16 +314,12 @@ en:
           queue: Queue
           total_ever: Total Ever
           visible: Visible
-        delete: Delete
-        delete_confirm: Permanently delete queue %{name}? This cannot be undone.
         pause: Pause
         pause_confirm: Pause processing for %{name}?
         paused: Paused
         purge: Purge
         purge_confirm: Purge all messages from %{name}?
         resume: Resume
-      destroy:
-        success: Queue %{name} deleted.
       show:
         delete_confirm: Permanently delete this queue? This cannot be undone.
         delete_queue: Delete Queue

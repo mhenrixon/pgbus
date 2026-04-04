@@ -1,13 +1,6 @@
 ---
 da:
   pgbus:
-    dialogs:
-      cancel: Annuller
-      confirm: Bekræft
-      confirm_title: Er du sikker?
-      delete: Slet
-      delete_title: Slet
-      ok: OK
     dashboard:
       processes_table:
         empty: Ingen processer kører
@@ -90,6 +83,13 @@ da:
         payload: Indhold
         retry: Forsøg igen
         title: 'DLQ-besked #%{id}'
+    dialogs:
+      cancel: Annuller
+      confirm: Bekræft
+      confirm_title: Er du sikker?
+      delete: Slet
+      delete_title: Slet
+      ok: OK
     events:
       index:
         processed_empty: Ingen begivenheder behandlet endnu
@@ -157,6 +157,10 @@ da:
     jobs:
       enqueued_table:
         arguments: Argumenter
+        discard: Kassér
+        discard_all: Kassér alle
+        discard_all_confirm: Kassér alle ventende jobs og frigiv deres låse? Dette kan ikke fortrydes.
+        discard_confirm: Kassér denne besked?
         empty: Ingen job i kø
         full_json_payload: Fuld JSON-payload
         headers:
@@ -176,13 +180,9 @@ da:
           scheduled: 'Planlagt:'
           timezone: 'Tidszone:'
           visible_at: 'Synlig fra:'
-        title: Job i kø
-        discard: Kassér
-        discard_confirm: Kassér denne besked?
-        discard_all: Kassér alle
-        discard_all_confirm: Kassér alle ventende jobs og frigiv deres låse? Dette kan ikke fortrydes.
         retry: Prøv igen
         retry_confirm: Nulstil synlighedstimeout og prøv igen?
+        title: Job i kø
       failed_table:
         discard: Kassér
         discard_confirm: Kassér dette job?
@@ -282,9 +282,13 @@ da:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Køen %{name} slettet.
       index:
         title: Køer
       queues_list:
+        delete: Slet
+        delete_confirm: Slet køen %{name} permanent? Dette kan ikke fortrydes.
         empty: Ingen køer fundet
         headers:
           actions: Handlinger
@@ -294,16 +298,12 @@ da:
           queue: Kø
           total_ever: Total nogensinde
           visible: Synlig
-        delete: Slet
-        delete_confirm: Slet køen %{name} permanent? Dette kan ikke fortrydes.
         pause: Pause
         pause_confirm: Pause behandling i %{name}?
         paused: Pauset
         purge: Rens
         purge_confirm: Rens alle beskeder fra %{name}?
         resume: Genoptag
-      destroy:
-        success: Køen %{name} slettet.
       show:
         delete_confirm: Slet denne kø permanent? Dette kan ikke fortrydes.
         delete_queue: Slet kø

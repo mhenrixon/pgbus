@@ -1,13 +1,6 @@
 ---
 de:
   pgbus:
-    dialogs:
-      cancel: Abbrechen
-      confirm: Bestätigen
-      confirm_title: Sind Sie sicher?
-      delete: Löschen
-      delete_title: Löschen
-      ok: OK
     dashboard:
       processes_table:
         empty: Keine Prozesse laufen
@@ -90,6 +83,13 @@ de:
         payload: Nutzlast
         retry: Erneut versuchen
         title: 'DLQ Nachricht #%{id}'
+    dialogs:
+      cancel: Abbrechen
+      confirm: Bestätigen
+      confirm_title: Sind Sie sicher?
+      delete: Löschen
+      delete_title: Löschen
+      ok: OK
     events:
       index:
         processed_empty: Noch keine Ereignisse verarbeitet
@@ -157,6 +157,10 @@ de:
     jobs:
       enqueued_table:
         arguments: Argumente
+        discard: Verwerfen
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle eingereihten Jobs verwerfen und ihre Sperren freigeben? Dies kann nicht rückgängig gemacht werden.
+        discard_confirm: Diese Nachricht verwerfen?
         empty: Keine eingereihten Jobs
         full_json_payload: Vollständige JSON-Nutzlast
         headers:
@@ -176,13 +180,9 @@ de:
           scheduled: 'Geplant:'
           timezone: 'Zeitzone:'
           visible_at: 'Sichtbar ab:'
-        title: Eingereihte Jobs
-        discard: Verwerfen
-        discard_confirm: Diese Nachricht verwerfen?
-        discard_all: Alle verwerfen
-        discard_all_confirm: Alle eingereihten Jobs verwerfen und ihre Sperren freigeben? Dies kann nicht rückgängig gemacht werden.
         retry: Wiederholen
         retry_confirm: Sichtbarkeits-Timeout zurücksetzen und erneut versuchen?
+        title: Eingereihte Jobs
       failed_table:
         discard: Verwerfen
         discard_confirm: Diesen Job verwerfen?
@@ -282,9 +282,13 @@ de:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Warteschlange %{name} gelöscht.
       index:
         title: Warteschlangen
       queues_list:
+        delete: Löschen
+        delete_confirm: Warteschlange %{name} dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         empty: Keine Warteschlangen gefunden
         headers:
           actions: Aktionen
@@ -294,16 +298,12 @@ de:
           queue: Warteschlange
           total_ever: Insgesamt jemals
           visible: Sichtbar
-        delete: Löschen
-        delete_confirm: Warteschlange %{name} dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         pause: Pause
         pause_confirm: Verarbeitung für %{name} pausieren?
         paused: Pausiert
         purge: Bereinigen
         purge_confirm: Alle Nachrichten von %{name} löschen?
         resume: Fortsetzen
-      destroy:
-        success: Warteschlange %{name} gelöscht.
       show:
         delete_confirm: Diese Warteschlange dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         delete_queue: Warteschlange löschen

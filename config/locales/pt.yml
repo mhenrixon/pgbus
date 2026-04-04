@@ -1,13 +1,6 @@
 ---
 pt:
   pgbus:
-    dialogs:
-      cancel: Cancelar
-      confirm: Confirmar
-      confirm_title: Tem certeza?
-      delete: Excluir
-      delete_title: Excluir
-      ok: OK
     dashboard:
       processes_table:
         empty: Nenhum processo em execução
@@ -90,6 +83,13 @@ pt:
         payload: Carga útil
         retry: Tentar novamente
         title: 'Mensagem DLQ #%{id}'
+    dialogs:
+      cancel: Cancelar
+      confirm: Confirmar
+      confirm_title: Tem certeza?
+      delete: Excluir
+      delete_title: Excluir
+      ok: OK
     events:
       index:
         processed_empty: Nenhum evento processado ainda
@@ -157,6 +157,10 @@ pt:
     jobs:
       enqueued_table:
         arguments: Argumentos
+        discard: Descartar
+        discard_all: Descartar todos
+        discard_all_confirm: Descartar todos os trabalhos na fila e liberar seus bloqueios? Esta ação não pode ser desfeita.
+        discard_confirm: Descartar esta mensagem?
         empty: Nenhum trabalho enfileirado
         full_json_payload: Carga JSON completa
         headers:
@@ -176,13 +180,9 @@ pt:
           scheduled: 'Agendado:'
           timezone: 'Fuso horário:'
           visible_at: 'Visível em:'
-        title: Trabalhos Enfileirados
-        discard: Descartar
-        discard_confirm: Descartar esta mensagem?
-        discard_all: Descartar todos
-        discard_all_confirm: Descartar todos os trabalhos na fila e liberar seus bloqueios? Esta ação não pode ser desfeita.
         retry: Tentar novamente
         retry_confirm: Redefinir tempo de visibilidade e tentar novamente?
+        title: Trabalhos Enfileirados
       failed_table:
         discard: Descartar
         discard_confirm: Descartar este trabalho?
@@ -282,9 +282,13 @@ pt:
           pid: PID
           status: Status
     queues:
+      destroy:
+        success: Fila %{name} excluída.
       index:
         title: Filas
       queues_list:
+        delete: Excluir
+        delete_confirm: Excluir permanentemente a fila %{name}? Esta ação não pode ser desfeita.
         empty: Nenhuma fila encontrada
         headers:
           actions: Ações
@@ -294,16 +298,12 @@ pt:
           queue: Fila
           total_ever: Total de todos os tempos
           visible: Visível
-        delete: Excluir
-        delete_confirm: Excluir permanentemente a fila %{name}? Esta ação não pode ser desfeita.
         pause: Pausar
         pause_confirm: Pausar processamento por %{name}?
         paused: Pausado
         purge: Limpar
         purge_confirm: Limpar todas as mensagens de %{name}?
         resume: Retomar
-      destroy:
-        success: Fila %{name} excluída.
       show:
         delete_confirm: Excluir permanentemente esta fila? Esta ação não pode ser desfeita.
         delete_queue: Excluir fila
