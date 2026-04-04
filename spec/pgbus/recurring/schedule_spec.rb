@@ -201,6 +201,28 @@ RSpec.describe Pgbus::Recurring::Schedule do
         )
       end
 
+      it "releases the lock when send_message raises" do
+        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(mock_client).to receive(:send_message).and_raise(StandardError, "connection refused")
+
+        expect do
+          schedule.enqueue_task(task, run_at: run_at)
+        end.to raise_error(StandardError, "connection refused")
+
+        expect(Pgbus::JobLock).to have_received(:release!).with("CleanupJob")
+      end
+
+      it "releases the lock when execution already recorded" do
+        allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
+        allow(Pgbus::RecurringExecution).to receive(:record)
+          .and_raise(Pgbus::Recurring::AlreadyRecorded)
+
+        schedule.enqueue_task(task, run_at: run_at)
+
+        expect(Pgbus::JobLock).to have_received(:release!).with("CleanupJob")
+        expect(mock_client).not_to have_received(:send_message)
+      end
+
       it "injects uniqueness metadata into the payload" do
         allow(Pgbus::JobLock).to receive(:acquire!).and_return(true)
 

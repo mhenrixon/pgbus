@@ -62,23 +62,31 @@ module Pgbus
       !result.nil?
     end
 
-    # Reap orphaned locks: locks in 'executing' state whose owner_pid
-    # has no healthy entry in pgbus_processes.
-    # Returns the number of orphaned locks released.
-    # Reap orphaned locks by matching (pid, hostname) against live process entries.
-    # A lock is orphaned if no healthy process exists with the same pid AND hostname.
+    # Reap orphaned locks whose owner is no longer alive, plus stale queued
+    # locks that were never claimed by a worker.
+    # Returns the total number of orphaned locks released.
     def self.reap_orphaned!
+      reaped = 0
+
+      # 1. Executing locks whose owner process has no healthy heartbeat
       alive_workers = ProcessEntry
                       .where("last_heartbeat_at >= ?", Time.current - Process::Heartbeat::ALIVE_THRESHOLD)
                       .pluck(:pid, :hostname)
 
-      orphaned = executing.select do |lock|
+      orphaned_executing = executing.select do |lock|
         alive_workers.none? { |pid, hostname| pid == lock.owner_pid && hostname == lock.owner_hostname }
       end
 
-      return 0 if orphaned.empty?
+      reaped += where(id: orphaned_executing.map(&:id)).delete_all if orphaned_executing.any?
 
-      where(id: orphaned.map(&:id)).delete_all
+      # 2. Queued locks older than the visibility timeout that were never
+      #    claimed. These are left behind when enqueue fails after lock
+      #    acquisition (e.g. network error, process crash).
+      threshold = Pgbus.configuration.visibility_timeout
+      stale_queued = queued_locks.where("locked_at < ?", Time.current - threshold)
+      reaped += stale_queued.delete_all if stale_queued.exists?
+
+      reaped
     end
 
     # Last-resort cleanup: delete locks whose expires_at has passed.

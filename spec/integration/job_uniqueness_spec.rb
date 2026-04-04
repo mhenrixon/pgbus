@@ -85,7 +85,7 @@ RSpec.describe "Job uniqueness (integration)", :integration do
       expect(Pgbus::JobLock.locked?("stale-lock")).to be false
     end
 
-    it "does not reap queued locks (they have no owner)" do
+    it "does not reap recent queued locks" do
       Pgbus::JobLock.acquire!(
         "queued-lock", job_class: "WaitingJob", job_id: "j1",
                        state: "queued", ttl: 86_400
@@ -94,6 +94,21 @@ RSpec.describe "Job uniqueness (integration)", :integration do
       reaped = Pgbus::JobLock.reap_orphaned!
       expect(reaped).to eq(0)
       expect(Pgbus::JobLock.locked?("queued-lock")).to be true
+    end
+
+    it "reaps stale queued locks older than visibility timeout" do
+      Pgbus::JobLock.acquire!(
+        "stale-queued-lock", job_class: "OrphanedJob", job_id: "j1",
+                             state: "queued", ttl: 86_400
+      )
+
+      # Backdate the lock to simulate it being stuck
+      Pgbus::JobLock.where(lock_key: "stale-queued-lock")
+                    .update_all(locked_at: 20.minutes.ago)
+
+      reaped = Pgbus::JobLock.reap_orphaned!
+      expect(reaped).to eq(1)
+      expect(Pgbus::JobLock.locked?("stale-queued-lock")).to be false
     end
   end
 

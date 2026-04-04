@@ -16,23 +16,13 @@ module Pgbus
 
       def enqueue_task(task, run_at:)
         queue = resolve_queue(task)
+        acquired_key = acquire_uniqueness_lock(task)
 
-        # Check uniqueness lock before enqueuing. If the job class declares
-        # ensures_uniqueness, we acquire the lock here so duplicate recurring
-        # enqueues are rejected while a previous instance is still queued or running.
-        if uniqueness_locked?(task)
-          Pgbus.logger.debug do
-            "[Pgbus] Recurring task #{task.key} skipped: uniqueness lock held"
-          end
-          return
-        end
+        return if acquired_key == :already_locked
 
         RecurringExecution.record(task.key, run_at) do
           payload = build_payload(task)
           headers = build_headers(task, run_at)
-
-          # Inject uniqueness metadata into the payload so the worker knows
-          # to release the lock after execution.
           payload = inject_uniqueness_metadata(task, payload)
 
           Pgbus.client.ensure_queue(queue)
@@ -44,7 +34,11 @@ module Pgbus
           end
         end
       rescue AlreadyRecorded
+        release_uniqueness_lock(acquired_key)
         Pgbus.logger.debug { "[Pgbus] Recurring task #{task.key} already enqueued for #{run_at.iso8601}" }
+      rescue StandardError
+        release_uniqueness_lock(acquired_key)
+        raise
       end
 
       def build_payload(task)
@@ -112,23 +106,25 @@ module Pgbus
         }
       end
 
-      # Check if the job class has ensures_uniqueness and if its lock is currently held.
-      # Returns true if the lock is held (skip enqueue), false otherwise.
-      def uniqueness_locked?(task)
-        return false unless task.class_name
+      # Acquire the uniqueness lock for a recurring task.
+      # Returns:
+      #   nil              — no uniqueness configured, proceed without lock
+      #   :already_locked  — lock held by a previous instance, caller should skip enqueue
+      #   String           — the lock key (lock was acquired, caller must release on failure)
+      def acquire_uniqueness_lock(task)
+        return nil unless task.class_name
 
         job_class = task.class_name.safe_constantize
-        return false unless job_class
-        return false unless job_class.respond_to?(:pgbus_uniqueness)
+        return nil unless job_class
+        return nil unless job_class.respond_to?(:pgbus_uniqueness)
 
         config = job_class.pgbus_uniqueness
-        return false unless config
-        return false unless config[:strategy] == :until_executed
+        return nil unless config
+        return nil unless config[:strategy] == :until_executed
 
         key = resolve_uniqueness_key(config, task)
-        return false unless key
+        return nil unless key
 
-        # Try to acquire the lock. If it fails, the lock is already held.
         acquired = JobLock.acquire!(
           key,
           job_class: task.class_name,
@@ -136,12 +132,25 @@ module Pgbus
           state: "queued",
           ttl: config[:lock_ttl]
         )
-        # If we acquired it, great — the message will be enqueued with the lock held.
-        # If not, a previous instance is still queued/running.
-        !acquired
+
+        if acquired
+          key
+        else
+          Pgbus.logger.debug { "[Pgbus] Recurring task #{task.key} skipped: uniqueness lock held" }
+          :already_locked
+        end
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Uniqueness check failed for #{task.key}: #{e.message}" }
-        false # Fail open — allow enqueue if uniqueness check errors
+        Pgbus.logger.warn { "[Pgbus] Uniqueness lock failed for #{task.key}: #{e.message}" }
+        nil # Fail open — allow enqueue if lock check errors
+      end
+
+      # Release a uniqueness lock. Safe to call with nil or :already_locked.
+      def release_uniqueness_lock(key)
+        return if key.nil? || key == :already_locked
+
+        JobLock.release!(key)
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{e.message}" }
       end
 
       # Resolve the uniqueness key for a recurring task.
