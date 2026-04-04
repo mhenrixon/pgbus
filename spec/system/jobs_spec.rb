@@ -122,6 +122,21 @@ RSpec.describe "Jobs", type: :system do
       end
     end
 
+    it "bulk select and discard selected enqueued jobs" do
+      visit "/pgbus/jobs"
+
+      within("turbo-frame#jobs-enqueued") do
+        find("input[data-bulk-select-all]").click
+        expect(page).to have_css("input[data-bulk-item]:checked", count: 1)
+      end
+
+      expect(page).to have_button("Discard Selected")
+      click_button "Discard Selected", match: :first
+      accept_confirm_dialog
+
+      expect(page).to have_toast("Discarded 1 selected")
+    end
+
     it "discard all enqueued: confirm and redirects with toast" do
       visit "/pgbus/jobs"
 

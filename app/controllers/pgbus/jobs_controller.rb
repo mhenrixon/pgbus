@@ -65,7 +65,15 @@ module Pgbus
     end
 
     def discard_selected_enqueued
-      selections = Array(params[:messages]).reject { |s| s[:queue_name].blank? || s[:msg_id].blank? }
+      selections = Array(params[:messages]).filter_map do |s|
+        next unless s.respond_to?(:[])
+
+        queue_name = s[:queue_name]
+        msg_id = s[:msg_id]
+        next if queue_name.blank? || msg_id.blank?
+
+        { queue_name: queue_name, msg_id: msg_id }
+      end
       if selections.empty?
         redirect_to jobs_path, alert: t("pgbus.jobs.index.none_selected")
         return
@@ -73,8 +81,7 @@ module Pgbus
 
       count = 0
       selections.each do |sel|
-        data_source.discard_job(sel[:queue_name], sel[:msg_id])
-        count += 1
+        count += 1 if data_source.discard_job(sel[:queue_name], sel[:msg_id])
       end
       redirect_to jobs_path, notice: t("pgbus.jobs.index.discarded_selected", count: count)
     end

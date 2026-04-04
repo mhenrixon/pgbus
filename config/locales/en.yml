@@ -118,6 +118,7 @@ en:
         not_found: Event not found
         title: Event %{event_id}
     helpers:
+      bulk_selected: selected
       paused_badge: Paused
       queue_badge:
         dlq: DLQ

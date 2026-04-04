@@ -89,8 +89,15 @@ function initBulkSelect() {
       selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
     }
 
+    let inSelectAll = false;
     selectAll.addEventListener("change", () => {
-      checkboxes().forEach(cb => { cb.checked = selectAll.checked; });
+      inSelectAll = true;
+      checkboxes().forEach(cb => {
+        cb.checked = selectAll.checked;
+        // Dispatch change event so inline onchange handlers fire (e.g., hidden input sync)
+        cb.dispatchEvent(new Event("change", { bubbles: false }));
+      });
+      inSelectAll = false;
       updateUI();
     });
 

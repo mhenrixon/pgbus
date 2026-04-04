@@ -5,7 +5,7 @@
       <% if @jobs.any? %>
         <div class="flex items-center space-x-2">
           <div data-bulk-actions class="hidden flex items-center space-x-2">
-            <span class="text-sm text-gray-500 dark:text-gray-400"><span data-bulk-count>0</span> selected</span>
+            <span class="text-sm text-gray-500 dark:text-gray-400"><span data-bulk-count>0</span> <%= t("pgbus.helpers.bulk_selected") %></span>
             <button type="submit" form="bulk-discard-enqueued-form"
                     class="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
                     data-turbo-confirm="<%= t("pgbus.jobs.index.discard_selected_confirm") %>">
