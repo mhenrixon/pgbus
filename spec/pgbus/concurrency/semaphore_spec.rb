@@ -8,7 +8,7 @@ RSpec.describe Pgbus::Concurrency::Semaphore do
       allow(Pgbus::Semaphore).to receive(:acquire!).and_return(:acquired)
 
       expect(described_class.acquire("TestJob-42", 2, 900)).to eq(:acquired)
-      expect(Pgbus::Semaphore).to have_received(:acquire!).with("TestJob-42", 2, an_instance_of(Time))
+      expect(Pgbus::Semaphore).to have_received(:acquire!).with("TestJob-42", 2, a_kind_of(Time))
     end
 
     it "returns :blocked when limit is reached" do

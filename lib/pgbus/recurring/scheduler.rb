@@ -30,7 +30,7 @@ module Pgbus
           process_signals
           break if @shutting_down
 
-          tick(Time.now)
+          tick(Time.current)
           break if @shutting_down
 
           interruptible_sleep(config.recurring_schedule_interval)

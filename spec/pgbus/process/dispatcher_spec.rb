@@ -55,7 +55,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       dispatcher.send(:cleanup_processed_events)
 
-      expect(Pgbus::ProcessedEvent).to have_received(:expired).with(an_instance_of(Time))
+      expect(Pgbus::ProcessedEvent).to have_received(:expired).with(a_kind_of(Time))
       expect(scope).to have_received(:delete_all)
     end
 
@@ -84,7 +84,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       dispatcher.send(:reap_stale_processes)
 
-      expect(Pgbus::ProcessEntry).to have_received(:stale).with(an_instance_of(Time))
+      expect(Pgbus::ProcessEntry).to have_received(:stale).with(a_kind_of(Time))
       expect(scope).to have_received(:delete_all)
     end
 
@@ -92,6 +92,10 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(Pgbus::ProcessEntry).to receive(:stale).and_raise(StandardError, "db error")
       expect { dispatcher.send(:reap_stale_processes) }.not_to raise_error
     end
+  end
+
+  def past_monotonic(seconds_ago)
+    Process.clock_gettime(Process::CLOCK_MONOTONIC) - seconds_ago
   end
 
   describe "#run_maintenance (private)" do
@@ -109,7 +113,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:cleanup_processed_events)
       allow(dispatcher).to receive(:reap_stale_processes)
 
-      dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
+      dispatcher.instance_variable_set(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_processed_events)
@@ -119,7 +123,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:cleanup_processed_events)
       allow(dispatcher).to receive(:reap_stale_processes)
 
-      dispatcher.instance_variable_set(:@last_reap_at, Time.now - described_class::REAP_INTERVAL - 1)
+      dispatcher.instance_variable_set(:@last_reap_at, past_monotonic(described_class::REAP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:reap_stale_processes)
@@ -128,7 +132,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs concurrency cleanup when concurrency interval has elapsed" do
       allow(dispatcher).to receive(:cleanup_concurrency)
 
-      dispatcher.instance_variable_set(:@last_concurrency_at, Time.now - described_class::CONCURRENCY_INTERVAL - 1)
+      dispatcher.instance_variable_set(:@last_concurrency_at, past_monotonic(described_class::CONCURRENCY_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_concurrency)
@@ -137,14 +141,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs batch cleanup when batch interval has elapsed" do
       allow(dispatcher).to receive(:cleanup_batches)
 
-      dispatcher.instance_variable_set(:@last_batch_cleanup_at, Time.now - described_class::BATCH_CLEANUP_INTERVAL - 1)
+      dispatcher.instance_variable_set(:@last_batch_cleanup_at, past_monotonic(described_class::BATCH_CLEANUP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_batches)
     end
 
     it "rescues errors from maintenance methods" do
-      dispatcher.instance_variable_set(:@last_cleanup_at, Time.now - described_class::CLEANUP_INTERVAL - 1)
+      dispatcher.instance_variable_set(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
       expect { dispatcher.send(:run_maintenance) }.not_to raise_error
     end
@@ -183,7 +187,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       dispatcher.send(:cleanup_batches)
 
-      expect(Pgbus::Batch).to have_received(:cleanup).with(older_than: an_instance_of(Time))
+      expect(Pgbus::Batch).to have_received(:cleanup).with(older_than: a_kind_of(Time))
     end
 
     it "rescues errors gracefully" do
@@ -244,7 +248,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs compact_archives when interval has elapsed" do
       allow(dispatcher).to receive(:compact_archives)
 
-      dispatcher.instance_variable_set(:@last_archive_compaction_at, Time.now - 3601)
+      dispatcher.instance_variable_set(:@last_archive_compaction_at, past_monotonic(3601))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:compact_archives)
@@ -258,7 +262,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       dispatcher.send(:cleanup_recurring_executions)
 
-      expect(Pgbus::RecurringExecution).to have_received(:older_than).with(an_instance_of(Time))
+      expect(Pgbus::RecurringExecution).to have_received(:older_than).with(a_kind_of(Time))
       expect(relation).to have_received(:delete_all)
     end
 

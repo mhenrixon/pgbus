@@ -29,10 +29,10 @@ module Pgbus
 
     def paused?(queue_name)
       cached = @pause_cache[queue_name]
-      return cached[:paused] if cached && (Time.now - cached[:checked_at]) < @pause_cache_ttl
+      return cached[:paused] if cached && (Time.current - cached[:checked_at]) < @pause_cache_ttl
 
       paused = check_paused(queue_name)
-      @pause_cache[queue_name] = { paused: paused, checked_at: Time.now }
+      @pause_cache[queue_name] = { paused: paused, checked_at: Time.current }
       paused
     end
 

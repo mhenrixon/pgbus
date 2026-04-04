@@ -10,7 +10,7 @@ module Pgbus
         @tasks = load_tasks
       end
 
-      def due_tasks(time = Time.now)
+      def due_tasks(time = Time.current)
         tasks.select { |task| task_due?(task, time) }
       end
 
