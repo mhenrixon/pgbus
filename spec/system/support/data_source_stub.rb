@@ -45,7 +45,15 @@ module Pgbus
         @recurring_tasks_list.find { |t| t[:id].to_s == id.to_s }&.merge(executions: [])
       end
 
-      def toggle_recurring_task(id) = record(:toggle_recurring_task, id)
+      def toggle_recurring_task(id)
+        task = @recurring_tasks_list.find { |t| t[:id].to_s == id.to_s }
+        return nil unless task
+
+        task[:enabled] = !task[:enabled]
+        record(:toggle_recurring_task, id)
+        task[:enabled] ? :enabled : :disabled
+      end
+
       def enqueue_recurring_task_now(id) = record(:enqueue_recurring_task_now, id)
 
       def purge_queue(name)          = record(:purge_queue, name)

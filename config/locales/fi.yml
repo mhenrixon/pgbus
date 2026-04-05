@@ -345,6 +345,10 @@ fi:
           one: "%{count} tehtävä määritetty"
           other: "%{count} tehtävää määritetty"
         title: Toistuvat tehtävät
+      toggle:
+        disabled: Tehtävä poistettu käytöstä
+        enabled: Tehtävä otettu käyttöön
+        failed: Tehtävän vaihto epäonnistui
       show:
         back: Takaisin
         configuration: Asetukset

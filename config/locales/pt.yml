@@ -345,6 +345,10 @@ pt:
           one: "%{count} tarefa configurada"
           other: "%{count} tarefas configuradas"
         title: Tarefas Recorrentes
+      toggle:
+        disabled: Tarefa desativada
+        enabled: Tarefa ativada
+        failed: Falha ao alternar tarefa
       show:
         back: Voltar
         configuration: Configuração

@@ -345,6 +345,10 @@ fr:
           one: Tâche %{count} configurée
           other: Tâches %{count} configurées
         title: Tâches récurrentes
+      toggle:
+        disabled: Tâche désactivée
+        enabled: Tâche activée
+        failed: Impossible de basculer la tâche
       show:
         back: Retour
         configuration: Configuration

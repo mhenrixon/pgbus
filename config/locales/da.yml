@@ -345,6 +345,10 @@ da:
           one: "%{count} opgave konfigureret"
           other: "%{count} opgaver konfigureret"
         title: Gentagne opgaver
+      toggle:
+        disabled: Opgave deaktiveret
+        enabled: Opgave aktiveret
+        failed: Kunne ikke ændre opgave
       show:
         back: Tilbage
         configuration: Konfiguration

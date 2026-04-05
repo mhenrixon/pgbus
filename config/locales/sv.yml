@@ -345,6 +345,10 @@ sv:
           one: "%{count} uppgift konfigurerad"
           other: "%{count} uppgifter konfigurerade"
         title: Återkommande uppgifter
+      toggle:
+        disabled: Uppgift inaktiverad
+        enabled: Uppgift aktiverad
+        failed: Kunde inte ändra uppgift
       show:
         back: Tillbaka
         configuration: Konfiguration

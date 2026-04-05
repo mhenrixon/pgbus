@@ -345,6 +345,10 @@ nl:
           one: "%{count} taak geconfigureerd"
           other: "%{count} taken geconfigureerd"
         title: Terugkerende taken
+      toggle:
+        disabled: Taak uitgeschakeld
+        enabled: Taak ingeschakeld
+        failed: Kon taak niet omschakelen
       show:
         back: Terug
         configuration: Configuratie

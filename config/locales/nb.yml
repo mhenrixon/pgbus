@@ -345,6 +345,10 @@ nb:
           one: "%{count} oppgave konfigurert"
           other: "%{count} oppgaver konfigurert"
         title: Gjentakende oppgaver
+      toggle:
+        disabled: Oppgave deaktivert
+        enabled: Oppgave aktivert
+        failed: Kunne ikke endre oppgave
       show:
         back: Tilbake
         configuration: Konfigurasjon

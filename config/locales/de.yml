@@ -345,6 +345,10 @@ de:
           one: "%{count} Aufgabe konfiguriert"
           other: "%{count} Aufgaben konfiguriert"
         title: Wiederkehrende Aufgaben
+      toggle:
+        disabled: Aufgabe deaktiviert
+        enabled: Aufgabe aktiviert
+        failed: Aufgabe konnte nicht umgeschaltet werden
       show:
         back: Zurück
         configuration: Konfiguration

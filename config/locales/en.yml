@@ -391,6 +391,10 @@ en:
           one: "%{count} task configured"
           other: "%{count} tasks configured"
         title: Recurring Tasks
+      toggle:
+        disabled: Task disabled
+        enabled: Task enabled
+        failed: Failed to toggle task
       show:
         back: Back
         configuration: Configuration

@@ -345,6 +345,10 @@ es:
           one: Tarea %{count} configurada
           other: Tareas %{count} configuradas
         title: Tareas recurrentes
+      toggle:
+        disabled: Tarea deshabilitada
+        enabled: Tarea habilitada
+        failed: No se pudo cambiar la tarea
       show:
         back: Atrás
         configuration: Configuración

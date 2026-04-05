@@ -345,6 +345,10 @@ it:
           one: "%{count} attività configurata"
           other: "%{count} attività configurate"
         title: Attività ricorrenti
+      toggle:
+        disabled: Attività disabilitata
+        enabled: Attività abilitata
+        failed: Impossibile cambiare lo stato dell'attività
       show:
         back: Indietro
         configuration: Configurazione

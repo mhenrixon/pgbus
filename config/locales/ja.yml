@@ -345,6 +345,10 @@ ja:
           one: "%{count} タスクが設定されています"
           other: "%{count} タスクが設定されています"
         title: 定期タスク
+      toggle:
+        disabled: タスクが無効になりました
+        enabled: タスクが有効になりました
+        failed: タスクの切り替えに失敗しました
       show:
         back: 戻る
         configuration: 設定
