@@ -174,18 +174,19 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#toggle_recurring_task" do
-    it "toggles the enabled state" do
-      mock_record = double("RecurringTask", enabled: true)
+    it "returns :disabled when toggling an enabled task" do
+      mock_record = double("RecurringTask")
       allow(Pgbus::RecurringTask).to receive(:find_by).with(id: 1).and_return(mock_record)
+      allow(mock_record).to receive(:enabled).and_return(true, false)
       allow(mock_record).to receive(:update!).with(enabled: false).and_return(true)
 
-      expect(data_source.toggle_recurring_task(1)).to be true
+      expect(data_source.toggle_recurring_task(1)).to eq(:disabled)
     end
 
-    it "returns false when task not found" do
+    it "returns nil when task not found" do
       allow(Pgbus::RecurringTask).to receive(:find_by).with(id: 99).and_return(nil)
 
-      expect(data_source.toggle_recurring_task(99)).to be false
+      expect(data_source.toggle_recurring_task(99)).to be_nil
     end
   end
 
