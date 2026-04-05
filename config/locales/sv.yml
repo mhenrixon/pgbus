@@ -301,23 +301,35 @@ sv:
         purge_confirm: Rensa alla meddelanden från %{name}?
         resume: Återuppta
       show:
+        arguments: Argument
         delete_confirm: Ta bort denna kö permanent? Detta kan inte ångras.
         delete_queue: Ta bort kö
         depth: 'Djup:'
         discard: Kassera
         discard_confirm: Kassera detta meddelande?
         empty: Kön är tom
+        full_json_payload: Fullständig JSON-payload
         headers:
-          actions: Åtgärder
           enqueued: Inlagd
           id: ID
-          payload: Innehåll
+          job_class: Jobbklass
           reads: Läsningar
           vt: VT
+        headers_section: Headers
+        job_id: 'Jobb-ID:'
         message_discard_failed: Kunde inte kassera meddelandet.
         message_discarded: Meddelande kasserat.
         message_retried: Meddelandets synlighet återställd.
         message_retry_failed: Kunde inte försöka igen med meddelandet.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Senast läst:'
+          locale: 'Språk:'
+          priority: 'Prioritet:'
+          queue: 'Kö:'
+          scheduled: 'Schemalagt:'
+          timezone: 'Tidszon:'
+          visible_at: 'Synlig vid:'
         pause: Pausa
         pause_confirm: Pausa bearbetning?
         purge_confirm: Rensa alla meddelanden?

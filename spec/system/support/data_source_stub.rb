@@ -5,7 +5,7 @@ module Pgbus
     class StubDataSource
       attr_accessor :stats, :queues, :processes_list, :failed_events_list,
                     :dlq_messages_list, :events_list, :subscribers_list, :jobs_list,
-                    :paused_queues, :locks_list
+                    :paused_queues, :locks_list, :recurring_tasks_list
       attr_reader :calls
 
       def initialize
@@ -19,6 +19,7 @@ module Pgbus
         @jobs_list = []
         @paused_queues = []
         @locks_list = []
+        @recurring_tasks_list = []
         @calls = Hash.new { |h, k| h[k] = [] }
       end
 
@@ -38,6 +39,14 @@ module Pgbus
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
       def job_locks = @locks_list
       def queue_paused?(name) = @paused_queues.include?(name)
+      def recurring_tasks = @recurring_tasks_list
+
+      def recurring_task(id)
+        @recurring_tasks_list.find { |t| t[:id].to_s == id.to_s }&.merge(executions: [])
+      end
+
+      def toggle_recurring_task(id) = record(:toggle_recurring_task, id)
+      def enqueue_recurring_task_now(id) = record(:enqueue_recurring_task_now, id)
 
       def purge_queue(name)          = record(:purge_queue, name)
       def drop_queue(name)           = record(:drop_queue, name)

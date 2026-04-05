@@ -24,7 +24,8 @@
               <td data-label="Task" class="px-4 py-3">
                 <div>
                   <%= link_to task[:key], pgbus.recurring_task_path(task[:id]),
-                      class: "text-sm font-medium text-blue-600 hover:text-blue-800" %>
+                      class: "text-sm font-medium text-blue-600 hover:text-blue-800",
+                      data: { turbo_frame: "_top" } %>
                 </div>
                 <div class="text-xs text-gray-500"><%= task[:class_name] || task[:command]&.truncate(40) %></div>
                 <% if task[:description] %>

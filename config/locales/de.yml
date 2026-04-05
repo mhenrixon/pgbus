@@ -301,23 +301,35 @@ de:
         purge_confirm: Alle Nachrichten von %{name} löschen?
         resume: Fortsetzen
       show:
+        arguments: Argumente
         delete_confirm: Diese Warteschlange dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         delete_queue: Warteschlange löschen
         depth: 'Tiefe:'
         discard: Verwerfen
         discard_confirm: Diese Nachricht verwerfen?
         empty: Warteschlange ist leer
+        full_json_payload: Vollständige JSON-Nutzlast
         headers:
-          actions: Aktionen
           enqueued: Eingereiht
           id: ID
-          payload: Nutzlast
+          job_class: Job-Klasse
           reads: Lesevorgänge
           vt: VT
+        headers_section: Header
+        job_id: 'Job-ID:'
         message_discard_failed: Nachricht konnte nicht verworfen werden.
         message_discarded: Nachricht verworfen.
         message_retried: Sichtbarkeit der Nachricht zurückgesetzt.
         message_retry_failed: Nachricht konnte nicht wiederholt werden.
+        metadata: Metadaten
+        metadata_labels:
+          last_read: 'Letzter Lesevorgang:'
+          locale: 'Sprache:'
+          priority: 'Priorität:'
+          queue: 'Warteschlange:'
+          scheduled: 'Geplant:'
+          timezone: 'Zeitzone:'
+          visible_at: 'Sichtbar ab:'
         pause: Pause
         pause_confirm: Verarbeitung pausieren?
         purge_confirm: Alle Nachrichten löschen?

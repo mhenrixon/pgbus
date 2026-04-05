@@ -87,20 +87,26 @@ RSpec.describe "Queues", type: :system do
       expect(page).to have_text("Queue is empty")
     end
 
-    it "displays messages when present" do
+    it "displays messages with expandable details" do
       @stub_data_source.jobs_list = [
         { msg_id: 42, queue_name: "pgbus_default", read_ct: 3,
           enqueued_at: Time.now.utc.iso8601, vt: Time.now.utc.iso8601,
-          message: '{"job_class":"TestJob"}' }
+          message: '{"job_class":"TestJob","job_id":"abc-123","arguments":["x"],"priority":2}' }
       ]
 
       visit "/pgbus/queues/pgbus_default"
 
       expect(page).to have_text("42")
-      expect(page).to have_text("3") # read_ct
+      expect(page).to have_text("TestJob")
+
+      # Expand details
+      find("details.group summary").click
+      expect(page).to have_text("Job ID:")
+      expect(page).to have_text("abc-123")
+      expect(page).to have_text("Arguments")
     end
 
-    it "shows discard and retry buttons for each message" do
+    it "shows discard and retry buttons inside expanded row" do
       @stub_data_source.jobs_list = [
         { msg_id: 42, queue_name: "pgbus_default", read_ct: 0,
           enqueued_at: Time.now.utc.iso8601, vt: Time.now.utc.iso8601,
@@ -108,6 +114,9 @@ RSpec.describe "Queues", type: :system do
       ]
 
       visit "/pgbus/queues/pgbus_default"
+
+      # Expand details to reveal action buttons
+      find("details.group summary").click
 
       expect(page).to have_button("Discard", count: 1)
       expect(page).to have_button("Retry", count: 1)
@@ -177,20 +186,22 @@ RSpec.describe "Queues", type: :system do
         ]
       end
 
-      it "discard message: confirm and shows toast" do
+      it "discard message: expand, confirm and shows toast" do
         visit "/pgbus/queues/pgbus_default"
 
-        within("tr", text: "42") { click_button "Discard" }
+        find("details.group summary").click
+        click_button "Discard"
         accept_confirm_dialog
 
         expect(page).to have_toast("Message discarded")
         expect(@stub_data_source).to be_called(:discard_job)
       end
 
-      it "retry message: confirm and shows toast" do
+      it "retry message: expand, confirm and shows toast" do
         visit "/pgbus/queues/pgbus_default"
 
-        within("tr", text: "42") { click_button "Retry" }
+        find("details.group summary").click
+        click_button "Retry"
         accept_confirm_dialog
 
         expect(page).to have_toast("Message visibility reset")

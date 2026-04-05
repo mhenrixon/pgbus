@@ -301,23 +301,35 @@ it:
         purge_confirm: Eliminare tutti i messaggi da %{name}?
         resume: Riprendi
       show:
+        arguments: Argomenti
         delete_confirm: Eliminare permanentemente questa coda? Questa azione non può essere annullata.
         delete_queue: Elimina coda
         depth: 'Profondità:'
         discard: Scarta
         discard_confirm: Scartare questo messaggio?
         empty: La coda è vuota
+        full_json_payload: Payload JSON completo
         headers:
-          actions: Azioni
           enqueued: In coda
           id: ID
-          payload: Carico utile
+          job_class: Classe Lavoro
           reads: Letture
           vt: VT
+        headers_section: Intestazioni
+        job_id: 'ID Lavoro:'
         message_discard_failed: Impossibile scartare il messaggio.
         message_discarded: Messaggio scartato.
         message_retried: Visibilità del messaggio reimpostata.
         message_retry_failed: Impossibile riprovare il messaggio.
+        metadata: Metadati
+        metadata_labels:
+          last_read: 'Ultima lettura:'
+          locale: 'Locale:'
+          priority: 'Priorità:'
+          queue: 'Coda:'
+          scheduled: 'Programmato:'
+          timezone: 'Fuso orario:'
+          visible_at: 'Visibile alle:'
         pause: Pausa
         pause_confirm: Mettere in pausa l'elaborazione?
         purge_confirm: Eliminare tutti i messaggi?

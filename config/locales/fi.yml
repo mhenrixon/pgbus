@@ -301,23 +301,35 @@ fi:
         purge_confirm: Tyhjennä kaikki viestit %{name}:sta?
         resume: Jatka
       show:
+        arguments: Argumentit
         delete_confirm: Poista tämä jono pysyvästi? Tätä ei voi kumota.
         delete_queue: Poista jono
         depth: 'Syvyys:'
         discard: Hylkää
         discard_confirm: Hylätä tämä viesti?
         empty: Jono on tyhjä
+        full_json_payload: Täysi JSON-payload
         headers:
-          actions: Toiminnot
           enqueued: Jonoon lisätty
           id: ID
-          payload: Kuorma
+          job_class: Työn luokka
           reads: Lukukerrat
           vt: VT
+        headers_section: Otsikot
+        job_id: 'Työn ID:'
         message_discard_failed: Viestiä ei voitu hylätä.
         message_discarded: Viesti hylätty.
         message_retried: Viestin näkyvyys nollattu.
         message_retry_failed: Viestiä ei voitu yrittää uudelleen.
+        metadata: Metatiedot
+        metadata_labels:
+          last_read: 'Viimeksi luettu:'
+          locale: 'Alue:'
+          priority: 'Prioriteetti:'
+          queue: 'Jono:'
+          scheduled: 'Aikataulutettu:'
+          timezone: 'Aikavyöhyke:'
+          visible_at: 'Näkyvissä:'
         pause: Tauko
         pause_confirm: Keskeytetäänkö käsittely?
         purge_confirm: Tyhjennetäänkö kaikki viestit?

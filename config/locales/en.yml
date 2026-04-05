@@ -347,23 +347,35 @@ en:
         purge_confirm: Purge all messages from %{name}?
         resume: Resume
       show:
+        arguments: Arguments
         delete_confirm: Permanently delete this queue? This cannot be undone.
         delete_queue: Delete Queue
         depth: 'Depth:'
         discard: Discard
         discard_confirm: Discard this message?
         empty: Queue is empty
+        full_json_payload: Full JSON payload
         headers:
-          actions: Actions
           enqueued: Enqueued
           id: ID
-          payload: Payload
+          job_class: Job Class
           reads: Reads
           vt: VT
+        headers_section: Headers
+        job_id: 'Job ID:'
         message_discard_failed: Could not discard message.
         message_discarded: Message discarded.
         message_retried: Message visibility reset.
         message_retry_failed: Could not retry message.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Last read:'
+          locale: 'Locale:'
+          priority: 'Priority:'
+          queue: 'Queue:'
+          scheduled: 'Scheduled at:'
+          timezone: 'Timezone:'
+          visible_at: 'Visible at:'
         pause: Pause
         pause_confirm: Pause processing?
         purge_confirm: Purge all messages?

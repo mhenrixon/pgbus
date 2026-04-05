@@ -176,4 +176,19 @@ task :release, %i[version force] do |_t, args|
   puts "    • Upload assets to the release"
 end
 
+namespace :dummy do
+  desc "Start dummy app with stub data for dashboard QA (PORT=3003, no database required)"
+  task :server do
+    port = ENV.fetch("PORT", "3003")
+    ENV["PGBUS_STUB_DATA"] = "1"
+    ENV["RAILS_ENV"] = "development"
+
+    puts "\n\e[32m→ Starting dummy app with stub data at http://localhost:#{port}/pgbus\e[0m"
+    puts "  Dashboard:  http://localhost:#{port}/pgbus"
+    puts "  Using stub data source (no database needed)"
+    puts "  Press Ctrl+C to stop\n\n"
+    sh("bundle exec puma spec/dummy/config.ru -p #{port}")
+  end
+end
+
 task default: %i[spec rubocop]
