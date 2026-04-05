@@ -88,7 +88,11 @@ module Pgbus
           { job_class: entry[:job_class], queue_name: entry[:queue_name],
             status: entry[:status], duration_ms: entry[:duration_ms] }
         end
-        JobStat.insert_all(base_rows)
+        begin
+          JobStat.insert_all(base_rows)
+        rescue StandardError => fallback_error
+          Pgbus.logger.warn { "[Pgbus] Stat buffer fallback flush failed: #{fallback_error.message}" }
+        end
       else
         Pgbus.logger.warn { "[Pgbus] Stat buffer flush failed: #{e.message}" }
       end
