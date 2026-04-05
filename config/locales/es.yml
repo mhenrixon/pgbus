@@ -301,23 +301,35 @@ es:
         purge_confirm: "¿Purgar todos los mensajes de %{name}?"
         resume: Reanudar
       show:
+        arguments: Argumentos
         delete_confirm: "¿Eliminar permanentemente esta cola? Esto no se puede deshacer."
         delete_queue: Eliminar cola
         depth: 'Profundidad:'
         discard: Descartar
         discard_confirm: "¿Descartar este mensaje?"
         empty: La cola está vacía
+        full_json_payload: Carga JSON completa
         headers:
-          actions: Acciones
           enqueued: Encolado
           id: ID
-          payload: Carga útil
+          job_class: Clase de Trabajo
           reads: Lecturas
           vt: VT
+        headers_section: Encabezados
+        job_id: 'ID del Trabajo:'
         message_discard_failed: No se pudo descartar el mensaje.
         message_discarded: Mensaje descartado.
         message_retried: Visibilidad del mensaje restablecida.
         message_retry_failed: No se pudo reintentar el mensaje.
+        metadata: Metadatos
+        metadata_labels:
+          last_read: 'Última lectura:'
+          locale: 'Configuración regional:'
+          priority: 'Prioridad:'
+          queue: 'Cola:'
+          scheduled: 'Programado:'
+          timezone: 'Zona horaria:'
+          visible_at: 'Visible en:'
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento?"
         purge_confirm: "¿Purgar todos los mensajes?"
@@ -333,6 +345,10 @@ es:
           one: Tarea %{count} configurada
           other: Tareas %{count} configuradas
         title: Tareas recurrentes
+      toggle:
+        disabled: Tarea deshabilitada
+        enabled: Tarea habilitada
+        failed: No se pudo cambiar la tarea
       show:
         back: Atrás
         configuration: Configuración

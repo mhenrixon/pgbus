@@ -301,23 +301,35 @@ pt:
         purge_confirm: Limpar todas as mensagens de %{name}?
         resume: Retomar
       show:
+        arguments: Argumentos
         delete_confirm: Excluir permanentemente esta fila? Esta ação não pode ser desfeita.
         delete_queue: Excluir fila
         depth: 'Profundidade:'
         discard: Descartar
         discard_confirm: Descartar esta mensagem?
         empty: Fila está vazia
+        full_json_payload: Carga JSON completa
         headers:
-          actions: Ações
           enqueued: Enfileirado
           id: ID
-          payload: Carga útil
+          job_class: Classe do Trabalho
           reads: Leituras
           vt: VT
+        headers_section: Cabeçalhos
+        job_id: 'ID do Trabalho:'
         message_discard_failed: Não foi possível descartar a mensagem.
         message_discarded: Mensagem descartada.
         message_retried: Visibilidade da mensagem redefinida.
         message_retry_failed: Não foi possível tentar novamente a mensagem.
+        metadata: Metadados
+        metadata_labels:
+          last_read: 'Última leitura:'
+          locale: 'Localidade:'
+          priority: 'Prioridade:'
+          queue: 'Fila:'
+          scheduled: 'Agendado:'
+          timezone: 'Fuso horário:'
+          visible_at: 'Visível em:'
         pause: Pausar
         pause_confirm: Pausar processamento?
         purge_confirm: Limpar todas as mensagens?
@@ -333,6 +345,10 @@ pt:
           one: "%{count} tarefa configurada"
           other: "%{count} tarefas configuradas"
         title: Tarefas Recorrentes
+      toggle:
+        disabled: Tarefa desativada
+        enabled: Tarefa ativada
+        failed: Falha ao alternar tarefa
       show:
         back: Voltar
         configuration: Configuração

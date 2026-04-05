@@ -479,13 +479,13 @@ module Pgbus
 
       def toggle_recurring_task(id)
         record = RecurringTask.find_by(id: id)
-        return false unless record
+        return nil unless record
 
         record.update!(enabled: !record.enabled)
-        true
+        record.enabled ? :enabled : :disabled
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error toggling recurring task #{id}: #{e.message}" }
-        false
+        nil
       end
 
       def enqueue_recurring_task_now(id)

@@ -301,23 +301,35 @@ nl:
         purge_confirm: Alle berichten verwijderen uit %{name}?
         resume: Hervatten
       show:
+        arguments: Argumenten
         delete_confirm: Deze wachtrij permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         delete_queue: Wachtrij verwijderen
         depth: 'Diepte:'
         discard: Verwerpen
         discard_confirm: Dit bericht verwerpen?
         empty: Wachtrij is leeg
+        full_json_payload: Volledige JSON payload
         headers:
-          actions: Acties
           enqueued: In de wachtrij geplaatst
           id: ID
-          payload: Inhoud
+          job_class: Taakklasse
           reads: Lezingen
           vt: VT
+        headers_section: Headers
+        job_id: 'Taak ID:'
         message_discard_failed: Kon bericht niet verwerpen.
         message_discarded: Bericht verworpen.
         message_retried: Zichtbaarheid van bericht gereset.
         message_retry_failed: Kon bericht niet opnieuw proberen.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Laatst gelezen:'
+          locale: 'Locale:'
+          priority: 'Prioriteit:'
+          queue: 'Wachtrij:'
+          scheduled: 'Gepland:'
+          timezone: 'Tijdzone:'
+          visible_at: 'Zichtbaar op:'
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren?
         purge_confirm: Alle berichten verwijderen?
@@ -333,6 +345,10 @@ nl:
           one: "%{count} taak geconfigureerd"
           other: "%{count} taken geconfigureerd"
         title: Terugkerende taken
+      toggle:
+        disabled: Taak uitgeschakeld
+        enabled: Taak ingeschakeld
+        failed: Kon taak niet omschakelen
       show:
         back: Terug
         configuration: Configuratie

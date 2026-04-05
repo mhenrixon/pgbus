@@ -114,12 +114,24 @@ initBulkSelect();
 document.addEventListener("turbo:load", initBulkSelect);
 document.addEventListener("turbo:frame-load", initBulkSelect);
 
-// -- Auto-refresh --
+// -- Auto-refresh (pauses when user is interacting) --
 const refreshInterval = parseInt(document.body?.dataset.pgbusRefreshInterval || "0", 10);
 if (refreshInterval > 0) {
   let timer;
+
+  function hasUserInteraction() {
+    // Pause when any checkbox is checked
+    const checked = document.querySelector("input[data-bulk-item]:checked, input[data-bulk-select-all]:checked");
+    if (checked) return true;
+    // Pause when any job detail row is expanded
+    const openDetails = document.querySelector("turbo-frame[data-auto-refresh] details[open]");
+    if (openDetails) return true;
+    return false;
+  }
+
   function refreshFrames() {
     if (document.hidden) return;
+    if (hasUserInteraction()) return;
     document.querySelectorAll("turbo-frame[data-auto-refresh]")
       .forEach(frame => {
         try {

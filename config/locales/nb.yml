@@ -301,23 +301,35 @@ nb:
         purge_confirm: Rens alle meldinger fra %{name}?
         resume: Gjenoppta
       show:
+        arguments: Argumenter
         delete_confirm: Slette denne køen permanent? Dette kan ikke angres.
         delete_queue: Slett kø
         depth: 'Dybde:'
         discard: Forkast
         discard_confirm: Forkaste denne meldingen?
         empty: Køen er tom
+        full_json_payload: Full JSON-payload
         headers:
-          actions: Handlinger
           enqueued: I kø
           id: ID
-          payload: Innhold
+          job_class: Jobbklasse
           reads: Lesninger
           vt: VT
+        headers_section: Overskrifter
+        job_id: 'Jobb-ID:'
         message_discard_failed: Kunne ikke forkaste meldingen.
         message_discarded: Melding forkastet.
         message_retried: Meldingens synlighet tilbakestilt.
         message_retry_failed: Kunne ikke prøve meldingen igjen.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Sist lest:'
+          locale: 'Språk:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          scheduled: 'Planlagt:'
+          timezone: 'Tidssone:'
+          visible_at: 'Synlig fra:'
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle meldinger?
@@ -333,6 +345,10 @@ nb:
           one: "%{count} oppgave konfigurert"
           other: "%{count} oppgaver konfigurert"
         title: Gjentakende oppgaver
+      toggle:
+        disabled: Oppgave deaktivert
+        enabled: Oppgave aktivert
+        failed: Kunne ikke endre oppgave
       show:
         back: Tilbake
         configuration: Konfigurasjon

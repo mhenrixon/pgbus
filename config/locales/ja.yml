@@ -301,23 +301,35 @@ ja:
         purge_confirm: "%{name} からすべてのメッセージを削除しますか？"
         resume: 再開
       show:
+        arguments: 引数
         delete_confirm: このキューを完全に削除しますか？この操作は取り消せません。
         delete_queue: キューを削除
         depth: 深さ：
         discard: 破棄
         discard_confirm: このメッセージを破棄しますか？
         empty: キューは空です
+        full_json_payload: 完全なJSONペイロード
         headers:
-          actions: アクション
           enqueued: エンキュー済み
           id: ID
-          payload: ペイロード
+          job_class: ジョブクラス
           reads: 読み取り回数
           vt: VT
+        headers_section: ヘッダー
+        job_id: ジョブID：
         message_discard_failed: メッセージを破棄できませんでした。
         message_discarded: メッセージを破棄しました。
         message_retried: メッセージの可視性をリセットしました。
         message_retry_failed: メッセージをリトライできませんでした。
+        metadata: メタデータ
+        metadata_labels:
+          last_read: 最終読み取り：
+          locale: ロケール：
+          priority: 優先度：
+          queue: キュー：
+          scheduled: スケジュール済み：
+          timezone: タイムゾーン：
+          visible_at: 表示可能日時：
         pause: 一時停止
         pause_confirm: 処理を一時停止しますか？
         purge_confirm: すべてのメッセージを削除しますか？
@@ -333,6 +345,10 @@ ja:
           one: "%{count} タスクが設定されています"
           other: "%{count} タスクが設定されています"
         title: 定期タスク
+      toggle:
+        disabled: タスクが無効になりました
+        enabled: タスクが有効になりました
+        failed: タスクの切り替えに失敗しました
       show:
         back: 戻る
         configuration: 設定

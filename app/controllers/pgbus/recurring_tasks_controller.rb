@@ -18,10 +18,12 @@ module Pgbus
     end
 
     def toggle
-      if data_source.toggle_recurring_task(params[:id])
-        redirect_to pgbus.recurring_tasks_path, notice: "Task toggled"
+      result = data_source.toggle_recurring_task(params[:id])
+      if result
+        message = result == :enabled ? t("pgbus.recurring_tasks.toggle.enabled") : t("pgbus.recurring_tasks.toggle.disabled")
+        redirect_to pgbus.recurring_tasks_path, notice: message
       else
-        redirect_to pgbus.recurring_tasks_path, alert: "Failed to toggle task"
+        redirect_to pgbus.recurring_tasks_path, alert: t("pgbus.recurring_tasks.toggle.failed")
       end
     end
 

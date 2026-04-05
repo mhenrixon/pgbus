@@ -301,23 +301,35 @@ fr:
         purge_confirm: Purger tous les messages de %{name} ?
         resume: Reprendre
       show:
+        arguments: Arguments
         delete_confirm: Supprimer définitivement cette file d'attente ? Cette action est irréversible.
         delete_queue: Supprimer la file d'attente
         depth: 'Profondeur :'
         discard: Rejeter
         discard_confirm: Rejeter ce message ?
         empty: La file d'attente est vide
+        full_json_payload: Charge utile JSON complète
         headers:
-          actions: Actions
           enqueued: Enregistré
           id: ID
-          payload: Charge utile
+          job_class: Classe de travail
           reads: Lectures
           vt: VT
+        headers_section: En-têtes
+        job_id: 'ID du travail :'
         message_discard_failed: Impossible de rejeter le message.
         message_discarded: Message rejeté.
         message_retried: Visibilité du message réinitialisée.
         message_retry_failed: Impossible de réessayer le message.
+        metadata: Métadonnées
+        metadata_labels:
+          last_read: 'Dernière lecture :'
+          locale: 'Langue :'
+          priority: 'Priorité :'
+          queue: 'File d''attente :'
+          scheduled: 'Planifié :'
+          timezone: 'Fuseau horaire :'
+          visible_at: 'Visible à :'
         pause: Pause
         pause_confirm: Mettre en pause le traitement ?
         purge_confirm: Purger tous les messages ?
@@ -333,6 +345,10 @@ fr:
           one: Tâche %{count} configurée
           other: Tâches %{count} configurées
         title: Tâches récurrentes
+      toggle:
+        disabled: Tâche désactivée
+        enabled: Tâche activée
+        failed: Impossible de basculer la tâche
       show:
         back: Retour
         configuration: Configuration

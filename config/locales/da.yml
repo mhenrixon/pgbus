@@ -301,23 +301,35 @@ da:
         purge_confirm: Rens alle beskeder fra %{name}?
         resume: Genoptag
       show:
+        arguments: Argumenter
         delete_confirm: Slet denne kø permanent? Dette kan ikke fortrydes.
         delete_queue: Slet kø
         depth: 'Dybde:'
         discard: Kassér
         discard_confirm: Kassér denne besked?
         empty: Køen er tom
+        full_json_payload: Fuld JSON-payload
         headers:
-          actions: Handlinger
           enqueued: Sat i kø
           id: ID
-          payload: Indhold
+          job_class: Jobklasse
           reads: Læsninger
           vt: VT
+        headers_section: Headers
+        job_id: 'Job ID:'
         message_discard_failed: Kunne ikke kassere besked.
         message_discarded: Besked kasseret.
         message_retried: Beskedens synlighed nulstillet.
         message_retry_failed: Kunne ikke prøve besked igen.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Sidst læst:'
+          locale: 'Locale:'
+          priority: 'Prioritet:'
+          queue: 'Kø:'
+          scheduled: 'Planlagt:'
+          timezone: 'Tidszone:'
+          visible_at: 'Synlig fra:'
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle beskeder?
@@ -333,6 +345,10 @@ da:
           one: "%{count} opgave konfigureret"
           other: "%{count} opgaver konfigureret"
         title: Gentagne opgaver
+      toggle:
+        disabled: Opgave deaktiveret
+        enabled: Opgave aktiveret
+        failed: Kunne ikke ændre opgave
       show:
         back: Tilbage
         configuration: Konfiguration

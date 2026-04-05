@@ -1,0 +1,229 @@
+# frozen_string_literal: true
+
+# Rich stub data source for dashboard QA without a database.
+# Used by `rake dummy:server` (triggered via PGBUS_STUB_DATA=1).
+module DummyApp
+  class StubDataSource
+    def self.build
+      new
+    end
+
+    def summary_stats
+      { total_queues: 4, total_depth: 127, total_visible: 98,
+        active_processes: 2, failed_count: 5, dlq_depth: 3,
+        recurring_count: 14, throughput_rate: 42.7 }
+    end
+
+    def queues_with_metrics
+      [
+        { name: "pgbus_default", queue_length: 85, queue_visible_length: 62,
+          oldest_msg_age_sec: 300, newest_msg_age_sec: 2, total_messages: 12_450 },
+        { name: "pgbus_mailers", queue_length: 22, queue_visible_length: 18,
+          oldest_msg_age_sec: 45, newest_msg_age_sec: 1, total_messages: 8_320 },
+        { name: "pgbus_events", queue_length: 15, queue_visible_length: 13,
+          oldest_msg_age_sec: 120, newest_msg_age_sec: 5, total_messages: 45_000 },
+        { name: "pgbus_default_dlq", queue_length: 3, queue_visible_length: 3,
+          oldest_msg_age_sec: 7200, newest_msg_age_sec: 3600, total_messages: 47 }
+      ]
+    end
+
+    def queue_detail(name)
+      queues_with_metrics.find { |q| q[:name] == name }
+    end
+
+    def queue_paused?(name)
+      name == "pgbus_mailers"
+    end
+
+    def jobs(queue_name: nil, page: 1, per_page: 25) # rubocop:disable Lint/UnusedMethodArgument
+      job_classes = %w[CaptureSpaceStatsJob SendWelcomeEmailJob ProcessPaymentJob SyncInventoryJob GenerateReportJob]
+      Array.new(6) do |i|
+        id = 900 - i
+        job_class = job_classes[i % job_classes.size]
+        {
+          msg_id: id, queue_name: queue_name || "pgbus_default", read_ct: i,
+          enqueued_at: (i * 5).minutes.ago.utc.iso8601,
+          vt: (i * 3).minutes.ago.utc.iso8601,
+          last_read_at: i.positive? ? (i * 2).minutes.ago.utc.iso8601 : nil,
+          message: {
+            job_class: job_class, job_id: "job-#{SecureRandom.hex(6)}",
+            queue_name: queue_name || "default", priority: [1, 2, 5][i % 3],
+            arguments: sample_arguments(job_class), locale: "en", timezone: "UTC",
+            scheduled_at: i.even? ? 1.minute.from_now.utc.iso8601 : nil
+          }.compact.to_json,
+          headers: i.even? ? { "X-Request-Id" => SecureRandom.uuid }.to_json : nil
+        }
+      end
+    end
+
+    def failed_events(page: 1, per_page: 25) # rubocop:disable Lint/UnusedMethodArgument
+      [
+        { "id" => 1, "handler_class" => "Billing::InvoiceHandler", "event_type" => "invoice.created",
+          "error_class" => "Stripe::InvalidRequestError", "error_message" => "No such customer: cus_xxx",
+          "retry_count" => 3, "failed_at" => 30.minutes.ago.utc.iso8601,
+          "queue_name" => "pgbus_default" },
+        { "id" => 2, "handler_class" => "Notifications::SlackHandler", "event_type" => "user.signed_up",
+          "error_class" => "Net::ReadTimeout", "error_message" => "execution expired",
+          "retry_count" => 1, "failed_at" => 2.hours.ago.utc.iso8601,
+          "queue_name" => "pgbus_events" }
+      ]
+    end
+
+    def failed_events_count = 2
+    def failed_event(id) = failed_events.find { |e| e["id"].to_s == id.to_s }
+
+    def dlq_messages(page: 1, per_page: 25) # rubocop:disable Lint/UnusedMethodArgument
+      [
+        { msg_id: 501, queue_name: "pgbus_default_dlq", read_ct: 6,
+          enqueued_at: 2.hours.ago.utc.iso8601, vt: 1.hour.ago.utc.iso8601,
+          message: { job_class: "ProcessPaymentJob", job_id: "dlq-aaa",
+                     arguments: [{ amount: 99.99 }], priority: 1 }.to_json },
+        { msg_id: 502, queue_name: "pgbus_default_dlq", read_ct: 4,
+          enqueued_at: 5.hours.ago.utc.iso8601, vt: 4.hours.ago.utc.iso8601,
+          message: { job_class: "SyncInventoryJob", job_id: "dlq-bbb",
+                     arguments: [{ sku: "WIDGET-42" }], priority: 2 }.to_json }
+      ]
+    end
+
+    def dlq_message_detail(msg_id)
+      dlq_messages.find { |m| m[:msg_id].to_s == msg_id.to_s }
+    end
+
+    def processes
+      [
+        { id: 1, kind: "worker", hostname: "web-01.prod", pid: 12_345,
+          metadata: { "queues" => "default,mailers", "threads" => 5 },
+          last_heartbeat_at: 10.seconds.ago, healthy: true, created_at: 2.hours.ago },
+        { id: 2, kind: "worker", hostname: "worker-01.prod", pid: 67_890,
+          metadata: { "queues" => "events", "threads" => 3 },
+          last_heartbeat_at: 45.seconds.ago, healthy: true, created_at: 1.day.ago }
+      ]
+    end
+
+    def recurring_tasks
+      tasks = %w[capture_stats cleanup_old sync_exchange_rates generate_reports
+                 purge_expired_tokens refresh_cache send_digest_emails
+                 check_ssl_certs rotate_logs archive_events
+                 update_search_index reindex_products vacuum_analyze health_check]
+      tasks.each_with_index.map do |key, i|
+        {
+          id: i + 1, key: key, class_name: key.camelize.concat("Job"),
+          command: nil, schedule: sample_schedule(i),
+          human_schedule: sample_human_schedule(i),
+          queue_name: %w[default maintenance events][i % 3],
+          priority: [1, 2, 5][i % 3],
+          description: "#{key.humanize} recurring task",
+          enabled: i != 1, static: i < 10,
+          next_run_at: i == 1 ? nil : ((i * 5) + 1).minutes.from_now,
+          last_run_at: i.positive? ? (i * 3).minutes.ago : nil,
+          created_at: 30.days.ago, updated_at: 1.day.ago
+        }
+      end
+    end
+
+    def recurring_task(id)
+      task = recurring_tasks.find { |t| t[:id].to_s == id.to_s }
+      return nil unless task
+
+      task.merge(executions: Array.new(5) do |i|
+        { run_at: (i * 5).minutes.ago, created_at: (i * 5).minutes.ago }
+      end)
+    end
+
+    def processed_events(page: 1, per_page: 25) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    def processed_events_count = 0
+    def processed_event(_id) = nil
+    def registered_subscribers = []
+
+    def job_locks
+      [
+        { lock_key: "uniqueness:ProcessPaymentJob:abc123", queue_name: "pgbus_default",
+          msg_id: 900, created_at: 5.minutes.ago, age_seconds: 300 },
+        { lock_key: "uniqueness:SendWelcomeEmailJob:def456", queue_name: "pgbus_mailers",
+          msg_id: 898, created_at: 2.minutes.ago, age_seconds: 120 }
+      ]
+    end
+
+    def outbox_stats
+      { unpublished: 3, total: 1250, oldest_unpublished_age: 45 }
+    end
+
+    def outbox_entries(page: 1, per_page: 25) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    def job_stats_summary(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      { total: 342, success: 335, failed: 5, dead_lettered: 2,
+        avg_duration_ms: 127.4, max_duration_ms: 4521.0 }
+    end
+
+    def slowest_job_classes(limit: 10, minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    def latency_by_queue(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    def latency_trend(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    def job_throughput(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      []
+    end
+
+    # Mutating actions (no-ops for QA)
+    def purge_queue(_name) = true
+    def drop_queue(_name) = true
+    def pause_queue(_name, reason: nil) = true # rubocop:disable Lint/UnusedMethodArgument
+    def resume_queue(_name) = true
+    def retry_job(_queue, _id) = true
+    def discard_job(_queue, _id) = true
+    def retry_failed_event(_id) = true
+    def discard_failed_event(_id) = true
+    def retry_all_failed = 2
+    def discard_all_failed = 2
+    def discard_all_enqueued = 6
+    def retry_dlq_message(_queue, _id) = true
+    def discard_dlq_message(_queue, _id) = true
+    def retry_all_dlq = 2
+    def discard_all_dlq = 2
+    def replay_event(_event) = true
+    def toggle_recurring_task(_id) = true
+    def enqueue_recurring_task_now(_id) = true
+    def discard_lock(_key) = 1
+    def discard_locks(keys) = keys.size
+    def discard_all_locks = 2
+
+    private
+
+    def sample_arguments(job_class)
+      case job_class
+      when "ProcessPaymentJob" then [{ amount: 49.99, currency: "USD" }]
+      when "SendWelcomeEmailJob" then [{ user_id: 42 }]
+      when "SyncInventoryJob" then [{ sku: "WIDGET-42", warehouse: "US-EAST" }]
+      else []
+      end
+    end
+
+    def sample_schedule(index)
+      schedules = ["*/5 * * * *", "0 3 * * *", "0 */6 * * *", "0 0 * * 1",
+                   "*/15 * * * *", "0 */2 * * *", "0 8 * * 1-5", "0 0 1 * *",
+                   "30 4 * * *", "0 2 * * 0", "*/10 * * * *", "0 6 * * *",
+                   "0 1 * * *", "*/1 * * * *"]
+      schedules[index % schedules.size]
+    end
+
+    def sample_human_schedule(index)
+      descriptions = ["Every 5 minutes", "Daily at 3:00 AM", "Every 6 hours", "Weekly on Monday",
+                      "Every 15 minutes", "Every 2 hours", "Weekdays at 8:00 AM", "Monthly on the 1st",
+                      "Daily at 4:30 AM", "Weekly on Sunday at 2:00 AM", "Every 10 minutes",
+                      "Daily at 6:00 AM", "Daily at 1:00 AM", "Every minute"]
+      descriptions[index % descriptions.size]
+    end
+  end
+end
