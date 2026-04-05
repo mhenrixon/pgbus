@@ -48,8 +48,7 @@ RSpec.describe Pgbus::StatBuffer do
       buffer.flush
 
       expect(Pgbus::JobStat).to have_received(:insert_all).with(
-        array_including(hash_including(job_class: "TestJob")),
-        record_timestamps: true
+        array_including(hash_including(job_class: "TestJob"))
       )
       expect(buffer.size).to eq(0)
     end
@@ -95,19 +94,51 @@ RSpec.describe Pgbus::StatBuffer do
     end
   end
 
-  describe "without latency columns" do
-    before { allow(Pgbus::JobStat).to receive(:latency_columns?).and_return(false) }
+  describe "always includes all columns" do
+    it "includes latency fields regardless of latency_columns? memoization" do
+      allow(Pgbus::JobStat).to receive(:latency_columns?).and_return(false)
 
-    it "omits latency fields from the insert" do
       buffer.push(stat_attrs)
       buffer.flush
 
-      expect(Pgbus::JobStat).to have_received(:insert_all) do |rows, **_opts|
+      expect(Pgbus::JobStat).to have_received(:insert_all) do |rows|
         row = rows.first
-        expect(row).to include(job_class: "TestJob", duration_ms: 42)
-        expect(row).not_to have_key(:enqueue_latency_ms)
-        expect(row).not_to have_key(:retry_count)
+        expect(row).to include(job_class: "TestJob", duration_ms: 42,
+                               enqueue_latency_ms: 10, retry_count: 0)
       end
+    end
+  end
+
+  describe "fallback when latency columns missing in DB" do
+    it "retries with base columns on StatementInvalid" do
+      calls = []
+      allow(Pgbus::JobStat).to receive(:insert_all) do |rows|
+        calls << rows
+        raise ActiveRecord::StatementInvalid, 'column "enqueue_latency_ms" does not exist' if calls.size == 1
+      end
+
+      buffer.push(stat_attrs)
+      buffer.flush
+
+      expect(calls.size).to eq(2)
+      expect(calls[0].first).to have_key(:enqueue_latency_ms)
+      expect(calls[1].first).not_to have_key(:enqueue_latency_ms)
+      expect(calls[1].first).to include(job_class: "TestJob")
+    end
+
+    it "retries with base columns on UnknownAttributeError" do
+      calls = []
+      allow(Pgbus::JobStat).to receive(:insert_all) do |rows|
+        calls << rows
+        raise ActiveModel::UnknownAttributeError.new(nil, "enqueue_latency_ms") if calls.size == 1
+      end
+
+      buffer.push(stat_attrs)
+      buffer.flush
+
+      expect(calls.size).to eq(2)
+      expect(calls[0].first).to have_key(:enqueue_latency_ms)
+      expect(calls[1].first).not_to have_key(:enqueue_latency_ms)
     end
   end
 end

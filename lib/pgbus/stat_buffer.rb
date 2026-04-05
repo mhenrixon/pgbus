@@ -68,21 +68,36 @@ module Pgbus
     def write_to_database(entries)
       return unless JobStat.table_exists?
 
-      columns = %i[job_class queue_name status duration_ms]
-      columns.push(:enqueue_latency_ms, :retry_count) if JobStat.latency_columns?
-
+      # Always attempt all 6 columns. If the latency migration hasn't
+      # run, the first flush will fail, and we fall back to base columns.
+      # This avoids relying on the memoized latency_columns? flag which
+      # can be stuck at false if evaluated before the connection is ready.
       rows = entries.map do |e|
-        row = [e[:job_class], e[:queue_name], e[:status], e[:duration_ms]]
-        row.push(e[:enqueue_latency_ms], e[:retry_count]) if JobStat.latency_columns?
-        row
+        { job_class: e[:job_class], queue_name: e[:queue_name],
+          status: e[:status], duration_ms: e[:duration_ms],
+          enqueue_latency_ms: e[:enqueue_latency_ms], retry_count: e[:retry_count] }
       end
 
-      JobStat.insert_all(
-        rows.map { |row| columns.zip(row).to_h },
-        record_timestamps: true
-      )
+      JobStat.insert_all(rows)
+    rescue ActiveRecord::StatementInvalid, ActiveModel::UnknownAttributeError => e
+      # Column doesn't exist — fall back to base columns only
+      if e.message.include?("enqueue_latency_ms") || e.message.include?("retry_count")
+        Pgbus.logger.warn { "[Pgbus] Latency columns missing — recording stats without latency data" } unless @degraded_warned
+        @degraded_warned = true
+        base_rows = entries.map do |entry|
+          { job_class: entry[:job_class], queue_name: entry[:queue_name],
+            status: entry[:status], duration_ms: entry[:duration_ms] }
+        end
+        begin
+          JobStat.insert_all(base_rows)
+        rescue StandardError => fallback_error
+          Pgbus.logger.warn { "[Pgbus] Stat buffer fallback flush failed: #{fallback_error.message}" }
+        end
+      else
+        Pgbus.logger.warn { "[Pgbus] Stat buffer flush failed: #{e.message}" }
+      end
     rescue StandardError => e
-      Pgbus.logger.debug { "[Pgbus] Stat buffer flush failed: #{e.message}" }
+      Pgbus.logger.warn { "[Pgbus] Stat buffer flush failed: #{e.message}" }
     end
 
     def monotonic_now
