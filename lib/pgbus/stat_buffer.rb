@@ -82,6 +82,8 @@ module Pgbus
     rescue ActiveRecord::StatementInvalid, ActiveModel::UnknownAttributeError => e
       # Column doesn't exist — fall back to base columns only
       if e.message.include?("enqueue_latency_ms") || e.message.include?("retry_count")
+        Pgbus.logger.warn { "[Pgbus] Latency columns missing — recording stats without latency data" } unless @degraded_warned
+        @degraded_warned = true
         base_rows = entries.map do |entry|
           { job_class: entry[:job_class], queue_name: entry[:queue_name],
             status: entry[:status], duration_ms: entry[:duration_ms] }

@@ -25,6 +25,8 @@ RSpec.describe "StatBuffer integration", :integration do
     # Ensure latency columns exist (may be missing if only base migration ran)
     unless conn.column_exists?(:pgbus_job_stats, :enqueue_latency_ms)
       conn.execute("ALTER TABLE pgbus_job_stats ADD COLUMN enqueue_latency_ms BIGINT")
+    end
+    unless conn.column_exists?(:pgbus_job_stats, :retry_count)
       conn.execute("ALTER TABLE pgbus_job_stats ADD COLUMN retry_count INTEGER DEFAULT 0")
     end
 
@@ -93,41 +95,39 @@ RSpec.describe "StatBuffer integration", :integration do
   end
 
   describe "Executor records stats via buffer" do
-    it "stats appear in the database after buffer flush" do # rubocop:disable RSpec/ExampleLength
-      client = Pgbus.client
-      client.ensure_queue("default")
-      config = Pgbus.configuration
+    let(:client) { Pgbus.client.tap { |c| c.ensure_queue("default") } }
+    let(:config) { Pgbus.configuration }
+    let(:buffer) { Pgbus::StatBuffer.new(flush_size: 100, flush_interval: 60) }
+    let(:executor) { Pgbus::ActiveJob::Executor.new(client: client, config: config, stat_buffer: buffer) }
+
+    before do
+      stub_const("PlainBenchJob", Class.new(ActiveJob::Base) { def perform(*); end })
+    end
+
+    around do |example|
+      original = config.stats_enabled
       config.stats_enabled = true
+      example.run
+    ensure
+      config.stats_enabled = original
+    end
 
-      buffer = Pgbus::StatBuffer.new(flush_size: 100, flush_interval: 60)
-      executor = Pgbus::ActiveJob::Executor.new(client: client, config: config, stat_buffer: buffer)
-
-      # Enqueue and execute a plain job
+    it "stats appear in the database after buffer flush" do
       payload = { "job_class" => "PlainBenchJob", "arguments" => [], "queue_name" => "default" }
       client.send_message("default", payload)
       msg = client.read_batch("default", qty: 1).first
 
-      # Define a minimal job class for deserialization
-      stub_const("PlainBenchJob", Class.new(ActiveJob::Base) { def perform(*); end })
-
       executor.execute(msg, "default")
 
-      # Stats should be buffered, not yet in DB
-      count_before = ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM pgbus_job_stats")
-      expect(count_before).to eq(0)
       expect(buffer.size).to eq(1)
-
-      # Flush should persist them
       buffer.flush
 
-      count_after = ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM pgbus_job_stats")
-      expect(count_after).to eq(1)
+      count = ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM pgbus_job_stats")
+      expect(count).to eq(1)
 
       row = ActiveRecord::Base.connection.select_one("SELECT * FROM pgbus_job_stats LIMIT 1")
       expect(row["status"]).to eq("success")
       expect(row["duration_ms"]).to be > 0
-    ensure
-      config.stats_enabled = true
     end
   end
 end

@@ -121,11 +121,24 @@ RSpec.describe Pgbus::StatBuffer do
       buffer.flush
 
       expect(calls.size).to eq(2)
-      # First call includes latency columns
       expect(calls[0].first).to have_key(:enqueue_latency_ms)
-      # Second call (fallback) omits them
       expect(calls[1].first).not_to have_key(:enqueue_latency_ms)
       expect(calls[1].first).to include(job_class: "TestJob")
+    end
+
+    it "retries with base columns on UnknownAttributeError" do
+      calls = []
+      allow(Pgbus::JobStat).to receive(:insert_all) do |rows|
+        calls << rows
+        raise ActiveModel::UnknownAttributeError.new(nil, "enqueue_latency_ms") if calls.size == 1
+      end
+
+      buffer.push(stat_attrs)
+      buffer.flush
+
+      expect(calls.size).to eq(2)
+      expect(calls[0].first).to have_key(:enqueue_latency_ms)
+      expect(calls[1].first).not_to have_key(:enqueue_latency_ms)
     end
   end
 end
