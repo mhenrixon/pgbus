@@ -1,0 +1,7 @@
+class AddPgbusFailedEventsUniqueIndex < ActiveRecord::Migration<%= migration_version %>
+  def change
+    add_index :pgbus_failed_events, [:queue_name, :msg_id],
+      unique: true, name: "idx_pgbus_failed_events_queue_msg",
+      if_not_exists: true
+  end
+end

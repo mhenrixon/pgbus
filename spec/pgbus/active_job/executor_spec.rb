@@ -25,6 +25,8 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     # Stub stat recording
     stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
     allow(Pgbus::JobStat).to receive_messages(record!: nil, table_exists?: true)
+    # Stub failure tracking
+    allow(Pgbus::FailedEventRecorder).to receive_messages(record!: nil, clear!: nil)
   end
 
   describe "#execute" do
@@ -41,6 +43,14 @@ RSpec.describe Pgbus::ActiveJob::Executor do
                                                                                                        job_class: "TestJob")
         expect(result).to eq(:success)
       end
+
+      it "clears any prior failed event record" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::FailedEventRecorder).to have_received(:clear!).with(
+          queue_name: queue_name, msg_id: 5
+        )
+      end
     end
 
     context "when read_ct exceeds max_retries (DLQ routing)" do
@@ -52,6 +62,14 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(mock_client).to have_received(:move_to_dead_letter).with(queue_name, message)
         expect(ActiveJob::Base).not_to have_received(:deserialize)
         expect(result).to eq(:dead_lettered)
+      end
+
+      it "clears any prior failed event record" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::FailedEventRecorder).to have_received(:clear!).with(
+          queue_name: queue_name, msg_id: 7
+        )
       end
     end
 
@@ -71,6 +89,19 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           hash_including(queue: queue_name, job_class: "TestJob", error: "StandardError")
         )
         expect(result).to eq(:failed)
+      end
+
+      it "records the failure in pgbus_failed_events" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::FailedEventRecorder).to have_received(:record!).with(
+          queue_name: queue_name,
+          msg_id: 3,
+          payload: job_payload,
+          headers: nil,
+          error: error,
+          retry_count: 0
+        )
       end
     end
 
