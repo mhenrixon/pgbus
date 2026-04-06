@@ -154,5 +154,16 @@ RSpec.describe Pgbus::Recurring::Schedule do # deduplication
       expect(mock_client).not_to have_received(:send_message)
       expect(Pgbus::UniquenessKey).not_to have_received(:release!)
     end
+
+    it "skips enqueue when lock acquisition raises (fail closed)" do
+      allow(Pgbus::UniquenessKey).to receive(:acquire!)
+        .and_raise(ActiveRecord::StatementInvalid, "PG::UndefinedTable")
+
+      schedule = described_class.new(config: config)
+      task = schedule.tasks.first
+      schedule.enqueue_task(task, run_at: Time.utc(2026, 4, 6, 7, 5, 0))
+
+      expect(mock_client).not_to have_received(:send_message)
+    end
   end
 end

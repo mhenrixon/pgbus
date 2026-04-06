@@ -151,8 +151,11 @@ module Pgbus
           :already_locked
         end
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Uniqueness lock failed for #{task.key}: #{e.message}" }
-        nil # Fail open — allow enqueue if lock check errors
+        Pgbus.logger.error do
+          "[Pgbus] Uniqueness lock check failed for #{task.key}: #{e.class}: #{e.message} — " \
+            "skipping enqueue to prevent duplicates"
+        end
+        :already_locked # Fail closed — skip enqueue when lock check errors
       end
 
       # Release a uniqueness lock. Safe to call with nil or :already_locked.
