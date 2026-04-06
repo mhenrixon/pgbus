@@ -715,7 +715,7 @@ RSpec.describe Pgbus::Client do
       )
     end
 
-    it "forces pool_size=1 when connection_options returns a Proc (shared connection)" do
+    it "forces pool_size=1 when connection_options falls back to Proc (shared connection)" do
       lambda_config = Pgbus::Configuration.new.tap do |c|
         c.database_url = nil
         c.connection_params = nil
@@ -723,10 +723,12 @@ RSpec.describe Pgbus::Client do
         c.queue_prefix = "pgbus_test"
       end
 
-      # Simulate the Rails path where connection_options returns a lambda
+      # Simulate the Rails path where AR config extraction fails, falling back to Proc
       raw_conn = double("PG::Connection")
       ar_connection = double("AR::ConnectionAdapter", raw_connection: raw_conn)
-      stub_const("ActiveRecord::Base", double("AR::Base", connection: ar_connection))
+      ar_base = double("AR::Base", connection: ar_connection)
+      allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+      stub_const("ActiveRecord::Base", ar_base)
 
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       described_class.new(lambda_config)
@@ -747,7 +749,7 @@ RSpec.describe Pgbus::Client do
       expect(client.instance_variable_get(:@pgmq_mutex)).to be_nil
     end
 
-    it "uses mutex synchronization for shared (Proc) connections" do
+    it "uses mutex synchronization when falling back to shared (Proc) connections" do
       lambda_config = Pgbus::Configuration.new.tap do |c|
         c.database_url = nil
         c.connection_params = nil
@@ -757,7 +759,9 @@ RSpec.describe Pgbus::Client do
 
       raw_conn = double("PG::Connection")
       ar_connection = double("AR::ConnectionAdapter", raw_connection: raw_conn)
-      stub_const("ActiveRecord::Base", double("AR::Base", connection: ar_connection))
+      ar_base = double("AR::Base", connection: ar_connection)
+      allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+      stub_const("ActiveRecord::Base", ar_base)
 
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       shared_client = described_class.new(lambda_config)
