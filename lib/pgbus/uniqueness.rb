@@ -81,11 +81,16 @@ module Pgbus
 
         args = active_job.arguments
         last = args.last
-        if last.is_a?(Hash) && last.each_key.all?(Symbol)
-          config[:key].call(*args[...-1], **last)
-        else
-          config[:key].call(*args)
-        end
+        key = if last.is_a?(Hash) && last.each_key.all?(Symbol)
+                config[:key].call(*args[...-1], **last)
+              else
+                config[:key].call(*args)
+              end
+
+        # Automatically serialize GlobalID-compatible objects (e.g. ActiveRecord models)
+        # so users can pass model instances directly without manual .to_global_id.to_s
+        key = key.to_global_id.to_s if key.respond_to?(:to_global_id)
+        key
       end
 
       def inject_metadata(active_job, payload_hash)

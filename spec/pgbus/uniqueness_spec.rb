@@ -85,6 +85,31 @@ RSpec.describe Pgbus::Uniqueness do
 
       expect(described_class.resolve_key(job)).to eq("MyUniqueJob")
     end
+
+    it "automatically serializes GlobalID-compatible objects returned by the key lambda" do
+      global_id = instance_double(GlobalID, to_s: "gid://app/Order/42")
+      record = double("Order", to_global_id: global_id)
+
+      job_class = Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness key: ->(order:, **) { order }
+      end
+      job = job_class.new(order: record)
+
+      expect(described_class.resolve_key(job)).to eq("gid://app/Order/42")
+    end
+
+    it "does not modify key values that are not GlobalID-compatible" do
+      job_class = Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness key: ->(id) { "order-#{id}" }
+      end
+      job = job_class.new(42)
+
+      expect(described_class.resolve_key(job)).to eq("order-42")
+    end
   end
 
   describe ".inject_metadata" do
