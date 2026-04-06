@@ -20,6 +20,7 @@ module Pgbus
 
         if read_count > config.max_retries
           handle_dead_letter(message, queue_name, payload, source_queue: source_queue)
+          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: message.msg_id.to_i)
           signal_concurrency(payload)
           signal_batch_discarded(payload)
           Uniqueness.release_lock(Uniqueness.extract_key(payload))
@@ -54,6 +55,7 @@ module Pgbus
           job = ::ActiveJob::Base.deserialize(payload)
           execute_job(job)
           archive_from(queue_name, message.msg_id.to_i, source_queue: source_queue)
+          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: message.msg_id.to_i)
           job_succeeded = true
         end
 
@@ -61,7 +63,7 @@ module Pgbus
         record_stat(payload, queue_name, "success", execution_start, message: message)
         :success
       rescue StandardError => e
-        handle_failure(message, queue_name, e)
+        handle_failure(message, queue_name, e, payload: payload)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
         record_stat(payload, queue_name, "failed", execution_start, message: message)
         # Don't signal concurrency on transient failure — the job will be retried.
@@ -143,13 +145,22 @@ module Pgbus
         [((Time.now.utc - enqueued_at) * 1000).round, 0].max
       end
 
-      def handle_failure(_message, _queue_name, error)
+      def handle_failure(message, queue_name, error, payload: nil)
         Pgbus.logger.error { "[Pgbus] Job failed: #{error.class}: #{error.message}" }
         Pgbus.logger.debug { error.backtrace&.join("\n") }
 
+        # Record failure for dashboard visibility.
         # Message visibility timeout will expire and it becomes available again.
         # read_ct tracks delivery attempts — when it exceeds max_retries,
         # the next read will route to DLQ.
+        FailedEventRecorder.record!(
+          queue_name: queue_name,
+          msg_id: message.msg_id.to_i,
+          payload: payload || message.message,
+          headers: message.respond_to?(:headers) ? message.headers : nil,
+          error: error,
+          retry_count: [message.read_ct.to_i - 1, 0].max
+        )
       end
 
       def instrument(event_name, payload = {})
