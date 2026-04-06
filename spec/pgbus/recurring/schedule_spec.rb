@@ -55,12 +55,18 @@ RSpec.describe Pgbus::Recurring::Schedule do
   end
 
   describe "#due_tasks" do
-    it "returns tasks whose next_time is at or before the given time" do
+    it "returns [task, run_at] pairs for due tasks" do
       schedule = described_class.new(config: config)
 
       # Both tasks should have some next_time
       due = schedule.due_tasks(Time.now + 7200) # 2 hours from now
       expect(due).to be_an(Array)
+      due.each do |entry|
+        expect(entry).to be_an(Array)
+        expect(entry.size).to eq(2)
+        expect(entry.first).to be_a(Pgbus::Recurring::Task)
+        expect(entry.last).to be_a(Time)
+      end
     end
 
     it "returns empty array when no tasks are due" do

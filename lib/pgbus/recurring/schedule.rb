@@ -11,7 +11,10 @@ module Pgbus
       end
 
       def due_tasks(time = Time.current)
-        tasks.select { |task| task_due?(task, time) }
+        tasks.filter_map do |task|
+          run_at = canonical_run_at(task, time)
+          [task, run_at] if run_at
+        end
       end
 
       def enqueue_task(task, run_at:)
@@ -34,6 +37,12 @@ module Pgbus
           end
         end
       rescue AlreadyRecorded
+        # AlreadyRecorded means this (task_key, run_at) was already enqueued.
+        # If we acquired a NEW lock (prior lock was already released because the
+        # job completed), release it — no message will use it. If we didn't
+        # acquire a lock (nil or :already_locked), there's nothing to release.
+        # In either case, we are NOT opening a race window because the job for
+        # this run_at already ran or is running.
         release_uniqueness_lock(acquired_key)
         Pgbus.logger.debug { "[Pgbus] Recurring task #{task.key} already enqueued for #{run_at.iso8601}" }
       rescue StandardError
@@ -75,23 +84,31 @@ module Pgbus
         end
       end
 
-      def task_due?(task, time)
-        # A task is due when its most recent cron occurrence (previous_time)
-        # falls within the current tick window. We also check match? to
-        # handle the exact-boundary case where time == cron time.
+      # Returns the canonical run_at time if the task is due, or nil if not.
+      # This ensures a consistent run_at regardless of which tick detects
+      # the cron occurrence — fixing a bug where match?(t) at the exact
+      # boundary returns previous_time=T-1, while a tick 1s later gets
+      # previous_time=T, producing different run_at values for the same
+      # cron occurrence and bypassing RecurringExecution deduplication.
+      def canonical_run_at(task, time)
         cron = task.parsed_schedule
-        return false unless cron
+        return nil unless cron
 
-        # Check if `time` itself matches the cron (exact boundary hit)
-        return true if cron.match?(time)
+        # Exact boundary hit: cron.match?(time) is true.
+        # previous_time returns the PRIOR occurrence here, but the cron
+        # time that fired is `time` itself (truncated to the minute).
+        if cron.match?(time)
+          # Fugit next_time from 1 second before gives us the current cron time
+          return cron.next_time(time - 1).to_t
+        end
 
-        # Check if the previous occurrence was recent enough that we should
-        # still fire it (handles the case where we tick slightly after the
-        # cron time). The window is the scheduler interval.
+        # Within the scheduler interval window after the cron time.
         prev = task.previous_time(time)
-        return false unless prev
+        return nil unless prev
 
-        (time - prev) <= @config.recurring_schedule_interval
+        return prev if (time - prev) <= @config.recurring_schedule_interval
+
+        nil
       end
 
       def resolve_queue(task)

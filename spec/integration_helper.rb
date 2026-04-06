@@ -38,7 +38,7 @@ RSpec.configure do |config|
   Kernel.srand config.seed
 
   unless PGBUS_DATABASE_URL
-    config.before { skip "PGBUS_DATABASE_URL not set" }
+    config.before(:each, :integration) { skip "PGBUS_DATABASE_URL not set" }
     next
   end
 
@@ -75,10 +75,11 @@ RSpec.configure do |config|
   end
 end
 
-# Purge all pgbus_int_* queues via raw SQL to avoid prefix double-application
+# Purge all pgbus_* queues via raw SQL to avoid prefix double-application.
+# Covers both pgbus_int_* (integration) and pgbus_test_* (unit test leakage).
 def purge_integration_queues
   conn = ActiveRecord::Base.connection
-  queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta WHERE queue_name LIKE 'pgbus_int_%'")
+  queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta WHERE queue_name LIKE 'pgbus_%'")
   queue_names.each do |full_name|
     conn.execute("DELETE FROM pgmq.q_#{full_name}")
   rescue StandardError
