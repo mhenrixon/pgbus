@@ -240,8 +240,10 @@ RSpec.describe Pgbus::Configuration do
       end
 
       it "falls back to Proc with a warning" do
+        allow(Pgbus.logger).to receive(:warn)
         result = config.connection_options
         expect(result).to be_a(Proc)
+        expect(Pgbus.logger).to have_received(:warn)
       end
     end
   end
