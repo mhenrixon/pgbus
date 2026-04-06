@@ -40,10 +40,7 @@ module Pgbus
       end
 
       def tick(now)
-        schedule.due_tasks(now).each do |task|
-          run_at = task.previous_time(now)
-          next unless run_at
-
+        schedule.due_tasks(now).each do |task, run_at|
           schedule.enqueue_task(task, run_at: run_at)
           @last_runs[task.key] = now
         rescue StandardError => e

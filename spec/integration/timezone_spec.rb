@@ -4,6 +4,7 @@ require_relative "../integration_helper"
 require_relative "../support/pgmq_doubles"
 require "json"
 require "active_job"
+require "active_support/core_ext/time/zones"
 
 # Reproduces timezone-related issues when Rails is configured with:
 # - ActiveRecord::Base.default_timezone = :local
@@ -31,6 +32,11 @@ RSpec.describe "Timezone handling (integration)", :integration do
   end
 
   around do |example|
+    unless PGBUS_DATABASE_URL
+      example.run
+      next
+    end
+
     original_env_tz = ENV.fetch("TZ", nil)
     original_ar_tz = ar_default_timezone
     original_zone = Time.zone
@@ -39,17 +45,18 @@ RSpec.describe "Timezone handling (integration)", :integration do
     self.ar_default_timezone = :local
     Time.zone = "Africa/Johannesburg"
 
-    # Force PG session timezone to match the new setting
     ActiveRecord::Base.connection.execute(
       "SET SESSION timezone = 'Africa/Johannesburg'"
     )
 
     example.run
   ensure
-    ENV["TZ"] = original_env_tz
-    self.ar_default_timezone = original_ar_tz
-    Time.zone = original_zone
-    ActiveRecord::Base.connection.execute("SET SESSION timezone = 'UTC'")
+    if PGBUS_DATABASE_URL
+      ENV["TZ"] = original_env_tz
+      self.ar_default_timezone = original_ar_tz
+      Time.zone = original_zone
+      ActiveRecord::Base.connection.execute("SET SESSION timezone = 'UTC'")
+    end
   end
 
   describe "Semaphore expiration" do

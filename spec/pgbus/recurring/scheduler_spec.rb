@@ -60,7 +60,8 @@ RSpec.describe Pgbus::Recurring::Scheduler do
     it "handles errors during enqueue gracefully" do
       scheduler = described_class.new(config: config)
 
-      allow(scheduler.schedule).to receive(:due_tasks).and_return(scheduler.schedule.tasks)
+      tasks_with_run_at = scheduler.schedule.tasks.map { |t| [t, Time.utc(2026, 3, 31, 12, 1, 0)] }
+      allow(scheduler.schedule).to receive(:due_tasks).and_return(tasks_with_run_at)
       allow(scheduler.schedule).to receive(:enqueue_task).and_raise(StandardError, "DB connection lost")
 
       # Should not raise
