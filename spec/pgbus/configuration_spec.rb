@@ -190,35 +190,58 @@ RSpec.describe Pgbus::Configuration do
     end
 
     context "with connects_to configured" do
-      let(:raw_connection) { double("raw_connection") }
-      let(:ar_connection) { double("ar_connection", raw_connection: raw_connection) }
+      let(:db_config) do
+        double("db_config", configuration_hash: {
+                 host: "pgbus-host", port: 5433, database: "pgbus_db",
+                 username: "pgbus_user", password: "secret"
+               })
+      end
 
       before do
         config.connects_to = { database: { writing: :pgbus } }
         stub_const("Pgbus::BusRecord", Class.new)
-        allow(Pgbus::BusRecord).to receive(:connection).and_return(ar_connection)
+        allow(Pgbus::BusRecord).to receive(:connection_db_config).and_return(db_config)
       end
 
-      it "returns a lambda that uses Pgbus::BusRecord connection" do
+      it "returns a connection hash extracted from BusRecord config" do
         result = config.connection_options
-        expect(result).to be_a(Proc)
-        expect(result.call).to eq(raw_connection)
+        expect(result).to be_a(Hash)
+        expect(result[:host]).to eq("pgbus-host")
+        expect(result[:dbname]).to eq("pgbus_db")
+        expect(result[:user]).to eq("pgbus_user")
       end
     end
 
     context "without connects_to" do
-      let(:raw_connection) { double("raw_connection") }
-      let(:ar_connection) { double("ar_connection", raw_connection: raw_connection) }
-
-      before do
-        stub_const("ActiveRecord::Base", Class.new)
-        allow(ActiveRecord::Base).to receive(:connection).and_return(ar_connection)
+      let(:db_config) do
+        double("db_config", configuration_hash: {
+                 host: "localhost", port: 5432, database: "myapp_dev",
+                 username: "dev_user", password: nil
+               })
       end
 
-      it "returns a lambda that uses ActiveRecord::Base connection" do
+      before do
+        allow(ActiveRecord::Base).to receive(:connection_db_config).and_return(db_config)
+      end
+
+      it "returns a connection hash extracted from ActiveRecord config" do
+        result = config.connection_options
+        expect(result).to be_a(Hash)
+        expect(result[:host]).to eq("localhost")
+        expect(result[:dbname]).to eq("myapp_dev")
+        expect(result[:user]).to eq("dev_user")
+      end
+    end
+
+    context "when AR config extraction fails" do
+      before do
+        allow(ActiveRecord::Base).to receive(:connection_db_config)
+          .and_raise(StandardError, "no connection established")
+      end
+
+      it "falls back to Proc with a warning" do
         result = config.connection_options
         expect(result).to be_a(Proc)
-        expect(result.call).to eq(raw_connection)
       end
     end
   end

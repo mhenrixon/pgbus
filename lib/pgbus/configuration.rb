@@ -202,14 +202,48 @@ module Pgbus
       elsif connection_params
         connection_params
       elsif defined?(ActiveRecord::Base)
-        if connects_to
-          -> { Pgbus::BusRecord.connection.raw_connection }
-        else
-          -> { ActiveRecord::Base.connection.raw_connection }
-        end
+        # Extract connection config from ActiveRecord so pgmq-ruby creates its
+        # own dedicated PG connections. Sharing AR's raw_connection via a Proc
+        # is NOT thread-safe: the ConnectionPool caches the PG::Connection from
+        # whichever thread first called the Proc, then hands that same object to
+        # other threads — causing nil results, segfaults, and data corruption
+        # when AR and PGMQ issue concurrent queries on the same connection.
+        extract_ar_connection_hash
       else
         raise ConfigurationError, "No database connection configured. " \
                                   "Set Pgbus.configuration.database_url, connection_params, or use with Rails."
+      end
+    end
+
+    private
+
+    def extract_ar_connection_hash
+      base = connects_to ? Pgbus::BusRecord : ActiveRecord::Base
+      db_config = base.connection_db_config
+
+      # Rails 7.1+ db_config.configuration_hash returns the full config
+      config_hash = db_config.configuration_hash
+
+      {
+        host: config_hash[:host] || "localhost",
+        port: (config_hash[:port] || 5432).to_i,
+        dbname: config_hash[:database],
+        user: config_hash[:username],
+        password: config_hash[:password]
+      }.compact
+    rescue StandardError => e
+      # Fallback to Proc path if AR config extraction fails (e.g., adapter
+      # doesn't expose standard config keys). Log a warning since this path
+      # is not thread-safe.
+      Pgbus.logger.warn do
+        "[Pgbus] Could not extract AR connection config (#{e.class}: #{e.message}). " \
+          "Falling back to shared raw_connection — this is NOT thread-safe with multiple workers. " \
+          "Set Pgbus.configuration.database_url explicitly for thread-safe operation."
+      end
+      if connects_to
+        -> { Pgbus::BusRecord.connection.raw_connection }
+      else
+        -> { ActiveRecord::Base.connection.raw_connection }
       end
     end
   end
