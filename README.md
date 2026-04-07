@@ -81,7 +81,6 @@ Pgbus works with zero config in Rails -- it uses your existing `ActiveRecord` co
 production:
   queue_prefix: myapp
   default_queue: default
-  pool_size: 10
   max_retries: 5
   prefetch_limit: 20
   workers:
@@ -616,7 +615,7 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `database_url` | `nil` | PostgreSQL connection URL (auto-detected in Rails) |
 | `queue_prefix` | `"pgbus"` | Prefix for all PGMQ queue names |
 | `default_queue` | `"default"` | Default queue for jobs without explicit queue |
-| `pool_size` | `5` | Connection pool size |
+| `pool_size` | `nil` (auto) | Connection pool size. Auto-tuned from worker thread counts: `sum(workers.threads) + sum(event_consumers.threads) + 2`. Set explicitly to override. |
 | `workers` | `[{queues: ["default"], threads: 5}]` | Worker process definitions |
 | `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
 | `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |

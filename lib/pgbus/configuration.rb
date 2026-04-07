@@ -69,7 +69,7 @@ module Pgbus
     def initialize
       @database_url = nil
       @connection_params = nil
-      @pool_size = 5
+      @pool_size = nil
       @pool_timeout = 5
 
       @default_queue = "default"
@@ -172,7 +172,10 @@ module Pgbus
     end
 
     def validate!
-      raise ArgumentError, "pool_size must be > 0" unless pool_size.is_a?(Numeric) && pool_size.positive?
+      if pool_size && !(pool_size.is_a?(Numeric) && pool_size.positive?)
+        raise ArgumentError, "pool_size must be a positive number or nil (auto-tune)"
+      end
+
       raise ArgumentError, "pool_timeout must be > 0" unless pool_timeout.is_a?(Numeric) && pool_timeout.positive?
       raise ArgumentError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
       raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
@@ -196,6 +199,35 @@ module Pgbus
       self
     end
 
+    # Returns the connection pool size to use for the PGMQ client.
+    #
+    # If +pool_size+ was explicitly set, returns that value unchanged. Otherwise
+    # auto-derives from the configured worker and event_consumer thread counts:
+    #
+    #   sum(workers.threads) + sum(event_consumers.threads) + 2
+    #
+    # The +2 covers the dispatcher and scheduler, which each issue occasional
+    # queries against the same connection pool.
+    #
+    # Auto-tune protects users from the common pitfall of running 15 worker
+    # threads with a hand-set pool_size of 5 (resulting in ConnectionPool
+    # timeouts under load). Setting pool_size explicitly is still supported
+    # for advanced cases where you need a tighter or looser pool than the
+    # default formula provides.
+    POOL_SIZE_OVERHEAD = 2 # dispatcher + scheduler
+    POOL_SIZE_WARN_THRESHOLD = 50
+
+    def resolved_pool_size
+      return pool_size if pool_size
+
+      total = sum_thread_counts(workers, default_threads: 5, group: "worker") +
+              sum_thread_counts(event_consumers, default_threads: 3, group: "event_consumer") +
+              POOL_SIZE_OVERHEAD
+
+      warn_if_oversized(total)
+      total
+    end
+
     def connection_options
       if database_url
         database_url
@@ -216,6 +248,34 @@ module Pgbus
     end
 
     private
+
+    # Sum the +:threads+ values across a list of worker/consumer entries.
+    # Uses +default_threads+ when an entry omits the key. Rejects anything
+    # that isn't a positive Integer with a clear error — silent coercion via
+    # +to_i+ would let "abc" → 0 produce a critically under-sized pool with
+    # no indication that something was wrong.
+    def sum_thread_counts(entries, default_threads:, group:)
+      return 0 unless entries
+
+      entries.sum do |entry|
+        threads = entry[:threads] || entry["threads"] || default_threads
+        unless threads.is_a?(Integer) && threads.positive?
+          raise ArgumentError,
+                "#{group} threads must be a positive integer, got #{threads.inspect}"
+        end
+        threads
+      end
+    end
+
+    def warn_if_oversized(size)
+      return unless size > POOL_SIZE_WARN_THRESHOLD
+
+      Pgbus.logger.warn do
+        "[Pgbus] Auto-tuned pool_size is #{size} (over #{POOL_SIZE_WARN_THRESHOLD}). " \
+          "Verify your worker thread counts are intentional. " \
+          "Set Pgbus.configuration.pool_size explicitly to override."
+      end
+    end
 
     def extract_ar_connection_hash
       base = connects_to ? Pgbus::BusRecord : ActiveRecord::Base

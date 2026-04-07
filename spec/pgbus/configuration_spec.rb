@@ -14,8 +14,8 @@ RSpec.describe Pgbus::Configuration do
       expect(config.default_queue).to eq("default")
     end
 
-    it "has default pool size" do
-      expect(config.pool_size).to eq(5)
+    it "leaves pool_size unset by default (auto-tuned at read time)" do
+      expect(config.pool_size).to be_nil
     end
 
     it "has default visibility timeout" do
@@ -127,6 +127,147 @@ RSpec.describe Pgbus::Configuration do
     it "returns sub-queue names when priority_levels > 1" do
       config.priority_levels = 3
       expect(config.priority_queue_names("default")).to eq(%w[pgbus_default_p0 pgbus_default_p1 pgbus_default_p2])
+    end
+  end
+
+  describe "#resolved_pool_size" do
+    context "when pool_size is explicitly set" do
+      it "returns the explicit value (overrides auto-tune)" do
+        config.pool_size = 17
+        expect(config.resolved_pool_size).to eq(17)
+      end
+
+      it "returns the explicit value even when it's smaller than the auto-tuned value" do
+        config.pool_size = 1
+        config.workers = [{ queues: %w[default], threads: 50 }]
+        expect(config.resolved_pool_size).to eq(1)
+      end
+    end
+
+    context "when pool_size is nil (auto-tune)" do
+      it "returns total worker threads + 2 (one for dispatcher, one for scheduler)" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        expect(config.resolved_pool_size).to eq(7)
+      end
+
+      it "sums threads across multiple worker entries (capsules)" do
+        config.pool_size = nil
+        config.workers = [
+          { queues: %w[critical], threads: 5 },
+          { queues: %w[default mailers], threads: 10 }
+        ]
+        expect(config.resolved_pool_size).to eq(17)
+      end
+
+      it "accepts string keys (YAML form)" do
+        config.pool_size = nil
+        config.workers = [{ "queues" => %w[default], "threads" => 8 }]
+        expect(config.resolved_pool_size).to eq(10)
+      end
+
+      it "uses 5 as the default per-worker thread count when threads is missing" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default] }]
+        expect(config.resolved_pool_size).to eq(7)
+      end
+
+      it "includes event_consumers thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        config.event_consumers = [{ topics: %w[orders.#], threads: 3 }]
+        expect(config.resolved_pool_size).to eq(10)
+      end
+
+      it "uses 3 as the default per-consumer thread count when threads is missing" do
+        config.pool_size = nil
+        config.workers = nil
+        config.event_consumers = [{ topics: %w[orders.#] }]
+        expect(config.resolved_pool_size).to eq(5)
+      end
+
+      it "treats nil workers as zero" do
+        config.pool_size = nil
+        config.workers = nil
+        config.event_consumers = nil
+        expect(config.resolved_pool_size).to eq(2)
+      end
+
+      it "treats empty workers as zero" do
+        config.pool_size = nil
+        config.workers = []
+        config.event_consumers = []
+        expect(config.resolved_pool_size).to eq(2)
+      end
+
+      it "warns when the auto-tuned pool exceeds the sanity threshold" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 60 }]
+        warned_message = nil
+        allow(Pgbus.logger).to receive(:warn) { |&block| warned_message = block.call }
+        config.resolved_pool_size
+        expect(warned_message).to match(/pool_size .* 62/)
+      end
+
+      it "does not warn for normal sizes" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        allow(Pgbus.logger).to receive(:warn)
+        config.resolved_pool_size
+        expect(Pgbus.logger).not_to have_received(:warn)
+      end
+
+      it "rejects non-integer thread counts (e.g. string)" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: "5" }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects float thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 0.5 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects zero thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 0 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects negative thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: -1 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects bad event_consumer thread counts with the right group label" do
+        config.pool_size = nil
+        config.workers = nil
+        config.event_consumers = [{ topics: %w[orders.#], threads: "abc" }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /event_consumer.*threads.*positive integer/
+        )
+      end
+
+      it "includes the offending value in the error message" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: "abc" }]
+        expect { config.resolved_pool_size }.to raise_error(ArgumentError, /"abc"/)
+      end
     end
   end
 
