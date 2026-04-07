@@ -24,7 +24,12 @@ module Pgbus
     def loader
       @loader ||= begin
         loader = Zeitwerk::Loader.for_gem
-        loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
+        loader.inflector.inflect(
+          "pgbus" => "Pgbus",
+          "cli" => "CLI",
+          "dsl" => "DSL",
+          "capsule_dsl" => "CapsuleDSL"
+        )
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
         loader
