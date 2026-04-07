@@ -144,9 +144,11 @@ module Pgbus
       end
 
       def cleanup_job_locks
-        # Clean up orphaned uniqueness keys whose msg_id no longer exists
-        # in any PGMQ queue. This handles the rare case where a message is
-        # lost (e.g., queue table truncated) but the uniqueness key remains.
+        # Clean up truly orphaned uniqueness keys: rows whose referenced
+        # message no longer exists in the PGMQ queue. This handles crashes
+        # or queue truncation. It must NEVER delete a lock while the message
+        # is still in the queue, even if the lock is "old" — recurring jobs
+        # that fail and retry can hold locks for hours.
         reaped = reap_orphaned_uniqueness_keys
         Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
       end
@@ -155,20 +157,17 @@ module Pgbus
         keys = UniquenessKey.all.to_a
         return 0 if keys.empty?
 
+        # Only consider locks that are old enough that we wouldn't be racing
+        # an in-flight enqueue. visibility_timeout * 2 is the floor — anything
+        # younger could be a freshly-acquired lock whose send_message hasn't
+        # committed yet.
         threshold = Time.current - (config.visibility_timeout * 2)
 
         orphaned = keys.select do |key|
-          # msg_id == 0 means pre-produce placeholder or :while_executing lock.
-          # These are live locks — never reap them based on msg_id alone.
-          # Only reap if old enough that the job is certainly gone.
-          next false if key.msg_id.zero? && (!key.created_at || key.created_at >= threshold)
-          next true if key.msg_id.zero? && key.created_at && key.created_at < threshold
+          next false unless key.created_at && key.created_at < threshold
+          next false unless key.queue_name
 
-          # For real msg_ids, only reap if stale (old enough that VT has
-          # long expired). The message itself may still be in the queue
-          # awaiting retry — age is the only safe signal without scanning
-          # every queue table.
-          key.created_at && key.created_at < threshold
+          message_gone?(key)
         end
 
         return 0 if orphaned.empty?
@@ -177,6 +176,42 @@ module Pgbus
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
         0
+      end
+
+      # Returns true if the message referenced by this lock no longer exists
+      # in the queue. False = message still in queue (do NOT reap).
+      #
+      # For real msg_ids, we check the PGMQ queue table directly for that id.
+      # For msg_id=0 (recurring scheduler placeholder, :while_executing locks),
+      # we scan the queue for any message whose payload carries the same
+      # uniqueness key in the pgbus_uniqueness_key field.
+      def message_gone?(key)
+        sanitized = QueueNameValidator.sanitize!(key.queue_name)
+        conn = UniquenessKey.connection
+
+        exists = if key.msg_id.to_i.positive?
+                   conn.select_value(
+                     "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
+                     "Pgbus::Dispatcher reap check",
+                     [key.msg_id.to_i]
+                   )
+                 else
+                   conn.select_value(
+                     "SELECT 1 FROM pgmq.q_#{sanitized} " \
+                     "WHERE message::jsonb ->> 'pgbus_uniqueness_key' = $1 LIMIT 1",
+                     "Pgbus::Dispatcher reap check",
+                     [key.lock_key]
+                   )
+                 end
+
+        exists.nil?
+      rescue ActiveRecord::StatementInvalid => e
+        # Queue table doesn't exist (queue was dropped). The lock IS orphaned.
+        return true if e.message.include?("does not exist")
+
+        Pgbus.logger.warn { "[Pgbus] Reap check failed for #{key.lock_key}: #{e.message}" }
+        # Be conservative: don't reap on unknown errors.
+        false
       end
 
       def cleanup_outbox
