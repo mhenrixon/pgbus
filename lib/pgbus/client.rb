@@ -238,14 +238,16 @@ module Pgbus
     #   nil   — could not determine (e.g. queue table missing or unknown error).
     #           Callers MUST treat nil as "exists" for safety.
     def message_exists?(queue_name, msg_id: nil, uniqueness_key: nil)
-      raise ArgumentError, "must pass msg_id or uniqueness_key" if msg_id.nil? && uniqueness_key.nil?
+      has_msg_id = !msg_id.nil?
+      has_uniqueness_key = !uniqueness_key.nil?
+      raise ArgumentError, "pass exactly one of msg_id or uniqueness_key" unless has_msg_id ^ has_uniqueness_key
 
       full_name = resolve_full_queue_name(queue_name)
       sanitized = QueueNameValidator.sanitize!(full_name)
 
       synchronized do
         with_raw_connection do |conn|
-          if msg_id
+          if has_msg_id
             msg_id_present?(conn, sanitized, msg_id.to_i)
           else
             uniqueness_key_present?(conn, sanitized, uniqueness_key)
@@ -309,9 +311,11 @@ module Pgbus
 
     # Accept either a logical name ("default") or an already-prefixed
     # physical name ("pgbus_default") and return the physical name.
+    # Coerces symbols to strings so callers can pass either form.
     def resolve_full_queue_name(queue_name)
+      name = queue_name.to_s
       prefix = "#{config.queue_prefix}_"
-      queue_name.start_with?(prefix) ? queue_name : config.queue_name(queue_name)
+      name.start_with?(prefix) ? name : config.queue_name(name)
     end
 
     def msg_id_present?(conn, sanitized, msg_id)
