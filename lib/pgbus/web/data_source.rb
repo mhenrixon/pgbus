@@ -183,7 +183,7 @@ module Pgbus
         # Falls back to enqueueing a fresh copy only if the original is gone
         # (e.g., already moved to DLQ).
         msg_id = event["msg_id"]
-        if msg_id && message_exists_in_queue?(event["queue_name"], msg_id.to_i)
+        if msg_id && @client.message_exists?(event["queue_name"], msg_id: msg_id.to_i)
           @client.set_visibility_timeout(event["queue_name"], msg_id.to_i, vt: 0)
         else
           payload = JSON.parse(event["payload"])
@@ -882,19 +882,6 @@ module Pgbus
         rows.to_a.each { |row| archive_failed_message(row) }
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error archiving failed messages: #{e.message}" }
-      end
-
-      # Check whether a message with the given msg_id is still in the queue.
-      def message_exists_in_queue?(queue_name, msg_id)
-        full = Pgbus.configuration.queue_name(queue_name)
-        sanitized = QueueNameValidator.sanitize!(full)
-        connection.select_value(
-          "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
-          "Pgbus check message exists",
-          [msg_id]
-        ).present?
-      rescue ActiveRecord::StatementInvalid
-        false
       end
 
       # Release all uniqueness keys associated with a queue before purge/drop.
