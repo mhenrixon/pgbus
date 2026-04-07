@@ -177,16 +177,24 @@ module Pgbus
         event = failed_event(id)
         return false unless event
 
-        payload = JSON.parse(event["payload"])
-        headers = event["headers"]
-        headers = JSON.parse(headers) if headers.is_a?(String)
-
-        connection.transaction do
+        # Prefer resetting the existing message's visibility timeout to 0
+        # so the worker picks it up immediately. This avoids creating a
+        # duplicate (the original is still in the queue waiting for retry).
+        # Falls back to enqueueing a fresh copy only if the original is gone
+        # (e.g., already moved to DLQ).
+        msg_id = event["msg_id"]
+        if msg_id && @client.message_exists?(event["queue_name"], msg_id: msg_id.to_i)
+          @client.set_visibility_timeout(event["queue_name"], msg_id.to_i, vt: 0)
+        else
+          payload = JSON.parse(event["payload"])
+          headers = event["headers"]
+          headers = JSON.parse(headers) if headers.is_a?(String)
           @client.send_message(event["queue_name"], payload, headers: headers)
-          connection.exec_delete(
-            "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
-          )
         end
+
+        connection.exec_delete(
+          "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
+        )
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error retrying failed event #{id}: #{e.message}" }
@@ -195,7 +203,10 @@ module Pgbus
 
       def discard_failed_event(id)
         event = failed_event(id)
-        release_lock_for_payload(event["payload"]) if event
+        if event
+          release_lock_for_payload(event["payload"])
+          archive_failed_message(event)
+        end
 
         connection.exec_delete(
           "DELETE FROM pgbus_failed_events WHERE id = $1", "Pgbus Delete Failed Event", [id.to_i]
@@ -235,6 +246,7 @@ module Pgbus
 
       def discard_all_failed
         release_locks_for_failed_events
+        archive_all_failed_messages
 
         result = connection.execute("DELETE FROM pgbus_failed_events")
         result.cmd_tuples
@@ -847,6 +859,29 @@ module Pgbus
         UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for failed events: #{e.message}" }
+      end
+
+      # Archive the queue message a failed_event row points to. Idempotent —
+      # silently no-ops if the message no longer exists in the queue.
+      def archive_failed_message(event)
+        return unless event["queue_name"] && event["msg_id"]
+
+        @client.archive_message(event["queue_name"], event["msg_id"].to_i)
+      rescue StandardError => e
+        Pgbus.logger.debug do
+          "[Pgbus::Web] Error archiving message for failed event #{event["id"]}: #{e.message}"
+        end
+      end
+
+      # Archive every queue message referenced by a failed_event row.
+      def archive_all_failed_messages
+        rows = connection.select_all(
+          "SELECT id, queue_name, msg_id FROM pgbus_failed_events WHERE msg_id IS NOT NULL",
+          "Pgbus Collect Failed Messages"
+        )
+        rows.to_a.each { |row| archive_failed_message(row) }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error archiving failed messages: #{e.message}" }
       end
 
       # Release all uniqueness keys associated with a queue before purge/drop.

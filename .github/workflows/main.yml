@@ -206,6 +206,8 @@ jobs:
                 ON pgbus_failed_events (queue_name);
               CREATE INDEX IF NOT EXISTS idx_pgbus_failed_events_time
                 ON pgbus_failed_events (failed_at);
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_failed_events_queue_msg
+                ON pgbus_failed_events (queue_name, msg_id);
             SQL
             conn.close
           "
