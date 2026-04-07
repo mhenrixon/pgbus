@@ -32,7 +32,6 @@
       padding: 0.75rem;
       border: 1px solid #e5e7eb;
       overflow-wrap: anywhere;
-      word-break: break-word;
     }
   }
   &:where(.dark, .dark *) tbody tr {
@@ -60,7 +59,6 @@
       min-width: 0;
       max-width: 100%;
       overflow-wrap: anywhere;
-      word-break: break-word;
     }
   }
   & tbody td::before {
@@ -71,7 +69,6 @@
       text-transform: uppercase;
       color: #6b7280;
       text-align: left;
-      margin-right: 1rem;
       flex-shrink: 0;
     }
   }
