@@ -22,9 +22,15 @@ module Pgbus
         @ensure_mutex = Mutex.new
       end
 
+      # Broadcasts a Turbo Stream HTML payload through the pgbus streamer.
+      # PGMQ's `message` column is JSONB, so raw HTML strings can't be passed
+      # directly. We wrap as `{"html": "..."}` on the way in and unwrap in
+      # Pgbus::Web::Streamer::Dispatcher before delivering to the SSE client.
+      # Callers pass a plain HTML string; the wrapping is an implementation
+      # detail.
       def broadcast(payload)
         ensure_queue!
-        @client.send_message(@name, payload)
+        @client.send_message(@name, { "html" => payload.to_s })
       end
 
       def current_msg_id
@@ -68,12 +74,6 @@ module Pgbus
           @ensured = true
         end
       end
-    end
-  end
-
-  class << self
-    def stream(streamables)
-      Streams::Stream.new(streamables)
     end
   end
 end

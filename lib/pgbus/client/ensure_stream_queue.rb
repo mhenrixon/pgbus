@@ -19,8 +19,16 @@ module Pgbus
     module EnsureStreamQueue
       def ensure_stream_queue(stream_name)
         ensure_queue(stream_name)
+        full_name = config.queue_name(stream_name)
 
-        sanitized = QueueNameValidator.sanitize!(config.queue_name(stream_name))
+        # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
+        # high-frequency worker queue inserts. Streams are latency-
+        # sensitive and need every broadcast to fire a NOTIFY, even
+        # when several are batched within a single millisecond.
+        # Override the throttle to 0 specifically for stream queues.
+        synchronized { @pgmq.enable_notify_insert(full_name, throttle_interval_ms: 0) } if config.listen_notify
+
+        sanitized = QueueNameValidator.sanitize!(full_name)
         sql = <<~SQL
           CREATE INDEX IF NOT EXISTS a_#{sanitized}_msg_id_idx
           ON pgmq.a_#{sanitized} (msg_id)

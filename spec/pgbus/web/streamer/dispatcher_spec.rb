@@ -14,7 +14,18 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
     )
   end
 
-  let(:client) { double("Pgbus::Client") }
+  let(:client) do
+    double("Pgbus::Client", config: stream_config)
+  end
+  let(:stream_config) do
+    instance_double(Pgbus::Configuration).tap do |c|
+      # Dispatcher#full_table_name_for calls config.queue_name(stream) to
+      # translate logical names to PGMQ full table names. In these unit
+      # tests we pass the stream name through unchanged — the real
+      # prefixing behavior is covered in the integration tests.
+      allow(c).to receive(:queue_name) { |name| name }
+    end
+  end
   # The connection double records enqueued envelopes and exposes a
   # controllable cursor. It implements just the surface the Dispatcher
   # touches, so the test is hermetic and doesn't depend on the real

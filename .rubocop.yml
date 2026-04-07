@@ -34,6 +34,11 @@ Layout/LineLength:
 
 RSpec/ExampleLength:
   Max: 20
+  Exclude:
+    # Integration specs orchestrate multi-phase scenarios (connect → broadcast
+    # → disconnect → reconnect → assert) that legitimately need more than
+    # 20 lines to express clearly.
+    - spec/integration/**/*
 
 RSpec/MultipleExpectations:
   Enabled: false
@@ -70,6 +75,18 @@ RSpec/SubjectStub:
 RSpec/InstanceVariable:
   Exclude:
     - spec/system/**/*
+    # Integration specs use @saved_* instance vars to snapshot and restore
+    # global Pgbus configuration between suites — the idiomatic rspec
+    # alternative (shared_context with around hooks) is much more verbose
+    # for the same semantics.
+    - spec/integration/**/*
+
+RSpec/BeforeAfterAll:
+  Exclude:
+    # Integration tests legitimately need before(:all) for expensive setup
+    # like booting Puma or flipping Pgbus.configuration — running it
+    # per-example would triple the suite runtime.
+    - spec/integration/**/*
 
 Naming/PredicateMethod:
   Exclude:

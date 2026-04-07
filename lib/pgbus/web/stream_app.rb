@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rack/request"
+
 module Pgbus
   module Web
     # Rack app mounted at /pgbus/streams. Not a Rails controller — this

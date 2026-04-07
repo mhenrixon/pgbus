@@ -59,7 +59,8 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       Pgbus::Client,
       read_after: [],
       stream_current_msg_id: 0,
-      ensure_stream_queue: nil
+      ensure_stream_queue: nil,
+      config: config
     )
   end
 

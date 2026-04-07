@@ -27,6 +27,12 @@ module Pgbus
         loader.inflector.inflect("pgbus" => "Pgbus", "cli" => "CLI", "dsl" => "DSL")
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
+        # lib/puma/plugin/pgbus_streams.rb is a Puma plugin — it's required
+        # explicitly by the user from config/puma.rb via `plugin :pgbus_streams`.
+        # Without this ignore, Zeitwerk scans lib/puma/ under the pgbus loader
+        # root and tries to autoload Puma::Plugin, which collides with the real
+        # Puma::Plugin class defined by the puma gem itself.
+        loader.ignore("#{__dir__}/puma")
         loader
       end
     end
@@ -64,6 +70,17 @@ module Pgbus
 
     def client
       @client ||= Client.new(configuration)
+    end
+
+    # Entry point for the streams subsystem — `Pgbus.stream(name).broadcast(html)`
+    # or `Pgbus.stream(@order).current_msg_id`. Defined on Pgbus itself rather
+    # than inside lib/pgbus/streams.rb because that file is only Zeitwerk-loaded
+    # when Pgbus::Streams::Stream is first referenced — the chicken-and-egg
+    # problem means `Pgbus.stream(...)` would be undefined on the first call.
+    # Referencing Streams::Stream inside the method body forces Zeitwerk to
+    # load lib/pgbus/streams.rb lazily on first use, which is fine.
+    def stream(streamables)
+      Streams::Stream.new(streamables)
     end
 
     def reset!

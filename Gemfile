@@ -25,6 +25,13 @@ group :test do
   gem "puma"
   gem "sqlite3"
 
+  # Streams subsystem integration tests. Puma above is already listed
+  # for system tests; the streams integration specs boot a real Puma
+  # server via PumaTestHarness. Falcon is optional and exists here so
+  # the Falcon streaming body code path (v1.1) can be exercised in
+  # tests without being a runtime dependency.
+  gem "falcon", require: false
+
   # Performance & memory profiling
   gem "benchmark-ips", "~> 2.13"
   gem "memory_profiler", "~> 1.1"
