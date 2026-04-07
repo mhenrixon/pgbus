@@ -30,8 +30,21 @@ module Pgbus
     class CapsuleDSL
       DEFAULT_THREADS = 5
       WILDCARD = "*"
-      # Valid queue tokens: bare wildcard ("*"), bare name ("default"),
-      # or prefix wildcard ("staging_*"). Names are alphanumeric + underscore.
+
+      # Valid queue tokens accepted by the DSL:
+      #   "*"         bare wildcard (matches all queues at runtime)
+      #   "default"   bare queue name
+      #   "staging_*" prefix wildcard (matches queues by prefix at runtime)
+      #
+      # The character class for queue names — alphanumerics and underscores
+      # only — intentionally matches Pgbus::QueueNameValidator::VALID_QUEUE_NAME_PATTERN.
+      # Hyphens, dots, and other punctuation are NOT permitted because PGMQ
+      # interpolates queue names directly into SQL identifiers (q_<name>,
+      # a_<name>) and only those characters are safe there. If you change
+      # this pattern, also update QueueNameValidator to keep them in sync.
+      #
+      # The "*" tokens (bare and trailing) are DSL-only — they get expanded
+      # to concrete queue names at runtime before reaching QueueNameValidator.
       QUEUE_NAME_PATTERN = /\A(?:\*|[a-zA-Z0-9_]+\*?)\z/
       THREAD_COUNT_PATTERN = /\A\d+\z/
 
