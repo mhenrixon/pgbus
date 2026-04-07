@@ -1,9 +1,14 @@
 # frozen_string_literal: true
 
 require "json"
+require_relative "client/read_after"
+require_relative "client/ensure_stream_queue"
 
 module Pgbus
   class Client
+    include ReadAfter
+    include EnsureStreamQueue
+
     attr_reader :pgmq, :config
 
     PGMQ_REQUIRE_MUTEX = Mutex.new
