@@ -95,6 +95,75 @@ RSpec.describe Pgbus::CLI do
         described_class.start(["start"])
         expect(supervisor).to have_received(:run)
       end
+
+      it "leaves config.roles nil (boot every role)" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start"])
+        expect(Pgbus.configuration.roles).to be_nil
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --workers-only flag" do
+      it "sets config.roles to [:workers]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--workers-only"])
+        expect(Pgbus.configuration.roles).to eq([:workers])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --scheduler-only flag" do
+      it "sets config.roles to [:scheduler]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--scheduler-only"])
+        expect(Pgbus.configuration.roles).to eq([:scheduler])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --dispatcher-only flag" do
+      it "sets config.roles to [:dispatcher]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--dispatcher-only"])
+        expect(Pgbus.configuration.roles).to eq([:dispatcher])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with multiple --*-only flags (mutually exclusive)" do
+      it "raises ArgumentError when --workers-only and --scheduler-only are both passed" do
+        expect do
+          described_class.start(["start", "--workers-only", "--scheduler-only"])
+        end.to raise_error(ArgumentError, /mutually exclusive/i)
+      end
+
+      it "raises ArgumentError when all three are passed" do
+        expect do
+          described_class.start(["start", "--workers-only", "--scheduler-only", "--dispatcher-only"])
+        end.to raise_error(ArgumentError, /mutually exclusive/i)
+      end
+    end
+
+    context "when composing role flags with --capsule" do
+      it "allows --workers-only --capsule critical" do
+        original_workers = Pgbus.configuration.workers
+        original_roles = Pgbus.configuration.roles
+        Pgbus.configuration.instance_variable_set(:@workers, nil)
+        Pgbus.configuration.capsule(:critical, queues: %w[critical], threads: 5)
+
+        described_class.start(["start", "--workers-only", "--capsule", "critical"])
+
+        expect(Pgbus.configuration.roles).to eq([:workers])
+        expect(Pgbus.configuration.workers.first[:name]).to eq("critical")
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+        Pgbus.configuration.roles = original_roles
+      end
     end
   end
 

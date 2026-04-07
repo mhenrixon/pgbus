@@ -14,6 +14,13 @@ module Pgbus
     attr_accessor :polling_interval, :visibility_timeout, :prefetch_limit
     attr_reader :workers
 
+    # Supervisor role selection.
+    # nil = boot all roles (default behavior).
+    # Array of role symbols = boot only the listed roles.
+    # Set via the CLI flags --workers-only / --scheduler-only / --dispatcher-only,
+    # or directly in an initializer for advanced cases.
+    attr_accessor :roles
+
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
 
@@ -77,6 +84,7 @@ module Pgbus
       @queue_prefix = "pgbus"
 
       @workers = [{ queues: %w[default], threads: 5 }]
+      @roles = nil
       @polling_interval = 0.1
       @visibility_timeout = 30
 
@@ -263,6 +271,20 @@ module Pgbus
 
       key = name.to_s
       @workers.find { |c| capsule_name(c) == key }
+    end
+
+    # Returns true if the given role should be booted by the supervisor.
+    # When +roles+ is nil (the default), every role is enabled — this matches
+    # the legacy single-process behavior. When +roles+ is set (e.g. via the
+    # CLI's --workers-only / --scheduler-only / --dispatcher-only flags),
+    # only the listed roles boot.
+    #
+    # Accepts symbol or string for case-insensitive comparison.
+    def role_enabled?(role)
+      return true if @roles.nil?
+
+      key = role.to_sym
+      @roles.any? { |r| r.to_sym == key }
     end
 
     # Returns the connection pool size to use for the PGMQ client.

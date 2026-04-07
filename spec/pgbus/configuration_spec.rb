@@ -463,6 +463,42 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#role_enabled?" do
+    context "when roles is nil (the default — boot everything)" do
+      it "returns true for every role" do
+        config.roles = nil
+        %i[workers dispatcher scheduler consumers outbox].each do |role|
+          expect(config.role_enabled?(role)).to be(true)
+        end
+      end
+    end
+
+    context "when roles is set to a subset" do
+      it "returns true only for roles in the subset" do
+        config.roles = %i[workers dispatcher]
+        expect(config.role_enabled?(:workers)).to be(true)
+        expect(config.role_enabled?(:dispatcher)).to be(true)
+        expect(config.role_enabled?(:scheduler)).to be(false)
+        expect(config.role_enabled?(:consumers)).to be(false)
+      end
+
+      it "accepts string role names" do
+        config.roles = %i[workers]
+        expect(config.role_enabled?("workers")).to be(true)
+        expect(config.role_enabled?("scheduler")).to be(false)
+      end
+    end
+
+    context "when roles is an empty array" do
+      it "returns false for every role (effectively disables the supervisor)" do
+        config.roles = []
+        %i[workers dispatcher scheduler consumers outbox].each do |role|
+          expect(config.role_enabled?(role)).to be(false)
+        end
+      end
+    end
+  end
+
   describe "#validate!" do
     it "rejects invalid prefetch_limit" do
       config.prefetch_limit = 0
