@@ -220,8 +220,8 @@ module Pgbus
     def resolved_pool_size
       return pool_size if pool_size
 
-      total = sum_thread_counts(workers, default_threads: 5) +
-              sum_thread_counts(event_consumers, default_threads: 3) +
+      total = sum_thread_counts(workers, default_threads: 5, group: "worker") +
+              sum_thread_counts(event_consumers, default_threads: 3, group: "event_consumer") +
               POOL_SIZE_OVERHEAD
 
       warn_if_oversized(total)
@@ -249,12 +249,21 @@ module Pgbus
 
     private
 
-    def sum_thread_counts(entries, default_threads:)
+    # Sum the +:threads+ values across a list of worker/consumer entries.
+    # Uses +default_threads+ when an entry omits the key. Rejects anything
+    # that isn't a positive Integer with a clear error — silent coercion via
+    # +to_i+ would let "abc" → 0 produce a critically under-sized pool with
+    # no indication that something was wrong.
+    def sum_thread_counts(entries, default_threads:, group:)
       return 0 unless entries
 
       entries.sum do |entry|
         threads = entry[:threads] || entry["threads"] || default_threads
-        threads.to_i
+        unless threads.is_a?(Integer) && threads.positive?
+          raise ArgumentError,
+                "#{group} threads must be a positive integer, got #{threads.inspect}"
+        end
+        threads
       end
     end
 

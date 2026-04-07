@@ -216,6 +216,58 @@ RSpec.describe Pgbus::Configuration do
         config.resolved_pool_size
         expect(Pgbus.logger).not_to have_received(:warn)
       end
+
+      it "rejects non-integer thread counts (e.g. string)" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: "5" }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects float thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 0.5 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects zero thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: 0 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects negative thread counts" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: -1 }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /worker.*threads.*positive integer/
+        )
+      end
+
+      it "rejects bad event_consumer thread counts with the right group label" do
+        config.pool_size = nil
+        config.workers = nil
+        config.event_consumers = [{ topics: %w[orders.#], threads: "abc" }]
+        expect { config.resolved_pool_size }.to raise_error(
+          ArgumentError,
+          /event_consumer.*threads.*positive integer/
+        )
+      end
+
+      it "includes the offending value in the error message" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[default], threads: "abc" }]
+        expect { config.resolved_pool_size }.to raise_error(ArgumentError, /"abc"/)
+      end
     end
   end
 
