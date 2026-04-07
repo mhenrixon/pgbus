@@ -33,9 +33,10 @@ module Pgbus
       else
         # With a String URL or Hash params, pgmq-ruby creates its own dedicated
         # PG::Connection per pool slot — no shared state with ActiveRecord.
-        # Use the configured pool_size and let pgmq-ruby's connection_pool handle
+        # Use the resolved pool size (auto-tuned from worker thread counts
+        # unless explicitly set) and let pgmq-ruby's connection_pool handle
         # concurrency internally (no mutex needed).
-        @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.pool_size, pool_timeout: config.pool_timeout)
+        @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.resolved_pool_size, pool_timeout: config.pool_timeout)
         @pgmq_mutex = nil
       end
 
