@@ -62,6 +62,14 @@
     document.addEventListener('DOMContentLoaded', function() { pgbusBindActions(); });
     document.addEventListener('turbo:load', function() { pgbusBindActions(); });
     document.addEventListener('turbo:frame-load', function(e) { pgbusBindActions(e.target); });
+    <%# Turbo Drive caches pages via cloneNode(true), which keeps attributes
+        but drops event listeners. Clear the binding sentinel before caching
+        so pgbusBindActions() actually rebinds when the snapshot is restored. %>
+    document.addEventListener('turbo:before-cache', function() {
+      document.querySelectorAll('[data-pgbus-bound]').forEach(function(el) {
+        el.removeAttribute('data-pgbus-bound');
+      });
+    });
     document.addEventListener('click', function(e) {
       var switcher = document.getElementById('pgbus-locale-switcher');
       var menu = document.getElementById('pgbus-locale-menu');
