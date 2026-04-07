@@ -11,7 +11,8 @@ module Pgbus
     attr_accessor :default_queue, :queue_prefix
 
     # Worker settings
-    attr_accessor :workers, :polling_interval, :visibility_timeout, :prefetch_limit
+    attr_accessor :polling_interval, :visibility_timeout, :prefetch_limit
+    attr_reader :workers
 
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
@@ -199,6 +200,75 @@ module Pgbus
       self
     end
 
+    # Set the worker capsule list. Accepts:
+    #
+    #   String — parsed via Pgbus::Configuration::CapsuleDSL into capsules
+    #            with auto-generated names (each capsule's :name is its
+    #            first queue token).
+    #
+    #     c.workers "*: 5"
+    #     c.workers "critical: 5; default, mailers: 10"
+    #
+    #   Array  — legacy explicit form. Each entry is a Hash with :queues
+    #            and :threads (and optionally :name, :single_active_consumer,
+    #            :consumer_priority, :prefetch_limit).
+    #
+    #     c.workers [{ queues: %w[default], threads: 5 }]
+    #
+    #   nil    — no workers configured (used when running scheduler-only or
+    #            dispatcher-only processes).
+    #
+    # Raises ArgumentError for any other type.
+    def workers=(value)
+      @workers = case value
+                 when nil
+                   nil
+                 when String
+                   CapsuleDSL.parse(value).map { |entry| entry.merge(name: entry[:queues].first) }
+                 when Array
+                   value
+                 else
+                   raise ArgumentError,
+                         "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
+                 end
+    end
+
+    # Define a named capsule and append it to the workers list.
+    #
+    #   c.capsule :critical, queues: %w[critical], threads: 5
+    #   c.capsule :gated, queues: %w[gated], threads: 1, single_active_consumer: true
+    #
+    # Names must be unique. Queues must not overlap with capsules already
+    # defined (would cause double-processing). Composes with the string DSL —
+    # +c.workers "..."+ followed by +c.capsule :name, ...+ appends the
+    # named capsule to the list parsed from the string.
+    def capsule(name, queues:, threads:, **)
+      raise ArgumentError, "capsule queues must be a non-empty Array" unless queues.is_a?(Array) && queues.any?
+      raise ArgumentError, "capsule threads must be a positive Integer" unless threads.is_a?(Integer) && threads.positive?
+
+      @workers ||= []
+
+      raise ArgumentError, "capsule #{name.inspect} is already defined" if @workers.any? { |c| c[:name] == name }
+
+      conflict = find_queue_overlap(queues)
+      if conflict
+        raise ArgumentError,
+              "queue #{conflict.inspect} is already assigned to another capsule — " \
+              "each queue can only belong to one capsule"
+      end
+
+      @workers << { name: name, queues: queues, threads: threads, ** }
+    end
+
+    # Look up a capsule by its name. Accepts symbol or string. Returns the
+    # matching Hash, or nil. Used by the CLI's --capsule selector.
+    def capsule_named(name)
+      return nil unless @workers
+
+      key = name.to_s
+      @workers.find { |c| c[:name].to_s == key }
+    end
+
     # Returns the connection pool size to use for the PGMQ client.
     #
     # If +pool_size+ was explicitly set, returns that value unchanged. Otherwise
@@ -254,6 +324,13 @@ module Pgbus
     # that isn't a positive Integer with a clear error — silent coercion via
     # +to_i+ would let "abc" → 0 produce a critically under-sized pool with
     # no indication that something was wrong.
+    # Returns the first queue from +new_queues+ that's already assigned to
+    # any existing capsule, or nil if no overlap.
+    def find_queue_overlap(new_queues)
+      existing = (@workers || []).flat_map { |c| c[:queues] || c["queues"] || [] }
+      new_queues.find { |q| existing.include?(q) }
+    end
+
     def sum_thread_counts(entries, default_threads:, group:)
       return 0 unless entries
 
