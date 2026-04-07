@@ -56,5 +56,24 @@ module Pgbus
       require "pgbus/web/authentication"
       require "pgbus/web/data_source"
     end
+
+    # Install the watermark cache middleware ahead of the app's own
+    # middleware so the thread-local cache is cleared between every
+    # Rack request. Without this, repeated page renders served by the
+    # same Puma thread would see stale current_msg_id values.
+    initializer "pgbus.streams.middleware" do |app|
+      app.middleware.use Pgbus::Streams::WatermarkCacheMiddleware if Pgbus.configuration.streams_enabled
+    end
+
+    # Install the Turbo::StreamsChannel patch after turbo-rails has been
+    # loaded. The patch redirects broadcast_stream_to through Pgbus.stream
+    # instead of ActionCable. When turbo-rails is not loaded, this is a
+    # no-op and pgbus_stream_from still works via the explicit
+    # Pgbus.stream(...).broadcast(...) API.
+    initializer "pgbus.streams.turbo_broadcastable", after: :load_config_initializers do
+      ActiveSupport.on_load(:after_initialize) do
+        Pgbus::Streams.install_turbo_broadcastable_patch! if Pgbus.configuration.streams_enabled
+      end
+    end
   end
 end

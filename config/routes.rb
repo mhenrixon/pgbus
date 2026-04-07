@@ -1,6 +1,13 @@
 # frozen_string_literal: true
 
 Pgbus::Engine.routes.draw do
+  # SSE streaming endpoint for the pgbus_stream_from turbo-rails replacement.
+  # Mounted as a bare Rack app so it bypasses the entire Rails middleware
+  # stack — see lib/pgbus/web/stream_app.rb for the rationale. Because
+  # the Pgbus engine is typically mounted at /pgbus, the full path to
+  # the endpoint is /pgbus/streams/:signed_name.
+  mount Pgbus::Web::StreamApp.new => "/streams" if Pgbus.configuration.streams_enabled
+
   root to: "dashboard#show"
 
   resources :queues, only: %i[index show destroy], param: :name do
