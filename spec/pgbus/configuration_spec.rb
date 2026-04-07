@@ -592,6 +592,94 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "duration coercion on assignment" do
+    let(:duration_settings) do
+      %i[
+        visibility_timeout
+        archive_retention
+        idempotency_ttl
+        outbox_retention
+        stats_retention
+        recurring_execution_retention
+      ]
+    end
+
+    it "accepts a Numeric (interpreted as seconds, existing behavior)" do
+      duration_settings.each do |setting|
+        config.public_send("#{setting}=", 60)
+        expect(config.public_send(setting)).to eq(60)
+      end
+    end
+
+    it "accepts an ActiveSupport::Duration and stores as integer seconds" do
+      config.visibility_timeout = 10.minutes
+      expect(config.visibility_timeout).to eq(600)
+
+      config.archive_retention = 7.days
+      expect(config.archive_retention).to eq(7 * 24 * 3600)
+
+      config.idempotency_ttl = 7.days
+      expect(config.idempotency_ttl).to eq(7 * 24 * 3600)
+
+      config.outbox_retention = 1.day
+      expect(config.outbox_retention).to eq(24 * 3600)
+
+      config.stats_retention = 30.days
+      expect(config.stats_retention).to eq(30 * 24 * 3600)
+
+      config.recurring_execution_retention = 7.days
+      expect(config.recurring_execution_retention).to eq(7 * 24 * 3600)
+    end
+
+    it "raises ArgumentError immediately when assigned a negative number" do
+      duration_settings.each do |setting|
+        expect { config.public_send("#{setting}=", -1) }.to raise_error(
+          ArgumentError, /#{setting}.*positive/
+        )
+      end
+    end
+
+    it "raises ArgumentError immediately when assigned zero" do
+      duration_settings.each do |setting|
+        expect { config.public_send("#{setting}=", 0) }.to raise_error(
+          ArgumentError, /#{setting}.*positive/
+        )
+      end
+    end
+
+    it "raises ArgumentError immediately when assigned a non-numeric value" do
+      duration_settings.each do |setting|
+        expect { config.public_send("#{setting}=", "five seconds") }.to raise_error(
+          ArgumentError, /#{setting}.*Numeric.*Duration/
+        )
+      end
+    end
+
+    it "accepts nil as a valid sentinel for 'feature disabled'" do
+      # archive_retention, idempotency_ttl, recurring_execution_retention all
+      # use nil to skip the corresponding maintenance task in the dispatcher.
+      duration_settings.each do |setting|
+        expect { config.public_send("#{setting}=", nil) }.not_to raise_error
+        expect(config.public_send(setting)).to be_nil
+      end
+    end
+
+    it "stores Duration values as a plain Integer (downstream code reads seconds)" do
+      config.visibility_timeout = 30.seconds
+      # ActiveSupport::Duration overrides BOTH is_a? AND instance_of? to return
+      # true for Integer, so we have to check the actual class identity to
+      # confirm the Duration was coerced rather than stored as-is.
+      expect(config.visibility_timeout.class).to eq(Integer)
+      expect(config.visibility_timeout).to eq(30)
+    end
+
+    it "preserves Float values for sub-second settings" do
+      # Numerics that happen to be float should pass through unchanged
+      config.visibility_timeout = 0.5
+      expect(config.visibility_timeout).to eq(0.5)
+    end
+  end
+
   describe "#validate!" do
     it "rejects invalid prefetch_limit" do
       config.prefetch_limit = 0
