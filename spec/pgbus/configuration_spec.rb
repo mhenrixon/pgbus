@@ -304,11 +304,14 @@ RSpec.describe Pgbus::Configuration do
       end
     end
 
-    context "when given anything else" do
-      it "raises ArgumentError for nil" do
-        expect { config.workers = nil }.not_to raise_error # nil is allowed (no workers)
+    context "when given nil" do
+      it "allows nil (no workers configured — used by scheduler-only / dispatcher-only deployments)" do
+        expect { config.workers = nil }.not_to raise_error
+        expect(config.workers).to be_nil
       end
+    end
 
+    context "when given anything else" do
       it "raises ArgumentError for an Integer" do
         expect { config.workers = 5 }.to raise_error(ArgumentError, /String.*Array|Array.*String/)
       end
