@@ -19,7 +19,9 @@ module Pgbus
     # Array of role symbols = boot only the listed roles.
     # Set via the CLI flags --workers-only / --scheduler-only / --dispatcher-only,
     # or directly in an initializer for advanced cases.
-    attr_accessor :roles
+    attr_reader :roles
+
+    VALID_ROLES = %i[workers dispatcher scheduler consumers outbox].freeze
 
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
@@ -283,34 +285,65 @@ module Pgbus
     def role_enabled?(role)
       return true if @roles.nil?
 
-      key = role.to_sym
-      @roles.any? { |r| r.to_sym == key }
+      @roles.include?(role.to_s.downcase.to_sym)
+    end
+
+    # Set the supervisor role filter. Accepts:
+    #
+    #   nil           — boot all roles (default)
+    #   Symbol/String — wraps into a single-element array
+    #   Array         — list of roles to boot
+    #
+    # Each role is normalized to a downcased symbol and validated against
+    # VALID_ROLES. Unknown role names raise ArgumentError immediately so
+    # typos like `[:workres]` fail loud at boot rather than leaving the
+    # supervisor idling with no children.
+    def roles=(value)
+      if value.nil?
+        @roles = nil
+        return
+      end
+
+      normalized = Array(value).map { |r| r.to_s.downcase.to_sym }.uniq
+      invalid = normalized - VALID_ROLES
+      if invalid.any?
+        raise ArgumentError,
+              "invalid role(s) #{invalid.inspect} — valid roles are: #{VALID_ROLES.join(", ")}"
+      end
+
+      @roles = normalized
     end
 
     # Returns the connection pool size to use for the PGMQ client.
     #
     # If +pool_size+ was explicitly set, returns that value unchanged. Otherwise
-    # auto-derives from the configured worker and event_consumer thread counts:
+    # auto-derives from the threads needed by the roles this process actually
+    # runs (respects +Configuration#roles+ from --workers-only / --scheduler-only
+    # / --dispatcher-only):
     #
-    #   sum(workers.threads) + sum(event_consumers.threads) + 2
+    #   workers role     → sum(workers.threads)
+    #   consumers role   → sum(event_consumers.threads)
+    #   dispatcher role  → +1
+    #   scheduler role   → +1
     #
-    # The +2 covers the dispatcher and scheduler, which each issue occasional
-    # queries against the same connection pool.
+    # A --scheduler-only deployment that has 50 worker threads configured
+    # only needs 1 connection (for the scheduler), not 52.
     #
     # Auto-tune protects users from the common pitfall of running 15 worker
     # threads with a hand-set pool_size of 5 (resulting in ConnectionPool
     # timeouts under load). Setting pool_size explicitly is still supported
     # for advanced cases where you need a tighter or looser pool than the
     # default formula provides.
-    POOL_SIZE_OVERHEAD = 2 # dispatcher + scheduler
     POOL_SIZE_WARN_THRESHOLD = 50
 
     def resolved_pool_size
       return pool_size if pool_size
 
-      total = sum_thread_counts(workers, default_threads: 5, group: "worker") +
-              sum_thread_counts(event_consumers, default_threads: 3, group: "event_consumer") +
-              POOL_SIZE_OVERHEAD
+      total = 0
+      total += sum_thread_counts(workers, default_threads: 5, group: "worker") if role_enabled?(:workers)
+      total += sum_thread_counts(event_consumers, default_threads: 3, group: "event_consumer") if role_enabled?(:consumers)
+      total += 1 if role_enabled?(:dispatcher)
+      total += 1 if role_enabled?(:scheduler)
 
       warn_if_oversized(total)
       total

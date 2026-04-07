@@ -499,6 +499,99 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#roles=" do
+    it "stores nil unchanged" do
+      config.roles = nil
+      expect(config.roles).to be_nil
+    end
+
+    it "normalizes string roles to symbols" do
+      config.roles = %w[workers dispatcher]
+      expect(config.roles).to eq(%i[workers dispatcher])
+    end
+
+    it "lowercases mixed-case role names" do
+      config.roles = %w[WORKERS Dispatcher]
+      expect(config.roles).to eq(%i[workers dispatcher])
+    end
+
+    it "wraps a single non-array value into an array" do
+      config.roles = :workers
+      expect(config.roles).to eq([:workers])
+    end
+
+    it "deduplicates" do
+      config.roles = %i[workers workers dispatcher]
+      expect(config.roles).to eq(%i[workers dispatcher])
+    end
+
+    it "raises ArgumentError for an unknown role (typo protection)" do
+      expect { config.roles = [:workres] }.to raise_error(ArgumentError, /invalid role.*workres/i)
+    end
+
+    it "lists valid roles in the error message" do
+      expect { config.roles = [:bogus] }.to raise_error(ArgumentError, /workers.*dispatcher.*scheduler/i)
+    end
+
+    it "does not raise for any of the supported roles" do
+      %i[workers dispatcher scheduler consumers outbox].each do |role|
+        expect { config.roles = [role] }.not_to raise_error
+      end
+    end
+  end
+
+  describe "#resolved_pool_size with role filtering" do
+    context "when roles is nil (default — boot everything)" do
+      it "includes worker + event_consumer + dispatcher + scheduler thread counts" do
+        config.pool_size = nil
+        config.roles = nil
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        config.event_consumers = [{ topics: %w[orders.#], threads: 3 }]
+        # 5 workers + 3 consumers + 1 dispatcher + 1 scheduler = 10
+        expect(config.resolved_pool_size).to eq(10)
+      end
+    end
+
+    context "when running --workers-only" do
+      it "excludes dispatcher and scheduler overhead from the pool size" do
+        config.pool_size = nil
+        config.roles = [:workers]
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        config.event_consumers = [{ topics: %w[orders.#], threads: 3 }]
+        # only workers: 5 threads, no overhead, no consumers
+        expect(config.resolved_pool_size).to eq(5)
+      end
+    end
+
+    context "when running --scheduler-only" do
+      it "needs only the scheduler's connection slot" do
+        config.pool_size = nil
+        config.roles = [:scheduler]
+        config.workers = [{ queues: %w[default], threads: 50 }]
+        # workers are configured but not booted by this process
+        expect(config.resolved_pool_size).to eq(1)
+      end
+    end
+
+    context "when running --dispatcher-only" do
+      it "needs only the dispatcher's connection slot" do
+        config.pool_size = nil
+        config.roles = [:dispatcher]
+        config.workers = [{ queues: %w[default], threads: 50 }]
+        expect(config.resolved_pool_size).to eq(1)
+      end
+    end
+
+    context "when explicitly set" do
+      it "ignores roles and returns the explicit value" do
+        config.pool_size = 3
+        config.roles = [:scheduler]
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        expect(config.resolved_pool_size).to eq(3)
+      end
+    end
+  end
+
   describe "#validate!" do
     it "rejects invalid prefetch_limit" do
       config.prefetch_limit = 0

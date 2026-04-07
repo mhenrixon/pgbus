@@ -59,7 +59,7 @@ module Pgbus
           options[:capsule] = v
         end
 
-        opts.on("--workers-only", "Run only the worker processes (no scheduler/dispatcher/consumers)") do
+        opts.on("--workers-only", "Run only the worker processes (no scheduler/dispatcher/consumers/outbox)") do
           options[:workers_only] = true
         end
 
@@ -159,7 +159,8 @@ module Pgbus
                              workers (useful for one-capsule-per-process
                              deployments)
           --workers-only     Run only worker processes (no scheduler/
-                             dispatcher/consumers — for worker-only containers)
+                             dispatcher/consumers/outbox — for worker-only
+                             containers)
           --scheduler-only   Run only the recurring scheduler (the cron pod
                              pattern — exactly one of these per deployment)
           --dispatcher-only  Run only the dispatcher (the maintenance pod
