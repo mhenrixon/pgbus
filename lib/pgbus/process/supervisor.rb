@@ -42,8 +42,9 @@ module Pgbus
       private
 
       def boot_processes
-        # Boot workers
-        config.workers.each do |worker_config|
+        # Boot workers (workers may be nil for scheduler-only or
+        # dispatcher-only deployments via the upcoming --workers-only flag).
+        Array(config.workers).each do |worker_config|
           fork_worker(worker_config)
         end
 

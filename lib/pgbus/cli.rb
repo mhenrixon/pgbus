@@ -64,12 +64,14 @@ module Pgbus
     def apply_capsule_filter(name)
       capsule = Pgbus.configuration.capsule_named(name)
       unless capsule
-        available = (Pgbus.configuration.workers || []).filter_map { |c| c[:name] }.compact
+        available = (Pgbus.configuration.workers || []).filter_map { |c| c[:name] || c["name"] }.compact
         raise ArgumentError,
               "no capsule named #{name.inspect} (available: #{available.join(", ")})"
       end
 
-      Pgbus.configuration.instance_variable_set(:@workers, [capsule])
+      # Go through the public setter so any future normalization/validation
+      # in workers= is applied consistently to the CLI override path too.
+      Pgbus.configuration.workers = [capsule]
     end
 
     def show_status

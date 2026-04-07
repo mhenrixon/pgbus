@@ -320,11 +320,11 @@ RSpec.describe Pgbus::Configuration do
   end
 
   describe "#capsule" do
-    it "appends a named capsule to workers" do
+    it "appends a named capsule to workers (with name normalized to string)" do
       config.workers = nil
       config.capsule(:critical, queues: %w[critical], threads: 5)
       expect(config.workers).to eq([
-                                     { name: :critical, queues: %w[critical], threads: 5 }
+                                     { name: "critical", queues: %w[critical], threads: 5 }
                                    ])
     end
 
@@ -343,17 +343,17 @@ RSpec.describe Pgbus::Configuration do
     end
 
     it "appends to an existing workers list set via the string DSL" do
-      config.workers = "*: 5"
+      config.workers = "default: 5"
       config.capsule(:critical, queues: %w[critical], threads: 3)
       names = config.workers.map { |c| c[:name] }
-      expect(names).to eq(["*", :critical])
+      expect(names).to eq(%w[default critical])
     end
 
     it "appends to an existing workers list set via the legacy array form" do
       config.workers = [{ queues: %w[default], threads: 5 }]
       config.capsule(:reports, queues: %w[reports], threads: 2)
       expect(config.workers.size).to eq(2)
-      expect(config.workers.last[:name]).to eq(:reports)
+      expect(config.workers.last[:name]).to eq("reports")
     end
 
     it "raises if the same name is registered twice" do
@@ -399,11 +399,11 @@ RSpec.describe Pgbus::Configuration do
     end
 
     it "returns the matching capsule by symbol name" do
-      expect(config.capsule_named(:critical)).to include(name: :critical, threads: 5)
+      expect(config.capsule_named(:critical)).to include(name: "critical", threads: 5)
     end
 
     it "returns the matching capsule by string name" do
-      expect(config.capsule_named("critical")).to include(name: :critical, threads: 5)
+      expect(config.capsule_named("critical")).to include(name: "critical", threads: 5)
     end
 
     it "returns nil when no capsule matches" do
@@ -413,6 +413,50 @@ RSpec.describe Pgbus::Configuration do
     it "returns nil when workers is nil" do
       config.workers = nil
       expect(config.capsule_named(:any)).to be_nil
+    end
+  end
+
+  describe "capsule name normalization" do
+    it "stores symbol-named capsules as strings internally" do
+      config.workers = nil
+      config.capsule(:critical, queues: %w[critical], threads: 5)
+      expect(config.workers.first[:name]).to eq("critical")
+    end
+
+    it "stores string-named capsules as strings internally" do
+      config.workers = nil
+      config.capsule("critical", queues: %w[critical], threads: 5)
+      expect(config.workers.first[:name]).to eq("critical")
+    end
+
+    it "rejects symbol/string name collision (treats them as the same name)" do
+      config.workers = nil
+      config.capsule(:critical, queues: %w[critical], threads: 5)
+      expect do
+        config.capsule("critical", queues: %w[urgent], threads: 3)
+      end.to raise_error(ArgumentError, /already defined/)
+    end
+
+    it "string DSL stores auto-generated names as strings" do
+      config.workers = "critical: 5"
+      expect(config.workers.first[:name]).to eq("critical")
+    end
+  end
+
+  describe "wildcard overlap detection" do
+    it "rejects adding a capsule when an existing capsule has '*'" do
+      config.workers = "*: 5"
+      expect do
+        config.capsule(:critical, queues: %w[critical], threads: 3)
+      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+    end
+
+    it "rejects adding a '*' capsule when other queues already exist" do
+      config.workers = nil
+      config.capsule(:critical, queues: %w[critical], threads: 3)
+      expect do
+        config.capsule(:catch_all, queues: ["*"], threads: 5)
+      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
     end
   end
 
@@ -450,6 +494,11 @@ RSpec.describe Pgbus::Configuration do
     it "rejects negative insights_default_minutes" do
       config.insights_default_minutes = -1
       expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+    end
+
+    it "accepts nil workers (workerless modes like scheduler-only or dispatcher-only)" do
+      config.workers = nil
+      expect { config.validate! }.not_to raise_error
     end
 
     it "rejects fractional insights_default_minutes" do

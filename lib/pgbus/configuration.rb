@@ -182,7 +182,7 @@ module Pgbus
       raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
       raise ArgumentError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
 
-      workers.each do |w|
+      Array(workers).each do |w|
         threads = w[:threads] || w["threads"] || 5
         raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
       end
@@ -224,7 +224,7 @@ module Pgbus
                  when nil
                    nil
                  when String
-                   CapsuleDSL.parse(value).map { |entry| entry.merge(name: entry[:queues].first) }
+                   CapsuleDSL.parse(value).map { |entry| entry.merge(name: entry[:queues].first.to_s) }
                  when Array
                    value
                  else
@@ -246,18 +246,14 @@ module Pgbus
       raise ArgumentError, "capsule queues must be a non-empty Array" unless queues.is_a?(Array) && queues.any?
       raise ArgumentError, "capsule threads must be a positive Integer" unless threads.is_a?(Integer) && threads.positive?
 
+      normalized_name = name.to_s
       @workers ||= []
 
-      raise ArgumentError, "capsule #{name.inspect} is already defined" if @workers.any? { |c| c[:name] == name }
+      raise ArgumentError, "capsule #{name.inspect} is already defined" if @workers.any? { |c| capsule_name(c) == normalized_name }
 
-      conflict = find_queue_overlap(queues)
-      if conflict
-        raise ArgumentError,
-              "queue #{conflict.inspect} is already assigned to another capsule — " \
-              "each queue can only belong to one capsule"
-      end
+      validate_no_queue_overlap!(queues)
 
-      @workers << { name: name, queues: queues, threads: threads, ** }
+      @workers << { name: normalized_name, queues: queues, threads: threads, ** }
     end
 
     # Look up a capsule by its name. Accepts symbol or string. Returns the
@@ -266,7 +262,7 @@ module Pgbus
       return nil unless @workers
 
       key = name.to_s
-      @workers.find { |c| c[:name].to_s == key }
+      @workers.find { |c| capsule_name(c) == key }
     end
 
     # Returns the connection pool size to use for the PGMQ client.
@@ -324,11 +320,40 @@ module Pgbus
     # that isn't a positive Integer with a clear error — silent coercion via
     # +to_i+ would let "abc" → 0 produce a critically under-sized pool with
     # no indication that something was wrong.
-    # Returns the first queue from +new_queues+ that's already assigned to
-    # any existing capsule, or nil if no overlap.
-    def find_queue_overlap(new_queues)
+    # Read a capsule's name from either symbol or string key, normalized
+    # to a string for comparison. Returns nil for unnamed (legacy) entries.
+    def capsule_name(entry)
+      raw = entry[:name] || entry["name"]
+      raw&.to_s
+    end
+
+    # Validates that no queue in +new_queues+ would overlap with any
+    # existing capsule. The wildcard '*' counts as overlapping with EVERY
+    # other queue (and vice versa) because at runtime '*' is expanded to
+    # all known queues. Raises ArgumentError on overlap.
+    def validate_no_queue_overlap!(new_queues)
       existing = (@workers || []).flat_map { |c| c[:queues] || c["queues"] || [] }
-      new_queues.find { |q| existing.include?(q) }
+      return if existing.empty?
+
+      if existing.include?(CapsuleDSL::WILDCARD)
+        raise ArgumentError,
+              "an existing capsule already uses '*' (matches every queue) — " \
+              "the new capsule's queues #{new_queues.inspect} would overlap with it"
+      end
+
+      if new_queues.include?(CapsuleDSL::WILDCARD)
+        raise ArgumentError,
+              "the new capsule uses '*' (matches every queue) but other capsules " \
+              "are already defined with queues #{existing.inspect} — " \
+              "the wildcard would overlap with all of them"
+      end
+
+      conflict = new_queues.find { |q| existing.include?(q) }
+      return unless conflict
+
+      raise ArgumentError,
+            "queue #{conflict.inspect} is already assigned to another capsule — " \
+            "each queue can only belong to one capsule"
     end
 
     def sum_thread_counts(entries, default_threads:, group:)

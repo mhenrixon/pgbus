@@ -72,7 +72,7 @@ RSpec.describe Pgbus::CLI do
         described_class.start(["start", "--capsule", "critical"])
 
         expect(Pgbus.configuration.workers.size).to eq(1)
-        expect(Pgbus.configuration.workers.first[:name]).to eq(:critical)
+        expect(Pgbus.configuration.workers.first[:name]).to eq("critical")
       ensure
         Pgbus.configuration.instance_variable_set(:@workers, original_workers)
       end
