@@ -38,8 +38,15 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
       - name: RuboCop
         run: bundle exec rubocop
+      - name: Herb (HTML+ERB linter)
+        run: bun run lint:herb
       - name: Verify gem builds
         run: bundle exec rake build
 
