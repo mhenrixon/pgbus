@@ -18,7 +18,6 @@ require_relative "../integration_helper"
 RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
   let(:dispatcher) { Pgbus::Process::Dispatcher.new }
   let(:queue_name) { "default" }
-  let(:full_queue) { Pgbus.configuration.queue_name(queue_name) }
 
   before do
     Pgbus.client.ensure_queue(queue_name)
@@ -28,7 +27,7 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
     context "when the message is still in the queue" do
       it "does NOT reap the lock even when older than visibility_timeout * 2" do
         msg_id = Pgbus.client.send_message(queue_name, { "job_class" => "TestJob" })
-        Pgbus::UniquenessKey.acquire!("TestJob:still-running", queue_name: full_queue, msg_id: msg_id)
+        Pgbus::UniquenessKey.acquire!("TestJob:still-running", queue_name: queue_name, msg_id: msg_id)
 
         # Backdate the lock to simulate a long-running/failing job
         Pgbus::UniquenessKey.where(lock_key: "TestJob:still-running")
@@ -50,7 +49,7 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
           { "job_class" => "RecurringJob",
             Pgbus::Uniqueness::METADATA_KEY => "RecurringJob" }
         )
-        Pgbus::UniquenessKey.acquire!("RecurringJob", queue_name: full_queue, msg_id: 0)
+        Pgbus::UniquenessKey.acquire!("RecurringJob", queue_name: queue_name, msg_id: 0)
 
         # Backdate
         Pgbus::UniquenessKey.where(lock_key: "RecurringJob")
@@ -69,7 +68,7 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
     context "when the message is gone but the lock remains" do
       it "reaps the lock for a real msg_id when the queue row no longer exists" do
         # Simulate a true orphan: lock exists for a msg_id that's not in the queue
-        Pgbus::UniquenessKey.acquire!("Orphan:gone", queue_name: full_queue, msg_id: 999_999_999)
+        Pgbus::UniquenessKey.acquire!("Orphan:gone", queue_name: queue_name, msg_id: 999_999_999)
         Pgbus::UniquenessKey.where(lock_key: "Orphan:gone")
                             .update_all(created_at: 10.minutes.ago)
 
@@ -81,7 +80,7 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
 
       it "reaps msg_id=0 placeholder locks when no message exists for that lock_key payload" do
         # Recurring lock with msg_id=0, no corresponding message in any queue
-        Pgbus::UniquenessKey.acquire!("RecurringJob:abandoned", queue_name: full_queue, msg_id: 0)
+        Pgbus::UniquenessKey.acquire!("RecurringJob:abandoned", queue_name: queue_name, msg_id: 0)
         Pgbus::UniquenessKey.where(lock_key: "RecurringJob:abandoned")
                             .update_all(created_at: 10.minutes.ago)
 
@@ -94,7 +93,7 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
 
     context "when locks are recent" do
       it "does not reap locks newer than the threshold even if the message is gone" do
-        Pgbus::UniquenessKey.acquire!("Recent:lock", queue_name: full_queue, msg_id: 999_999_998)
+        Pgbus::UniquenessKey.acquire!("Recent:lock", queue_name: queue_name, msg_id: 999_999_998)
         # created_at is now (default), well within threshold
 
         reaped = dispatcher.send(:reap_orphaned_uniqueness_keys)
@@ -112,13 +111,17 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
         # 3. Time passes (> visibility_timeout * 2)
         # 4. Reaper runs — must NOT delete the lock
         # 5. Next scheduler tick must still see :already_locked
+        #
+        # NOTE: production stores the LOGICAL queue name (e.g. "default") on
+        # uniqueness key rows, not the prefixed physical name. The reaper
+        # must handle both — that is what Pgbus::Client#message_exists? does.
 
-        msg_id = Pgbus.client.send_message(
+        Pgbus.client.send_message(
           queue_name,
           { "job_class" => "FetchTransactionsJob",
             Pgbus::Uniqueness::METADATA_KEY => "FetchTransactionsJob" }
         )
-        Pgbus::UniquenessKey.acquire!("FetchTransactionsJob", queue_name: full_queue, msg_id: 0)
+        Pgbus::UniquenessKey.acquire!("FetchTransactionsJob", queue_name: queue_name, msg_id: 0)
 
         # Simulate 10 minutes of failing retries
         Pgbus::UniquenessKey.where(lock_key: "FetchTransactionsJob")
@@ -130,17 +133,12 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
         # The lock MUST still be present
         expect(Pgbus::UniquenessKey.exists?(lock_key: "FetchTransactionsJob")).to be(true)
 
-        # Verify the message is still there too (sanity check)
-        # Use a separate queue check that doesn't consume
-        count = ActiveRecord::Base.connection.select_value(
-          "SELECT COUNT(*) FROM pgmq.q_#{full_queue} WHERE msg_id = $1",
-          "test", [msg_id]
-        )
-        expect(count.to_i).to eq(1)
+        # Sanity check: message_exists? routes via Pgbus::Client (no raw SQL)
+        expect(Pgbus.client.message_exists?(queue_name, uniqueness_key: "FetchTransactionsJob")).to be(true)
 
         # And the next acquire! attempt should fail (lock is held)
         expect(
-          Pgbus::UniquenessKey.acquire!("FetchTransactionsJob", queue_name: full_queue, msg_id: 0)
+          Pgbus::UniquenessKey.acquire!("FetchTransactionsJob", queue_name: queue_name, msg_id: 0)
         ).to be(false)
       end
     end

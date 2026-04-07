@@ -221,6 +221,47 @@ module Pgbus
       result
     end
 
+    # Check whether a message exists in the given queue.
+    #
+    # Pass either +msg_id+ for a fast primary-key lookup, or +uniqueness_key+
+    # to scan the queue for any message whose payload carries that key in the
+    # +pgbus_uniqueness_key+ JSONB field. The latter is used by the dispatcher
+    # reaper to determine if a uniqueness lock with msg_id=0 (placeholder)
+    # still has a corresponding queue message.
+    #
+    # +queue_name+ may be either a logical name (e.g. "default") or an already
+    # prefixed physical name (e.g. "pgbus_default"). The client normalizes both.
+    #
+    # Returns:
+    #   true  — the message definitely exists in the queue
+    #   false — the message definitely does not exist
+    #   nil   — could not determine (e.g. queue table missing or unknown error).
+    #           Callers MUST treat nil as "exists" for safety.
+    def message_exists?(queue_name, msg_id: nil, uniqueness_key: nil)
+      raise ArgumentError, "must pass msg_id or uniqueness_key" if msg_id.nil? && uniqueness_key.nil?
+
+      full_name = resolve_full_queue_name(queue_name)
+      sanitized = QueueNameValidator.sanitize!(full_name)
+
+      synchronized do
+        with_raw_connection do |conn|
+          if msg_id
+            msg_id_present?(conn, sanitized, msg_id.to_i)
+          else
+            uniqueness_key_present?(conn, sanitized, uniqueness_key)
+          end
+        end
+      end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      nil
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      nil
+    end
+
     def purge_archive(queue_name, older_than:, batch_size: 1000)
       full_name = config.queue_name(queue_name)
       sanitized = QueueNameValidator.sanitize!(full_name)
@@ -265,6 +306,40 @@ module Pgbus
     end
 
     private
+
+    # Accept either a logical name ("default") or an already-prefixed
+    # physical name ("pgbus_default") and return the physical name.
+    def resolve_full_queue_name(queue_name)
+      prefix = "#{config.queue_prefix}_"
+      queue_name.start_with?(prefix) ? queue_name : config.queue_name(queue_name)
+    end
+
+    def msg_id_present?(conn, sanitized, msg_id)
+      result = conn.exec_params(
+        "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
+        [msg_id]
+      )
+      result.ntuples.positive?
+    end
+
+    def uniqueness_key_present?(conn, sanitized, uniqueness_key)
+      result = conn.exec_params(
+        "SELECT 1 FROM pgmq.q_#{sanitized} " \
+        "WHERE message::jsonb ->> 'pgbus_uniqueness_key' = $1 LIMIT 1",
+        [uniqueness_key]
+      )
+      result.ntuples.positive?
+    end
+
+    # Detect "relation does not exist" via the underlying PG error type.
+    # Falls back to message matching only if PG::UndefinedTable is undefined
+    # (very old pg gem) — never relies on locale-sensitive text.
+    def undefined_table_error?(error)
+      cause = error.respond_to?(:cause) ? error.cause : nil
+      return true if defined?(PG::UndefinedTable) && cause.is_a?(PG::UndefinedTable)
+
+      false
+    end
 
     def collect_configured_queues
       queues = Set.new

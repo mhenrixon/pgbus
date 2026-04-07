@@ -178,39 +178,24 @@ module Pgbus
         0
       end
 
-      # Returns true if the message referenced by this lock no longer exists
-      # in the queue. False = message still in queue (do NOT reap).
+      # Returns true if the message referenced by this lock is definitely gone
+      # from the queue. Returns false otherwise (message present, or unknown).
       #
-      # For real msg_ids, we check the PGMQ queue table directly for that id.
-      # For msg_id=0 (recurring scheduler placeholder, :while_executing locks),
-      # we scan the queue for any message whose payload carries the same
-      # uniqueness key in the pgbus_uniqueness_key field.
+      # Routes through Pgbus::Client#message_exists? so all PGMQ access stays
+      # behind the client interface. The client returns nil when it can't
+      # determine the answer (queue table missing, etc.); we treat that as
+      # "still here" — the reaper must NEVER delete a lock when in doubt.
       def message_gone?(key)
-        sanitized = QueueNameValidator.sanitize!(key.queue_name)
-        conn = UniquenessKey.connection
-
-        exists = if key.msg_id.to_i.positive?
-                   conn.select_value(
-                     "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
-                     "Pgbus::Dispatcher reap check",
-                     [key.msg_id.to_i]
-                   )
+        msg_id = key.msg_id.to_i
+        result = if msg_id.positive?
+                   Pgbus.client.message_exists?(key.queue_name, msg_id: msg_id)
                  else
-                   conn.select_value(
-                     "SELECT 1 FROM pgmq.q_#{sanitized} " \
-                     "WHERE message::jsonb ->> 'pgbus_uniqueness_key' = $1 LIMIT 1",
-                     "Pgbus::Dispatcher reap check",
-                     [key.lock_key]
-                   )
+                   Pgbus.client.message_exists?(key.queue_name, uniqueness_key: key.lock_key)
                  end
 
-        exists.nil?
-      rescue ActiveRecord::StatementInvalid => e
-        # Queue table doesn't exist (queue was dropped). The lock IS orphaned.
-        return true if e.message.include?("does not exist")
-
+        result == false
+      rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Reap check failed for #{key.lock_key}: #{e.message}" }
-        # Be conservative: don't reap on unknown errors.
         false
       end
 
