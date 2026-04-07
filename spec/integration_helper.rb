@@ -22,6 +22,25 @@ def bootstrap_integration_tables(conn)
       CREATE UNIQUE INDEX idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
     SQL
   end
+
+  unless conn.table_exists?("pgbus_failed_events")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_failed_events (
+        id BIGSERIAL PRIMARY KEY,
+        queue_name VARCHAR NOT NULL,
+        msg_id BIGINT,
+        payload JSONB,
+        headers JSONB,
+        error_class VARCHAR,
+        error_message TEXT,
+        backtrace TEXT,
+        retry_count INTEGER DEFAULT 0,
+        failed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_failed_events_queue_msg
+        ON pgbus_failed_events (queue_name, msg_id);
+    SQL
+  end
 rescue StandardError => e
   warn "[pgbus integration] Bootstrap warning: #{e.message}"
 end
