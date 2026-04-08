@@ -121,7 +121,7 @@ RSpec.describe Pgbus::Web::StreamApp do
       # Intentionally do not set env["rack.hijack?"]
       status, _, body = app.call(env)
       expect(status).to eq(501)
-      expect(body.first).to include("rack.hijack not available")
+      expect(body.first).to include("does not provide rack.hijack")
     end
 
     it "returns 503 when the streamer is at capacity" do

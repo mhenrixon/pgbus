@@ -160,7 +160,7 @@ module Pgbus
       def unsupported_server
         [501,
          { "content-type" => "text/plain" },
-         ["pgbus streams require Puma 6.1+ or Falcon (rack.hijack not available)"]]
+         ["pgbus streams require Puma 6.1+ or Falcon — current Rack server does not provide rack.hijack"]]
       end
 
       def server_error
