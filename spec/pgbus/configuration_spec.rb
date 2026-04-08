@@ -881,6 +881,21 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.to raise_error(ArgumentError, /streams_retention/)
     end
 
+    it "rejects non-positive streams_idle_timeout" do
+      config.streams_idle_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_idle_timeout/)
+    end
+
+    it "rejects non-positive streams_listen_health_check_ms" do
+      config.streams_listen_health_check_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_listen_health_check_ms/)
+    end
+
+    it "rejects non-positive streams_write_deadline_ms" do
+      config.streams_write_deadline_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_write_deadline_ms/)
+    end
+
     it "accepts a valid streams config" do
       expect { config.validate! }.not_to raise_error
     end

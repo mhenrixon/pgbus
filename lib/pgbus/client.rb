@@ -54,6 +54,7 @@ module Pgbus
       end
 
       @queues_created = Concurrent::Map.new
+      @stream_indexes_created = Concurrent::Map.new
       @queue_strategy = QueueFactory.for(config)
       @schema_ensured = false
     end
