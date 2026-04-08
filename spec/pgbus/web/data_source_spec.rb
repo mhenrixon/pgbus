@@ -250,26 +250,30 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#discard_failed_event" do
-    it "deletes the event and releases the uniqueness lock" do
+    it "deletes the event, releases the uniqueness lock, and archives the queue message" do
       allow(mock_connection).to receive(:select_one)
         .with(anything, "Pgbus Failed Event", [1])
         .and_return({
                       "id" => 1,
+                      "queue_name" => "default",
+                      "msg_id" => 42,
                       "payload" => '{"job_class":"FailedJob","pgbus_uniqueness_key":"failed-1"}'
                     })
 
       allow(mock_connection).to receive(:exec_delete)
       allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
+      allow(mock_client).to receive(:archive_message)
 
       data_source.discard_failed_event(1)
 
       expect(mock_connection).to have_received(:exec_delete)
       expect(Pgbus::UniquenessKey).to have_received(:release!).with("failed-1")
+      expect(mock_client).to have_received(:archive_message).with("default", 42)
     end
   end
 
   describe "#discard_all_failed" do
-    it "collects uniqueness keys before deleting and releases locks" do
+    before do
       allow(mock_connection).to receive(:select_all)
         .with("SELECT payload FROM pgbus_failed_events", "Pgbus Collect Failed Keys")
         .and_return([
@@ -278,17 +282,39 @@ RSpec.describe Pgbus::Web::DataSource do
                       { "payload" => '{"job_class":"PlainJob"}' }
                     ])
 
-      result_double = double("result", cmd_tuples: 3)
+      allow(mock_connection).to receive(:select_all)
+        .with(
+          "SELECT id, queue_name, msg_id FROM pgbus_failed_events WHERE msg_id IS NOT NULL",
+          "Pgbus Collect Failed Messages"
+        )
+        .and_return([
+                      { "id" => 1, "queue_name" => "default", "msg_id" => 10 },
+                      { "id" => 2, "queue_name" => "default", "msg_id" => 11 },
+                      { "id" => 3, "queue_name" => "low", "msg_id" => 99 }
+                    ])
+
       allow(mock_connection).to receive(:execute)
         .with("DELETE FROM pgbus_failed_events")
-        .and_return(result_double)
+        .and_return(double("result", cmd_tuples: 3))
 
       allow(Pgbus::UniquenessKey).to receive(:where).and_return(double(delete_all: 2))
+      allow(mock_client).to receive(:archive_message)
+    end
 
-      count = data_source.discard_all_failed
-
-      expect(count).to eq(3)
+    it "releases the uniqueness locks for every failed event" do
+      data_source.discard_all_failed
       expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: %w[k1 k2])
+    end
+
+    it "archives every queue message referenced by a failed event" do
+      data_source.discard_all_failed
+      expect(mock_client).to have_received(:archive_message).with("default", 10)
+      expect(mock_client).to have_received(:archive_message).with("default", 11)
+      expect(mock_client).to have_received(:archive_message).with("low", 99)
+    end
+
+    it "returns the number of rows deleted" do
+      expect(data_source.discard_all_failed).to eq(3)
     end
   end
 

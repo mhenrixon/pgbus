@@ -32,7 +32,14 @@ module Pgbus
           ]
         )
       rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus] Failed to record failed event: #{e.message}" }
+        # ERROR-level: silent loss of failure-tracking data defeats the
+        # purpose of the dashboard's "Failed Jobs" section. If recording
+        # fails, surface it loudly so the broken state can be diagnosed
+        # rather than silently masked.
+        Pgbus.logger.error do
+          "[Pgbus] Failed to record failed event for queue=#{queue_name} msg_id=#{msg_id}: " \
+            "#{e.class}: #{e.message}"
+        end
       end
 
       def clear!(queue_name:, msg_id:)
@@ -42,7 +49,13 @@ module Pgbus
           [queue_name, msg_id.to_i]
         )
       rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus] Failed to clear failed event: #{e.message}" }
+        # ERROR-level: a failed clear leaves a stale row in the dashboard
+        # AFTER the job actually succeeded — confusing and load-bearing
+        # for users debugging recurring duplicates.
+        Pgbus.logger.error do
+          "[Pgbus] Failed to clear failed event for queue=#{queue_name} msg_id=#{msg_id}: " \
+            "#{e.class}: #{e.message}"
+        end
       end
 
       private

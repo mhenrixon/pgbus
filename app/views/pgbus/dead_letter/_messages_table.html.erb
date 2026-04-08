@@ -24,15 +24,13 @@
       <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
         <% @messages.each do |m| %>
           <% payload = pgbus_parse_message(m[:message]) %>
-          <% dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix %>
-          <% source_queue = m[:queue_name].to_s.delete_suffix(dlq_suffix) %>
+          <% source_queue = m[:queue_name].to_s.delete_suffix(Pgbus::DEAD_LETTER_SUFFIX) %>
           <tr>
             <td class="w-10 px-4 py-3 align-top">
-              <input type="checkbox" data-bulk-item
+              <input type="checkbox" data-bulk-item data-pgbus-action="bulk-row-toggle"
                      aria-label="<%= t("pgbus.helpers.bulk_select_row", id: m[:msg_id]) %>"
                      data-queue-name="<%= m[:queue_name] %>" data-msg-id="<%= m[:msg_id] %>"
-                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1"
-                     onchange="this.nextElementSibling.disabled = !this.checked; this.nextElementSibling.nextElementSibling.disabled = !this.checked">
+                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1">
               <input type="hidden" name="messages[][queue_name]" value="<%= m[:queue_name] %>" form="bulk-discard-dlq-form" disabled>
               <input type="hidden" name="messages[][msg_id]" value="<%= m[:msg_id] %>" form="bulk-discard-dlq-form" disabled>
             </td>
