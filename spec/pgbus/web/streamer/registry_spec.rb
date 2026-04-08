@@ -43,6 +43,31 @@ RSpec.describe Pgbus::Web::Streamer::Registry do
       [c1, c2, c3].each { |c| registry.register(c) }
       expect(registry.connections_for("chat")).to contain_exactly(c1, c2, c3)
     end
+
+    it "evicts a replaced connection from its old stream index when the id collides" do
+      # SecureRandom.hex(8) collisions are astronomical in practice, but
+      # the Registry's invariant is that @by_stream only holds objects
+      # that are also in @by_id. Verify we don't leave orphans behind.
+      old = build_conn(id: "c1", stream_name: "chat")
+      new = build_conn(id: "c1", stream_name: "orders")
+      registry.register(old)
+      registry.register(new)
+
+      expect(registry.connections_for("chat")).to be_empty
+      expect(registry.connections_for("orders")).to contain_exactly(new)
+      expect(registry.lookup("c1")).to eq(new)
+      expect(registry.streams).to contain_exactly("orders")
+    end
+
+    it "evicts a replaced connection even when the new object targets the same stream" do
+      old = build_conn(id: "c1", stream_name: "chat")
+      new = build_conn(id: "c1", stream_name: "chat")
+      registry.register(old)
+      registry.register(new)
+
+      expect(registry.connections_for("chat")).to contain_exactly(new)
+      expect(registry.size).to eq(1)
+    end
   end
 
   describe "#unregister" do

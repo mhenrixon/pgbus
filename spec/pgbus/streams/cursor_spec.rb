@@ -43,6 +43,14 @@ RSpec.describe Pgbus::Streams::Cursor do
         .to raise_error(Pgbus::Streams::Cursor::InvalidCursor, /negative/)
     end
 
+    it "raises on a negative Integer last_event_id instead of silently falling through to query_since" do
+      # Previously, last_event_id: -5 would be treated as "not present" by
+      # `present?`, causing pick to fall through to query_since. Now any
+      # Integer counts as present and validate! rejects the negative.
+      expect { described_class.parse(query_since: "100", last_event_id: -5) }
+        .to raise_error(Pgbus::Streams::Cursor::InvalidCursor, /negative/)
+    end
+
     it "raises on cursor exceeding 64-bit signed range" do
       # PGMQ msg_id is BIGINT — cap at 2^63 - 1
       too_big = (2**63).to_s
