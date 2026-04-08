@@ -99,6 +99,10 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
       raise ActiveRecord::Rollback
     end
 
+    # Negative assertion: give any erroneously-delivered event time to
+    # arrive through the SSE pipeline before checking. A rolled-back
+    # transaction should produce zero events — the sleep bounds how
+    # long we'll wait for the "never happens" assertion to become true.
     sleep 0.3
     expect(client.events).to be_empty
 

@@ -703,7 +703,7 @@ Per-stream retention is handled by the main pgbus dispatcher process on the same
 
 ### Transactional broadcasts
 
-**This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change the database never persisted.
+**This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change that the database never persisted.
 
 ```ruby
 ActiveRecord::Base.transaction do

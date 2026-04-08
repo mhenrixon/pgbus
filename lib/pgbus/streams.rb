@@ -32,8 +32,8 @@ module Pgbus
       # Transactional semantics: if this call is made inside an open
       # ActiveRecord transaction, the PGMQ insert is deferred to an
       # after_commit callback. If the transaction rolls back, the broadcast
-      # silently drops — clients never see the change the database never
-      # persisted. This is the feature no other Rails real-time stack
+      # silently drops — clients never see the change that the database
+      # never persisted. This is the feature no other Rails real-time stack
       # (including turbo-rails over ActionCable) can offer: the broadcast
       # and the data mutation are atomic with respect to each other.
       # Returns the assigned msg_id when sent synchronously, nil when
