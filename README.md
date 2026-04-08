@@ -688,7 +688,7 @@ Pgbus.configure do |c|
   c.streams_heartbeat_interval     = 15            # seconds
   c.streams_max_connections        = 2_000         # per Puma worker
   c.streams_idle_timeout           = 3_600         # close idle connections after 1h
-  c.streams_listen_health_check_ms = 5_000         # PG LISTEN keepalive
+  c.streams_listen_health_check_ms = 250           # PG LISTEN keepalive + ensure_listening ack budget
   c.streams_write_deadline_ms      = 5_000         # write_nonblock deadline
 end
 ```
