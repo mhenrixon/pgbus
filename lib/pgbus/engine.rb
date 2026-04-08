@@ -46,6 +46,7 @@ module Pgbus
 
     rake_tasks do
       load File.expand_path("../tasks/pgbus_pgmq.rake", __dir__)
+      load File.expand_path("../tasks/pgbus_streams.rake", __dir__)
     end
 
     initializer "pgbus.i18n" do

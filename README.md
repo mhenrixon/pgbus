@@ -26,6 +26,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Architecture](#architecture)
 - [CLI](#cli)
 - [Dashboard](#dashboard)
+- [Real-time broadcasts (turbo-streams replacement)](#real-time-broadcasts-turbo-streams-replacement)
 - [Database tables](#database-tables)
 - [Switching from another backend](#switching-from-another-backend)
 - [Development](#development)
@@ -34,6 +35,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 ## Features
 
 - **ActiveJob adapter** -- drop-in replacement, zero config migration from other backends
+- **Turbo Streams replacement** -- `pgbus_stream_from` drops into turbo-rails apps with no ActionCable, no Redis, no lost messages on reconnect (fixes rails/rails#52420, hotwired/turbo#1261)
 - **Event bus** -- publish/subscribe with AMQP-style topic routing (`orders.#`, `payments.*`)
 - **Dead letter queues** -- automatic DLQ routing after configurable retries
 - **Worker recycling** -- memory, job count, and lifetime limits prevent runaway processes
@@ -742,6 +744,88 @@ rails generate pgbus:add_job_stats --database=pgbus
 ```
 
 Stats collection is enabled by default (`config.stats_enabled = true`). Old stats are cleaned up by the dispatcher based on `config.stats_retention` (default: 7 days). If the migration hasn't been run yet, stat recording is silently skipped.
+
+## Real-time broadcasts (turbo-streams replacement)
+
+Pgbus ships a drop-in replacement for turbo-rails' `turbo_stream_from` helper that fixes several well-known ActionCable correctness bugs by using PGMQ message IDs as a replay cursor. Same API as turbo-rails. No Redis. No ActionCable. No lost messages on reconnect.
+
+**Bugs fixed:**
+
+- [**rails/rails#52420**](https://github.com/rails/rails/issues/52420) -- "page born stale": a broadcast that fires between controller render and WebSocket subscribe is silently lost with ActionCable. Pgbus captures a PGMQ `msg_id` watermark at render time and replays any messages published in the gap via the SSE `Last-Event-ID` mechanism.
+- [**hotwired/turbo#1261**](https://github.com/hotwired/turbo/issues/1261) -- missed messages on reconnect. Pgbus persists the cursor on the client (EventSource's built-in `Last-Event-ID`) and replays from the PGMQ archive on every reconnect.
+- [**hotwired/turbo-rails#674**](https://github.com/hotwired/turbo-rails/issues/674) -- no way to detect disconnect. Pgbus dispatches `pgbus:open`, `pgbus:gap-detected`, and `pgbus:close` DOM events on the stream element.
+
+### Usage
+
+Swap `turbo_stream_from` for `pgbus_stream_from` in your view:
+
+```erb
+<%# Before %>
+<%= turbo_stream_from @order %>
+
+<%# After %>
+<%= pgbus_stream_from @order %>
+```
+
+Everything else stays the same. The model concern keeps working unchanged:
+
+```ruby
+class Order < ApplicationRecord
+  broadcasts_to ->(order) { [order.account, :orders] }
+end
+```
+
+`broadcasts_to`, `broadcast_replace_to`, `broadcasts_refreshes`, `broadcast_append_later_to`, and every other `Turbo::Broadcastable` helper funnels through a single `Turbo::StreamsChannel.broadcast_stream_to` method that pgbus monkey-patches at engine boot. The signed-stream-name verification reuses `Turbo.signed_stream_verifier_key` so existing signed tokens Just Work.
+
+Add the Puma plugin to `config/puma.rb` so SSE connections drain cleanly on deploy:
+
+```ruby
+# config/puma.rb
+plugin :pgbus_streams
+```
+
+Without the plugin, Puma closes hijacked SSE sockets abruptly during graceful restart, which looks to browsers like a network error and triggers an immediate reconnect. With the plugin, the streamer writes a `pgbus:shutdown` sentinel before the socket closes; browsers reconnect to the new worker and replay missed messages via `Last-Event-ID`.
+
+### Requirements
+
+- **Puma 6.1 or newer.** Streams use `rack.hijack` + partial hijack (both supported in 6.1+). Unicorn, Pitchfork, and Passenger return HTTP 501 from the streams endpoint.
+- **PostgreSQL LISTEN/NOTIFY.** `config.listen_notify = true` (the default). Stream queues override PGMQ's 250ms NOTIFY throttle to 0 so every broadcast fires individually.
+- **HTTP/2 or HTTP/3 in production.** SSE has a 6-connection-per-origin limit on HTTP/1.1; HTTP/2 lifts it.
+
+### Configuration
+
+```ruby
+Pgbus.configure do |c|
+  c.streams_enabled                = true          # default
+  c.streams_queue_prefix           = "pgbus_stream"
+  c.streams_default_retention      = 5 * 60        # 5 minutes
+  c.streams_retention              = {             # per-stream overrides
+    /^chat_/        => 7 * 24 * 3600,              # 7 days for chat history
+    "presence_room" => 30                          # 30 seconds for presence
+  }
+  c.streams_heartbeat_interval     = 15            # seconds
+  c.streams_max_connections        = 2_000         # per Puma worker
+  c.streams_idle_timeout           = 3_600         # close idle connections after 1h
+  c.streams_listen_health_check_ms = 5_000         # PG LISTEN keepalive
+  c.streams_write_deadline_ms      = 5_000         # write_nonblock deadline
+end
+```
+
+### How it works
+
+Stream broadcasts are stored in PGMQ queues prefixed `pgbus_stream_*`. Each broadcast is assigned a monotonic `msg_id` by PGMQ. The `pgbus_stream_from` helper captures the current `MAX(msg_id)` at render time and embeds it in the HTML as `since-id`. When the SSE client connects, it sends that cursor as `?since=` on the first request and as `Last-Event-ID` on reconnects. The streamer replays from `pgmq.q_*` (live) UNION `pgmq.a_*` (archive) for any `msg_id > cursor`, then switches to LISTEN/NOTIFY for the live path. There is no message identity gap between the render and the subscribe — the cursor model guarantees every broadcast is delivered exactly once, in order, even across reconnects.
+
+One Puma worker hosts one `Pgbus::Web::Streamer::Instance` singleton with three threads (Listener / Dispatcher / Heartbeat) and one dedicated PG connection for LISTEN. Hijacked SSE sockets are held outside Puma's thread pool -- confirmed by an integration test that fires 20 concurrent hijacked connections and observes them complete in parallel on an 8-thread Puma server ([puma/puma#1009](https://github.com/puma/puma/issues/1009)).
+
+Per-stream retention is handled by the main pgbus dispatcher process on the same interval as `archive_compaction_interval`. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
+
+### What's NOT included (yet)
+
+- Transactional broadcasts as the default. `broadcast_replace_to` inside an `ActiveRecord::Base.transaction` currently fires before the transaction commits (same as turbo-rails). Use `broadcast_replace_later_to` for now; a future release will make sync broadcasts transactional.
+- `broadcasts_with_replay`: chat-history-as-a-stream where new subscribers replay from the beginning of retention rather than just the render watermark.
+- Server-side audience filtering (per-connection authorization that filters individual broadcasts).
+- Presence as a first-class primitive.
+- Falcon streaming-body code path. Puma is the only supported server in v1. A small `stream_app.rb` conditional will add Falcon in a follow-up.
 
 ## Database tables
 

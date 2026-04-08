@@ -43,12 +43,11 @@ module Pgbus
           @read_limit = read_limit
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
-          # Bidirectional map between logical stream names (what users pass
-          # to Pgbus.stream) and the PGMQ full table names PG emits on
-          # NOTIFY channels. The Dispatcher is the single source of truth
-          # for this translation; Registry and Connection stay blissfully
-          # unaware of the pgbus queue prefix.
-          @logical_to_full = {}
+          # PGMQ full table name (pgbus_<prefix>_<name>) → logical stream
+          # name. Populated on connect so handle_wake can translate
+          # Listener::WakeMessage#queue_name (a full table name, because
+          # that's what PG NOTIFY channels carry) into the logical name
+          # used by Registry and the in-flight buffer.
           @full_to_logical = {}
           @running = false
           @thread = nil
@@ -95,6 +94,11 @@ module Pgbus
             @logger.warn { "[Pgbus::Streamer::Dispatcher] unknown message: #{msg.class}" }
           end
         rescue StandardError => e
+          # Intentionally swallows per-message failures so one bad
+          # broadcast can't kill the dispatcher thread and orphan every
+          # connected client. The top-level run_loop rescue (below)
+          # does re-raise — a crash *between* messages is a real bug
+          # and the supervisor should see it.
           @logger.error { "[Pgbus::Streamer::Dispatcher] handling #{msg.class} raised #{e.class}: #{e.message}" }
         end
 
@@ -125,13 +129,13 @@ module Pgbus
 
           # Step 1: subscribe first. Any WakeMessage that arrives after
           # this line will see our in-flight buffer and fan out into it.
-          # The Listener is told the PGMQ full table name because that's
-          # what PG NOTIFY channels are keyed on; the Registry and the
-          # in-flight buffer use the logical stream name. The Dispatcher
-          # is the single translator between the two naming worlds.
-          full_name = full_table_name_for(stream)
+          # The Listener is told the prefixed PGMQ queue name (not the
+          # logical stream name) because the NOTIFY channel includes the
+          # prefix: pgmq.q_<prefixed>.INSERT. Registry and the in-flight
+          # buffer use the logical name. The Dispatcher is the single
+          # translator between the two naming worlds.
+          full_name = notify_queue_name_for(stream)
           @full_to_logical[full_name] = stream
-          @logical_to_full[stream] = full_name
           @listener.ensure_listening(full_name)
 
           # Step 2: install the in-flight buffer BEFORE any read.
@@ -164,7 +168,25 @@ module Pgbus
         end
 
         def handle_disconnect(msg)
-          @registry.unregister(msg.connection)
+          connection = msg.connection
+          stream = connection.stream_name
+          @registry.unregister(connection)
+
+          # If this was the last subscriber to the stream, release all
+          # per-stream state so long-running processes don't leak memory
+          # proportional to unique stream count (important for apps that
+          # use GlobalID-keyed streams like `order_42`). Three places to
+          # clean up:
+          #   1. @full_to_logical (the translation map — this file)
+          #   2. @in_flight[stream] (cleared by remove_in_flight already)
+          #   3. Listener's @listening_to set + the PG LISTEN itself
+          return unless @registry.empty?(stream) && @in_flight[stream].empty?
+
+          full_name = @full_to_logical.key(stream)
+          return unless full_name
+
+          @full_to_logical.delete(full_name)
+          @listener.remove_listening(full_name)
         end
 
         def minimum_cursor(registered, in_flight_pairs)
@@ -192,11 +214,12 @@ module Pgbus
           @in_flight.delete(stream) if pairs.empty?
         end
 
-        # Translates a logical stream name (pbns_xxx) into the PGMQ full
-        # table name (pgbus_int_pbns_xxx) that the NOTIFY trigger fires
-        # on. Uses Pgbus::Client's config.queue_name to match the prefix
-        # the Client already applied when send_message was called.
-        def full_table_name_for(stream_name)
+        # Translates a logical stream name (e.g. "chat") into the prefixed
+        # PGMQ queue name (e.g. "pgbus_int_chat") that appears in the
+        # NOTIFY channel `pgmq.q_<prefixed>.INSERT`. Mirrors the prefix
+        # Pgbus::Client#send_message already applied when the broadcast
+        # was published, so the Listener's LISTEN matches the NOTIFY.
+        def notify_queue_name_for(stream_name)
           @client.config.queue_name(stream_name)
         end
 

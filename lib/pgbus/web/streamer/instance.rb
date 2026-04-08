@@ -126,9 +126,7 @@ module Pgbus
             # might still be performing if their stop hadn't fully
             # returned yet.
             safely { IoWriter.write(connection, sentinel_bytes, deadline_ms: deadline_ms) }
-            safely do
-              connection.io.close if connection.io.respond_to?(:close) && !connection.io.closed?
-            end
+            safely { connection.close }
           end
         end
 

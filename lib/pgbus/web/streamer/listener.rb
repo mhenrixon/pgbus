@@ -9,20 +9,22 @@ module Pgbus
       # thread does the actual read_after + fanout.
       #
       # Threading:
-      #   - #start spawns ONE listener thread
-      #   - ensure_listening / remove_listening are called from the
-      #     dispatcher thread, which means the listener thread itself is
-      #     only running `wait_for_notify` — all LISTEN/UNLISTEN SQL goes
-      #     through a command queue that the listener thread drains between
-      #     notifies
+      #   - #start spawns ONE listener thread that sits in wait_for_notify
+      #   - ensure_listening / remove_listening execute LISTEN/UNLISTEN SQL
+      #     synchronously on the caller's thread, guarded by @conn_mutex
+      #     so they interleave safely with the listener's wait_for_notify.
+      #     The listener's run_loop does `sleep 0` between iterations to
+      #     release the mutex long enough for the dispatcher thread to
+      #     acquire it. Deferring LISTEN onto the listener thread would
+      #     open a race where a NOTIFY fires before the listener processes
+      #     the LISTEN command, silently dropping the notification.
       #   - #stop joins the thread cleanly
       #
       # Health check: `wait_for_notify(timeout)` returns nil on timeout. When
       # it does, the listener runs `SELECT 1` as a TCP keepalive. If that
       # raises, the connection is reset (`conn.reset`) and every channel in
-      # `@listening_to` is re-LISTENed. This is the fix for design doc §11 #1
-      # (silently dropped LISTEN connections from NAT / PG restart / network
-      # blips).
+      # `@listening_to` is re-LISTENed. This is the fix for silently dropped
+      # LISTEN connections from NAT / PG restart / network blips.
       #
       # NOTIFY channel naming (from pgmq_v1.11.0.sql:1634):
       #   PG_NOTIFY('pgmq.' || TG_TABLE_NAME || '.' || TG_OP, NULL)

@@ -24,6 +24,7 @@ module Pgbus
           @write_deadline_ms = write_deadline_ms
           @mutex = Mutex.new
           @dead = false
+          @closed = false
           @created_at = monotonic
           @last_write_at = @created_at
         end
@@ -73,6 +74,20 @@ module Pgbus
 
         def mark_dead!
           @dead = true
+        end
+
+        # Idempotent socket close for use by Instance#shutdown! and the
+        # heartbeat idle reaper. Wraps the respond_to? / closed? dance
+        # so callers don't need to know about StringIO-in-tests vs real
+        # Socket-in-prod or about the mark_dead! ordering.
+        def close
+          return if @closed
+
+          @closed = true
+          mark_dead!
+          @io.close if @io.respond_to?(:close) && !@io.closed?
+        rescue StandardError
+          # best effort — the IO may already be half-closed
         end
 
         private

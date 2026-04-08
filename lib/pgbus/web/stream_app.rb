@@ -33,9 +33,8 @@ module Pgbus
       PATH_PREFIX = "/pgbus/streams"
       private_constant :PATH_PREFIX
 
-      def initialize(streamer: nil, client: nil, config: nil, logger: nil, authorize: nil)
+      def initialize(streamer: nil, config: nil, logger: nil, authorize: nil)
         @streamer_override = streamer
-        @client_override   = client
         @config_override   = config
         @logger_override   = logger
         @authorize         = authorize || ->(_env, _stream_name) { true }
@@ -65,7 +64,6 @@ module Pgbus
         logger.error { "[Pgbus::StreamApp] #{e.class}: #{e.message}" }
         server_error
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       private
 
@@ -98,8 +96,12 @@ module Pgbus
       end
 
       def hijack_and_register(env, stream_name:, since_id:)
-        env["rack.hijack"].call
-        io = env["rack.hijack_io"] || env["rack.hijack"].call
+        # Rack's full-hijack API: calling env["rack.hijack"] returns
+        # the IO on some servers (Puma) and populates env["rack.hijack_io"]
+        # as a side effect on all servers. Use the side-effect variable
+        # if set (more portable), else fall back to the return value.
+        returned_io = env["rack.hijack"].call
+        io = env["rack.hijack_io"] || returned_io
 
         write_headers(io, stream_name: stream_name, since_id: since_id)
 
@@ -124,10 +126,6 @@ module Pgbus
 
       def streamer
         @streamer_override || Pgbus::Web::Streamer.current
-      end
-
-      def client
-        @client_override || Pgbus.client
       end
 
       def config

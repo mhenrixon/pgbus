@@ -7,7 +7,6 @@ require_relative "../integration_helper"
 # (libpq SSL context corruption). These tests run reliably on Linux (CI).
 FORK_PG_SAFE = !RUBY_PLATFORM.include?("darwin")
 
-# rubocop:disable RSpec/ExampleLength
 RSpec.describe "Signal handling (integration)", :integration do
   let(:client) { Pgbus.client }
 
@@ -186,7 +185,7 @@ RSpec.describe "Signal handling (integration)", :integration do
             trap("QUIT") { exit 0 }
             sleep 120
           end
-          @forks[child_pid] = { type: :worker, config: {} } # rubocop:disable RSpec/InstanceVariable
+          @forks[child_pid] = { type: :worker, config: {} }
           write_pipe.write("S")
           write_pipe.flush
         end
@@ -271,7 +270,7 @@ RSpec.describe "Signal handling (integration)", :integration do
         rescue StandardError => e
           warn "[child] process_message error: #{e.class}: #{e.message}"
         ensure
-          @in_flight&.decrement # rubocop:disable RSpec/InstanceVariable
+          @in_flight&.decrement
         end
 
         worker.run
@@ -302,4 +301,3 @@ RSpec.describe "Signal handling (integration)", :integration do
     end
   end
 end
-# rubocop:enable RSpec/ExampleLength
