@@ -28,9 +28,26 @@ module Pgbus
       # Pgbus::Web::Streamer::Dispatcher before delivering to the SSE client.
       # Callers pass a plain HTML string; the wrapping is an implementation
       # detail.
+      #
+      # Transactional semantics: if this call is made inside an open
+      # ActiveRecord transaction, the PGMQ insert is deferred to an
+      # after_commit callback. If the transaction rolls back, the broadcast
+      # silently drops — clients never see the change the database never
+      # persisted. This is the feature no other Rails real-time stack
+      # (including turbo-rails over ActionCable) can offer: the broadcast
+      # and the data mutation are atomic with respect to each other.
+      # Returns the assigned msg_id when sent synchronously, nil when
+      # deferred (the id isn't known until the after_commit callback runs).
       def broadcast(payload)
         ensure_queue!
-        @client.send_message(@name, { "html" => payload.to_s })
+        wrapped = { "html" => payload.to_s }
+        transaction = current_open_transaction
+        if transaction
+          transaction.after_commit { @client.send_message(@name, wrapped) }
+          nil
+        else
+          @client.send_message(@name, wrapped)
+        end
       end
 
       def current_msg_id
@@ -73,6 +90,25 @@ module Pgbus
           @client.ensure_stream_queue(@name)
           @ensured = true
         end
+      end
+
+      # Returns the current AR transaction if one is open, nil otherwise.
+      # Guarded by defined? so the streams subsystem stays usable in
+      # non-Rails contexts. AR's NullTransaction yields immediately from
+      # after_commit, so we have to check #open? explicitly — otherwise
+      # every call path would hit the "deferred" branch and we'd lose the
+      # msg_id return value.
+      def current_open_transaction
+        return nil unless defined?(::ActiveRecord::Base)
+
+        connection = ::ActiveRecord::Base.connection
+        transaction = connection.current_transaction
+        transaction if transaction.open?
+      rescue StandardError
+        # Defensive: if AR is loaded but not yet connected (e.g. a
+        # Rake task invoked before Rails boot), don't let the transaction
+        # probe break the broadcast.
+        nil
       end
     end
   end
