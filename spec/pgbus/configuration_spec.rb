@@ -847,8 +847,8 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_idle_timeout).to eq(3_600)
     end
 
-    it "has a 5 second LISTEN health check interval" do
-      expect(config.streams_listen_health_check_ms).to eq(5_000)
+    it "has a 250ms LISTEN health check interval" do
+      expect(config.streams_listen_health_check_ms).to eq(250)
     end
 
     it "has a 5 second write deadline" do
@@ -879,6 +879,21 @@ RSpec.describe Pgbus::Configuration do
     it "rejects non-Hash streams_retention" do
       config.streams_retention = "nope"
       expect { config.validate! }.to raise_error(ArgumentError, /streams_retention/)
+    end
+
+    it "rejects non-positive streams_idle_timeout" do
+      config.streams_idle_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_idle_timeout/)
+    end
+
+    it "rejects non-positive streams_listen_health_check_ms" do
+      config.streams_listen_health_check_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_listen_health_check_ms/)
+    end
+
+    it "rejects non-positive streams_write_deadline_ms" do
+      config.streams_write_deadline_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_write_deadline_ms/)
     end
 
     it "accepts a valid streams config" do

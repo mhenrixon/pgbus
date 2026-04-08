@@ -184,6 +184,47 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
   end
 
   describe "reconnect on PG::Error" do
+    # A fake PG connection that can be told to fail the next LISTEN call.
+    # Used by the reconnect-preservation test below to prove that a
+    # mid-loop failure inside reconnect! does not drop the canonical
+    # subscription set.
+    let(:raising_pg) do
+      Class.new do
+        attr_reader :reset_count, :executed
+
+        def initialize
+          @executed = []
+          @events = Queue.new
+          @reset_count = 0
+          @raise_on_next_listen = false
+        end
+
+        def exec(sql)
+          @executed << sql
+          if sql.start_with?("LISTEN") && @raise_on_next_listen
+            @raise_on_next_listen = false
+            raise PG::Error, "boom"
+          end
+          nil
+        end
+
+        def wait_for_notify(_timeout)
+          event = @events.pop
+          case event[0]
+          when :timeout then nil
+          when :raise then raise event[1]
+          when :close then raise PG::Error, "closed"
+          end
+        end
+
+        def reset = (@reset_count += 1)
+        def close = (@events << [:close])
+        def push_timeout = @events << [:timeout]
+        def push_error(error) = @events << [:raise, error]
+        def fail_next_listen! = (@raise_on_next_listen = true)
+      end.new
+    end
+
     it "calls reset and re-LISTENs on every previously-known channel" do
       listener.start
 
@@ -212,6 +253,61 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
         "pgmq.q_chat.INSERT",
         "pgmq.q_presence.INSERT"
       )
+    end
+
+    it "preserves the canonical subscription set when a re-LISTEN raises mid-loop" do
+      raising_listener = described_class.new(
+        pg_connection: raising_pg, dispatch_queue: dispatch_queue,
+        health_check_ms: 50, logger: logger
+      )
+      raising_listener.start
+      raising_listener.ensure_listening("chat")
+      raising_listener.ensure_listening("presence")
+      raising_pg.push_timeout
+      wait_until { raising_listener.listening_to.size == 2 }
+
+      # Make the second LISTEN inside the reconnect loop raise.
+      raising_pg.fail_next_listen!
+      raising_pg.push_error(PG::Error.new("network blip"))
+      wait_until { raising_pg.reset_count >= 1 }
+      sleep 0.1
+
+      # The previous version cleared @listening_to before the loop, so
+      # any channel not yet retried was permanently forgotten. Now both
+      # channels survive a transient mid-reconnect failure.
+      expect(raising_listener.listening_to).to contain_exactly(
+        "pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT"
+      )
+      raising_listener.stop
+    end
+  end
+
+  describe "ensure_listening synchronous handshake" do
+    it "blocks until the listener thread has actually executed the LISTEN" do
+      listener.start
+
+      # Run ensure_listening on a separate thread so we can observe
+      # whether it's still waiting on the ack while wait_for_notify
+      # is still blocking the listener thread.
+      acked = false
+      caller_thread = Thread.new do
+        listener.ensure_listening("chat")
+        acked = true
+      end
+
+      # Give the caller thread a chance to push and start blocking on
+      # the ack queue. With the old async behavior `acked` would
+      # already be true here.
+      sleep 0.05
+      expect(acked).to be false
+      expect(fake_pg.executed.any? { |s| s.include?("LISTEN") }).to be false
+
+      # Unblock the listener thread; it will run drain_commands → do_listen → ack.
+      fake_pg.push_timeout
+      caller_thread.join(2)
+
+      expect(acked).to be true
+      expect(fake_pg.executed).to include(%(LISTEN "pgmq.q_chat.INSERT"))
     end
   end
 end

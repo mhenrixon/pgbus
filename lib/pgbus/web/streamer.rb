@@ -14,22 +14,37 @@ module Pgbus
     # share an instance across requests within a worker without passing it
     # through every method call.
     module Streamer
+      # Module-level mutex protecting `@current`. Without this, two
+      # concurrent first-callers inside a multi-threaded Puma worker
+      # can both build and start an Instance, leaking listener,
+      # dispatcher, and heartbeat threads plus a PG connection. Same
+      # gap would let `reset!` overlap teardown with a fresh
+      # replacement instance.
+      @current_mutex = Mutex.new
+
       class << self
         # Returns the worker-local instance, creating it on first call.
         # `factory_opts` are passed to `Instance.new` the first time.
         def current(**factory_opts)
-          @current ||= Instance.new(**factory_opts).tap(&:start)
+          @current_mutex.synchronize do
+            @current ||= Instance.new(**factory_opts).tap(&:start)
+          end
         end
 
         # Explicitly set the current instance — used by tests and by the
         # Puma plugin to inject a pre-built instance.
-        attr_writer :current
+        def current=(instance)
+          @current_mutex.synchronize { @current = instance }
+        end
 
         # Tear down the current instance and clear the slot. Called by the
         # Puma shutdown hook (Phase 4.4) and by tests between examples.
         def reset!
-          instance = @current
-          @current = nil
+          instance = nil
+          @current_mutex.synchronize do
+            instance = @current
+            @current = nil
+          end
           instance&.shutdown!
         end
       end

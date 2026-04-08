@@ -42,7 +42,11 @@ module Pgbus
 
       def self.present?(value)
         return false if value.nil?
-        return value.positive? || value.zero? if value.is_a?(Integer)
+        # Any Integer is "present" so precedence is decided here, not by
+        # the sign of the value. validate! rejects negatives separately
+        # so a caller passing a literal -1 still crashes loud rather than
+        # silently falling through to query_since.
+        return true if value.is_a?(Integer)
 
         !value.to_s.strip.empty?
       end
