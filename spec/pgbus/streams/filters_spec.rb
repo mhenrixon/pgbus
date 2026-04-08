@@ -59,12 +59,16 @@ RSpec.describe Pgbus::Streams::Filters do
       # Audience filtering is a data-isolation feature. Failing open
       # on a typo'd or renamed label would turn a restricted broadcast
       # into a public one — the opposite of what the developer wanted.
-      # The warning log is loud enough that typos still get noticed
-      # in dev ("why are no subscribers receiving my broadcast?" →
-      # check the log).
+      # The warning log is the developer-facing signal; assert it fires
+      # so future changes can't silently drop the log and regress the
+      # "typos are loud" guarantee.
       warnings = []
-      filters_with_logger = described_class.new(logger: double("logger", warn: ->(&b) { warnings << b.call }))
+      logger = instance_double(Logger)
+      allow(logger).to receive(:warn) { |&block| warnings << block.call }
+      filters_with_logger = described_class.new(logger: logger)
+
       expect(filters_with_logger.visible?(:nope, { any: :context })).to be false
+      expect(warnings).to include(a_string_matching(/unknown filter label.*:nope/))
     end
 
     it "returns true when the label is nil (no filter applied)" do
@@ -74,8 +78,16 @@ RSpec.describe Pgbus::Streams::Filters do
     it "gracefully handles a raising filter by logging and returning false (fail-closed on exception)" do
       # If the predicate itself raises, we fail CLOSED — better to drop
       # one broadcast than to show private data to the wrong user.
-      filters.register(:broken) { |_ctx| raise "boom" }
-      expect(filters.visible?(:broken, {})).to be false
+      # Verify the error log fires as well, for the same "don't let
+      # this behavior silently regress" reason as the unknown-label test.
+      errors = []
+      logger = instance_double(Logger)
+      allow(logger).to receive(:error) { |&block| errors << block.call }
+      filters_with_logger = described_class.new(logger: logger)
+      filters_with_logger.register(:broken) { |_ctx| raise "boom" }
+
+      expect(filters_with_logger.visible?(:broken, {})).to be false
+      expect(errors).to include(a_string_matching(/filter.*:broken.*raised.*boom/))
     end
   end
 end
