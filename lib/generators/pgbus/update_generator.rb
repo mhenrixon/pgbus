@@ -33,10 +33,11 @@ module Pgbus
         source_path = File.expand_path(options[:source], destination_root)
         destination_path = File.expand_path(options[:destination], destination_root)
 
-        unless File.exist?(source_path)
-          say_status :error, "#{options[:source]} not found", :red
-          exit 1
-        end
+        # Thor::Error is the idiomatic way to abort a Rails generator. Thor
+        # catches it, prints the message in red, and exits with status 1
+        # without a Ruby backtrace. exit 1 would skip the framework's
+        # cleanup hooks and is hard to test.
+        raise Thor::Error, "Source file not found: #{options[:source]}" unless File.exist?(source_path)
 
         ruby_source = ConfigConverter.from_yaml(source_path)
         create_file destination_path, ruby_source

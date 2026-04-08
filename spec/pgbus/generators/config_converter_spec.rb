@@ -160,7 +160,6 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
         {
           "production" => {
             "pool_size" => 17,
-            "pool_timeout" => 5,
             "workers" => [{ "queues" => ["*"], "threads" => 15 }]
           }
         }
@@ -172,6 +171,37 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
 
       it "still emits the workers (pool_size is what was dropped)" do
         expect(output).to include('c.workers = "*: 15"')
+      end
+    end
+
+    context "with a non-default pool_timeout" do
+      let(:input) do
+        {
+          "production" => {
+            "pool_timeout" => 10 # default is 5; emit the override
+          }
+        }
+      end
+
+      it "emits pool_timeout when it differs from the gem default" do
+        # pool_timeout is a KNOWN_SETTING (still supported), not in
+        # DEPRECATED_SETTINGS — only the value-matches-default rule
+        # would drop it. With a non-default value it must round-trip.
+        expect(output).to include("c.pool_timeout = 10")
+      end
+    end
+
+    context "with pool_timeout matching the default" do
+      let(:input) do
+        {
+          "production" => {
+            "pool_timeout" => 5 # default
+          }
+        }
+      end
+
+      it "drops pool_timeout to keep the initializer minimal" do
+        expect(output).not_to include("pool_timeout")
       end
     end
 
