@@ -165,7 +165,15 @@ module Pgbus
       @streams_heartbeat_interval = 15
       @streams_max_connections = 2_000
       @streams_idle_timeout = 3_600 # 1 hour
-      @streams_listen_health_check_ms = 5_000
+      # 250ms — this value plays two roles: (1) the TCP keepalive
+      # interval for the streamer's PG LISTEN connection, and (2) the
+      # upper bound on how long Dispatcher#handle_connect waits for
+      # the Listener to acknowledge a synchronous ensure_listening
+      # call. 5s was unbounded enough to drop messages on a
+      # realistic subscribe burst; 250ms keeps the connect-path race
+      # window tight while still leaving headroom over a typical
+      # PG keepalive interval.
+      @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
       @streams_falcon_streaming_body = false
     end

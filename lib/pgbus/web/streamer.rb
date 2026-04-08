@@ -2,11 +2,52 @@
 
 module Pgbus
   module Web
-    # The worker-local singleton that owns SSE connections, one PG LISTEN
-    # session, and the dispatch/heartbeat threads. Phase 1 ships only the
-    # namespace and the in-memory Registry — the threaded coordinator and
-    # integration with Puma arrive in Phase 3.
+    # The worker-local coordinator that owns SSE connections, one PG LISTEN
+    # session, and the dispatch/heartbeat threads. Lazily created on the
+    # first SSE connection to a Puma worker (or eagerly in tests). There is
+    # exactly one Instance per Puma worker process; the module-level
+    # accessors memoise it.
+    #
+    # This is NOT a Singleton in the GoF sense — tests are free to construct
+    # throwaway Instances directly and dependency-inject everything. The
+    # `current` / `reset!` helpers exist purely so the Rack StreamApp can
+    # share an instance across requests within a worker without passing it
+    # through every method call.
     module Streamer
+      # Module-level mutex protecting `@current`. Without this, two
+      # concurrent first-callers inside a multi-threaded Puma worker
+      # can both build and start an Instance, leaking listener,
+      # dispatcher, and heartbeat threads plus a PG connection. Same
+      # gap would let `reset!` overlap teardown with a fresh
+      # replacement instance.
+      @current_mutex = Mutex.new
+
+      class << self
+        # Returns the worker-local instance, creating it on first call.
+        # `factory_opts` are passed to `Instance.new` the first time.
+        def current(**factory_opts)
+          @current_mutex.synchronize do
+            @current ||= Instance.new(**factory_opts).tap(&:start)
+          end
+        end
+
+        # Explicitly set the current instance — used by tests and by the
+        # Puma plugin to inject a pre-built instance.
+        def current=(instance)
+          @current_mutex.synchronize { @current = instance }
+        end
+
+        # Tear down the current instance and clear the slot. Called by the
+        # Puma shutdown hook (Phase 4.4) and by tests between examples.
+        def reset!
+          instance = nil
+          @current_mutex.synchronize do
+            instance = @current
+            @current = nil
+          end
+          instance&.shutdown!
+        end
+      end
     end
   end
 end
