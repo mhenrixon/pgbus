@@ -84,6 +84,14 @@ module Pgbus
         self
       end
 
+      # Returns a Pgbus::Streams::Presence handle for this stream.
+      # The Presence object exposes join/leave/touch/members/sweep!
+      # for tracking who is currently subscribed. See
+      # lib/pgbus/streams/presence.rb for the API.
+      def presence
+        @presence ||= Presence.new(self)
+      end
+
       # Mirrors `Turbo::Streams::StreamName#stream_name_from`. Strings pass
       # through; objects with `to_gid_param` or `to_param` are coerced; arrays
       # are joined with `:`. The result is suitable both as a logical stream

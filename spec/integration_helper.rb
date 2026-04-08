@@ -22,6 +22,22 @@ def bootstrap_integration_tables(conn)
       CREATE UNIQUE INDEX idx_pgbus_uniqueness_keys_key ON pgbus_uniqueness_keys (lock_key);
     SQL
   end
+
+  unless conn.table_exists?("pgbus_presence_members")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_presence_members (
+        stream_name VARCHAR NOT NULL,
+        member_id VARCHAR NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}',
+        joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_presence_members_pk
+        ON pgbus_presence_members (stream_name, member_id);
+      CREATE INDEX idx_pgbus_presence_members_sweep
+        ON pgbus_presence_members (stream_name, last_seen_at);
+    SQL
+  end
 rescue StandardError => e
   warn "[pgbus integration] Bootstrap warning: #{e.message}"
 end
@@ -94,6 +110,7 @@ def cleanup_tables
   tables = %w[
     pgbus_semaphores pgbus_blocked_executions pgbus_uniqueness_keys
     pgbus_processes pgbus_recurring_executions pgbus_failed_events
+    pgbus_presence_members
   ]
   tables.each do |table|
     conn.execute("DELETE FROM #{table}")
