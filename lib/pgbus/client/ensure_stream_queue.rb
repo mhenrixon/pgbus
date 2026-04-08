@@ -20,6 +20,12 @@ module Pgbus
       def ensure_stream_queue(stream_name)
         ensure_queue(stream_name)
 
+        # CREATE INDEX IF NOT EXISTS is idempotent in Postgres but still
+        # requires a roundtrip and a brief ACCESS SHARE lock on the archive
+        # table. Broadcast-per-after_commit loops can hit this 1000x/sec on
+        # the same stream, so memoize per-process after the first success.
+        return if @stream_indexes_created[stream_name]
+
         sanitized = QueueNameValidator.sanitize!(config.queue_name(stream_name))
         sql = <<~SQL
           CREATE INDEX IF NOT EXISTS a_#{sanitized}_msg_id_idx
@@ -31,6 +37,8 @@ module Pgbus
             conn.exec(sql)
           end
         end
+
+        @stream_indexes_created[stream_name] = true
       end
     end
   end

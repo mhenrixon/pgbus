@@ -244,6 +244,18 @@ module Pgbus
         raise ArgumentError, "streams_heartbeat_interval must be a positive number"
       end
 
+      unless streams_idle_timeout.is_a?(Numeric) && streams_idle_timeout.positive?
+        raise ArgumentError, "streams_idle_timeout must be a positive number"
+      end
+
+      unless streams_listen_health_check_ms.is_a?(Integer) && streams_listen_health_check_ms.positive?
+        raise ArgumentError, "streams_listen_health_check_ms must be a positive integer"
+      end
+
+      unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
+        raise ArgumentError, "streams_write_deadline_ms must be a positive integer"
+      end
+
       raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
     end
 
