@@ -102,10 +102,21 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
                                        "<turbo-stream>B</turbo-stream>"
                                      ])
 
+    # Replay IDs must be strictly above the watermark and monotonic —
+    # same invariant page_born_stale_spec proves on Puma. Asserting
+    # it here proves Falcon's hijack path preserves the cursor
+    # semantics the whole subsystem depends on.
+    replay_ids = events.map { |e| e.id.to_i }
+    expect(replay_ids).to all(be > rendered_watermark)
+    expect(replay_ids).to eq(replay_ids.sort)
+
     stream.broadcast("<turbo-stream>C</turbo-stream>")
     live_events = client.wait_for_events(count: 3, timeout: 5)
     expect(live_events.size).to eq(3)
     expect(live_events.last.data).to include(">C<")
+    # The live-path event id must be strictly greater than the last
+    # replay event id.
+    expect(live_events.last.id.to_i).to be > events.last.id.to_i
 
     client.close
   end
