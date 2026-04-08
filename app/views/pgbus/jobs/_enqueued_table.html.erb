@@ -45,11 +45,10 @@
             <% payload = pgbus_parse_message(j[:message]) %>
             <tr>
               <td class="w-10 px-4 py-3 align-top">
-                <input type="checkbox" data-bulk-item
+                <input type="checkbox" data-bulk-item data-pgbus-action="bulk-row-toggle"
                        aria-label="<%= t("pgbus.helpers.bulk_select_row", id: j[:msg_id]) %>"
                        data-queue-name="<%= j[:queue_name] %>" data-msg-id="<%= j[:msg_id] %>"
-                       class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1"
-                       onchange="this.nextElementSibling.disabled = !this.checked; this.nextElementSibling.nextElementSibling.disabled = !this.checked">
+                       class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1">
                 <input type="hidden" name="messages[][queue_name]" value="<%= j[:queue_name] %>" form="bulk-discard-enqueued-form" disabled>
                 <input type="hidden" name="messages[][msg_id]" value="<%= j[:msg_id] %>" form="bulk-discard-enqueued-form" disabled>
               </td>
