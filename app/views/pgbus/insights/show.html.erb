@@ -159,6 +159,65 @@
   </table>
 </div>
 
+<% if @stream_stats_available %>
+<!-- Stream stats -->
+<div class="mt-8">
+  <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4"><%= t("pgbus.insights.show.streams.title") %></h2>
+
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 mb-6">
+    <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.summary.broadcasts") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_number(@stream_summary[:broadcasts]) %></dd>
+    </div>
+    <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.summary.connects") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400"><%= pgbus_number(@stream_summary[:connects]) %></dd>
+    </div>
+    <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.summary.disconnects") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-orange-600 dark:text-orange-400"><%= pgbus_number(@stream_summary[:disconnects]) %></dd>
+    </div>
+    <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.summary.active") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= pgbus_number(@stream_summary[:active_estimate]) %></dd>
+    </div>
+    <div class="rounded-lg bg-white dark:bg-gray-800 p-4 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+      <dt class="text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.summary.avg_fanout") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white"><%= @stream_summary[:avg_fanout]&.round(1) || 0 %></dd>
+    </div>
+  </div>
+
+  <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+    <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+      <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300"><%= t("pgbus.insights.show.streams.top.title") %></h3>
+    </div>
+    <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+      <thead class="bg-gray-50 dark:bg-gray-900">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.top.headers.stream") %></th>
+          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.top.headers.broadcasts") %></th>
+          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.top.headers.avg_fanout") %></th>
+          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-gray-400"><%= t("pgbus.insights.show.streams.top.headers.avg_ms") %></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+        <% @top_streams.each do |row| %>
+          <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+            <td data-label="Stream" class="px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300"><%= row[:stream_name] %></td>
+            <td data-label="Broadcasts" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_number(row[:count]) %></td>
+            <td data-label="Avg Fanout" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= row[:avg_fanout]&.round(1) || 0 %></td>
+            <td data-label="Avg Duration" class="px-4 py-3 text-sm text-right font-mono text-gray-700 dark:text-gray-300"><%= pgbus_ms_duration(row[:avg_ms]) %></td>
+          </tr>
+        <% end %>
+        <% if @top_streams.empty? %>
+          <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-gray-400 dark:text-gray-500"><%= t("pgbus.insights.show.streams.top.empty") %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</div>
+<% end %>
+
 <script type="module" nonce="<%= content_security_policy_nonce %>">
   import { renderCharts, observeThemeChanges } from "charts";
 

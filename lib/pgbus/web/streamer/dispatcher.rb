@@ -45,7 +45,7 @@ module Pgbus
 
         def initialize(client:, registry:, listener:, dispatch_queue:,
                        logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
-                       filters: nil)
+                       filters: nil, config: nil)
           @client = client
           @registry = registry
           @listener = listener
@@ -56,6 +56,13 @@ module Pgbus
           # code picks up whatever was registered at boot. Tests inject
           # a fresh Filters instance to avoid cross-test pollution.
           @filters = filters || Pgbus::Streams.filters
+          # Config is injected so the Dispatcher can read
+          # `streams_stats_enabled` without reaching into the global
+          # Pgbus.configuration at every call site. Tests pass a
+          # throwaway config to flip the flag independently of the
+          # process-wide setting. Falls back to the global config
+          # for production call sites that don't specify one.
+          @config = config || Pgbus.configuration
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
           # PGMQ full table name (pgbus_<prefix>_<name>) → logical stream
@@ -181,6 +188,7 @@ module Pgbus
         end
 
         def handle_wake(msg)
+          started_at = monotonic_ms
           # msg.queue_name is the PGMQ full table name (pgbus_int_pbns_xxx),
           # but connections are registered under the logical name (pbns_xxx).
           # Translate before looking up.
@@ -217,9 +225,22 @@ module Pgbus
           end
 
           prune_dead(registered)
+
+          # Record one stat row per wake. Fanout is the number of
+          # subscribers (registered + in-flight) that received the
+          # broadcast before any filter dropped it — the "intended"
+          # audience size, which is the useful operator number even
+          # when audience filtering is in play.
+          record_stat(
+            stream_name: stream,
+            event_type: "broadcast",
+            started_at: started_at,
+            fanout: registered.size + in_flight_pairs.size
+          )
         end
 
         def handle_connect(msg)
+          started_at = monotonic_ms
           connection = msg.connection
           stream = connection.stream_name
 
@@ -269,6 +290,17 @@ module Pgbus
           else
             @registry.register(connection)
           end
+
+          # Record the connect regardless of whether the connection
+          # survived the replay — a dead-before-register is still an
+          # operator-visible "connection attempt" and disconnects
+          # won't be recorded for it, so dropping it here would
+          # under-count.
+          record_stat(
+            stream_name: stream,
+            event_type: "connect",
+            started_at: started_at
+          )
         rescue StandardError => e
           # Same leak path for exceptions in steps 1-4. Mark dead and
           # scrub state so a transient failure on a single connect
@@ -282,11 +314,18 @@ module Pgbus
         end
 
         def handle_disconnect(msg)
+          started_at = monotonic_ms
           connection = msg.connection
           stream = connection.stream_name
           @registry.unregister(connection)
           @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
+
+          record_stat(
+            stream_name: stream,
+            event_type: "disconnect",
+            started_at: started_at
+          )
         end
 
         # If this stream has no remaining subscribers (registered or
@@ -399,6 +438,28 @@ module Pgbus
             label = envelope.respond_to?(:visible_to) ? envelope.visible_to : nil
             @filters.visible?(label, connection.context)
           end
+        end
+
+        def monotonic_ms
+          ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) * 1000.0
+        end
+
+        # Opt-in stream event stat recording. Gated by
+        # `config.streams_stats_enabled` (default false) because
+        # stream volume can dwarf job volume in chat-style apps,
+        # and the Insights surface is only worth the INSERT cost
+        # if operators actually look at it. All failures are
+        # swallowed by StreamStat.record! itself so a stats-table
+        # outage cannot block the dispatcher.
+        def record_stat(stream_name:, event_type:, started_at:, fanout: nil)
+          return unless @config.streams_stats_enabled
+
+          Pgbus::StreamStat.record!(
+            stream_name: stream_name,
+            event_type: event_type,
+            duration_ms: (monotonic_ms - started_at).round,
+            fanout: fanout
+          )
         end
       end
     end

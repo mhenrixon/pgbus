@@ -630,6 +630,34 @@ module Pgbus
         []
       end
 
+      # Stream stats — only populated when streams_stats_enabled is
+      # true AND the migration has been run. Controllers should gate
+      # rendering on `stream_stats_available?` to avoid showing empty
+      # sections.
+      def stream_stats_available?
+        Pgbus.configuration.streams_stats_enabled && StreamStat.table_exists?
+      rescue StandardError
+        false
+      end
+
+      def stream_stats_summary(minutes: 60)
+        StreamStat.summary(minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching stream stats summary: #{e.message}" }
+        {
+          broadcasts: 0, connects: 0, disconnects: 0,
+          active_estimate: 0, avg_fanout: 0,
+          avg_broadcast_ms: 0, avg_connect_ms: 0
+        }
+      end
+
+      def top_streams(limit: 10, minutes: 60)
+        StreamStat.top_streams(limit: limit, minutes: minutes)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching top streams: #{e.message}" }
+        []
+      end
+
       # Subscriber registry
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|

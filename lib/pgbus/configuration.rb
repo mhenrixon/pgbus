@@ -88,7 +88,8 @@ module Pgbus
     attr_accessor :streams_enabled, :streams_queue_prefix, :streams_signed_name_secret,
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
-                  :streams_write_deadline_ms, :streams_falcon_streaming_body
+                  :streams_write_deadline_ms, :streams_falcon_streaming_body,
+                  :streams_stats_enabled
 
     def initialize
       @database_url = nil
@@ -176,6 +177,14 @@ module Pgbus
       @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
       @streams_falcon_streaming_body = false
+      # Opt-in: when true, the Dispatcher writes one row to
+      # pgbus_stream_stats per broadcast/connect/disconnect. Default
+      # off because stream event volume can be much higher than job
+      # volume and the Insights surface is only useful if operators
+      # actually look at it. Separate from #stats_enabled (which
+      # gates pgbus_job_stats recording) on purpose — operators
+      # usually want job stats on and stream stats off, or vice versa.
+      @streams_stats_enabled = false
     end
 
     def queue_name(name)
