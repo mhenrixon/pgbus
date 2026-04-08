@@ -108,7 +108,7 @@ RSpec.describe Pgbus::Client do
       config.listen_notify = true
       client.ensure_queue("jobs")
 
-      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: config.notify_throttle_ms)
+      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: Pgbus::Client::NOTIFY_THROTTLE_MS)
     end
 
     it "skips LISTEN/NOTIFY when listen_notify is false" do
@@ -478,6 +478,89 @@ RSpec.describe Pgbus::Client do
 
       total = client.purge_archive("default", older_than: Time.now, batch_size: 50)
       expect(total).to eq(60) # 50 + 10
+    end
+  end
+
+  describe "#message_exists?" do
+    let(:conn) { double("conn") }
+
+    before { allow(client).to receive(:with_raw_connection).and_yield(conn) }
+
+    it "raises ArgumentError when neither msg_id nor uniqueness_key is given" do
+      expect { client.message_exists?("default") }.to raise_error(ArgumentError, /exactly one/)
+    end
+
+    it "raises ArgumentError when both msg_id and uniqueness_key are given" do
+      expect do
+        client.message_exists?("default", msg_id: 1, uniqueness_key: "MyJob")
+      end.to raise_error(ArgumentError, /exactly one/)
+    end
+
+    it "accepts a symbol queue name" do
+      allow(conn).to receive(:exec_params).with(
+        a_string_matching(/pgmq\.q_pgbus_test_default/),
+        [42]
+      ).and_return(double("result", ntuples: 1))
+
+      expect(client.message_exists?(:default, msg_id: 42)).to be(true)
+    end
+
+    context "when looking up by msg_id" do
+      it "returns true when the row exists in the prefixed queue table" do
+        allow(conn).to receive(:exec_params).with(
+          a_string_matching(/SELECT 1 FROM pgmq\.q_pgbus_test_default WHERE msg_id = \$1/),
+          [42]
+        ).and_return(double("result", ntuples: 1))
+
+        expect(client.message_exists?("default", msg_id: 42)).to be(true)
+      end
+
+      it "returns false when the row does not exist" do
+        allow(conn).to receive(:exec_params).and_return(double("result", ntuples: 0))
+
+        expect(client.message_exists?("default", msg_id: 42)).to be(false)
+      end
+
+      it "accepts an already-prefixed physical queue name" do
+        allow(conn).to receive(:exec_params).with(
+          a_string_matching(/pgmq\.q_pgbus_test_default/),
+          [42]
+        ).and_return(double("result", ntuples: 1))
+
+        expect(client.message_exists?("pgbus_test_default", msg_id: 42)).to be(true)
+      end
+    end
+
+    context "when looking up by uniqueness_key" do
+      it "queries the JSONB pgbus_uniqueness_key field" do
+        allow(conn).to receive(:exec_params).with(
+          a_string_matching(/message::jsonb ->> 'pgbus_uniqueness_key' = \$1/),
+          ["MyJob"]
+        ).and_return(double("result", ntuples: 1))
+
+        expect(client.message_exists?("default", uniqueness_key: "MyJob")).to be(true)
+      end
+    end
+
+    context "when the queue table is missing" do
+      before { stub_const("PG::UndefinedTable", Class.new(StandardError)) }
+
+      it "returns nil when the cause is PG::UndefinedTable (locale-independent)" do
+        cause = PG::UndefinedTable.new("relation does not exist")
+        wrapped = ActiveRecord::StatementInvalid.new("ERROR: relation \"pgmq.q_x\" does not exist")
+        allow(wrapped).to receive(:cause).and_return(cause)
+        allow(conn).to receive(:exec_params).and_raise(wrapped)
+
+        expect(client.message_exists?("nonexistent", msg_id: 1)).to be_nil
+      end
+
+      it "re-raises a StatementInvalid when it is not an UndefinedTable" do
+        wrapped = ActiveRecord::StatementInvalid.new("syntax error")
+        allow(wrapped).to receive(:cause).and_return(StandardError.new("syntax error"))
+        allow(conn).to receive(:exec_params).and_raise(wrapped)
+
+        expect { client.message_exists?("default", msg_id: 1) }.to raise_error(ActiveRecord::StatementInvalid)
+      end
     end
   end
 

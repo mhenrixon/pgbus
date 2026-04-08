@@ -163,18 +163,18 @@
   import { renderCharts, observeThemeChanges } from "charts";
 
   const i18n = {
-    seriesName: "<%= j(t("pgbus.insights.show.charts.series_name")) %>",
-    noData: "<%= j(t("pgbus.insights.show.charts.no_data")) %>",
-    failedToLoad: "<%= j(t("pgbus.insights.show.charts.failed_to_load")) %>",
-    latencyAvg: "<%= j(t("pgbus.insights.show.charts.latency_avg")) %>",
-    latencyP95: "<%= j(t("pgbus.insights.show.charts.latency_p95")) %>",
+    seriesName: <%= t("pgbus.insights.show.charts.series_name").to_json.html_safe %>,
+    noData: <%= t("pgbus.insights.show.charts.no_data").to_json.html_safe %>,
+    failedToLoad: <%= t("pgbus.insights.show.charts.failed_to_load").to_json.html_safe %>,
+    latencyAvg: <%= t("pgbus.insights.show.charts.latency_avg").to_json.html_safe %>,
+    latencyP95: <%= t("pgbus.insights.show.charts.latency_p95").to_json.html_safe %>,
   };
 
   let chartData = null;
 
   observeThemeChanges(() => chartData, i18n);
 
-  fetch("<%= pgbus.api_insights_path(minutes: @minutes) %>")
+  fetch(<%= pgbus.api_insights_path(minutes: @minutes).to_json.html_safe %>)
     .then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
