@@ -91,14 +91,25 @@ module Pgbus
     # problem means `Pgbus.stream(...)` would be undefined on the first call.
     # Referencing Streams::Stream inside the method body forces Zeitwerk to
     # load lib/pgbus/streams.rb lazily on first use, which is fine.
+    #
+    # Caches Stream instances by logical name so high-frequency callers
+    # (e.g. Turbo::StreamsChannel.broadcast_stream_to inside an
+    # after_update_commit callback firing 1000x/sec) don't allocate a new
+    # Stream + Mutex per broadcast. The cache is process-local; reset!
+    # clears it. The cache key is the resolved name string, not the raw
+    # streamables, so `Pgbus.stream(@order)` and `Pgbus.stream(@order)`
+    # in the same process return the same instance.
     def stream(streamables)
-      Streams::Stream.new(streamables)
+      name = Streams::Stream.name_from(streamables)
+      @stream_cache ||= Concurrent::Map.new
+      @stream_cache.compute_if_absent(name) { Streams::Stream.new(streamables) }
     end
 
     def reset!
       @client&.close
       @client = nil
       @configuration = nil
+      @stream_cache = nil
     end
 
     # Discard the inherited PGMQ client after fork.

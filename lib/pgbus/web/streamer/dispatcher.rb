@@ -116,11 +116,51 @@ module Pgbus
             msg = @queue.pop
             break if msg == :__stop__
 
-            handle(msg)
+            # Wake coalescing: if a WakeMessage arrives, opportunistically
+            # drain consecutive same-stream wakes from the queue. Without
+            # this, N broadcasts in rapid succession produce N
+            # WakeMessages, each running its own read_after roundtrip
+            # even though one read_after with the lowest cursor would
+            # have pulled all N messages. The drain is bounded by the
+            # queue's current contents — once we hit a non-Wake or a
+            # different stream, we stop and let the regular path handle
+            # the rest.
+            if msg.is_a?(WakeMessage)
+              wakes, trailing = drain_wakes_for(msg)
+              wakes.each { |w| handle(w) }
+              handle(trailing) if trailing
+            else
+              handle(msg)
+            end
           end
         rescue StandardError => e
           @logger.error { "[Pgbus::Streamer::Dispatcher] crashed: #{e.class}: #{e.message}" }
           raise
+        end
+
+        # Coalesces consecutive WakeMessages from the queue into one
+        # per unique stream. Returns [coalesced_wakes, trailing_msg]
+        # where trailing_msg is the first non-WakeMessage we hit (or
+        # nil if the queue is empty after the wakes). The caller
+        # processes the wakes first, then the trailing message — same
+        # order as the original queue, but with redundant wakes folded.
+        def drain_wakes_for(first)
+          seen = Set.new([first.queue_name])
+          coalesced = [first]
+          loop do
+            begin
+              peek = @queue.pop(true)
+            rescue ThreadError
+              return [coalesced, nil] # queue drained
+            end
+
+            return [coalesced, peek] unless peek.is_a?(WakeMessage)
+
+            next if seen.include?(peek.queue_name)
+
+            seen.add(peek.queue_name)
+            coalesced << peek
+          end
         end
 
         def handle(msg)

@@ -405,6 +405,66 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
     end
   end
 
+  describe "wake coalescing (drain_wakes_for)" do
+    it "collapses consecutive WakeMessages for the same stream into one" do
+      first = described_class::WakeMessage.new(queue_name: "chat")
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+
+      coalesced, trailing = dispatcher.send(:drain_wakes_for, first)
+
+      expect(coalesced.size).to eq(1)
+      expect(coalesced.first.queue_name).to eq("chat")
+      expect(trailing).to be_nil
+    end
+
+    it "keeps WakeMessages for different streams as separate entries" do
+      first = described_class::WakeMessage.new(queue_name: "chat")
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "presence")
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat") # dup
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "alerts")
+
+      coalesced, trailing = dispatcher.send(:drain_wakes_for, first)
+
+      expect(coalesced.map(&:queue_name)).to contain_exactly("chat", "presence", "alerts")
+      expect(trailing).to be_nil
+    end
+
+    it "stops at the first non-WakeMessage and returns it as the trailing message" do
+      first = described_class::WakeMessage.new(queue_name: "chat")
+      conn = build_conn(id: "a", stream_name: "chat")
+      connect = described_class::ConnectMessage.new(connection: conn)
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+      dispatch_queue << connect
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "presence")
+
+      coalesced, trailing = dispatcher.send(:drain_wakes_for, first)
+
+      expect(coalesced.map(&:queue_name)).to eq(["chat"])
+      expect(trailing).to be(connect)
+      # The presence wake is left in the queue for the next iteration
+      expect(dispatch_queue.size).to eq(1)
+      expect(dispatch_queue.pop.queue_name).to eq("presence")
+    end
+
+    it "performs only one read_after per stream when N consecutive wakes arrive" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c)
+
+      # Pre-populate the queue with 5 wakes for "chat"
+      5.times { dispatch_queue << described_class::WakeMessage.new(queue_name: "chat") }
+      first = dispatch_queue.pop
+
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      coalesced, = dispatcher.send(:drain_wakes_for, first)
+      coalesced.each { |w| dispatcher.send(:handle, w) }
+
+      expect(client).to have_received(:read_after).once
+    end
+  end
+
   describe "#start and #stop" do
     it "processes queued messages on a background thread" do
       c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
