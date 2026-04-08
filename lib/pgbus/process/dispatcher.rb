@@ -16,6 +16,12 @@ module Pgbus
       JOB_LOCK_CLEANUP_INTERVAL = 300 # Run job lock cleanup every 5 minutes
       STATS_CLEANUP_INTERVAL = 3600 # Run stats cleanup every hour
 
+      # Page size for archive compaction. Each cycle deletes up to this
+      # many archived rows per queue. Tuned via constant rather than
+      # configuration because the value rarely needs adjusting and a
+      # too-small value just delays cleanup, never breaks anything.
+      ARCHIVE_COMPACTION_BATCH_SIZE = 1000
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -72,7 +78,7 @@ module Pgbus
         run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
         run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
         run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
-        run_if_due(now, :@last_archive_compaction_at, archive_compaction_interval) { compact_archives }
+        run_if_due(now, :@last_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { compact_archives }
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
@@ -144,9 +150,11 @@ module Pgbus
       end
 
       def cleanup_job_locks
-        # Clean up orphaned uniqueness keys whose msg_id no longer exists
-        # in any PGMQ queue. This handles the rare case where a message is
-        # lost (e.g., queue table truncated) but the uniqueness key remains.
+        # Clean up truly orphaned uniqueness keys: rows whose referenced
+        # message no longer exists in the PGMQ queue. This handles crashes
+        # or queue truncation. It must NEVER delete a lock while the message
+        # is still in the queue, even if the lock is "old" — recurring jobs
+        # that fail and retry can hold locks for hours.
         reaped = reap_orphaned_uniqueness_keys
         Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
       end
@@ -155,20 +163,17 @@ module Pgbus
         keys = UniquenessKey.all.to_a
         return 0 if keys.empty?
 
+        # Only consider locks that are old enough that we wouldn't be racing
+        # an in-flight enqueue. visibility_timeout * 2 is the floor — anything
+        # younger could be a freshly-acquired lock whose send_message hasn't
+        # committed yet.
         threshold = Time.current - (config.visibility_timeout * 2)
 
         orphaned = keys.select do |key|
-          # msg_id == 0 means pre-produce placeholder or :while_executing lock.
-          # These are live locks — never reap them based on msg_id alone.
-          # Only reap if old enough that the job is certainly gone.
-          next false if key.msg_id.zero? && (!key.created_at || key.created_at >= threshold)
-          next true if key.msg_id.zero? && key.created_at && key.created_at < threshold
+          next false unless key.created_at && key.created_at < threshold
+          next false unless key.queue_name
 
-          # For real msg_ids, only reap if stale (old enough that VT has
-          # long expired). The message itself may still be in the queue
-          # awaiting retry — age is the only safe signal without scanning
-          # every queue table.
-          key.created_at && key.created_at < threshold
+          message_gone?(key)
         end
 
         return 0 if orphaned.empty?
@@ -177,6 +182,27 @@ module Pgbus
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
         0
+      end
+
+      # Returns true if the message referenced by this lock is definitely gone
+      # from the queue. Returns false otherwise (message present, or unknown).
+      #
+      # Routes through Pgbus::Client#message_exists? so all PGMQ access stays
+      # behind the client interface. The client returns nil when it can't
+      # determine the answer (queue table missing, etc.); we treat that as
+      # "still here" — the reaper must NEVER delete a lock when in doubt.
+      def message_gone?(key)
+        msg_id = key.msg_id.to_i
+        result = if msg_id.positive?
+                   Pgbus.client.message_exists?(key.queue_name, msg_id: msg_id)
+                 else
+                   Pgbus.client.message_exists?(key.queue_name, uniqueness_key: key.lock_key)
+                 end
+
+        result == false
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Reap check failed for #{key.lock_key}: #{e.message}" }
+        false
       end
 
       def cleanup_outbox
@@ -191,16 +217,12 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
       end
 
-      def archive_compaction_interval
-        config.archive_compaction_interval || ARCHIVE_COMPACTION_INTERVAL
-      end
-
       def compact_archives
         retention = config.archive_retention
         return unless retention&.positive?
 
         cutoff = Time.current - retention
-        batch_size = config.archive_compaction_batch_size || 1000
+        batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         prefix = config.queue_prefix
 
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
