@@ -788,9 +788,9 @@ Without the plugin, Puma closes hijacked SSE sockets abruptly during graceful re
 
 ### Requirements
 
-- **Puma 6.1 or newer.** Streams use `rack.hijack` + partial hijack (both supported in 6.1+). Unicorn, Pitchfork, and Passenger return HTTP 501 from the streams endpoint.
+- **Puma 6.1+ or Falcon.** Streams use `rack.hijack`. Puma 6.1+ supports it via partial hijack (thread-releasing, see [puma/puma#1009](https://github.com/puma/puma/issues/1009)). Falcon supports it via [protocol-rack](https://github.com/socketry/protocol-rack)'s adapter layer — same `env["rack.hijack?"]` + `env["rack.hijack"]` shape as Puma, so `Pgbus::Web::StreamApp` needs no server-specific code paths. Unicorn, Pitchfork, and Passenger return HTTP 501 from the streams endpoint.
 - **PostgreSQL LISTEN/NOTIFY.** `config.listen_notify = true` (the default). Stream queues override PGMQ's 250ms NOTIFY throttle to 0 so every broadcast fires individually.
-- **HTTP/2 or HTTP/3 in production.** SSE has a 6-connection-per-origin limit on HTTP/1.1; HTTP/2 lifts it.
+- **HTTP/2 or HTTP/3 in production.** SSE has a 6-connection-per-origin limit on HTTP/1.1; HTTP/2 lifts it. Falcon supports HTTP/2 natively without a reverse proxy.
 
 ### Configuration
 
@@ -815,7 +815,7 @@ end
 
 Stream broadcasts are stored in PGMQ queues prefixed `pgbus_stream_*`. Each broadcast is assigned a monotonic `msg_id` by PGMQ. The `pgbus_stream_from` helper captures the current `MAX(msg_id)` at render time and embeds it in the HTML as `since-id`. When the SSE client connects, it sends that cursor as `?since=` on the first request and as `Last-Event-ID` on reconnects. The streamer replays from `pgmq.q_*` (live) UNION `pgmq.a_*` (archive) for any `msg_id > cursor`, then switches to LISTEN/NOTIFY for the live path. There is no message identity gap between the render and the subscribe — the cursor model guarantees every broadcast is delivered exactly once, in order, even across reconnects.
 
-One Puma worker hosts one `Pgbus::Web::Streamer::Instance` singleton with three threads (Listener / Dispatcher / Heartbeat) and one dedicated PG connection for LISTEN. Hijacked SSE sockets are held outside Puma's thread pool -- confirmed by an integration test that fires 20 concurrent hijacked connections and observes them complete in parallel on an 8-thread Puma server ([puma/puma#1009](https://github.com/puma/puma/issues/1009)).
+One Puma worker (or Falcon reactor) hosts one `Pgbus::Web::Streamer::Instance` singleton with three threads (Listener / Dispatcher / Heartbeat) and one dedicated PG connection for LISTEN. Hijacked SSE sockets are held outside the web server's thread pool on Puma (confirmed by an integration test that fires 20 concurrent hijacked connections and observes them complete in parallel on an 8-thread Puma server, [puma/puma#1009](https://github.com/puma/puma/issues/1009)) and inside a fiber on Falcon (one fiber per hijacked connection, scheduler-backed non-blocking IO).
 
 Per-stream retention is handled by the main pgbus dispatcher process on the same interval as `archive_compaction_interval`. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
 
@@ -843,7 +843,6 @@ Outside an open transaction, broadcasts are synchronous and return the assigned 
 - `broadcasts_with_replay`: chat-history-as-a-stream where new subscribers replay from the beginning of retention rather than just the render watermark.
 - Server-side audience filtering (per-connection authorization that filters individual broadcasts).
 - Presence as a first-class primitive.
-- Falcon streaming-body code path. Puma is the only supported server in v1. A small `stream_app.rb` conditional will add Falcon in a follow-up.
 
 ## Database tables
 
