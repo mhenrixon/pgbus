@@ -24,8 +24,7 @@
       <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
         <% @messages.each do |m| %>
           <% payload = pgbus_parse_message(m[:message]) %>
-          <% dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX %>
-          <% source_queue = m[:queue_name].to_s.delete_suffix(dlq_suffix) %>
+          <% source_queue = m[:queue_name].to_s.delete_suffix(Pgbus::DEAD_LETTER_SUFFIX) %>
           <tr>
             <td class="w-10 px-4 py-3 align-top">
               <input type="checkbox" data-bulk-item data-pgbus-action="bulk-row-toggle"
