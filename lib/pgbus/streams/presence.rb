@@ -184,14 +184,21 @@ module Pgbus
       end
 
       def connection
-        # Use the streamer's PG connection path so this respects
-        # multi-database setups (connects_to). Falls back to the
-        # primary AR connection.
-        if defined?(::ActiveRecord::Base)
-          ::ActiveRecord::Base.connection.raw_connection
-        else
+        # Respect multi-database setups (connects_to). When
+        # Pgbus.configuration.connects_to is set, the pgbus tables
+        # live in a separate database accessed via Pgbus::BusRecord;
+        # the default path uses ActiveRecord::Base. Matches the
+        # canonical pattern in Pgbus::Process::QueueLock#connection
+        # and Pgbus::Configuration's connection probe.
+        unless defined?(::ActiveRecord::Base)
           raise Pgbus::ConfigurationError,
                 "Pgbus::Streams::Presence requires ActiveRecord (no AR connection available)"
+        end
+
+        if Pgbus.configuration.connects_to
+          Pgbus::BusRecord.connection.raw_connection
+        else
+          ::ActiveRecord::Base.connection.raw_connection
         end
       end
     end
