@@ -286,12 +286,34 @@ module Pgbus
     #            dispatcher-only processes).
     #
     # Raises ArgumentError for any other type.
+    #
+    # NAMING SEMANTICS for the String form:
+    #
+    # The parser produces anonymous capsules (no :name). The setter then
+    # auto-assigns a :name to capsules whose first queue would yield a
+    # *unique* name across the parsed list AND is not the bare wildcard
+    # (`*`). Anything else stays anonymous.
+    #
+    #   "critical: 5; default: 10"  -> two NAMED capsules ("critical", "default")
+    #   "*: 5"                       -> one anonymous capsule (wildcard never names)
+    #   "*: 3; *: 3; *: 3"           -> three anonymous capsules — legal,
+    #                                   represents "3 forks all reading every
+    #                                   queue", restoring the legacy YAML
+    #                                   `5 × {queues: ["*"], threads: 3}` shape
+    #   "default: 5; default: 3"     -> two anonymous capsules — same logic
+    #
+    # The point of the carve-out is the legacy "I want N forks of the same
+    # worker pool" pattern: it must keep working since PGMQ tolerates it
+    # natively (multiple processes reading the same queue with FOR UPDATE
+    # SKIP LOCKED). The CLI's --capsule selector only matches NAMED
+    # capsules, so anonymous duplicates can't be ambiguously addressed.
     def workers=(value)
       @workers = case value
                  when nil
                    nil
                  when String
-                   CapsuleDSL.parse(value).map { |entry| entry.merge(name: entry[:queues].first.to_s) }
+                   parsed = CapsuleDSL.parse(value)
+                   assign_auto_names(parsed)
                  when Array
                    value
                  else
@@ -501,33 +523,58 @@ module Pgbus
       raw&.to_s
     end
 
-    # Validates that no queue in +new_queues+ would overlap with any
-    # existing capsule. The wildcard '*' counts as overlapping with EVERY
-    # other queue (and vice versa) because at runtime '*' is expanded to
-    # all known queues. Raises ArgumentError on overlap.
-    def validate_no_queue_overlap!(new_queues)
-      existing = (@workers || []).flat_map { |c| c[:queues] || c["queues"] || [] }
-      return if existing.empty?
+    # Auto-assign :name to parsed capsules where the first queue token would
+    # yield a unique name and is not the bare wildcard. See the long comment
+    # on +workers=+ for the why. Returns the same array with :name merged in
+    # where applicable.
+    def assign_auto_names(parsed_capsules)
+      first_queue_counts = parsed_capsules.each_with_object(Hash.new(0)) do |capsule, h|
+        h[capsule[:queues].first] += 1
+      end
 
-      if existing.include?(CapsuleDSL::WILDCARD)
+      parsed_capsules.map do |capsule|
+        first = capsule[:queues].first
+        nameable = first != CapsuleDSL::WILDCARD && first_queue_counts[first] == 1
+        nameable ? capsule.merge(name: first.to_s) : capsule
+      end
+    end
+
+    # Validates that the new capsule (added via +c.capsule :name, ...+) does
+    # not overlap with any existing NAMED capsule. Anonymous capsules (parsed
+    # from the string DSL with auto-naming skipped, e.g. wildcards or
+    # would-collide first-queues) are intentionally invisible here — they
+    # represent "N forks of the same pool" and are allowed to overlap with
+    # each other and with named capsules.
+    #
+    # The wildcard '*' counts as overlapping with EVERY other queue (and
+    # vice versa) because at runtime '*' is expanded to all known queues.
+    # Raises ArgumentError on overlap.
+    def validate_no_queue_overlap!(new_queues)
+      existing_named = (@workers || []).select { |c| capsule_name(c) }
+      return if existing_named.empty?
+
+      existing_queues = existing_named.flat_map { |c| c[:queues] || c["queues"] || [] }
+      return if existing_queues.empty?
+
+      if existing_queues.include?(CapsuleDSL::WILDCARD)
         raise ArgumentError,
-              "an existing capsule already uses '*' (matches every queue) — " \
+              "an existing named capsule already uses '*' (matches every queue) — " \
               "the new capsule's queues #{new_queues.inspect} would overlap with it"
       end
 
       if new_queues.include?(CapsuleDSL::WILDCARD)
         raise ArgumentError,
-              "the new capsule uses '*' (matches every queue) but other capsules " \
-              "are already defined with queues #{existing.inspect} — " \
+              "the new capsule uses '*' (matches every queue) but other named capsules " \
+              "are already defined with queues #{existing_queues.inspect} — " \
               "the wildcard would overlap with all of them"
       end
 
-      conflict = new_queues.find { |q| existing.include?(q) }
+      conflict = new_queues.find { |q| existing_queues.include?(q) }
       return unless conflict
 
       raise ArgumentError,
-            "queue #{conflict.inspect} is already assigned to another capsule — " \
-            "each queue can only belong to one capsule"
+            "queue #{conflict.inspect} is already assigned to another named capsule — " \
+            "named capsules cannot share queues"
     end
 
     def sum_thread_counts(entries, default_threads:, group:)
