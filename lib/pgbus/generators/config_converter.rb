@@ -36,21 +36,33 @@ module Pgbus
         outbox_retention stats_retention recurring_execution_retention
       ].freeze
 
-      # Settings that no longer exist in the public API.
-      # pool_size is auto-tuned from worker thread counts as of PR 1.
-      DEPRECATED_SETTINGS = %w[pool_size].freeze
+      # Settings that no longer exist in the public API. The converter
+      # silently drops these from the generated initializer so users on
+      # legacy YAML get a clean migration.
+      #
+      #   - pool_size              -> auto-tuned from worker thread counts
+      #   - notify_throttle_ms     -> Pgbus::Client::NOTIFY_THROTTLE_MS
+      #   - circuit_breaker_*      -> Pgbus::CircuitBreaker constants
+      #   - archive_compaction_*   -> Pgbus::Process::Dispatcher constants
+      #   - dead_letter_queue_suffix -> Pgbus::DEAD_LETTER_SUFFIX (frozen)
+      DEPRECATED_SETTINGS = %w[
+        pool_size
+        notify_throttle_ms
+        circuit_breaker_threshold circuit_breaker_base_backoff circuit_breaker_max_backoff
+        archive_compaction_interval archive_compaction_batch_size
+        dead_letter_queue_suffix
+      ].freeze
 
       # Settings whose default we know how to compute by inspecting
       # Pgbus::Configuration.new. Any setting not listed here is emitted
       # as-is (we can't tell if it matches the default).
       KNOWN_SETTINGS = %w[
         queue_prefix default_queue pool_timeout listen_notify
-        notify_throttle_ms visibility_timeout max_retries idempotency_ttl
+        visibility_timeout max_retries idempotency_ttl
         max_jobs_per_worker max_memory_mb max_worker_lifetime
         dispatch_interval prefetch_limit
-        circuit_breaker_enabled circuit_breaker_threshold
-        circuit_breaker_base_backoff circuit_breaker_max_backoff
-        archive_retention archive_compaction_interval archive_compaction_batch_size
+        circuit_breaker_enabled
+        archive_retention
         outbox_enabled outbox_poll_interval outbox_batch_size outbox_retention
         stats_enabled stats_retention
         recurring_schedule_interval recurring_execution_retention skip_recurring

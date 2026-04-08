@@ -16,7 +16,7 @@ module Pgbus
         queues = queues_with_metrics
         total_depth = queues.sum { |q| q[:queue_length] }
         total_visible = queues.sum { |q| q[:queue_visible_length] }
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         dlq_depth = queues.select { |q| q[:name].end_with?(dlq_suffix) }.sum { |q| q[:queue_length] }
 
         throughput = compute_throughput(queues)
@@ -120,7 +120,7 @@ module Pgbus
       end
 
       def discard_all_enqueued
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.reject { |q| q[:name].end_with?(dlq_suffix) }
         total = 0
 
@@ -259,7 +259,7 @@ module Pgbus
       # Note: DLQ queue names from queues_with_metrics are already fully qualified
       # (e.g., "pgbus_default_dlq"), so we use them directly without re-prefixing.
       def dlq_messages(page: 1, per_page: 25)
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }
         offset = (page - 1) * per_page
 
@@ -274,7 +274,7 @@ module Pgbus
       end
 
       def dlq_message_detail(msg_id)
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }
         queues.each do |q|
           row = connection.select_one(
@@ -292,7 +292,7 @@ module Pgbus
 
       def retry_dlq_message(queue_name, msg_id)
         # queue_name here is the full DLQ name (already prefixed)
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         original_queue = queue_name.delete_suffix(dlq_suffix)
 
         row = connection.select_one(
@@ -664,7 +664,7 @@ module Pgbus
       end
 
       def all_queue_messages(limit, offset)
-        dlq_suffix = Pgbus.configuration.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.reject { |q| q[:name].end_with?(dlq_suffix) }
         messages = queues.flat_map do |q|
           query_queue_messages_raw(q[:name], limit + offset, 0)

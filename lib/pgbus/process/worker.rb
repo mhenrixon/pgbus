@@ -217,7 +217,7 @@ module Pgbus
       def resolve_wildcard_queues
         return unless @wildcard
 
-        dlq_suffix = config.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         prefix = "#{config.queue_prefix}_"
 
         conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection

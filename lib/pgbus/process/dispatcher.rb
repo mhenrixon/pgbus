@@ -16,6 +16,12 @@ module Pgbus
       JOB_LOCK_CLEANUP_INTERVAL = 300 # Run job lock cleanup every 5 minutes
       STATS_CLEANUP_INTERVAL = 3600 # Run stats cleanup every hour
 
+      # Page size for archive compaction. Each cycle deletes up to this
+      # many archived rows per queue. Tuned via constant rather than
+      # configuration because the value rarely needs adjusting and a
+      # too-small value just delays cleanup, never breaks anything.
+      ARCHIVE_COMPACTION_BATCH_SIZE = 1000
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -72,7 +78,7 @@ module Pgbus
         run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
         run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
         run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
-        run_if_due(now, :@last_archive_compaction_at, archive_compaction_interval) { compact_archives }
+        run_if_due(now, :@last_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { compact_archives }
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
@@ -211,16 +217,12 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
       end
 
-      def archive_compaction_interval
-        config.archive_compaction_interval || ARCHIVE_COMPACTION_INTERVAL
-      end
-
       def compact_archives
         retention = config.archive_retention
         return unless retention&.positive?
 
         cutoff = Time.current - retention
-        batch_size = config.archive_compaction_batch_size || 1000
+        batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         prefix = config.queue_prefix
 
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection

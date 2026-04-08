@@ -46,9 +46,15 @@ RSpec.describe Pgbus::Configuration do
 
     it "has circuit breaker enabled by default" do
       expect(config.circuit_breaker_enabled).to be true
-      expect(config.circuit_breaker_threshold).to eq(5)
-      expect(config.circuit_breaker_base_backoff).to eq(30)
-      expect(config.circuit_breaker_max_backoff).to eq(600)
+    end
+
+    it "exposes circuit breaker tuning as constants on Pgbus::CircuitBreaker" do
+      # The threshold/backoff values were silent settings nobody tuned and
+      # were culled from configuration. They live on the CircuitBreaker
+      # class as documented constants.
+      expect(Pgbus::CircuitBreaker::THRESHOLD).to eq(5)
+      expect(Pgbus::CircuitBreaker::BASE_BACKOFF).to eq(30)
+      expect(Pgbus::CircuitBreaker::MAX_BACKOFF).to eq(600)
     end
 
     it "has no priority levels by default" do
@@ -58,8 +64,13 @@ RSpec.describe Pgbus::Configuration do
 
     it "has default archive retention of 7 days" do
       expect(config.archive_retention).to eq(7 * 24 * 3600)
-      expect(config.archive_compaction_interval).to eq(3600)
-      expect(config.archive_compaction_batch_size).to eq(1000)
+    end
+
+    it "exposes archive compaction tuning as constants on Pgbus::Process::Dispatcher" do
+      # The compaction interval and batch size were silent settings; they
+      # live on the dispatcher class as constants now.
+      expect(Pgbus::Process::Dispatcher::ARCHIVE_COMPACTION_INTERVAL).to eq(3600)
+      expect(Pgbus::Process::Dispatcher::ARCHIVE_COMPACTION_BATCH_SIZE).to eq(1000)
     end
 
     it "has stats enabled with 30 day retention by default" do
