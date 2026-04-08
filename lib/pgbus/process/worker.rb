@@ -133,12 +133,30 @@ module Pgbus
           fetch_multi(active_queues, qty)
         end
       rescue StandardError => e
-        if e.message.include?("does not exist") && e.message.include?("pgmq.q_")
+        if undefined_queue_table_error?(e)
           evict_missing_queues(e)
         else
           Pgbus.logger.error { "[Pgbus] Error fetching messages: #{e.message}" }
         end
         []
+      end
+
+      # Detect "queue table missing" via the underlying PG::UndefinedTable
+      # cause when available. Falls back to a guarded message check that
+      # requires BOTH "pgmq.q_" (so we know it's our queue table) and
+      # "does not exist", which keeps the eviction logic working for
+      # adapters/exception wrappers that don't preserve the original
+      # PG::UndefinedTable as #cause (e.g. PGMQ::Errors::ConnectionError
+      # raised by pgmq-ruby's auto-reconnect path). Locale-fragile, but
+      # this is gated by the very specific "pgmq.q_" prefix so a false
+      # positive can only come from another error mentioning that exact
+      # string — which is itself a queue-table error worth handling.
+      def undefined_queue_table_error?(error)
+        cause = error.respond_to?(:cause) ? error.cause : nil
+        return true if defined?(PG::UndefinedTable) && cause.is_a?(PG::UndefinedTable)
+        return true if error.message.include?("pgmq.q_") && error.message.include?("does not exist")
+
+        false
       end
 
       def fetch_prioritized(active_queues, qty)
@@ -199,7 +217,7 @@ module Pgbus
       def resolve_wildcard_queues
         return unless @wildcard
 
-        dlq_suffix = config.dead_letter_queue_suffix
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         prefix = "#{config.queue_prefix}_"
 
         conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection

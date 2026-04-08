@@ -11,7 +11,17 @@ module Pgbus
     attr_accessor :default_queue, :queue_prefix
 
     # Worker settings
-    attr_accessor :workers, :polling_interval, :visibility_timeout, :prefetch_limit
+    attr_accessor :polling_interval, :prefetch_limit
+    attr_reader :workers, :visibility_timeout # rubocop:disable Style/AccessorGrouping
+
+    # Supervisor role selection.
+    # nil = boot all roles (default behavior).
+    # Array of role symbols = boot only the listed roles.
+    # Set via the CLI flags --workers-only / --scheduler-only / --dispatcher-only,
+    # or directly in an initializer for advanced cases.
+    attr_reader :roles
+
+    VALID_ROLES = %i[workers dispatcher scheduler consumers outbox].freeze
 
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
@@ -19,30 +29,37 @@ module Pgbus
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
-    # Circuit breaker
-    attr_accessor :circuit_breaker_enabled, :circuit_breaker_threshold,
-                  :circuit_breaker_base_backoff, :circuit_breaker_max_backoff
+    # Circuit breaker. Only `enabled` is user-facing — the trip threshold and
+    # backoff curve are tuned via constants on Pgbus::CircuitBreaker because
+    # they are implementation details that have never been worth exposing.
+    attr_accessor :circuit_breaker_enabled
 
     # Dead letter queue
-    attr_accessor :max_retries, :dead_letter_queue_suffix
+    attr_accessor :max_retries
 
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
-    # Archive compaction
-    attr_accessor :archive_retention, :archive_compaction_interval, :archive_compaction_batch_size
+    # Archive compaction. Only the user-facing retention window is configurable;
+    # the loop interval and batch size are tuned via constants on
+    # Pgbus::Process::Dispatcher.
+    attr_reader :archive_retention
 
     # Transactional outbox
-    attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size, :outbox_retention
+    attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size
+    attr_reader :outbox_retention # rubocop:disable Style/AccessorGrouping
 
     # Event bus
-    attr_accessor :idempotency_ttl, :allowed_global_id_models
+    attr_accessor :allowed_global_id_models
+    attr_reader :idempotency_ttl # rubocop:disable Style/AccessorGrouping
 
     # Logging
     attr_accessor :logger
 
-    # LISTEN/NOTIFY
-    attr_accessor :listen_notify, :notify_throttle_ms
+    # LISTEN/NOTIFY. Only the on/off switch is user-facing — the throttle
+    # interval is a Postgres-side tuning knob that lives as a constant on
+    # Pgbus::Client (NOTIFY_THROTTLE_MS).
+    attr_accessor :listen_notify
 
     # PGMQ schema installation mode (:auto, :extension, :embedded)
     attr_reader :pgmq_schema_mode
@@ -51,8 +68,8 @@ module Pgbus
     attr_accessor :event_consumers
 
     # Recurring jobs
-    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file,
-                  :skip_recurring, :recurring_execution_retention
+    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
+    attr_reader :recurring_execution_retention # rubocop:disable Style/AccessorGrouping
 
     # Multi-database support (optional separate database for pgbus tables)
     # Set to { database: { writing: :pgbus, reading: :pgbus } } to use a separate database.
@@ -60,7 +77,8 @@ module Pgbus
     attr_accessor :connects_to
 
     # Job stats
-    attr_accessor :stats_retention, :stats_enabled
+    attr_accessor :stats_enabled
+    attr_reader :stats_retention # rubocop:disable Style/AccessorGrouping
 
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
@@ -75,13 +93,14 @@ module Pgbus
     def initialize
       @database_url = nil
       @connection_params = nil
-      @pool_size = 5
+      @pool_size = nil
       @pool_timeout = 5
 
       @default_queue = "default"
       @queue_prefix = "pgbus"
 
       @workers = [{ queues: %w[default], threads: 5 }]
+      @roles = nil
       @polling_interval = 0.1
       @visibility_timeout = 30
 
@@ -94,19 +113,13 @@ module Pgbus
       @dispatch_interval = 1.0
 
       @circuit_breaker_enabled = true
-      @circuit_breaker_threshold = 5
-      @circuit_breaker_base_backoff = 30
-      @circuit_breaker_max_backoff = 600
 
       @max_retries = 5
-      @dead_letter_queue_suffix = "_dlq"
 
       @priority_levels = nil
       @default_priority = 1
 
       @archive_retention = 7 * 24 * 3600 # 7 days
-      @archive_compaction_interval = 3600
-      @archive_compaction_batch_size = 1000
 
       @outbox_enabled = false
       @outbox_poll_interval = 1.0
@@ -119,7 +132,6 @@ module Pgbus
       @logger = (defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger) || Logger.new($stdout)
 
       @listen_notify = true
-      @notify_throttle_ms = 250
 
       @pgmq_schema_mode = :auto
 
@@ -165,7 +177,7 @@ module Pgbus
     end
 
     def dead_letter_queue_name(name)
-      "#{queue_name(name)}#{dead_letter_queue_suffix}"
+      "#{queue_name(name)}#{Pgbus::DEAD_LETTER_SUFFIX}"
     end
 
     def priority_queue_name(name, priority)
@@ -190,13 +202,16 @@ module Pgbus
     end
 
     def validate!
-      raise ArgumentError, "pool_size must be > 0" unless pool_size.is_a?(Numeric) && pool_size.positive?
+      if pool_size && !(pool_size.is_a?(Numeric) && pool_size.positive?)
+        raise ArgumentError, "pool_size must be a positive number or nil (auto-tune)"
+      end
+
       raise ArgumentError, "pool_timeout must be > 0" unless pool_timeout.is_a?(Numeric) && pool_timeout.positive?
       raise ArgumentError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
       raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
       raise ArgumentError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
 
-      workers.each do |w|
+      Array(workers).each do |w|
         threads = w[:threads] || w["threads"] || 5
         raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
       end
@@ -232,6 +247,177 @@ module Pgbus
       raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
     end
 
+    # Set the worker capsule list. Accepts:
+    #
+    #   String — parsed via Pgbus::Configuration::CapsuleDSL into capsules
+    #            with auto-generated names (each capsule's :name is its
+    #            first queue token).
+    #
+    #     c.workers "*: 5"
+    #     c.workers "critical: 5; default, mailers: 10"
+    #
+    #   Array  — legacy explicit form. Each entry is a Hash with :queues
+    #            and :threads (and optionally :name, :single_active_consumer,
+    #            :consumer_priority, :prefetch_limit).
+    #
+    #     c.workers [{ queues: %w[default], threads: 5 }]
+    #
+    #   nil    — no workers configured (used when running scheduler-only or
+    #            dispatcher-only processes).
+    #
+    # Raises ArgumentError for any other type.
+    def workers=(value)
+      @workers = case value
+                 when nil
+                   nil
+                 when String
+                   CapsuleDSL.parse(value).map { |entry| entry.merge(name: entry[:queues].first.to_s) }
+                 when Array
+                   value
+                 else
+                   raise ArgumentError,
+                         "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
+                 end
+    end
+
+    # Define a named capsule and append it to the workers list.
+    #
+    #   c.capsule :critical, queues: %w[critical], threads: 5
+    #   c.capsule :gated, queues: %w[gated], threads: 1, single_active_consumer: true
+    #
+    # Names must be unique. Queues must not overlap with capsules already
+    # defined (would cause double-processing). Composes with the string DSL —
+    # +c.workers "..."+ followed by +c.capsule :name, ...+ appends the
+    # named capsule to the list parsed from the string.
+    def capsule(name, queues:, threads:, **)
+      raise ArgumentError, "capsule queues must be a non-empty Array" unless queues.is_a?(Array) && queues.any?
+      raise ArgumentError, "capsule threads must be a positive Integer" unless threads.is_a?(Integer) && threads.positive?
+
+      normalized_name = name.to_s
+      @workers ||= []
+
+      raise ArgumentError, "capsule #{name.inspect} is already defined" if @workers.any? { |c| capsule_name(c) == normalized_name }
+
+      validate_no_queue_overlap!(queues)
+
+      @workers << { name: normalized_name, queues: queues, threads: threads, ** }
+    end
+
+    # Look up a capsule by its name. Accepts symbol or string. Returns the
+    # matching Hash, or nil. Used by the CLI's --capsule selector.
+    def capsule_named(name)
+      return nil unless @workers
+
+      key = name.to_s
+      @workers.find { |c| capsule_name(c) == key }
+    end
+
+    # Returns true if the given role should be booted by the supervisor.
+    # When +roles+ is nil (the default), every role is enabled — this matches
+    # the legacy single-process behavior. When +roles+ is set (e.g. via the
+    # CLI's --workers-only / --scheduler-only / --dispatcher-only flags),
+    # only the listed roles boot.
+    #
+    # Accepts symbol or string for case-insensitive comparison.
+    def role_enabled?(role)
+      return true if @roles.nil?
+
+      @roles.include?(role.to_s.downcase.to_sym)
+    end
+
+    # Set the supervisor role filter. Accepts:
+    #
+    #   nil           — boot all roles (default)
+    #   Symbol/String — wraps into a single-element array
+    #   Array         — list of roles to boot
+    #
+    # Each role is normalized to a downcased symbol and validated against
+    # VALID_ROLES. Unknown role names raise ArgumentError immediately so
+    # typos like `[:workres]` fail loud at boot rather than leaving the
+    # supervisor idling with no children.
+    def roles=(value)
+      if value.nil?
+        @roles = nil
+        return
+      end
+
+      normalized = Array(value).map { |r| r.to_s.downcase.to_sym }.uniq
+      invalid = normalized - VALID_ROLES
+      if invalid.any?
+        raise ArgumentError,
+              "invalid role(s) #{invalid.inspect} — valid roles are: #{VALID_ROLES.join(", ")}"
+      end
+
+      @roles = normalized
+    end
+
+    # Duration setters: each accepts either a Numeric (seconds) or an
+    # ActiveSupport::Duration (e.g. 10.minutes, 7.days). Validation runs
+    # immediately on assignment so misconfigurations crash at boot rather
+    # than leaving stale state until a `validate!` call somewhere.
+    #
+    # Numeric values are stored unchanged (preserving Float for sub-second
+    # values). Duration values are coerced to Integer seconds via .to_i.
+
+    def visibility_timeout=(value)
+      @visibility_timeout = coerce_duration!(value, :visibility_timeout)
+    end
+
+    def archive_retention=(value)
+      @archive_retention = coerce_duration!(value, :archive_retention)
+    end
+
+    def outbox_retention=(value)
+      @outbox_retention = coerce_duration!(value, :outbox_retention)
+    end
+
+    def idempotency_ttl=(value)
+      @idempotency_ttl = coerce_duration!(value, :idempotency_ttl)
+    end
+
+    def stats_retention=(value)
+      @stats_retention = coerce_duration!(value, :stats_retention)
+    end
+
+    def recurring_execution_retention=(value)
+      @recurring_execution_retention = coerce_duration!(value, :recurring_execution_retention)
+    end
+
+    # Returns the connection pool size to use for the PGMQ client.
+    #
+    # If +pool_size+ was explicitly set, returns that value unchanged. Otherwise
+    # auto-derives from the threads needed by the roles this process actually
+    # runs (respects +Configuration#roles+ from --workers-only / --scheduler-only
+    # / --dispatcher-only):
+    #
+    #   workers role     → sum(workers.threads)
+    #   consumers role   → sum(event_consumers.threads)
+    #   dispatcher role  → +1
+    #   scheduler role   → +1
+    #
+    # A --scheduler-only deployment that has 50 worker threads configured
+    # only needs 1 connection (for the scheduler), not 52.
+    #
+    # Auto-tune protects users from the common pitfall of running 15 worker
+    # threads with a hand-set pool_size of 5 (resulting in ConnectionPool
+    # timeouts under load). Setting pool_size explicitly is still supported
+    # for advanced cases where you need a tighter or looser pool than the
+    # default formula provides.
+    POOL_SIZE_WARN_THRESHOLD = 50
+
+    def resolved_pool_size
+      return pool_size if pool_size
+
+      total = 0
+      total += sum_thread_counts(workers, default_threads: 5, group: "worker") if role_enabled?(:workers)
+      total += sum_thread_counts(event_consumers, default_threads: 3, group: "event_consumer") if role_enabled?(:consumers)
+      total += 1 if role_enabled?(:dispatcher)
+      total += 1 if role_enabled?(:scheduler)
+
+      warn_if_oversized(total)
+      total
+    end
+
     def connection_options
       if database_url
         database_url
@@ -252,6 +438,100 @@ module Pgbus
     end
 
     private
+
+    # Coerce a duration setting value to a positive Numeric.
+    #
+    # Accepts an ActiveSupport::Duration (coerced to Integer seconds via .to_i)
+    # or a Numeric (stored as-is, preserving Float for sub-second values).
+    # Raises ArgumentError immediately for nil, zero, negative, or non-numeric
+    # input — callers crash at boot rather than carrying silently-broken state.
+    def coerce_duration!(value, name)
+      # nil is a valid sentinel for "feature disabled" (e.g. archive_retention,
+      # idempotency_ttl, recurring_execution_retention all use nil to skip the
+      # corresponding maintenance task in the dispatcher).
+      return nil if value.nil?
+
+      # Check Duration FIRST because ActiveSupport overrides Numeric#is_a?
+      # to return true for Integer, so a duration would otherwise be caught
+      # by the Numeric branch and stored as-is (uncoerced).
+      duration_class_loaded = defined?(ActiveSupport::Duration)
+      return validate_positive_duration!(value.to_i, name) if duration_class_loaded && value.is_a?(ActiveSupport::Duration)
+
+      # Plain Numeric (Integer, Float, Rational). Use class identity rather
+      # than is_a? for the Duration exclusion because ActiveSupport overrides
+      # is_a? — see comment above.
+      if value.is_a?(Numeric) && (!defined?(ActiveSupport::Duration) || value.class != ActiveSupport::Duration)
+        return validate_positive_duration!(value, name)
+      end
+
+      raise ArgumentError,
+            "#{name} must be a Numeric (seconds), ActiveSupport::Duration, or nil to disable, got #{value.inspect}"
+    end
+
+    def validate_positive_duration!(numeric, name)
+      raise ArgumentError, "#{name} must be a positive number, got #{numeric}" unless numeric.positive?
+
+      numeric
+    end
+
+    # Read a capsule's name from either symbol or string key, normalized
+    # to a string for comparison. Returns nil for unnamed (legacy) entries.
+    def capsule_name(entry)
+      raw = entry[:name] || entry["name"]
+      raw&.to_s
+    end
+
+    # Validates that no queue in +new_queues+ would overlap with any
+    # existing capsule. The wildcard '*' counts as overlapping with EVERY
+    # other queue (and vice versa) because at runtime '*' is expanded to
+    # all known queues. Raises ArgumentError on overlap.
+    def validate_no_queue_overlap!(new_queues)
+      existing = (@workers || []).flat_map { |c| c[:queues] || c["queues"] || [] }
+      return if existing.empty?
+
+      if existing.include?(CapsuleDSL::WILDCARD)
+        raise ArgumentError,
+              "an existing capsule already uses '*' (matches every queue) — " \
+              "the new capsule's queues #{new_queues.inspect} would overlap with it"
+      end
+
+      if new_queues.include?(CapsuleDSL::WILDCARD)
+        raise ArgumentError,
+              "the new capsule uses '*' (matches every queue) but other capsules " \
+              "are already defined with queues #{existing.inspect} — " \
+              "the wildcard would overlap with all of them"
+      end
+
+      conflict = new_queues.find { |q| existing.include?(q) }
+      return unless conflict
+
+      raise ArgumentError,
+            "queue #{conflict.inspect} is already assigned to another capsule — " \
+            "each queue can only belong to one capsule"
+    end
+
+    def sum_thread_counts(entries, default_threads:, group:)
+      return 0 unless entries
+
+      entries.sum do |entry|
+        threads = entry[:threads] || entry["threads"] || default_threads
+        unless threads.is_a?(Integer) && threads.positive?
+          raise ArgumentError,
+                "#{group} threads must be a positive integer, got #{threads.inspect}"
+        end
+        threads
+      end
+    end
+
+    def warn_if_oversized(size)
+      return unless size > POOL_SIZE_WARN_THRESHOLD
+
+      Pgbus.logger.warn do
+        "[Pgbus] Auto-tuned pool_size is #{size} (over #{POOL_SIZE_WARN_THRESHOLD}). " \
+          "Verify your worker thread counts are intentional. " \
+          "Set Pgbus.configuration.pool_size explicitly to override."
+      end
+    end
 
     def extract_ar_connection_hash
       base = connects_to ? Pgbus::BusRecord : ActiveRecord::Base
