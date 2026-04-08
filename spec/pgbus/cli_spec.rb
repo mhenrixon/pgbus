@@ -29,6 +29,144 @@ RSpec.describe Pgbus::CLI do
     end
   end
 
+  describe ".start with start command" do
+    let(:supervisor) { instance_double(Pgbus::Process::Supervisor, run: nil) }
+
+    before do
+      allow(Pgbus::Process::Supervisor).to receive(:new).and_return(supervisor)
+      allow(Pgbus.logger).to receive(:info)
+    end
+
+    context "with --queues flag" do
+      it "overrides Pgbus.configuration.workers from the CLI" do
+        original_workers = Pgbus.configuration.workers
+        described_class.start(["start", "--queues", "critical: 5; default: 10"])
+        expect(Pgbus.configuration.workers.size).to eq(2)
+        expect(Pgbus.configuration.workers.map { |c| c[:name] }).to eq(%w[critical default])
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+      end
+
+      it "supports --queues=STRING with equals sign" do
+        original_workers = Pgbus.configuration.workers
+        described_class.start(["start", "--queues=*: 7"])
+        expect(Pgbus.configuration.workers).to eq([{ queues: ["*"], threads: 7, name: "*" }])
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+      end
+
+      it "raises a parse error for invalid queue strings" do
+        expect do
+          described_class.start(["start", "--queues", "default: 0"])
+        end.to raise_error(Pgbus::Configuration::CapsuleDSL::ParseError)
+      end
+    end
+
+    context "with --capsule flag" do
+      it "filters workers to only the named capsule" do
+        original_workers = Pgbus.configuration.workers
+        Pgbus.configuration.instance_variable_set(:@workers, nil)
+        Pgbus.configuration.capsule(:critical, queues: %w[critical], threads: 5)
+        Pgbus.configuration.capsule(:default, queues: %w[default], threads: 10)
+
+        described_class.start(["start", "--capsule", "critical"])
+
+        expect(Pgbus.configuration.workers.size).to eq(1)
+        expect(Pgbus.configuration.workers.first[:name]).to eq("critical")
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+      end
+
+      it "raises when the named capsule does not exist" do
+        original_workers = Pgbus.configuration.workers
+        Pgbus.configuration.instance_variable_set(:@workers, nil)
+        Pgbus.configuration.capsule(:critical, queues: %w[critical], threads: 5)
+
+        expect do
+          described_class.start(["start", "--capsule", "missing"])
+        end.to raise_error(/no capsule named.*missing/i)
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+      end
+    end
+
+    context "without flags" do
+      it "starts the supervisor with the existing workers config" do
+        described_class.start(["start"])
+        expect(supervisor).to have_received(:run)
+      end
+
+      it "leaves config.roles nil (boot every role)" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start"])
+        expect(Pgbus.configuration.roles).to be_nil
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --workers-only flag" do
+      it "sets config.roles to [:workers]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--workers-only"])
+        expect(Pgbus.configuration.roles).to eq([:workers])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --scheduler-only flag" do
+      it "sets config.roles to [:scheduler]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--scheduler-only"])
+        expect(Pgbus.configuration.roles).to eq([:scheduler])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with --dispatcher-only flag" do
+      it "sets config.roles to [:dispatcher]" do
+        original_roles = Pgbus.configuration.roles
+        described_class.start(["start", "--dispatcher-only"])
+        expect(Pgbus.configuration.roles).to eq([:dispatcher])
+      ensure
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+
+    context "with multiple --*-only flags (mutually exclusive)" do
+      it "raises ArgumentError when --workers-only and --scheduler-only are both passed" do
+        expect do
+          described_class.start(["start", "--workers-only", "--scheduler-only"])
+        end.to raise_error(ArgumentError, /mutually exclusive/i)
+      end
+
+      it "raises ArgumentError when all three are passed" do
+        expect do
+          described_class.start(["start", "--workers-only", "--scheduler-only", "--dispatcher-only"])
+        end.to raise_error(ArgumentError, /mutually exclusive/i)
+      end
+    end
+
+    context "when composing role flags with --capsule" do
+      it "allows --workers-only --capsule critical" do
+        original_workers = Pgbus.configuration.workers
+        original_roles = Pgbus.configuration.roles
+        Pgbus.configuration.instance_variable_set(:@workers, nil)
+        Pgbus.configuration.capsule(:critical, queues: %w[critical], threads: 5)
+
+        described_class.start(["start", "--workers-only", "--capsule", "critical"])
+
+        expect(Pgbus.configuration.roles).to eq([:workers])
+        expect(Pgbus.configuration.workers.first[:name]).to eq("critical")
+      ensure
+        Pgbus.configuration.instance_variable_set(:@workers, original_workers)
+        Pgbus.configuration.roles = original_roles
+      end
+    end
+  end
+
   describe ".show_status" do
     it "prints processes table when processes exist" do
       process = double("ProcessEntry",

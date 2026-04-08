@@ -12,7 +12,7 @@ require "active_support/core_ext/time/zones"
 # - System timezone (ENV['TZ']) set to the same non-UTC timezone
 #
 # This combination is common in apps that store timestamps in local time
-# (e.g. getzazu/app using Africa/Casablanca).
+# (e.g. an app using Africa/Casablanca for both DB and process timezones).
 RSpec.describe "Timezone handling (integration)", :integration do
   # Rails 8.1 moved default_timezone from ActiveRecord::Base to ActiveRecord module.
   def ar_default_timezone

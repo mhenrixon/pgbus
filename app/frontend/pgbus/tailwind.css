@@ -4,18 +4,34 @@
 
 /* Responsive tables: stack rows as cards on small screens */
 @utility pgbus-table {
+  @media (max-width: 1023px) {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
   & thead {
     @media (max-width: 1023px) {
       display: none;
     }
   }
+  & tbody {
+    @media (max-width: 1023px) {
+      display: block;
+      width: 100%;
+    }
+  }
   & tbody tr {
     @media (max-width: 1023px) {
       display: block;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
       margin-bottom: 0.75rem;
       border-radius: 0.5rem;
       padding: 0.75rem;
       border: 1px solid #e5e7eb;
+      overflow-wrap: anywhere;
     }
   }
   &:where(.dark, .dark *) tbody tr {
@@ -26,11 +42,23 @@
   & tbody td {
     @media (max-width: 1023px) {
       display: flex;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
       justify-content: space-between;
       align-items: baseline;
+      gap: 1rem;
       padding: 0.25rem 0;
       border: none;
       text-align: right;
+      min-width: 0;
+    }
+  }
+  & tbody td > * {
+    @media (max-width: 1023px) {
+      min-width: 0;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
   }
   & tbody td::before {
@@ -41,7 +69,6 @@
       text-transform: uppercase;
       color: #6b7280;
       text-align: left;
-      margin-right: 1rem;
       flex-shrink: 0;
     }
   }

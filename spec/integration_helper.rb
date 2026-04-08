@@ -38,6 +38,34 @@ def bootstrap_integration_tables(conn)
         ON pgbus_presence_members (stream_name, last_seen_at);
     SQL
   end
+
+  unless conn.table_exists?("pgbus_failed_events")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_failed_events (
+        id BIGSERIAL PRIMARY KEY,
+        queue_name VARCHAR NOT NULL,
+        msg_id BIGINT,
+        payload JSONB,
+        headers JSONB,
+        error_class VARCHAR,
+        error_message TEXT,
+        backtrace TEXT,
+        retry_count INTEGER DEFAULT 0,
+        failed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    SQL
+  end
+
+  # Always ensure the unique index exists, even if the table was created
+  # by an older bootstrap (e.g. CI workflow's "Set up pgbus tables" step
+  # that predates the upsert). FailedEventRecorder.record! does
+  # ON CONFLICT (queue_name, msg_id) UPDATE — without this index it raises
+  # "no unique or exclusion constraint matching the ON CONFLICT specification"
+  # and silently swallows the error, leaving failed_events.first nil in tests.
+  conn.execute(<<~SQL)
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_failed_events_queue_msg
+      ON pgbus_failed_events (queue_name, msg_id);
+  SQL
 rescue StandardError => e
   warn "[pgbus integration] Bootstrap warning: #{e.message}"
 end
