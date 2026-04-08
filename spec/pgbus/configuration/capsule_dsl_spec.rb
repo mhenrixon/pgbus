@@ -176,16 +176,27 @@ RSpec.describe Pgbus::Configuration::CapsuleDSL do
         expect_parse_error("default mailers: 5", /invalid character|expected/i)
       end
 
-      it "rejects the same queue listed in two capsules" do
-        expect_parse_error("default: 5; default: 3", /default.*two capsules|appears in two/i)
-      end
-
       it "rejects the same queue listed twice within one capsule" do
         expect_parse_error("default, default: 5", /default.*twice|duplicate/i)
       end
 
-      it "rejects the wildcard in two capsules" do
-        expect_parse_error("*: 5; *: 3", /wildcard.*two capsules|\*.*appears in two/i)
+      # Same-queue across capsules is now ALLOWED — see the carve-out in
+      # Pgbus::Configuration#workers= for the rationale. The parser is
+      # purely syntactic and doesn't enforce overlap rules.
+      it "accepts the same queue listed in two capsules (parser is purely syntactic now)" do
+        result = described_class.parse("default: 5; default: 3")
+        expect(result).to eq([
+                               { queues: ["default"], threads: 5 },
+                               { queues: ["default"], threads: 3 }
+                             ])
+      end
+
+      it "accepts the wildcard in two capsules (the legacy 'N forks' pattern)" do
+        result = described_class.parse("*: 5; *: 3")
+        expect(result).to eq([
+                               { queues: ["*"], threads: 5 },
+                               { queues: ["*"], threads: 3 }
+                             ])
       end
 
       it "includes the offending input in the error message" do

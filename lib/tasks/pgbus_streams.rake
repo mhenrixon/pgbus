@@ -13,10 +13,19 @@ namespace :pgbus do
       # reintroduction of ActionController::Live into the pgbus web layer
       # would regress the architecture invisibly, so we guard against it
       # in CI.
-      roots = %w[
-        app/controllers/pgbus
-        lib/pgbus/web
-      ].map { |r| File.expand_path("../../#{r}", __dir__) }.select { |p| File.directory?(p) }
+      # The host app's Pgbus-namespaced controllers live under
+      # Rails.root/app/controllers/pgbus. The gem's own streaming
+      # code lives under gem_root/lib/pgbus/web. __dir__ here is
+      # gem_root/lib/tasks, which is why the app path needs
+      # Rails.root (or Dir.pwd when this task runs outside a Rails
+      # context) — resolving `app/controllers/pgbus` from __dir__
+      # would silently lint the gem itself and miss every consumer
+      # app's overrides.
+      app_root = defined?(Rails) && Rails.respond_to?(:root) ? Rails.root.to_s : Dir.pwd
+      roots = [
+        File.expand_path("app/controllers/pgbus", app_root),
+        File.expand_path("../pgbus/web", __dir__)
+      ].select { |p| File.directory?(p) }
 
       offenders = []
       roots.each do |root|

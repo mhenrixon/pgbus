@@ -34,11 +34,11 @@ Puma::Plugin.create do
   def teardown_streamer(launcher)
     return unless defined?(Pgbus::Web::Streamer)
 
-    instance = Pgbus::Web::Streamer.instance_variable_get(:@current)
-    return unless instance
-
-    instance.shutdown!
-    Pgbus::Web::Streamer.instance_variable_set(:@current, nil)
+    # Go through the public API so `@current_mutex` guards both the
+    # read and the clear. Bypassing it with instance_variable_get/set
+    # would race with any thread that's currently inside
+    # `Streamer.current` building a new Instance.
+    Pgbus::Web::Streamer.reset!
   rescue StandardError => e
     log_error(launcher, e)
   end

@@ -686,9 +686,9 @@ Pgbus.configure do |c|
     "presence_room" => 30                          # 30 seconds for presence
   }
   c.streams_heartbeat_interval     = 15            # seconds
-  c.streams_max_connections        = 2_000         # per Puma worker
+  c.streams_max_connections        = 2_000         # per web-server process (Puma worker or Falcon process)
   c.streams_idle_timeout           = 3_600         # close idle connections after 1h
-  c.streams_listen_health_check_ms = 5_000         # PG LISTEN keepalive
+  c.streams_listen_health_check_ms = 250           # PG LISTEN keepalive + ensure_listening ack budget
   c.streams_write_deadline_ms      = 5_000         # write_nonblock deadline
 end
 ```
@@ -705,7 +705,7 @@ Per-stream retention is handled by the main pgbus dispatcher process on the same
 
 ### Transactional broadcasts
 
-**This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change the database never persisted.
+**This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change that the database never persisted.
 
 ```ruby
 ActiveRecord::Base.transaction do
@@ -772,7 +772,7 @@ Pgbus.stream("ops").broadcast(html, visible_to: :admin_only)        # admins onl
 
 Failure semantics:
 
-- **Unknown filter label** → fail-OPEN with a warning log. Typos shouldn't silently drop every broadcast to zero subscribers.
+- **Unknown filter label** → fail-CLOSED with a warning log. Audience filtering is a data-isolation feature; failing open on a typo would turn a restricted broadcast into a public one. The warning log is loud enough that typos still get noticed in dev ("why are no subscribers receiving my broadcast?" → check the log).
 - **Filter predicate raises** → fail-CLOSED. A buggy predicate that crashes is treated as "deny" so private data doesn't leak on an exception path.
 - **No `visible_to` on the broadcast** → no filter applied; everyone sees it.
 

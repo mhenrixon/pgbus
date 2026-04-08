@@ -179,19 +179,36 @@ module Pgbus
         return {} if value.nil? || value.empty?
 
         JSON.parse(value)
-      rescue JSON::ParserError
+      rescue JSON::ParserError => e
+        # Resilience fallback: return an empty hash rather than
+        # crashing the presence member list on one corrupt row. Debug
+        # log so operators can still find the corruption without
+        # impacting production throughput (debug is off by default).
+        # Truncate the value so a huge metadata payload doesn't bloat
+        # the log line.
+        truncated = value.to_s[0, 200]
+        Pgbus.logger&.debug do
+          "[Pgbus::Streams::Presence] parse_metadata failed (#{e.class}: #{e.message}); raw: #{truncated.inspect}"
+        end
         {}
       end
 
       def connection
-        # Use the streamer's PG connection path so this respects
-        # multi-database setups (connects_to). Falls back to the
-        # primary AR connection.
-        if defined?(::ActiveRecord::Base)
-          ::ActiveRecord::Base.connection.raw_connection
-        else
+        # Respect multi-database setups (connects_to). When
+        # Pgbus.configuration.connects_to is set, the pgbus tables
+        # live in a separate database accessed via Pgbus::BusRecord;
+        # the default path uses ActiveRecord::Base. Matches the
+        # canonical pattern in Pgbus::Process::QueueLock#connection
+        # and Pgbus::Configuration's connection probe.
+        unless defined?(::ActiveRecord::Base)
           raise Pgbus::ConfigurationError,
                 "Pgbus::Streams::Presence requires ActiveRecord (no AR connection available)"
+        end
+
+        if Pgbus.configuration.connects_to
+          Pgbus::BusRecord.connection.raw_connection
+        else
+          ::ActiveRecord::Base.connection.raw_connection
         end
       end
     end

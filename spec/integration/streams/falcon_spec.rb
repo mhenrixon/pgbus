@@ -20,6 +20,10 @@ require_relative "../../support/sse_test_client"
 RSpec.describe "Streams: Falcon server compatibility", :integration do
   before(:all) do
     @saved_listen_notify = Pgbus.configuration.listen_notify
+    @saved_signed_name_secret = Pgbus.configuration.streams_signed_name_secret
+    @saved_listen_health_check_ms = Pgbus.configuration.streams_listen_health_check_ms
+    @saved_heartbeat_interval = Pgbus.configuration.streams_heartbeat_interval
+    @saved_write_deadline_ms = Pgbus.configuration.streams_write_deadline_ms
     Pgbus.configuration.listen_notify = true
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
     Pgbus.configuration.streams_listen_health_check_ms = 100
@@ -30,7 +34,10 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
 
   after(:all) do
     Pgbus.configuration.listen_notify = @saved_listen_notify
-    Pgbus.configuration.streams_signed_name_secret = nil
+    Pgbus.configuration.streams_signed_name_secret = @saved_signed_name_secret
+    Pgbus.configuration.streams_listen_health_check_ms = @saved_listen_health_check_ms
+    Pgbus.configuration.streams_heartbeat_interval = @saved_heartbeat_interval
+    Pgbus.configuration.streams_write_deadline_ms = @saved_write_deadline_ms
     Pgbus.reset_client!
   end
 
@@ -62,7 +69,11 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    # Capture-then-shutdown avoids re-triggering the lazy `let(:harness)`
+    # if boot failed mid-test. RSpec doesn't memoize a let block that
+    # raises, so a naive `harness.shutdown` in `after` would attempt a
+    # second Falcon boot during teardown.
+    @booted_harness&.shutdown
   end
 
   def signed(name)
@@ -70,8 +81,8 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
   end
 
   def connect_sse_client(since_id:)
-    @harness_started = true
-    url = "#{harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
+    @booted_harness = harness
+    url = "#{@booted_harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
     SseTestSupport::SseTestClient.connect(url: url, timeout: 5)
   end
 
@@ -91,10 +102,21 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
                                        "<turbo-stream>B</turbo-stream>"
                                      ])
 
+    # Replay IDs must be strictly above the watermark and monotonic —
+    # same invariant page_born_stale_spec proves on Puma. Asserting
+    # it here proves Falcon's hijack path preserves the cursor
+    # semantics the whole subsystem depends on.
+    replay_ids = events.map { |e| e.id.to_i }
+    expect(replay_ids).to all(be > rendered_watermark)
+    expect(replay_ids).to eq(replay_ids.sort)
+
     stream.broadcast("<turbo-stream>C</turbo-stream>")
     live_events = client.wait_for_events(count: 3, timeout: 5)
     expect(live_events.size).to eq(3)
     expect(live_events.last.data).to include(">C<")
+    # The live-path event id must be strictly greater than the last
+    # replay event id.
+    expect(live_events.last.id.to_i).to be > events.last.id.to_i
 
     client.close
   end

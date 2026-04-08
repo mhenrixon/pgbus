@@ -231,4 +231,46 @@ RSpec.describe Pgbus::Web::Streamer::Connection do
       expect(conn.dead?).to be true
     end
   end
+
+  describe "#close" do
+    it "marks the connection dead and closes the underlying IO" do
+      expect(io.closed?).to be false
+      conn.close
+      expect(conn.dead?).to be true
+      expect(io.closed?).to be true
+    end
+
+    it "is idempotent — a second close is a no-op" do
+      conn.close
+      expect { conn.close }.not_to raise_error
+    end
+
+    it "holds the connection mutex while closing so writes cannot race" do
+      # Prove the close path takes the same mutex as IoWriter.write.
+      # Without the mutex, a concurrent write could hit a half-closed
+      # socket and corrupt the cursor by marking dead between writes.
+      writer_thread = nil
+      in_write = Queue.new
+      conn.mutex.synchronize do
+        writer_thread = Thread.new do
+          conn.close
+          in_write << :closed
+        end
+        # Sleep briefly so the writer_thread can attempt to acquire
+        # the lock and block on it. If close didn't take the mutex
+        # at all, :closed would be pushed immediately.
+        sleep 0.05
+        expect(in_write).to be_empty
+      end
+      writer_thread.join(1)
+      expect(in_write.pop).to eq(:closed)
+      expect(conn.dead?).to be true
+    end
+
+    it "swallows IOError from a double-close race" do
+      io.close # externally close first
+      expect { conn.close }.not_to raise_error
+      expect(conn.dead?).to be true
+    end
+  end
 end
