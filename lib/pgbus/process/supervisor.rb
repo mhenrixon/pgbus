@@ -42,22 +42,17 @@ module Pgbus
       private
 
       def boot_processes
-        # Boot workers
-        config.workers.each do |worker_config|
-          fork_worker(worker_config)
-        end
+        # Boot workers (workers may be nil for scheduler-only or
+        # dispatcher-only deployments via --workers-only / --scheduler-only /
+        # --dispatcher-only CLI flags). Each role is gated by
+        # config.role_enabled?, which returns true unless +config.roles+ has
+        # been narrowed.
+        Array(config.workers).each { |worker_config| fork_worker(worker_config) } if config.role_enabled?(:workers)
 
-        # Boot dispatcher
-        fork_dispatcher
-
-        # Boot recurring scheduler if configured
-        boot_scheduler
-
-        # Boot event consumers if configured
-        boot_consumers
-
-        # Boot outbox poller if configured
-        boot_outbox_poller
+        fork_dispatcher if config.role_enabled?(:dispatcher)
+        boot_scheduler if config.role_enabled?(:scheduler)
+        boot_consumers if config.role_enabled?(:consumers)
+        boot_outbox_poller if config.role_enabled?(:outbox)
       end
 
       def fork_worker(worker_config)

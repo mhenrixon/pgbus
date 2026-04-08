@@ -1,0 +1,27 @@
+# Herb configuration for pgbus
+# Lints HTML+ERB templates in app/views to catch CSP violations,
+# accessibility issues, and other template gotchas.
+#
+# Run:
+#   bin/herb-lint              # lint app/views/
+#   bin/herb-lint --fix        # auto-fix what's fixable
+#
+# Custom rules live in .herb/rules/ — see no-inline-event-handlers.mjs
+# for the rule that prevents the CSP script-src-attr regression.
+#
+# Docs: https://herb-tools.dev/configuration
+
+version: 0.9.5
+
+linter:
+  enabled: true
+  failLevel: error
+
+  rules:
+    # Pgbus dashboard partials are page-specific and intentionally read
+    # controller ivars. Pass-as-locals would add boilerplate without value.
+    erb-no-instance-variables-in-partials:
+      enabled: false
+
+formatter:
+  enabled: false

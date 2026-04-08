@@ -12,23 +12,34 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Concurrency controls](#concurrency-controls)
-- [Batches](#batches)
-- [Job uniqueness](#job-uniqueness)
-- [Priority queues](#priority-queues)
-- [Single active consumer](#single-active-consumer)
-- [Consumer priority](#consumer-priority)
-- [Circuit breaker and queue pause/resume](#circuit-breaker-and-queue-pauseresume)
-- [Prefetch flow control](#prefetch-flow-control)
-- [Transactional outbox](#transactional-outbox)
-- [Archive compaction](#archive-compaction)
-- [Configuration reference](#configuration-reference)
-- [Architecture](#architecture)
-- [CLI](#cli)
-- [Dashboard](#dashboard)
-- [Real-time broadcasts (turbo-streams replacement)](#real-time-broadcasts-turbo-streams-replacement)
-- [Database tables](#database-tables)
-- [Switching from another backend](#switching-from-another-backend)
+  - [1. Configure (optional)](#1-configure-optional)
+  - [2. Use as ActiveJob backend](#2-use-as-activejob-backend)
+  - [3. Event bus (optional)](#3-event-bus-optional)
+  - [4. Start workers](#4-start-workers)
+  - [5. Mount the dashboard](#5-mount-the-dashboard)
+- [Reliability](#reliability)
+  - [Job uniqueness](#job-uniqueness)
+  - [Concurrency controls](#concurrency-controls)
+  - [Circuit breaker and queue pause/resume](#circuit-breaker-and-queue-pauseresume)
+  - [Prefetch flow control](#prefetch-flow-control)
+  - [Worker recycling](#worker-recycling)
+- [Routing and ordering](#routing-and-ordering)
+  - [Priority queues](#priority-queues)
+  - [Consumer priority](#consumer-priority)
+  - [Single active consumer](#single-active-consumer)
+- [Persistence and batching](#persistence-and-batching)
+  - [Batches](#batches)
+  - [Transactional outbox](#transactional-outbox)
+  - [Archive compaction](#archive-compaction)
+- [Real-time broadcasts](#real-time-broadcasts-turbo-streams-replacement)
+- [Operations](#operations)
+  - [CLI](#cli)
+  - [Dashboard](#dashboard)
+  - [Database tables](#database-tables)
+  - [Switching from another backend](#switching-from-another-backend)
+- [Reference](#reference)
+  - [Architecture](#architecture)
+  - [Configuration reference](#configuration-reference)
 - [Development](#development)
 - [License](#license)
 
@@ -77,50 +88,32 @@ CREATE EXTENSION IF NOT EXISTS pgmq;
 
 ### 1. Configure (optional)
 
-Pgbus works with zero config in Rails -- it uses your existing `ActiveRecord` connection. For custom setups, create `config/pgbus.yml`:
-
-```yaml
-production:
-  queue_prefix: myapp
-  default_queue: default
-  pool_size: 10
-  max_retries: 5
-  prefetch_limit: 20
-  workers:
-    - queues: [default, mailers]
-      threads: 10
-      consumer_priority: 10
-    - queues: [critical]
-      threads: 5
-      single_active_consumer: true
-    - queues: [default, mailers]
-      threads: 5
-      consumer_priority: 0    # fallback worker
-  event_consumers:
-    - queues: [orders, payments]
-      threads: 5
-  max_jobs_per_worker: 10000
-  max_memory_mb: 512
-  max_worker_lifetime: 3600
-```
-
-Or configure in an initializer:
+Pgbus works with zero config in Rails -- it uses your existing `ActiveRecord` connection. For custom setups, drop a Ruby initializer:
 
 ```ruby
 # config/initializers/pgbus.rb
-Pgbus.configure do |config|
-  config.queue_prefix = "myapp"
-  config.max_retries = 5
-  config.max_jobs_per_worker = 10_000
-  config.max_memory_mb = 512
-  config.max_worker_lifetime = 3600
+Pgbus.configure do |c|
+  c.queue_prefix      = "myapp"
+  c.max_retries       = 5
+  c.visibility_timeout = 30.seconds   # ActiveSupport::Duration accepted
+  c.idempotency_ttl   = 7.days
 
-  config.workers = [
-    { queues: %w[default mailers], threads: 10 },
-    { queues: %w[critical], threads: 5 }
-  ]
+  # Worker recycling — prevents long-lived processes from leaking memory
+  c.max_jobs_per_worker = 10_000
+  c.max_memory_mb       = 512
+  c.max_worker_lifetime = 1.hour
+
+  # Capsule string DSL — Sidekiq-style "queues: threads; queues: threads"
+  c.workers = "default, mailers: 10; critical: 5"
+
+  # Or use named capsules with advanced options
+  c.capsule :ordered, queues: %w[ordered_events], threads: 1, single_active_consumer: true
 end
 ```
+
+The capsule string DSL is the shortest form for the common case. Use `c.capsule` when you need named capsules with advanced options like `single_active_consumer` or `consumer_priority`. See [Routing and ordering](#routing-and-ordering) for the full set.
+
+> **Migrating from `config/pgbus.yml`?** Run `rails generate pgbus:update` to convert your YAML config to a Ruby initializer using the modern DSL. The original YAML stays in place for review; delete it once the new initializer looks right.
 
 ### 2. Use as ActiveJob backend
 
@@ -241,128 +234,11 @@ Pgbus.configure do |config|
 end
 ```
 
-## Concurrency controls
+## Reliability
 
-Limit how many jobs with the same key can run concurrently:
+These features stop bad jobs from cascading into outages: deduplication, concurrency caps, automatic queue pausing on repeated failures, in-flight backpressure, and worker recycling.
 
-```ruby
-class ProcessOrderJob < ApplicationJob
-  limits_concurrency to: 1,
-                     key: ->(order_id) { "ProcessOrder-#{order_id}" },
-                     duration: 15.minutes,
-                     on_conflict: :block
-
-  def perform(order_id)
-    # Only one job per order_id runs at a time
-  end
-end
-```
-
-### Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `to:` | (required) | Maximum concurrent jobs for the same key |
-| `key:` | Job class name | Proc receiving job arguments, returns a string key |
-| `duration:` | `15.minutes` | Safety expiry for the semaphore (crashed worker recovery) |
-| `on_conflict:` | `:block` | What to do when the limit is reached |
-
-### Conflict strategies
-
-| Strategy | Behavior |
-|----------|----------|
-| `:block` | Hold the job in a blocked queue. It is automatically released when a slot opens or the semaphore expires. |
-| `:discard` | Silently drop the job. |
-| `:raise` | Raise `Pgbus::ConcurrencyLimitExceeded` so the caller can handle it. |
-
-### How it works
-
-1. **Enqueue**: The adapter checks a semaphore table for the concurrency key. If under the limit, it increments the counter and sends the job to PGMQ. If at the limit, it applies the `on_conflict` strategy.
-2. **Complete**: After a job succeeds or is dead-lettered, the executor signals the concurrency system via an `ensure` block (guaranteeing the signal fires even if the archive step fails). It first tries to promote a blocked job (atomic delete + enqueue in a single transaction). If nothing to promote, it releases the semaphore slot.
-3. **Safety net**: The dispatcher periodically cleans up expired semaphores and orphaned blocked executions to recover from crashed workers.
-
-### Concurrency compared to other backends
-
-Pgbus, SolidQueue, GoodJob, and Sidekiq all offer concurrency controls, but with fundamentally different locking strategies and trade-offs.
-
-#### Architecture comparison
-
-| | **Pgbus** | **SolidQueue** | **GoodJob** | **Sidekiq Enterprise** |
-|---|---|---|---|---|
-| **Lock backend** | PostgreSQL rows (`pgbus_semaphores` table) | PostgreSQL rows (`solid_queue_semaphores`) | PostgreSQL advisory locks (`pg_advisory_xact_lock`) | Redis sorted sets (lease-based) |
-| **Lock granularity** | Counting semaphore (allows N concurrent) | Counting semaphore (allows N concurrent) | Count query under advisory lock | Sorted set entries with TTL |
-| **Acquire mechanism** | Atomic `INSERT ... ON CONFLICT DO UPDATE WHERE value < max` (single SQL) | `UPDATE ... SET value = value + 1 WHERE value < limit` | `pg_advisory_xact_lock` then `SELECT COUNT(*)` in rolled-back txn | Redis Lua script (atomic check-and-add) |
-| **At-limit behavior** | `:block` (hold in queue), `:discard`, or `:raise` | Blocks in `solid_queue_blocked_executions` | Enqueue: silently dropped. Perform: retry with backoff (forever) | Reschedule with backoff (raises `OverLimit`, middleware re-enqueues) |
-| **Blocked job storage** | `pgbus_blocked_executions` table with priority ordering | `solid_queue_blocked_executions` table | No blocked queue — retries via ActiveJob retry mechanism | No blocked queue — job returns to Redis queue with delay |
-| **Release on completion** | `ensure` block: promote next blocked job or decrement semaphore | Inline after `finished`/`failed_with` (inside same transaction as of PR #689) | Release advisory lock via `pg_advisory_unlock` | Lease auto-expires from sorted set |
-| **Crash recovery** | Semaphore `expires_at` + dispatcher `expire_stale` cleanup | Semaphore `expires_at` + concurrency maintenance task | Advisory locks auto-release on session disconnect | TTL-based lease expiry (default 5 min) |
-| **Message lifecycle** | PGMQ visibility timeout (`FOR UPDATE SKIP LOCKED`) — message stays in queue until archived | AR-backed `claimed_executions` table | AR-backed `good_jobs` table with advisory lock per row | Redis list + sorted set |
-
-#### Key design differences
-
-**Pgbus** uses PGMQ's native `FOR UPDATE SKIP LOCKED` for message claiming and a separate semaphore table for concurrency control. This two-layer approach means the message queue and concurrency system are independent — PGMQ handles exactly-once delivery, the semaphore handles admission control. The semaphore acquire is a single atomic SQL (`INSERT ... ON CONFLICT DO UPDATE WHERE value < max`), avoiding the need for explicit row locks.
-
-**SolidQueue** uses AR models for everything — jobs, claimed executions, and semaphores all live in PostgreSQL tables. This means the entire lifecycle can be wrapped in AR transactions. However, as documented in [rails/solid_queue#689](https://github.com/rails/solid_queue/pull/689), this model is vulnerable to race conditions when semaphore expiry, job completion, and blocked-job release interleave across transactions. Pgbus avoids several of these by design: PGMQ's visibility timeout handles message recovery without a `claimed_executions` table, and there is no "release during shutdown" codepath.
-
-**GoodJob** takes a different approach entirely: advisory locks. Each job dequeue acquires a session-level advisory lock on the job row, and concurrency checks use transaction-scoped advisory locks on the concurrency key. This means the check and the perform are serialized at the database level. The downside is that advisory locks are session-scoped — if a connection is returned to the pool without unlocking, the lock persists. GoodJob handles this by auto-releasing on session disconnect, but connection pool sharing between web and worker can cause surprising behavior.
-
-**Sidekiq Enterprise** uses Redis sorted sets with TTL-based leases. Each concurrent slot is a sorted set entry with an expiry timestamp. This is fast and simple but has no durability guarantee — Redis failover can lose leases, temporarily allowing over-limit execution. The `sidekiq-unique-jobs` gem (open-source) uses a similar Lua-script approach but with more lock strategies (`:until_executing`, `:while_executing`, `:until_and_while_executing`) and configurable conflict handlers (`:reject`, `:reschedule`, `:replace`, `:raise`).
-
-#### Race condition resilience
-
-| Scenario | Pgbus | SolidQueue | GoodJob | Sidekiq |
-|---|---|---|---|---|
-| **Worker crash mid-execution** | PGMQ visibility timeout expires → message re-read. Semaphore expires via `expire_stale`. | `claimed_execution` survives → supervisor's process pruning calls `fail_all_with`. | Advisory lock released on session disconnect. | Lease TTL expires in Redis. |
-| **Blocked job released while original still executing** | Not possible — promote only happens in `signal_concurrency`, which only runs after job success/DLQ. | Fixed in PR #689 — now checks for claimed executions before releasing. | N/A — no blocked queue; retries independently. | N/A — no blocked queue. |
-| **Archive succeeds but signal fails** | `ensure` block guarantees signal fires even if archive raises. For SIGKILL: semaphore expires via dispatcher. | Fixed in PR #689 — `unblock_next_job` moved inside same transaction as `finished`. | Advisory lock released by session disconnect. | Lease auto-expires. |
-| **Concurrent enqueue and signal race** | Semaphore acquire is a single atomic SQL — no read-then-write gap. | Fixed in PR #689 — `FOR UPDATE` lock on semaphore row serializes enqueue with signal. | `pg_advisory_xact_lock` serializes the concurrency check. | Redis Lua script is atomic. |
-
-## Batches
-
-Coordinate groups of jobs with callbacks when all complete:
-
-```ruby
-batch = Pgbus::Batch.new(
-  on_finish: BatchFinishedJob,
-  on_success: BatchSucceededJob,
-  on_discard: BatchFailedJob,
-  description: "Import users",
-  properties: { initiated_by: current_user.id }
-)
-
-batch.enqueue do
-  users.each { |user| ImportUserJob.perform_later(user.id) }
-end
-```
-
-### Callbacks
-
-| Callback | Fired when |
-|----------|------------|
-| `on_finish` | All jobs completed (success or discard) |
-| `on_success` | All jobs completed successfully (zero discarded) |
-| `on_discard` | At least one job was dead-lettered |
-
-Callback jobs receive the batch `properties` hash as their argument:
-
-```ruby
-class BatchFinishedJob < ApplicationJob
-  def perform(properties)
-    user = User.find(properties["initiated_by"])
-    ImportMailer.complete(user).deliver_later
-  end
-end
-```
-
-### How it works
-
-1. `Batch.new(...)` creates a tracking row in `pgbus_batches` with `status: "pending"`
-2. `batch.enqueue { ... }` tags each enqueued job with the `pgbus_batch_id` in its payload
-3. After each job completes or is dead-lettered, the executor atomically updates the batch counters
-4. When `completed_jobs + discarded_jobs == total_jobs`, the batch status flips to `"finished"` and callback jobs are enqueued
-5. The dispatcher cleans up finished batches older than 7 days
-
-## Job uniqueness
+### Job uniqueness
 
 Prevent duplicate jobs from running. Unlike `limits_concurrency` (which controls *how many* jobs with the same key run), uniqueness guarantees *at most one* job with a given key exists in the system at any time.
 
@@ -380,14 +256,14 @@ class ImportOrderJob < ApplicationJob
 end
 ```
 
-### Strategies
+#### Strategies
 
 | Strategy | Lock acquired | Lock released | Prevents |
 |----------|--------------|---------------|----------|
 | `:until_executed` | At enqueue | On completion or DLQ | Duplicate enqueue AND execution |
 | `:while_executing` | At execution start | On completion or DLQ | Duplicate execution only |
 
-### Conflict policies
+#### Conflict policies
 
 | Policy | Behavior |
 |--------|----------|
@@ -395,7 +271,7 @@ end
 | `:discard` | Silently drop the duplicate |
 | `:log` | Log a warning and drop |
 
-### Lock lifecycle
+#### Lock lifecycle
 
 The lock is **never released by a timer**. It is held as long as the job exists in the system:
 
@@ -428,7 +304,7 @@ Enqueue ──→ pgbus_job_locks (state: queued, owner_pid: nil)
 
 A last-resort TTL (default 24 hours) handles the case where the entire pgbus supervisor is dead and the reaper itself can't run.
 
-### Uniqueness vs concurrency controls
+#### Uniqueness vs concurrency controls
 
 | | `ensures_uniqueness` | `limits_concurrency` |
 |---|---|---|
@@ -445,14 +321,148 @@ A last-resort TTL (default 24 hours) handles the case where the entire pgbus sup
 - Rate-limited API calls, resource-constrained tasks → `limits_concurrency`
 - Both at once → combine them (they use separate tables, no conflicts)
 
-### Setup
+#### Setup
 
 ```bash
 rails generate pgbus:add_job_locks                  # Add the migration
 rails generate pgbus:add_job_locks --database=pgbus # For separate database
 ```
 
-## Priority queues
+### Concurrency controls
+
+Limit how many jobs with the same key can run concurrently:
+
+```ruby
+class ProcessOrderJob < ApplicationJob
+  limits_concurrency to: 1,
+                     key: ->(order_id) { "ProcessOrder-#{order_id}" },
+                     duration: 15.minutes,
+                     on_conflict: :block
+
+  def perform(order_id)
+    # Only one job per order_id runs at a time
+  end
+end
+```
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `to:` | (required) | Maximum concurrent jobs for the same key |
+| `key:` | Job class name | Proc receiving job arguments, returns a string key |
+| `duration:` | `15.minutes` | Safety expiry for the semaphore (crashed worker recovery) |
+| `on_conflict:` | `:block` | What to do when the limit is reached |
+
+#### Conflict strategies
+
+| Strategy | Behavior |
+|----------|----------|
+| `:block` | Hold the job in a blocked queue. It is automatically released when a slot opens or the semaphore expires. |
+| `:discard` | Silently drop the job. |
+| `:raise` | Raise `Pgbus::ConcurrencyLimitExceeded` so the caller can handle it. |
+
+#### How concurrency works
+
+1. **Enqueue**: The adapter checks a semaphore table for the concurrency key. If under the limit, it increments the counter and sends the job to PGMQ. If at the limit, it applies the `on_conflict` strategy.
+2. **Complete**: After a job succeeds or is dead-lettered, the executor signals the concurrency system via an `ensure` block (guaranteeing the signal fires even if the archive step fails). It first tries to promote a blocked job (atomic delete + enqueue in a single transaction). If nothing to promote, it releases the semaphore slot.
+3. **Safety net**: The dispatcher periodically cleans up expired semaphores and orphaned blocked executions to recover from crashed workers.
+
+#### Concurrency compared to other backends
+
+Pgbus, SolidQueue, GoodJob, and Sidekiq all offer concurrency controls, but with fundamentally different locking strategies and trade-offs.
+
+##### Architecture comparison
+
+| | **Pgbus** | **SolidQueue** | **GoodJob** | **Sidekiq Enterprise** |
+|---|---|---|---|---|
+| **Lock backend** | PostgreSQL rows (`pgbus_semaphores` table) | PostgreSQL rows (`solid_queue_semaphores`) | PostgreSQL advisory locks (`pg_advisory_xact_lock`) | Redis sorted sets (lease-based) |
+| **Lock granularity** | Counting semaphore (allows N concurrent) | Counting semaphore (allows N concurrent) | Count query under advisory lock | Sorted set entries with TTL |
+| **Acquire mechanism** | Atomic `INSERT ... ON CONFLICT DO UPDATE WHERE value < max` (single SQL) | `UPDATE ... SET value = value + 1 WHERE value < limit` | `pg_advisory_xact_lock` then `SELECT COUNT(*)` in rolled-back txn | Redis Lua script (atomic check-and-add) |
+| **At-limit behavior** | `:block` (hold in queue), `:discard`, or `:raise` | Blocks in `solid_queue_blocked_executions` | Enqueue: silently dropped. Perform: retry with backoff (forever) | Reschedule with backoff (raises `OverLimit`, middleware re-enqueues) |
+| **Blocked job storage** | `pgbus_blocked_executions` table with priority ordering | `solid_queue_blocked_executions` table | No blocked queue — retries via ActiveJob retry mechanism | No blocked queue — job returns to Redis queue with delay |
+| **Release on completion** | `ensure` block: promote next blocked job or decrement semaphore | Inline after `finished`/`failed_with` (inside same transaction as of PR #689) | Release advisory lock via `pg_advisory_unlock` | Lease auto-expires from sorted set |
+| **Crash recovery** | Semaphore `expires_at` + dispatcher `expire_stale` cleanup | Semaphore `expires_at` + concurrency maintenance task | Advisory locks auto-release on session disconnect | TTL-based lease expiry (default 5 min) |
+| **Message lifecycle** | PGMQ visibility timeout (`FOR UPDATE SKIP LOCKED`) — message stays in queue until archived | AR-backed `claimed_executions` table | AR-backed `good_jobs` table with advisory lock per row | Redis list + sorted set |
+
+##### Key design differences
+
+**Pgbus** uses PGMQ's native `FOR UPDATE SKIP LOCKED` for message claiming and a separate semaphore table for concurrency control. This two-layer approach means the message queue and concurrency system are independent — PGMQ handles exactly-once delivery, the semaphore handles admission control. The semaphore acquire is a single atomic SQL (`INSERT ... ON CONFLICT DO UPDATE WHERE value < max`), avoiding the need for explicit row locks.
+
+**SolidQueue** uses AR models for everything — jobs, claimed executions, and semaphores all live in PostgreSQL tables. This means the entire lifecycle can be wrapped in AR transactions. However, as documented in [rails/solid_queue#689](https://github.com/rails/solid_queue/pull/689), this model is vulnerable to race conditions when semaphore expiry, job completion, and blocked-job release interleave across transactions. Pgbus avoids several of these by design: PGMQ's visibility timeout handles message recovery without a `claimed_executions` table, and there is no "release during shutdown" codepath.
+
+**GoodJob** takes a different approach entirely: advisory locks. Each job dequeue acquires a session-level advisory lock on the job row, and concurrency checks use transaction-scoped advisory locks on the concurrency key. This means the check and the perform are serialized at the database level. The downside is that advisory locks are session-scoped — if a connection is returned to the pool without unlocking, the lock persists. GoodJob handles this by auto-releasing on session disconnect, but connection pool sharing between web and worker can cause surprising behavior.
+
+**Sidekiq Enterprise** uses Redis sorted sets with TTL-based leases. Each concurrent slot is a sorted set entry with an expiry timestamp. This is fast and simple but has no durability guarantee — Redis failover can lose leases, temporarily allowing over-limit execution. The `sidekiq-unique-jobs` gem (open-source) uses a similar Lua-script approach but with more lock strategies (`:until_executing`, `:while_executing`, `:until_and_while_executing`) and configurable conflict handlers (`:reject`, `:reschedule`, `:replace`, `:raise`).
+
+##### Race condition resilience
+
+| Scenario | Pgbus | SolidQueue | GoodJob | Sidekiq |
+|---|---|---|---|---|
+| **Worker crash mid-execution** | PGMQ visibility timeout expires → message re-read. Semaphore expires via `expire_stale`. | `claimed_execution` survives → supervisor's process pruning calls `fail_all_with`. | Advisory lock released on session disconnect. | Lease TTL expires in Redis. |
+| **Blocked job released while original still executing** | Not possible — promote only happens in `signal_concurrency`, which only runs after job success/DLQ. | Fixed in PR #689 — now checks for claimed executions before releasing. | N/A — no blocked queue; retries independently. | N/A — no blocked queue. |
+| **Archive succeeds but signal fails** | `ensure` block guarantees signal fires even if archive raises. For SIGKILL: semaphore expires via dispatcher. | Fixed in PR #689 — `unblock_next_job` moved inside same transaction as `finished`. | Advisory lock released by session disconnect. | Lease auto-expires. |
+| **Concurrent enqueue and signal race** | Semaphore acquire is a single atomic SQL — no read-then-write gap. | Fixed in PR #689 — `FOR UPDATE` lock on semaphore row serializes enqueue with signal. | `pg_advisory_xact_lock` serializes the concurrency check. | Redis Lua script is atomic. |
+
+### Circuit breaker and queue pause/resume
+
+Pgbus automatically pauses queues that fail repeatedly, preventing cascading failures.
+
+```ruby
+Pgbus.configure do |config|
+  config.circuit_breaker_enabled = true   # default
+end
+```
+
+The trip threshold (`5` consecutive failures), base backoff (`30s`), and
+max backoff (`600s`) are tuned via constants on `Pgbus::CircuitBreaker`.
+Override the constants in an initializer if you need different values —
+they are not exposed as configuration because tweaking them at runtime
+has never proved useful in practice.
+
+When a queue hits the failure threshold:
+1. The circuit breaker **auto-pauses** the queue with exponential backoff
+2. After the backoff expires, the queue **auto-resumes** and the trip counter resets
+3. If failures continue, each trip doubles the backoff (capped at `MAX_BACKOFF`)
+
+You can also **manually pause/resume** queues from the dashboard. The pause state is stored in the `pgbus_queue_states` table and survives restarts.
+
+```bash
+rails generate pgbus:add_queue_states           # Add the queue_states migration
+rails generate pgbus:add_queue_states --database=pgbus  # For separate database
+```
+
+### Prefetch flow control
+
+Cap the number of in-flight (claimed but unfinished) messages per worker:
+
+```ruby
+Pgbus.configure do |config|
+  config.prefetch_limit = 20  # nil = unlimited (default)
+end
+```
+
+The worker tracks in-flight messages with an atomic counter and only fetches `min(idle_threads, prefetch_available)` messages per cycle. The counter is decremented in an `ensure` block so it never gets stuck.
+
+### Worker recycling
+
+Pgbus workers recycle themselves to prevent memory bloat. This is the main reliability difference vs. solid_queue, which leaves workers alive forever.
+
+```ruby
+Pgbus.configure do |config|
+  config.max_jobs_per_worker = 10_000  # Restart after 10k jobs
+  config.max_memory_mb = 512           # Restart if memory exceeds 512MB
+  config.max_worker_lifetime = 1.hour  # Restart after 1 hour
+end
+```
+
+When a limit is hit, the worker drains its thread pool, exits, and the supervisor forks a fresh process. RSS memory is sampled from `/proc/self/statm` (Linux) or `ps -o rss` (macOS).
+
+## Routing and ordering
+
+How messages flow between producers and the workers that handle them: priority sub-queues, consumer priority for active/standby workers, and single-active-consumer for strict ordering.
+
+### Priority queues
 
 Route jobs to priority sub-queues so high-priority work is processed first:
 
@@ -489,80 +499,82 @@ end
 
 When `priority_levels` is `nil` (default), priority queues are disabled and all jobs go to a single queue per logical name.
 
-## Single active consumer
-
-For queues that require strict ordering, enable single active consumer mode. Only one worker process can read from a queue at a time -- others skip it and process other queues.
-
-```yaml
-# config/pgbus.yml
-production:
-  workers:
-    - queues: [ordered_events]
-      threads: 1
-      single_active_consumer: true
-    - queues: [ordered_events]
-      threads: 1
-      single_active_consumer: true  # Standby — takes over if the first worker dies
-```
-
-Uses PostgreSQL session-level advisory locks (`pg_try_advisory_lock`). The lock is non-blocking -- workers that can't acquire it simply skip the queue. Locks auto-release on connection close (including crashes), so failover is automatic.
-
-## Consumer priority
+### Consumer priority
 
 When multiple workers subscribe to the same queues, higher-priority workers process messages first. Lower-priority workers back off (3x polling interval) when a higher-priority worker is active.
 
-```yaml
-# config/pgbus.yml
-production:
-  workers:
-    - queues: [default]
-      threads: 10
-      consumer_priority: 10     # Primary — polls at base interval
-    - queues: [default]
-      threads: 5
-      consumer_priority: 0      # Fallback — polls at 3x interval when primary is healthy
+```ruby
+Pgbus.configure do |c|
+  c.capsule :primary,  queues: %w[default], threads: 10, consumer_priority: 10
+  c.capsule :fallback, queues: %w[default], threads: 5,  consumer_priority: 0
+end
 ```
 
 Priority is stored in heartbeat metadata. Workers check the `pgbus_processes` table to discover higher-priority peers. When a high-priority worker goes stale (no heartbeat for 5 minutes), lower-priority workers automatically resume normal polling.
 
-## Circuit breaker and queue pause/resume
+### Single active consumer
 
-Pgbus automatically pauses queues that fail repeatedly, preventing cascading failures.
+For queues that require strict ordering, enable single active consumer mode. Only one worker process can read from a queue at a time — others skip it and process other queues.
 
 ```ruby
-Pgbus.configure do |config|
-  config.circuit_breaker_enabled = true   # default
-  config.circuit_breaker_threshold = 5    # consecutive failures before tripping
-  config.circuit_breaker_base_backoff = 30  # seconds (doubles per trip)
-  config.circuit_breaker_max_backoff = 600  # 10 minute cap
+Pgbus.configure do |c|
+  c.capsule :ordered_primary,  queues: %w[ordered_events], threads: 1, single_active_consumer: true
+  c.capsule :ordered_standby,  queues: %w[ordered_events], threads: 1, single_active_consumer: true
 end
 ```
 
-When a queue hits the failure threshold:
-1. The circuit breaker **auto-pauses** the queue with exponential backoff
-2. After the backoff expires, the queue **auto-resumes** and the trip counter resets
-3. If failures continue, each trip doubles the backoff (capped at `max_backoff`)
+Uses PostgreSQL session-level advisory locks (`pg_try_advisory_lock`). The lock is non-blocking — workers that can't acquire it simply skip the queue. Locks auto-release on connection close (including crashes), so failover is automatic. The standby capsule takes over within one polling tick if the primary dies.
 
-You can also **manually pause/resume** queues from the dashboard. The pause state is stored in the `pgbus_queue_states` table and survives restarts.
+## Persistence and batching
 
-```bash
-rails generate pgbus:add_queue_states           # Add the queue_states migration
-rails generate pgbus:add_queue_states --database=pgbus  # For separate database
-```
+How Pgbus integrates with your application's transactions and tracks groups of related work: outbox for atomic publish, batches for fan-out coordination, archive compaction for keeping the queue tables small.
 
-## Prefetch flow control
+### Batches
 
-Cap the number of in-flight (claimed but unfinished) messages per worker:
+Coordinate groups of jobs with callbacks when all complete:
 
 ```ruby
-Pgbus.configure do |config|
-  config.prefetch_limit = 20  # nil = unlimited (default)
+batch = Pgbus::Batch.new(
+  on_finish: BatchFinishedJob,
+  on_success: BatchSucceededJob,
+  on_discard: BatchFailedJob,
+  description: "Import users",
+  properties: { initiated_by: current_user.id }
+)
+
+batch.enqueue do
+  users.each { |user| ImportUserJob.perform_later(user.id) }
 end
 ```
 
-The worker tracks in-flight messages with an atomic counter and only fetches `min(idle_threads, prefetch_available)` messages per cycle. The counter is decremented in an `ensure` block so it never gets stuck.
+#### Callbacks
 
-## Transactional outbox
+| Callback | Fired when |
+|----------|------------|
+| `on_finish` | All jobs completed (success or discard) |
+| `on_success` | All jobs completed successfully (zero discarded) |
+| `on_discard` | At least one job was dead-lettered |
+
+Callback jobs receive the batch `properties` hash as their argument:
+
+```ruby
+class BatchFinishedJob < ApplicationJob
+  def perform(properties)
+    user = User.find(properties["initiated_by"])
+    ImportMailer.complete(user).deliver_later
+  end
+end
+```
+
+#### How batches work
+
+1. `Batch.new(...)` creates a tracking row in `pgbus_batches` with `status: "pending"`
+2. `batch.enqueue { ... }` tags each enqueued job with the `pgbus_batch_id` in its payload
+3. After each job completes or is dead-lettered, the executor atomically updates the batch counters
+4. When `completed_jobs + discarded_jobs == total_jobs`, the batch status flips to `"finished"` and callback jobs are enqueued
+5. The dispatcher cleans up finished batches older than 7 days
+
+### Transactional outbox
 
 Publish events atomically inside your database transactions. A background poller moves outbox entries to PGMQ.
 
@@ -576,7 +588,7 @@ Pgbus.configure do |config|
   config.outbox_enabled = true
   config.outbox_poll_interval = 1.0  # seconds
   config.outbox_batch_size = 100
-  config.outbox_retention = 24 * 3600  # keep published entries for 24h
+  config.outbox_retention = 1.day    # ActiveSupport::Duration also accepted
 end
 ```
 
@@ -597,153 +609,23 @@ end
 
 The outbox poller uses `FOR UPDATE SKIP LOCKED` inside a transaction to claim entries, publishes them to PGMQ, and marks them as published. Failed entries are skipped and retried next cycle.
 
-## Archive compaction
+### Archive compaction
 
 PGMQ archive tables grow unbounded. Pgbus automatically purges old entries:
 
 ```ruby
 Pgbus.configure do |config|
-  config.archive_retention = 7 * 24 * 3600       # 7 days (default)
-  config.archive_compaction_interval = 3600       # run every hour (default)
-  config.archive_compaction_batch_size = 1000     # delete in batches (default)
+  config.archive_retention = 7.days               # ActiveSupport::Duration (default 7 days)
 end
 ```
 
-The dispatcher runs archive compaction as part of its maintenance loop, deleting archived messages older than `archive_retention` in batches to avoid long-running transactions.
-
-## Configuration reference
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `database_url` | `nil` | PostgreSQL connection URL (auto-detected in Rails) |
-| `queue_prefix` | `"pgbus"` | Prefix for all PGMQ queue names |
-| `default_queue` | `"default"` | Default queue for jobs without explicit queue |
-| `pool_size` | `5` | Connection pool size |
-| `workers` | `[{queues: ["default"], threads: 5}]` | Worker process definitions |
-| `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
-| `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |
-| `visibility_timeout` | `30` | Seconds before unacked message becomes visible again |
-| `max_retries` | `5` | Failed reads before routing to dead letter queue |
-| `max_jobs_per_worker` | `nil` | Recycle worker after N jobs (nil = unlimited) |
-| `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
-| `max_worker_lifetime` | `nil` | Recycle worker after N seconds |
-| `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
-| `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
-| `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
-| `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures |
-| `circuit_breaker_threshold` | `5` | Consecutive failures before tripping |
-| `circuit_breaker_base_backoff` | `30` | Base backoff seconds (doubles per trip) |
-| `circuit_breaker_max_backoff` | `600` | Max backoff cap in seconds |
-| `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
-| `default_priority` | `1` | Default priority for jobs without explicit priority |
-| `archive_retention` | `604800` | Seconds to keep archived messages (7 days) |
-| `archive_compaction_interval` | `3600` | Seconds between archive cleanup runs |
-| `archive_compaction_batch_size` | `1000` | Rows deleted per batch during compaction |
-| `outbox_enabled` | `false` | Enable transactional outbox poller process |
-| `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
-| `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
-| `outbox_retention` | `86400` | Seconds to keep published outbox entries (1 day) |
-| `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
-| `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
-| `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
-| `web_auth` | `nil` | Lambda for dashboard authentication |
-| `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
-| `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
-| `stats_enabled` | `true` | Record job execution stats for insights dashboard |
-| `stats_retention` | `604800` | Seconds to keep job stats (7 days) |
-
-## Architecture
-
-```text
-Supervisor (fork manager)
-  ├── Worker 1        (queues: [default, mailers], threads: 10, priority: 10)
-  ├── Worker 2        (queues: [critical], threads: 5, single_active_consumer: true)
-  ├── Dispatcher      (maintenance: cleanup, compaction, reaping, circuit breaker)
-  ├── Scheduler       (recurring tasks via cron)
-  ├── Consumer        (event bus topics)
-  └── Outbox Poller   (transactional outbox → PGMQ, when enabled)
-
-PostgreSQL + PGMQ
-  ├── pgbus_default          (job queue)
-  ├── pgbus_default_dlq      (dead letter queue)
-  ├── pgbus_critical         (job queue)
-  ├── pgbus_critical_dlq     (dead letter queue)
-  ├── pgbus_mailers          (job queue)
-  └── pgbus_queue_states     (pause/resume + circuit breaker state)
-```
-
-### How it works
-
-1. **Enqueue**: ActiveJob serializes the job to JSON, Pgbus sends it to the appropriate PGMQ queue
-2. **Read**: Workers poll queues (or wake instantly via LISTEN/NOTIFY) and claim messages with a visibility timeout
-3. **Execute**: The job is deserialized and executed within the Rails executor
-4. **Archive/Retry**: On success, the message is archived. On failure, the visibility timeout expires and the message becomes available again. PGMQ's `read_ct` tracks delivery attempts
-5. **Dead letter**: When `read_ct` exceeds `max_retries`, the message is moved to the `_dlq` queue for manual inspection
-
-### Worker recycling
-
-Unlike solid_queue, Pgbus workers recycle themselves to prevent memory bloat:
-
-```ruby
-Pgbus.configure do |config|
-  config.max_jobs_per_worker = 10_000  # Restart after 10k jobs
-  config.max_memory_mb = 512           # Restart if memory exceeds 512MB
-  config.max_worker_lifetime = 3600    # Restart after 1 hour
-end
-```
-
-When a limit is hit, the worker drains its thread pool, exits, and the supervisor forks a fresh process.
-
-## CLI
-
-```bash
-pgbus start     # Start supervisor with workers + dispatcher
-pgbus status    # Show running processes
-pgbus queues    # List queues with depth/metrics
-pgbus version   # Print version
-pgbus help      # Show help
-```
-
-## Dashboard
-
-The dashboard is a mountable Rails engine at `/pgbus` with:
-
-- **Overview** -- queue depths, enqueued count, active processes, failure count, throughput rate
-- **Queues** -- per-queue metrics, purge/pause/resume/delete actions
-- **Jobs** -- enqueued and failed jobs, retry/discard actions
-- **Dead letter** -- DLQ messages with retry/discard, bulk actions
-- **Processes** -- active workers/dispatcher/consumers with heartbeat status
-- **Events** -- registered subscribers and processed events
-- **Outbox** -- transactional outbox entries pending publication
-- **Locks** -- active job uniqueness locks with state (queued/executing), owner PID@hostname, age
-- **Insights** -- throughput chart (jobs/min), status distribution donut, slowest job classes table
-
-All tables use Turbo Frames for periodic auto-refresh without page reloads. Destructive actions use styled confirmation dialogs (not browser `confirm()`), and flash messages appear as auto-dismissing toast notifications.
-
-### Queue management
-
-The queues page lets you manage PGMQ queues directly:
-
-- **Purge** -- removes all messages from the queue (the queue itself remains)
-- **Delete** -- permanently drops the queue from PGMQ (removes the queue table and metadata)
-- **Pause / Resume** -- pauses or resumes job processing for a queue
-
-All destructive actions require confirmation. Pause/resume and delete are available on both the queue index and detail pages.
-
-### Dark mode
-
-The dashboard supports dark mode via Tailwind CSS `dark:` classes. It respects your system preference on first visit and persists your choice via localStorage. Toggle with the sun/moon button in the nav bar.
-
-### Job stats and insights
-
-The executor records every job completion to `pgbus_job_stats` (job class, queue, status, duration). The insights page visualizes this data with ApexCharts (loaded via CDN, zero npm dependencies).
-
-```bash
-rails generate pgbus:add_job_stats           # Add the stats migration
-rails generate pgbus:add_job_stats --database=pgbus
-```
-
-Stats collection is enabled by default (`config.stats_enabled = true`). Old stats are cleaned up by the dispatcher based on `config.stats_retention` (default: 7 days). If the migration hasn't been run yet, stat recording is silently skipped.
+The compaction loop runs every hour and deletes up to 1000 rows per
+queue per cycle. Both knobs live as constants on
+`Pgbus::Process::Dispatcher` (`ARCHIVE_COMPACTION_INTERVAL`,
+`ARCHIVE_COMPACTION_BATCH_SIZE`) — they have never been worth surfacing
+as configuration. The dispatcher runs archive compaction as part of its
+maintenance loop, deleting archived messages older than `archive_retention`
+in batches to avoid long-running transactions.
 
 ## Real-time broadcasts (turbo-streams replacement)
 
@@ -819,7 +701,7 @@ One Puma worker (or Falcon reactor) hosts one `Pgbus::Web::Streamer::Instance` s
 
 > **Don't use `ActionController::Live` for pgbus streams.** It's the conventional Rails answer for SSE and it's the wrong one. `Live` blocks inside `@app.call(env)` for the lifetime of the connection, which ties up a Puma thread *per subscriber* — the exact problem the `rack.hijack`-based architecture above exists to avoid. Pgbus's streams endpoint is a mounted Rack app (not a Rails controller) so the temptation isn't even available, and a `rake pgbus:streams:lint_no_live` task fails CI if any pgbus controller `include`s it. If you're tempted to wire SSE through a Rails controller, use `pgbus_stream_from` in your view instead — the helper handles the cursor, replay, reconnect, and Puma-thread-release concerns for you.
 
-Per-stream retention is handled by the main pgbus dispatcher process on the same interval as `archive_compaction_interval`. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
+Per-stream retention is handled by the main pgbus dispatcher process on the same interval as the dispatcher's `ARCHIVE_COMPACTION_INTERVAL` constant. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
 
 ### Transactional broadcasts
 
@@ -950,7 +832,85 @@ The sweep uses `DELETE ... RETURNING` so multiple workers running it concurrentl
 - The stale-member sweep is manual. Run it from a cron, an ActiveJob, or your existing heartbeat — pgbus does not assume one over the others.
 - The DOM markup for join/leave is whatever your `join`/`leave` block returns. Pgbus does not impose a fixed presence schema on `<pgbus-stream-source>`.
 
-## Database tables
+## Operations
+
+Day-to-day running of Pgbus: starting and stopping processes, observing what is happening on the dashboard, the database tables Pgbus relies on, and how to migrate from an existing job backend.
+
+### CLI
+
+```bash
+pgbus start     # Start supervisor with workers + dispatcher + scheduler
+pgbus status    # Show running processes
+pgbus queues    # List queues with depth/metrics
+pgbus version   # Print version
+pgbus help      # Show help
+```
+
+#### Role flags (split deployments)
+
+By default, `pgbus start` boots every role in one supervisor (workers, dispatcher, scheduler, event consumers, outbox poller). For containerized deployments where each role lives in a separate process, use the role flags:
+
+```bash
+pgbus start --workers-only      # Only worker processes
+pgbus start --scheduler-only    # Only the recurring-task scheduler
+pgbus start --dispatcher-only   # Only the maintenance dispatcher
+```
+
+These flags are mutually exclusive. The auto-tuned `pool_size` adjusts to the role: a `--scheduler-only` deployment with 50 worker threads configured only opens the connections it actually needs (1 for the scheduler), not 51.
+
+#### Capsule selection
+
+`--capsule NAME` boots a single named capsule. Combine with `--workers-only` to run one capsule per container:
+
+```bash
+pgbus start --workers-only --capsule critical
+pgbus start --workers-only --capsule default
+```
+
+The capsule name is the `:name` you passed to `c.capsule` in your initializer (or the first queue token when using the string DSL).
+
+### Dashboard
+
+The dashboard is a mountable Rails engine at `/pgbus` with:
+
+- **Overview** — queue depths, enqueued count, active processes, failure count, throughput rate
+- **Queues** — per-queue metrics, purge/pause/resume/delete actions
+- **Jobs** — enqueued and failed jobs, retry/discard actions
+- **Dead letter** — DLQ messages with retry/discard, bulk actions
+- **Processes** — active workers/dispatcher/consumers with heartbeat status
+- **Events** — registered subscribers and processed events
+- **Outbox** — transactional outbox entries pending publication
+- **Locks** — active job uniqueness locks with state (queued/executing), owner PID@hostname, age
+- **Insights** — throughput chart (jobs/min), status distribution donut, slowest job classes table
+
+All tables use Turbo Frames for periodic auto-refresh without page reloads. Destructive actions use styled confirmation dialogs (not browser `confirm()`), and flash messages appear as auto-dismissing toast notifications.
+
+#### Queue management
+
+The queues page lets you manage PGMQ queues directly:
+
+- **Purge** — removes all messages from the queue (the queue itself remains)
+- **Delete** — permanently drops the queue from PGMQ (removes the queue table and metadata)
+- **Pause / Resume** — pauses or resumes job processing for a queue
+
+All destructive actions require confirmation. Pause/resume and delete are available on both the queue index and detail pages.
+
+#### Dark mode
+
+The dashboard supports dark mode via Tailwind CSS `dark:` classes. It respects your system preference on first visit and persists your choice via localStorage. Toggle with the sun/moon button in the nav bar.
+
+#### Job stats and insights
+
+The executor records every job completion to `pgbus_job_stats` (job class, queue, status, duration). The insights page visualizes this data with ApexCharts (loaded via CDN, zero npm dependencies).
+
+```bash
+rails generate pgbus:add_job_stats           # Add the stats migration
+rails generate pgbus:add_job_stats --database=pgbus
+```
+
+Stats collection is enabled by default (`config.stats_enabled = true`). Old stats are cleaned up by the dispatcher based on `config.stats_retention` (default: 30 days). If the migration hasn't been run yet, stat recording is silently skipped.
+
+### Database tables
 
 Pgbus uses these tables (created via PGMQ and migrations):
 
@@ -971,15 +931,84 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_recurring_tasks` | Recurring job definitions |
 | `pgbus_recurring_executions` | Recurring job execution history |
 
-## Switching from another backend
+### Switching from another backend
 
 Already using a different job processor? These guides walk you through the migration:
 
-- **[Switch from Sidekiq](docs/switch_from_sidekiq.md)** -- remove Redis, convert native workers, replace middleware with callbacks
-- **[Switch from SolidQueue](docs/switch_from_solid_queue.md)** -- similar architecture, swap config format, gain LISTEN/NOTIFY + worker recycling
-- **[Switch from GoodJob](docs/switch_from_good_job.md)** -- both PostgreSQL-native, swap advisory locks for PGMQ visibility timeouts
+- **[Switch from Sidekiq](docs/switch_from_sidekiq.md)** — remove Redis, convert native workers, replace middleware with callbacks
+- **[Switch from SolidQueue](docs/switch_from_solid_queue.md)** — similar architecture, swap config format, gain LISTEN/NOTIFY + worker recycling
+- **[Switch from GoodJob](docs/switch_from_good_job.md)** — both PostgreSQL-native, swap advisory locks for PGMQ visibility timeouts
 
 See [docs/README.md](docs/README.md) for a full feature comparison table.
+
+## Reference
+
+Architectural overview and the full list of configuration settings.
+
+### Architecture
+
+```text
+Supervisor (fork manager)
+  ├── Worker 1        (queues: [default, mailers], threads: 10, priority: 10)
+  ├── Worker 2        (queues: [critical], threads: 5, single_active_consumer: true)
+  ├── Dispatcher      (maintenance: cleanup, compaction, reaping, circuit breaker)
+  ├── Scheduler       (recurring tasks via cron)
+  ├── Consumer        (event bus topics)
+  └── Outbox Poller   (transactional outbox → PGMQ, when enabled)
+
+PostgreSQL + PGMQ
+  ├── pgbus_default          (job queue)
+  ├── pgbus_default_dlq      (dead letter queue)
+  ├── pgbus_critical         (job queue)
+  ├── pgbus_critical_dlq     (dead letter queue)
+  ├── pgbus_mailers          (job queue)
+  └── pgbus_queue_states     (pause/resume + circuit breaker state)
+```
+
+#### How a job flows through the system
+
+1. **Enqueue**: ActiveJob serializes the job to JSON, Pgbus sends it to the appropriate PGMQ queue
+2. **Read**: Workers poll queues (or wake instantly via LISTEN/NOTIFY) and claim messages with a visibility timeout
+3. **Execute**: The job is deserialized and executed within the Rails executor
+4. **Archive/Retry**: On success, the message is archived. On failure, the visibility timeout expires and the message becomes available again. PGMQ's `read_ct` tracks delivery attempts
+5. **Dead letter**: When `read_ct` exceeds `max_retries`, the message is moved to the `_dlq` queue for manual inspection
+
+### Configuration reference
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `database_url` | `nil` | PostgreSQL connection URL (auto-detected in Rails) |
+| `queue_prefix` | `"pgbus"` | Prefix for all PGMQ queue names |
+| `default_queue` | `"default"` | Default queue for jobs without explicit queue |
+| `pool_size` | `nil` (auto) | Connection pool size. Auto-tuned from worker thread counts: `sum(workers.threads) + sum(event_consumers.threads) + 2`. Set explicitly to override. |
+| `workers` | `[{queues: ["default"], threads: 5}]` | Worker capsule definitions. String DSL (`"default: 5; critical: 10"`), Array, or `nil`. |
+| `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
+| `roles` | `nil` (all) | Supervisor role filter — usually set via CLI flags (`--workers-only` etc.) |
+| `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |
+| `visibility_timeout` | `30` | Time before unacked message becomes visible again. Accepts seconds or `ActiveSupport::Duration` (e.g. `10.minutes`) |
+| `max_retries` | `5` | Failed reads before routing to dead letter queue |
+| `max_jobs_per_worker` | `nil` | Recycle worker after N jobs (nil = unlimited) |
+| `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
+| `max_worker_lifetime` | `nil` | Recycle worker after N seconds. Accepts seconds or Duration. |
+| `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
+| `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
+| `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
+| `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures (threshold and backoff are tuned via `Pgbus::CircuitBreaker` constants) |
+| `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
+| `default_priority` | `1` | Default priority for jobs without explicit priority |
+| `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `outbox_enabled` | `false` | Enable transactional outbox poller process |
+| `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
+| `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
+| `outbox_retention` | `1.day` | How long to keep published outbox entries. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `idempotency_ttl` | `7.days` | How long to keep processed event records. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
+| `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
+| `web_auth` | `nil` | Lambda for dashboard authentication |
+| `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
+| `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
+| `stats_enabled` | `true` | Record job execution stats for insights dashboard |
+| `stats_retention` | `30.days` | How long to keep job stats. Accepts seconds, Duration, or `nil` to disable cleanup |
 
 ## Development
 
