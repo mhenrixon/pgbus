@@ -84,6 +84,12 @@ module Pgbus
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
                   :insights_default_minutes, :base_controller_class, :return_to_app_url
 
+    # Streams (turbo-rails replacement, SSE-based)
+    attr_accessor :streams_enabled, :streams_queue_prefix, :streams_signed_name_secret,
+                  :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
+                  :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
+                  :streams_write_deadline_ms, :streams_falcon_streaming_body
+
     def initialize
       @database_url = nil
       @connection_params = nil
@@ -150,6 +156,18 @@ module Pgbus
       @insights_default_minutes = 30 * 24 * 60 # 30 days
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
+
+      @streams_enabled = true
+      @streams_queue_prefix = "pgbus_stream"
+      @streams_signed_name_secret = nil
+      @streams_default_retention = 5 * 60 # 5 minutes
+      @streams_retention = {}
+      @streams_heartbeat_interval = 15
+      @streams_max_connections = 2_000
+      @streams_idle_timeout = 3_600 # 1 hour
+      @streams_listen_health_check_ms = 5_000
+      @streams_write_deadline_ms = 5_000
+      @streams_falcon_streaming_body = false
     end
 
     def queue_name(name)
@@ -208,7 +226,37 @@ module Pgbus
         raise ArgumentError, "insights_default_minutes must be a positive integer"
       end
 
+      validate_streams!
+
       self
+    end
+
+    def validate_streams!
+      unless streams_default_retention.is_a?(Numeric) && streams_default_retention >= 0
+        raise ArgumentError, "streams_default_retention must be a non-negative number"
+      end
+
+      unless streams_max_connections.is_a?(Integer) && streams_max_connections.positive?
+        raise ArgumentError, "streams_max_connections must be a positive integer"
+      end
+
+      unless streams_heartbeat_interval.is_a?(Numeric) && streams_heartbeat_interval.positive?
+        raise ArgumentError, "streams_heartbeat_interval must be a positive number"
+      end
+
+      unless streams_idle_timeout.is_a?(Numeric) && streams_idle_timeout.positive?
+        raise ArgumentError, "streams_idle_timeout must be a positive number"
+      end
+
+      unless streams_listen_health_check_ms.is_a?(Integer) && streams_listen_health_check_ms.positive?
+        raise ArgumentError, "streams_listen_health_check_ms must be a positive integer"
+      end
+
+      unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
+        raise ArgumentError, "streams_write_deadline_ms must be a positive integer"
+      end
+
+      raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
     end
 
     # Set the worker capsule list. Accepts:

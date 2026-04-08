@@ -27,6 +27,7 @@ Naming/MethodParameterName:
     - id
     - n
     - m
+    - io
 
 Layout/LineLength:
   Max: 140

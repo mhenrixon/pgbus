@@ -813,4 +813,91 @@ RSpec.describe Pgbus::Configuration do
       end
     end
   end
+
+  describe "streams settings" do
+    it "is enabled by default" do
+      expect(config.streams_enabled).to be true
+    end
+
+    it "has a default queue prefix for streams" do
+      expect(config.streams_queue_prefix).to eq("pgbus_stream")
+    end
+
+    it "has no signed name secret by default (falls back to Turbo's key)" do
+      expect(config.streams_signed_name_secret).to be_nil
+    end
+
+    it "has a 5 minute default retention" do
+      expect(config.streams_default_retention).to eq(5 * 60)
+    end
+
+    it "has an empty per-stream retention map by default" do
+      expect(config.streams_retention).to eq({})
+    end
+
+    it "has a 15 second heartbeat interval" do
+      expect(config.streams_heartbeat_interval).to eq(15)
+    end
+
+    it "caps connections per worker at 2000" do
+      expect(config.streams_max_connections).to eq(2_000)
+    end
+
+    it "has a 1 hour idle timeout" do
+      expect(config.streams_idle_timeout).to eq(3_600)
+    end
+
+    it "has a 5 second LISTEN health check interval" do
+      expect(config.streams_listen_health_check_ms).to eq(5_000)
+    end
+
+    it "has a 5 second write deadline" do
+      expect(config.streams_write_deadline_ms).to eq(5_000)
+    end
+
+    it "does not opt into the Falcon streaming body code path by default" do
+      expect(config.streams_falcon_streaming_body).to be false
+    end
+  end
+
+  describe "#validate! with streams settings" do
+    it "rejects negative streams_default_retention" do
+      config.streams_default_retention = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_default_retention/)
+    end
+
+    it "rejects non-positive streams_max_connections" do
+      config.streams_max_connections = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_max_connections/)
+    end
+
+    it "rejects non-positive streams_heartbeat_interval" do
+      config.streams_heartbeat_interval = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_heartbeat_interval/)
+    end
+
+    it "rejects non-Hash streams_retention" do
+      config.streams_retention = "nope"
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_retention/)
+    end
+
+    it "rejects non-positive streams_idle_timeout" do
+      config.streams_idle_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_idle_timeout/)
+    end
+
+    it "rejects non-positive streams_listen_health_check_ms" do
+      config.streams_listen_health_check_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_listen_health_check_ms/)
+    end
+
+    it "rejects non-positive streams_write_deadline_ms" do
+      config.streams_write_deadline_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_write_deadline_ms/)
+    end
+
+    it "accepts a valid streams config" do
+      expect { config.validate! }.not_to raise_error
+    end
+  end
 end
