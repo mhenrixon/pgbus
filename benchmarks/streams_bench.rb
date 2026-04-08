@@ -72,7 +72,8 @@ def build_pg_listen_connection
     host: uri.host || "localhost",
     port: (uri.port || 5432).to_i,
     dbname: uri.path.delete_prefix("/"),
-    user: uri.user || ENV.fetch("USER")
+    user: uri.user || ENV.fetch("USER"),
+    password: uri.password
   )
 end
 
