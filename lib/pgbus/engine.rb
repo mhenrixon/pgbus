@@ -73,7 +73,18 @@ module Pgbus
     # Pgbus.stream(...).broadcast(...) API.
     initializer "pgbus.streams.turbo_broadcastable", after: :load_config_initializers do
       ActiveSupport.on_load(:after_initialize) do
-        Pgbus::Streams.install_turbo_broadcastable_patch! if Pgbus.configuration.streams_enabled
+        if Pgbus.configuration.streams_enabled
+          # Touch the constant first so Zeitwerk autoloads
+          # lib/pgbus/streams/turbo_broadcastable.rb. The file defines
+          # `Pgbus::Streams::TurboBroadcastable` (the autoloaded const)
+          # AND `Pgbus::Streams.install_turbo_broadcastable_patch!`
+          # (a side-effect class method on the parent module). Without
+          # the constant reference, Zeitwerk doesn't load the file and
+          # the method call below raises NoMethodError. Assigning to
+          # `_` keeps RuboCop's Lint/Void from deleting the line.
+          _autoload_trigger = Pgbus::Streams::TurboBroadcastable
+          Pgbus::Streams.install_turbo_broadcastable_patch!
+        end
       end
     end
   end
