@@ -76,7 +76,7 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    harness.shutdown if @harness_started
   end
 
   def signed(name)

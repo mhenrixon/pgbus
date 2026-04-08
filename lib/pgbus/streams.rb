@@ -104,10 +104,17 @@ module Pgbus
         connection = ::ActiveRecord::Base.connection
         transaction = connection.current_transaction
         transaction if transaction.open?
-      rescue StandardError
+      rescue StandardError => e
         # Defensive: if AR is loaded but not yet connected (e.g. a
         # Rake task invoked before Rails boot), don't let the transaction
-        # probe break the broadcast.
+        # probe break the broadcast. Debug-logged so a misconfigured
+        # app can diagnose "why aren't my transactional broadcasts
+        # deferring?" without impacting production performance
+        # (debug is off by default).
+        Pgbus.logger.debug do
+          "[Pgbus::Streams::Stream] transaction probe failed (#{e.class}: #{e.message}); " \
+            "falling back to synchronous broadcast"
+        end
         nil
       end
     end
