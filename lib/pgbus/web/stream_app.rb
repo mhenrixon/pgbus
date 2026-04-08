@@ -33,9 +33,8 @@ module Pgbus
       PATH_PREFIX = "/pgbus/streams"
       private_constant :PATH_PREFIX
 
-      def initialize(streamer: nil, client: nil, config: nil, logger: nil, authorize: nil)
+      def initialize(streamer: nil, config: nil, logger: nil, authorize: nil)
         @streamer_override = streamer
-        @client_override   = client
         @config_override   = config
         @logger_override   = logger
         @authorize         = authorize || ->(_env, _stream_name) { true }
@@ -128,10 +127,6 @@ module Pgbus
 
       def streamer
         @streamer_override || Pgbus::Web::Streamer.current
-      end
-
-      def client
-        @client_override || Pgbus.client
       end
 
       def config

@@ -141,9 +141,7 @@ module Pgbus
             # might still be performing if their stop hadn't fully
             # returned yet.
             safely { IoWriter.write(connection, sentinel_bytes, deadline_ms: deadline_ms) }
-            safely do
-              connection.io.close if connection.io.respond_to?(:close) && !connection.io.closed?
-            end
+            safely { connection.close }
           end
         end
 
@@ -153,9 +151,21 @@ module Pgbus
           case opts
           when String then ::PG.connect(opts)
           when Hash   then ::PG.connect(**opts)
-          when Proc   then opts.call
+          when Proc
+            # The Proc branch in connection_options typically returns
+            # ActiveRecord::Base.connection.raw_connection — a pooled
+            # AR connection. That's fatal for the streamer: LISTEN and
+            # wait_for_notify bind the session to the connection object,
+            # so if AR's pool hands the same raw_connection to another
+            # thread mid-wait, we get concurrent libpq calls → segfault
+            # or result corruption. Bail out with a clear error instead
+            # of silently segfaulting in production.
+            raise Pgbus::ConfigurationError,
+                  "Streamer cannot use a Proc-based connection_options. " \
+                  "Set Pgbus.configuration.database_url or connection_params " \
+                  "so the streamer owns its own dedicated PG::Connection for LISTEN/NOTIFY."
           else
-            raise ConfigurationError,
+            raise Pgbus::ConfigurationError,
                   "Cannot build streamer PG connection from #{opts.class}"
           end
         end

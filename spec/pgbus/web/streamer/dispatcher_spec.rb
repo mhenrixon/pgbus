@@ -54,7 +54,7 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
     end
   end
   let(:registry)       { Pgbus::Web::Streamer::Registry.new }
-  let(:listener)       { double("Listener", ensure_listening: nil) }
+  let(:listener)       { double("Listener", ensure_listening: nil, remove_listening: nil) }
   let(:dispatch_queue) { Queue.new }
   let(:logger)         { Logger.new(IO::NULL) }
 
@@ -143,6 +143,34 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
       connection.mark_dead!
       dispatcher.send(:handle, described_class::ConnectMessage.new(connection: connection))
       expect(registry.connections_for("chat")).to be_empty
+    end
+
+    it "cleans up @full_to_logical and unlistens when a connect dies before registry promotion" do
+      # Without the dead-before-register cleanup path, this scenario
+      # would pin @full_to_logical[full_name] = "chat" and leave the
+      # PG LISTEN active for the life of the worker, since the
+      # connection never reaches the registry and no DisconnectMessage
+      # is ever emitted.
+      allow(client).to receive(:read_after).and_return([])
+      connection.mark_dead!
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: connection))
+
+      expect(dispatcher.instance_variable_get(:@full_to_logical)).to be_empty
+      expect(listener).to have_received(:remove_listening).with("chat")
+    end
+
+    it "cleans up @full_to_logical and unlistens when step 3 raises" do
+      # Same leak surface from a thrown exception path — the rescue
+      # must scrub state so a transient failure on a single connect
+      # doesn't permanently bloat @full_to_logical.
+      allow(client).to receive(:read_after).and_raise(StandardError, "boom")
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: connection))
+
+      expect(dispatcher.instance_variable_get(:@full_to_logical)).to be_empty
+      expect(listener).to have_received(:remove_listening).with("chat")
+      expect(connection.dead?).to be true
     end
 
     it "removes the in-flight buffer entry after register" do

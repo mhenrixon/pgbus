@@ -191,4 +191,6 @@ namespace :dummy do
   end
 end
 
-task default: %i[spec rubocop]
+load File.expand_path("lib/tasks/pgbus_streams.rake", __dir__)
+
+task default: %i[spec rubocop pgbus:streams:lint_no_live]
