@@ -13,15 +13,21 @@ module Pgbus
       # cursor only for envelopes that actually wrote successfully. This is
       # the client-side leg of the replay-race fix (§6.5 of the design doc).
       class Connection
-        attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent
+        attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
 
-        def initialize(id:, stream_name:, io:, since_id:, writer:, write_deadline_ms:)
+        def initialize(id:, stream_name:, io:, since_id:, writer:, write_deadline_ms:, context: nil)
           @id = id
           @stream_name = stream_name
           @io = io
           @last_msg_id_sent = since_id.to_i
           @writer = writer
           @write_deadline_ms = write_deadline_ms
+          # Context is whatever the StreamApp's authorize hook returned
+          # (a truthy non-boolean value). Typically a user model or a
+          # session hash. The Dispatcher passes it to the Filters
+          # registry when evaluating visible_to predicates. Defaults to
+          # nil for tests that don't need audience filtering.
+          @context = context
           @mutex = Mutex.new
           @dead = false
           @closed = false

@@ -857,9 +857,45 @@ The replay cap is applied server-side: the helper computes `since_id = max(0, cu
 
 How much history is actually available depends on the stream's retention setting (`streams_retention` or `streams_default_retention`, both in seconds). A chat stream configured with `streams_retention = { /^chat_/ => 7.days }` will replay up to seven days of history with `replay: :all`; a notification stream with the 5-minute default will only go back five minutes.
 
+### Server-side audience filtering
+
+Some broadcasts shouldn't reach every subscriber on a stream. Pgbus supports per-connection filtering via a registry of named predicates evaluated against each connection's authorize-hook context:
+
+```ruby
+# config/initializers/pgbus_streams.rb
+Pgbus::Streams.filters.register(:admin_only) { |user| user&.admin? }
+Pgbus::Streams.filters.register(:workspace_member) do |user, stream_name|
+  user&.workspace_ids&.include?(stream_name.split(":").last.to_i)
+end
+```
+
+The authorize hook on `Pgbus::Web::StreamApp` doubles as a context provider — return any non-boolean value (typically a `User` model) and pgbus will pass it to the filter predicate when evaluating broadcasts:
+
+```ruby
+Pgbus::Web::StreamApp.new(authorize: ->(env, _stream_name) {
+  user = User.find_by(id: env["rack.session"][:user_id])
+  return false unless user
+  user  # ← context attached to the connection
+})
+```
+
+Then label broadcasts with the filter you want to apply:
+
+```ruby
+@order.broadcast_replace_to :account                                # delivered to everyone
+Pgbus.stream("ops").broadcast(html, visible_to: :admin_only)        # admins only
+```
+
+Failure semantics:
+
+- **Unknown filter label** → fail-OPEN with a warning log. Typos shouldn't silently drop every broadcast to zero subscribers.
+- **Filter predicate raises** → fail-CLOSED. A buggy predicate that crashes is treated as "deny" so private data doesn't leak on an exception path.
+- **No `visible_to` on the broadcast** → no filter applied; everyone sees it.
+
+The filter registry is process-local. Each Puma worker (or Falcon reactor) has its own copy populated at boot. Filter predicates run **on the subscriber side** — the predicate itself can't be serialized through PGMQ, so the broadcast carries only the label name.
+
 ### What's NOT included (yet)
 
-- Server-side audience filtering (per-connection authorization that filters individual broadcasts).
 - Presence as a first-class primitive.
 
 ## Database tables

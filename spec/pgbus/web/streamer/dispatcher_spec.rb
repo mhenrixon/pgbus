@@ -33,12 +33,13 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
   let(:conn_class) do
     Class.new do
       attr_accessor :last_msg_id_sent
-      attr_reader :id, :stream_name, :enqueued
+      attr_reader :id, :stream_name, :enqueued, :context
 
-      def initialize(id:, stream_name:, last_msg_id_sent: 0)
+      def initialize(id:, stream_name:, last_msg_id_sent: 0, context: nil)
         @id = id
         @stream_name = stream_name
         @last_msg_id_sent = last_msg_id_sent
+        @context = context
         @enqueued = []
         @dead = false
       end
@@ -223,6 +224,109 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
       dispatcher.send(:handle, described_class::ConnectMessage.new(connection: connection))
 
       expect(connection.enqueued.map(&:msg_id)).to contain_exactly(1050)
+    end
+  end
+
+  describe "audience filtering via visible_to" do
+    subject(:dispatcher) do
+      described_class.new(
+        client: client,
+        registry: registry,
+        listener: listener,
+        dispatch_queue: dispatch_queue,
+        logger: logger,
+        read_limit: 500,
+        filters: filters
+      )
+    end
+
+    let(:filters) { Pgbus::Streams::Filters.new }
+    let(:admin_conn)  { build_conn(id: "admin", stream_name: "chat", context: { role: "admin" }) }
+    let(:viewer_conn) { build_conn(id: "viewer", stream_name: "chat", context: { role: "viewer" }) }
+
+    before do
+      filters.register(:admin_only) { |ctx| ctx[:role] == "admin" }
+      registry.register(admin_conn)
+      registry.register(viewer_conn)
+    end
+
+    def admin_envelope
+      Pgbus::Web::Streamer::Dispatcher::StreamEnvelope.new(
+        msg_id: 100,
+        enqueued_at: nil,
+        payload: "<turbo-stream>secret</turbo-stream>",
+        source: "live",
+        visible_to: :admin_only
+      )
+    end
+
+    def public_envelope
+      Pgbus::Web::Streamer::Dispatcher::StreamEnvelope.new(
+        msg_id: 101,
+        enqueued_at: nil,
+        payload: "<turbo-stream>everyone</turbo-stream>",
+        source: "live",
+        visible_to: nil
+      )
+    end
+
+    it "delivers a labeled envelope only to connections matching the filter" do
+      raw = double("raw", payload: '{"html":"<turbo-stream>secret</turbo-stream>","visible_to":"admin_only"}',
+                          msg_id: 100, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(admin_conn.enqueued.map(&:msg_id)).to eq([100])
+      expect(viewer_conn.enqueued).to be_empty
+    end
+
+    it "delivers an unlabeled envelope to every connection (no filter applied)" do
+      raw = double("raw", payload: '{"html":"<turbo-stream>everyone</turbo-stream>"}',
+                          msg_id: 101, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(admin_conn.enqueued.map(&:msg_id)).to eq([101])
+      expect(viewer_conn.enqueued.map(&:msg_id)).to eq([101])
+    end
+
+    it "fail-opens on an unknown filter label (delivers to all and logs)" do
+      allow(logger).to receive(:warn)
+      raw = double("raw", payload: '{"html":"<turbo-stream/>","visible_to":"nope"}',
+                          msg_id: 102, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(admin_conn.enqueued.map(&:msg_id)).to eq([102])
+      expect(viewer_conn.enqueued.map(&:msg_id)).to eq([102])
+    end
+
+    it "fail-closes when the filter predicate raises (drops the envelope)" do
+      filters.register(:broken) { |_| raise "boom" }
+      allow(logger).to receive(:error)
+      raw = double("raw", payload: '{"html":"<turbo-stream/>","visible_to":"broken"}',
+                          msg_id: 103, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(admin_conn.enqueued).to be_empty
+      expect(viewer_conn.enqueued).to be_empty
+    end
+
+    it "applies the filter on the in-flight buffer path during handle_connect" do
+      new_conn = build_conn(id: "new", stream_name: "chat", context: { role: "viewer" })
+
+      raw = double("raw", payload: '{"html":"<turbo-stream/>","visible_to":"admin_only"}',
+                          msg_id: 200, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: new_conn))
+
+      expect(new_conn.enqueued).to be_empty
     end
   end
 

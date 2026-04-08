@@ -32,15 +32,30 @@ module Pgbus
         ConnectMessage    = Data.define(:connection)
         DisconnectMessage = Data.define(:connection)
 
+        # An unwrapped stream broadcast. Similar shape to
+        # Pgbus::Client::ReadAfter::Envelope (msg_id + payload) so
+        # Connection#enqueue can consume either type via duck typing,
+        # but adds the `visible_to` label carried through from
+        # Pgbus::Streams::Stream#broadcast. The Dispatcher uses
+        # visible_to to decide per-connection delivery; Connection
+        # never sees the field.
+        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to)
+
         DEFAULT_READ_LIMIT = 500
 
-        def initialize(client:, registry:, listener:, dispatch_queue:, logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT)
+        def initialize(client:, registry:, listener:, dispatch_queue:,
+                       logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
+                       filters: nil)
           @client = client
           @registry = registry
           @listener = listener
           @queue = dispatch_queue
           @logger = logger
           @read_limit = read_limit
+          # Filters default to the process-wide registry so production
+          # code picks up whatever was registered at boot. Tests inject
+          # a fresh Filters instance to avoid cross-test pollution.
+          @filters = filters || Pgbus::Streams.filters
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
           # PGMQ full table name (pgbus_<prefix>_<name>) → logical stream
@@ -117,8 +132,15 @@ module Pgbus
 
           envelopes = raw_envelopes.map { |e| unwrap_stream_envelope(e) }
 
-          registered.each { |conn| safe_enqueue(conn, envelopes) }
-          in_flight_pairs.each { |(_conn, buffer)| buffer.concat(envelopes) }
+          # Each connection gets a per-connection filtered subset. We
+          # can't pre-filter once because different connections have
+          # different authorize contexts.
+          registered.each do |conn|
+            safe_enqueue(conn, visible_envelopes_for(envelopes, conn))
+          end
+          in_flight_pairs.each do |(conn, buffer)|
+            buffer.concat(visible_envelopes_for(envelopes, conn))
+          end
 
           prune_dead(registered)
         end
@@ -150,11 +172,12 @@ module Pgbus
             limit: @read_limit
           )
           initial = raw_initial.map { |e| unwrap_stream_envelope(e) }
-          safe_enqueue(connection, initial)
+          safe_enqueue(connection, visible_envelopes_for(initial, connection))
 
           # Step 4: drain the in-flight buffer (anything published between
           # step 2 and now). Connection#enqueue dedupes by cursor, so
-          # overlap with step 3 is safe.
+          # overlap with step 3 is safe. The buffer entries were already
+          # filtered when enqueued by handle_wake, so no re-filter here.
           safe_enqueue(connection, buffer)
 
           # Step 5: promote to the main registry. From this point the
@@ -237,14 +260,31 @@ module Pgbus
           html = parsed.is_a?(Hash) ? parsed["html"] : nil
           return envelope unless html.is_a?(String)
 
-          Pgbus::Client::ReadAfter::Envelope.new(
+          visible_to = parsed["visible_to"]
+          visible_to = visible_to.to_sym if visible_to.is_a?(String)
+
+          StreamEnvelope.new(
             msg_id: envelope.msg_id,
             enqueued_at: envelope.enqueued_at,
             payload: html,
-            source: envelope.source
+            source: envelope.source,
+            visible_to: visible_to
           )
         rescue JSON::ParserError
           envelope
+        end
+
+        # Filters a list of envelopes against a specific connection's
+        # context. Envelopes without a visible_to label pass through
+        # unchanged; envelopes with a label are evaluated via the
+        # Filters registry. Envelopes that predate the StreamEnvelope
+        # refactor (plain ReadAfter::Envelope with no visible_to) also
+        # pass through.
+        def visible_envelopes_for(envelopes, connection)
+          envelopes.select do |envelope|
+            label = envelope.respond_to?(:visible_to) ? envelope.visible_to : nil
+            @filters.visible?(label, connection.context)
+          end
         end
       end
     end
