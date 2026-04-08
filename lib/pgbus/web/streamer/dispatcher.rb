@@ -64,6 +64,11 @@ module Pgbus
           # that's what PG NOTIFY channels carry) into the logical name
           # used by Registry and the in-flight buffer.
           @full_to_logical = {}
+          # @running is a soft hint, not the authoritative stop signal.
+          # The :__stop__ sentinel pushed onto @queue is what actually
+          # terminates run_loop — even if a torn read of @running ever
+          # happened (it cannot under MRI's GVL for a single-word
+          # boolean assignment), the sentinel break would still fire.
           @running = false
           @thread = nil
         end
@@ -81,7 +86,15 @@ module Pgbus
 
           @running = false
           @queue << :__stop__
-          @thread&.join(5)
+          if @thread && @thread.join(5).nil?
+            # join returned nil → 5s timeout. The thread is still running
+            # (probably blocked inside an unresponsive client write or a
+            # slow Postgres query). We log and clear the reference rather
+            # than calling Thread#kill, which leaves IO state corrupt.
+            # The orphaned thread will exit on its own once the blocking
+            # call returns and it sees @running == false on the next loop.
+            @logger.warn { "[Pgbus::Streamer::Dispatcher] thread did not terminate within 5s" }
+          end
           @thread = nil
           self
         end
@@ -181,11 +194,26 @@ module Pgbus
           safe_enqueue(connection, buffer)
 
           # Step 5: promote to the main registry. From this point the
-          # regular WakeMessage path handles the connection.
+          # regular WakeMessage path handles the connection. If the
+          # connection died during steps 3/4 (e.g. client vanished
+          # mid-replay, Connection#enqueue marks it dead without
+          # raising), no DisconnectMessage will ever be emitted, so
+          # we have to scrub @full_to_logical + the PG LISTEN right
+          # here. Otherwise this stream's state is pinned for the
+          # life of the worker.
           remove_in_flight(stream, connection)
-          @registry.register(connection) unless connection.dead?
+          if connection.dead?
+            cleanup_stream_if_unused(stream)
+          else
+            @registry.register(connection)
+          end
         rescue StandardError => e
+          # Same leak path for exceptions in steps 1-4. Mark dead and
+          # scrub state so a transient failure on a single connect
+          # doesn't permanently bloat @full_to_logical or leave a
+          # dangling LISTEN on the PG connection.
           remove_in_flight(stream, connection)
+          cleanup_stream_if_unused(stream)
           connection.mark_dead!
           @logger.error { "[Pgbus::Streamer::Dispatcher] connect failed for #{connection.id}: #{e.class}: #{e.message}" }
         end
@@ -194,15 +222,18 @@ module Pgbus
           connection = msg.connection
           stream = connection.stream_name
           @registry.unregister(connection)
+          cleanup_stream_if_unused(stream)
+        end
 
-          # If this was the last subscriber to the stream, release all
-          # per-stream state so long-running processes don't leak memory
-          # proportional to unique stream count (important for apps that
-          # use GlobalID-keyed streams like `order_42`). Three places to
-          # clean up:
-          #   1. @full_to_logical (the translation map — this file)
-          #   2. @in_flight[stream] (cleared by remove_in_flight already)
-          #   3. Listener's @listening_to set + the PG LISTEN itself
+        # If this stream has no remaining subscribers (registered or
+        # in-flight), release all per-stream state so long-running
+        # processes don't leak memory proportional to unique stream
+        # count (important for apps that use GlobalID-keyed streams
+        # like `order_42`). Three places to clean up:
+        #   1. @full_to_logical (the translation map — this file)
+        #   2. @in_flight[stream] (cleared by remove_in_flight already)
+        #   3. Listener's @listening_to set + the PG LISTEN itself
+        def cleanup_stream_if_unused(stream)
           return unless @registry.empty?(stream) && @in_flight[stream].empty?
 
           full_name = @full_to_logical.key(stream)

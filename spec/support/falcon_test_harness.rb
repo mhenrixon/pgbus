@@ -86,16 +86,27 @@ module SseTestSupport
           server_task.each(&:stop)
         end
       rescue StandardError => e
-        server_ready << :error
+        # Pass the exception object itself through the queue so the
+        # main thread can re-raise with the original class and
+        # backtrace instead of a generic "failed to start" string.
+        server_ready << e
         warn "[FalconTestHarness] reactor error: #{e.class}: #{e.message}"
         warn e.backtrace.first(5).join("\n")
       end
 
       result = server_ready.pop
-      raise "FalconTestHarness failed to start" if result == :error
+      raise result if result.is_a?(Exception)
 
       wait_until_accepting(timeout: 5)
       self
+    rescue StandardError
+      # Any failure on the boot path leaves @thread and the self-pipe
+      # orphaned — the `after` hook won't call shutdown because the
+      # lazy `let(:harness)` re-raises before ever binding the harness
+      # ivar. Tear down manually so the test process doesn't leak
+      # threads or file descriptors between examples.
+      shutdown
+      raise
     end
 
     def url(path = "/")
@@ -103,28 +114,37 @@ module SseTestSupport
     end
 
     def shutdown
-      return unless @thread
-
       # Signal the reactor via self-pipe. Falcon's server_task.stop is
       # cooperative and can take time to unwind all fibers, so we only
       # give it a short window before killing the whole thread. The
       # production shutdown path (signal-driven, no harness) has no
-      # such hurry.
-      @stop_pipe_w&.write("\0")
+      # such hurry. Safe to call multiple times or when boot failed
+      # midway — each ivar is guarded independently so partial state
+      # from a failed start still gets cleaned up.
+      if @thread
+        begin
+          @stop_pipe_w&.write("\0")
+        rescue IOError
+          # pipe already closed — fine, we're about to join/kill anyway
+        end
+        joined = @thread.join(1)
+        @thread.kill unless joined
+        @thread = nil
+      end
       @stop_pipe_w&.close
-      joined = @thread.join(1)
-      @thread.kill unless joined
-      @thread = nil
+      @stop_pipe_w = nil
       @stop_pipe_r&.close
       @stop_pipe_r = nil
-      @stop_pipe_w = nil
     end
 
     private
 
     def wait_until_accepting(timeout:)
-      deadline = Time.now + timeout
-      while Time.now < deadline
+      # Monotonic clock so the wait can't be fooled by NTP corrections
+      # or system-time jumps mid-boot. Matches PumaTestHarness and
+      # SseTestClient's existing use of CLOCK_MONOTONIC.
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
         begin
           sock = TCPSocket.new(@host, @port)
           sock.close

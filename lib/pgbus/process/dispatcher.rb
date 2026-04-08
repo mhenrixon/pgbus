@@ -33,6 +33,7 @@ module Pgbus
         @last_batch_cleanup_at = monotonic_now
         @last_recurring_cleanup_at = monotonic_now
         @last_archive_compaction_at = monotonic_now
+        @last_stream_archive_compaction_at = monotonic_now
         @last_outbox_cleanup_at = monotonic_now
         @last_job_lock_cleanup_at = monotonic_now
         @last_stats_cleanup_at = monotonic_now

@@ -50,7 +50,9 @@ RSpec.describe Pgbus::CLI do
       it "supports --queues=STRING with equals sign" do
         original_workers = Pgbus.configuration.workers
         described_class.start(["start", "--queues=*: 7"])
-        expect(Pgbus.configuration.workers).to eq([{ queues: ["*"], threads: 7, name: "*" }])
+        # Wildcard capsules are anonymous (no auto-assigned :name) — see
+        # the long comment on Pgbus::Configuration#workers= for the why.
+        expect(Pgbus.configuration.workers).to eq([{ queues: ["*"], threads: 7 }])
       ensure
         Pgbus.configuration.instance_variable_set(:@workers, original_workers)
       end

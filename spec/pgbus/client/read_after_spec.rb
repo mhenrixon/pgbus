@@ -42,7 +42,7 @@ RSpec.describe Pgbus::Client::ReadAfter do
         "msg_id" => "1249",
         "enqueued_at" => "2026-04-07T10:00:01.000000Z",
         "message" => '{"html":"<turbo-stream>B</turbo-stream>"}',
-        "source" => "live"
+        "source" => "archive"
       }
     end
 
