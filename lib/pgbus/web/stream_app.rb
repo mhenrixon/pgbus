@@ -50,7 +50,14 @@ module Pgbus
         stream_name = verify!(signed_name)
         return not_found("invalid signed stream name") if stream_name.nil?
 
-        return forbidden unless @authorize.call(env, stream_name)
+        authorize_result = @authorize.call(env, stream_name)
+        return forbidden unless authorize_result
+
+        # If authorize returned a non-boolean value (e.g. a User model),
+        # treat it as the connection context for audience filtering.
+        # A bare `true` means "authorized but no context" — filters that
+        # depend on a context will fail-closed on these connections.
+        context = authorize_result unless authorize_result == true
 
         cursor = parse_cursor(env, request)
         return bad_request("invalid cursor: #{cursor}") if cursor.is_a?(String)
@@ -59,7 +66,7 @@ module Pgbus
 
         return over_capacity if streamer.registry.size >= config.streams_max_connections
 
-        hijack_and_register(env, stream_name: stream_name, since_id: cursor)
+        hijack_and_register(env, stream_name: stream_name, since_id: cursor, context: context)
       rescue StandardError => e
         logger.error { "[Pgbus::StreamApp] #{e.class}: #{e.message}" }
         server_error
@@ -95,7 +102,7 @@ module Pgbus
         e.message
       end
 
-      def hijack_and_register(env, stream_name:, since_id:)
+      def hijack_and_register(env, stream_name:, since_id:, context: nil)
         # Rack hijack is a one-time transition per the Rack spec. Call
         # once, use the return value, and fall back to the side-effect
         # `rack.hijack_io` variable only if the return was nil (some
@@ -112,7 +119,8 @@ module Pgbus
           io: io,
           since_id: since_id,
           writer: Pgbus::Web::Streamer::IoWriter,
-          write_deadline_ms: config.streams_write_deadline_ms
+          write_deadline_ms: config.streams_write_deadline_ms,
+          context: context
         )
         streamer.register(connection)
 

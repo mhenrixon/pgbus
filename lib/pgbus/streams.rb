@@ -6,6 +6,19 @@ module Pgbus
   # which returns a `Pgbus::Streams::Stream` providing `#broadcast`,
   # `#current_msg_id`, and `#read_after`.
   module Streams
+    # Process-wide registry of server-side audience filter predicates.
+    # Register filters at boot time via:
+    #   Pgbus::Streams.filters.register(:admin_only) { |user| user.admin? }
+    # See lib/pgbus/streams/filters.rb for the full API.
+    def self.filters
+      @filters ||= Filters.new
+    end
+
+    # Clears the filters registry. Used by tests; not intended for runtime.
+    def self.reset_filters!
+      @filters = nil
+    end
+
     # A handle on a single logical stream. The name can be any string, an
     # object responding to `to_gid_param`, or an array of streamables (which
     # are joined with colons — turbo-rails-compatible).
@@ -38,9 +51,17 @@ module Pgbus
       # and the data mutation are atomic with respect to each other.
       # Returns the assigned msg_id when sent synchronously, nil when
       # deferred (the id isn't known until the after_commit callback runs).
-      def broadcast(payload)
+      #
+      # Audience filtering: pass `visible_to:` with a filter label (a
+      # Symbol previously registered via Pgbus::Streams.filters.register)
+      # to restrict delivery to connections whose authorize-hook context
+      # satisfies the predicate. The label travels with the broadcast
+      # through PGMQ; the predicate itself lives in-process on the
+      # subscriber side and is evaluated per-connection by the Dispatcher.
+      def broadcast(payload, visible_to: nil)
         ensure_queue!
         wrapped = { "html" => payload.to_s }
+        wrapped["visible_to"] = visible_to.to_s if visible_to
         transaction = current_open_transaction
         if transaction
           transaction.after_commit { @client.send_message(@name, wrapped) }

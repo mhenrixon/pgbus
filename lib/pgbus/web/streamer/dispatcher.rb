@@ -32,15 +32,30 @@ module Pgbus
         ConnectMessage    = Data.define(:connection)
         DisconnectMessage = Data.define(:connection)
 
+        # An unwrapped stream broadcast. Similar shape to
+        # Pgbus::Client::ReadAfter::Envelope (msg_id + payload) so
+        # Connection#enqueue can consume either type via duck typing,
+        # but adds the `visible_to` label carried through from
+        # Pgbus::Streams::Stream#broadcast. The Dispatcher uses
+        # visible_to to decide per-connection delivery; Connection
+        # never sees the field.
+        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to)
+
         DEFAULT_READ_LIMIT = 500
 
-        def initialize(client:, registry:, listener:, dispatch_queue:, logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT)
+        def initialize(client:, registry:, listener:, dispatch_queue:,
+                       logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
+                       filters: nil)
           @client = client
           @registry = registry
           @listener = listener
           @queue = dispatch_queue
           @logger = logger
           @read_limit = read_limit
+          # Filters default to the process-wide registry so production
+          # code picks up whatever was registered at boot. Tests inject
+          # a fresh Filters instance to avoid cross-test pollution.
+          @filters = filters || Pgbus::Streams.filters
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
           # PGMQ full table name (pgbus_<prefix>_<name>) → logical stream
@@ -49,6 +64,16 @@ module Pgbus
           # that's what PG NOTIFY channels carry) into the logical name
           # used by Registry and the in-flight buffer.
           @full_to_logical = {}
+          # Per-connection "scanned" cursor — the highest msg_id this
+          # Dispatcher has examined for a given connection, whether or
+          # not it was actually delivered. Needed because an audience
+          # filter can drop an entire read_after batch; without a
+          # separate scan cursor the dispatcher would re-read the
+          # same hidden window forever and starve later public
+          # messages. Connection#last_msg_id_sent still drives the
+          # client-visible Last-Event-ID; this cursor only feeds
+          # minimum_cursor so subsequent read_after calls advance.
+          @scanned_cursor = {}
           # @running is a soft hint, not the authoritative stop signal.
           # The :__stop__ sentinel pushed onto @queue is what actually
           # terminates run_loop — even if a torn read of @running ever
@@ -129,9 +154,27 @@ module Pgbus
           return if raw_envelopes.empty?
 
           envelopes = raw_envelopes.map { |e| unwrap_stream_envelope(e) }
+          # The maximum msg_id in THIS batch. We advance every
+          # connection's scanned cursor past this value even if the
+          # filter drops everything — otherwise a 500-message run
+          # of invisible broadcasts would pin minimum_cursor and
+          # the dispatcher would re-read the same window forever,
+          # starving later public messages. Connection#enqueue still
+          # gates the client-facing cursor on actual successful
+          # writes, so this advance is invisible to clients.
+          max_msg_id = envelopes.map(&:msg_id).max
 
-          registered.each { |conn| safe_enqueue(conn, envelopes) }
-          in_flight_pairs.each { |(_conn, buffer)| buffer.concat(envelopes) }
+          # Each connection gets a per-connection filtered subset. We
+          # can't pre-filter once because different connections have
+          # different authorize contexts.
+          registered.each do |conn|
+            safe_enqueue(conn, visible_envelopes_for(envelopes, conn))
+            advance_scanned_cursor(conn, max_msg_id)
+          end
+          in_flight_pairs.each do |(conn, buffer)|
+            buffer.concat(visible_envelopes_for(envelopes, conn))
+            advance_scanned_cursor(conn, max_msg_id)
+          end
 
           prune_dead(registered)
         end
@@ -163,11 +206,12 @@ module Pgbus
             limit: @read_limit
           )
           initial = raw_initial.map { |e| unwrap_stream_envelope(e) }
-          safe_enqueue(connection, initial)
+          safe_enqueue(connection, visible_envelopes_for(initial, connection))
 
           # Step 4: drain the in-flight buffer (anything published between
           # step 2 and now). Connection#enqueue dedupes by cursor, so
-          # overlap with step 3 is safe.
+          # overlap with step 3 is safe. The buffer entries were already
+          # filtered when enqueued by handle_wake, so no re-filter here.
           safe_enqueue(connection, buffer)
 
           # Step 5: promote to the main registry. From this point the
@@ -180,6 +224,7 @@ module Pgbus
           # life of the worker.
           remove_in_flight(stream, connection)
           if connection.dead?
+            @scanned_cursor.delete(connection)
             cleanup_stream_if_unused(stream)
           else
             @registry.register(connection)
@@ -190,6 +235,7 @@ module Pgbus
           # doesn't permanently bloat @full_to_logical or leave a
           # dangling LISTEN on the PG connection.
           remove_in_flight(stream, connection)
+          @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
           connection.mark_dead!
           @logger.error { "[Pgbus::Streamer::Dispatcher] connect failed for #{connection.id}: #{e.class}: #{e.message}" }
@@ -199,6 +245,7 @@ module Pgbus
           connection = msg.connection
           stream = connection.stream_name
           @registry.unregister(connection)
+          @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
         end
 
@@ -221,9 +268,28 @@ module Pgbus
         end
 
         def minimum_cursor(registered, in_flight_pairs)
-          cursors = registered.map(&:last_msg_id_sent)
-          in_flight_pairs.each { |(conn, _buf)| cursors << conn.last_msg_id_sent }
+          # Prefer the scanned cursor (per-connection max msg_id this
+          # Dispatcher has examined) over Connection#last_msg_id_sent
+          # (per-connection max successfully written). The two only
+          # differ when an audience filter drops envelopes: the scanned
+          # cursor advances past the hidden window so the next
+          # read_after moves forward. Falls back to last_msg_id_sent
+          # for connections that haven't been scanned yet (fresh
+          # in-flight entries on their first handle_wake pass).
+          cursors = registered.map { |c| cursor_for(c) }
+          in_flight_pairs.each { |(conn, _buf)| cursors << cursor_for(conn) }
           cursors.min || 0
+        end
+
+        def cursor_for(connection)
+          [@scanned_cursor.fetch(connection, 0), connection.last_msg_id_sent].max
+        end
+
+        def advance_scanned_cursor(connection, msg_id)
+          return if msg_id.nil?
+
+          current = @scanned_cursor[connection] || 0
+          @scanned_cursor[connection] = msg_id if msg_id > current
         end
 
         def safe_enqueue(connection, envelopes_or_buffer)
@@ -268,14 +334,31 @@ module Pgbus
           html = parsed.is_a?(Hash) ? parsed["html"] : nil
           return envelope unless html.is_a?(String)
 
-          Pgbus::Client::ReadAfter::Envelope.new(
+          visible_to = parsed["visible_to"]
+          visible_to = visible_to.to_sym if visible_to.is_a?(String)
+
+          StreamEnvelope.new(
             msg_id: envelope.msg_id,
             enqueued_at: envelope.enqueued_at,
             payload: html,
-            source: envelope.source
+            source: envelope.source,
+            visible_to: visible_to
           )
         rescue JSON::ParserError
           envelope
+        end
+
+        # Filters a list of envelopes against a specific connection's
+        # context. Envelopes without a visible_to label pass through
+        # unchanged; envelopes with a label are evaluated via the
+        # Filters registry. Envelopes that predate the StreamEnvelope
+        # refactor (plain ReadAfter::Envelope with no visible_to) also
+        # pass through.
+        def visible_envelopes_for(envelopes, connection)
+          envelopes.select do |envelope|
+            label = envelope.respond_to?(:visible_to) ? envelope.visible_to : nil
+            @filters.visible?(label, connection.context)
+          end
         end
       end
     end
