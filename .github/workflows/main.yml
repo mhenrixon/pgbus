@@ -38,8 +38,15 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: ".bun-version"
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
       - name: RuboCop
         run: bundle exec rubocop
+      - name: Herb (HTML+ERB linter)
+        run: bun run lint:herb
       - name: Verify gem builds
         run: bundle exec rake build
 
@@ -206,6 +213,8 @@ jobs:
                 ON pgbus_failed_events (queue_name);
               CREATE INDEX IF NOT EXISTS idx_pgbus_failed_events_time
                 ON pgbus_failed_events (failed_at);
+              CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_failed_events_queue_msg
+                ON pgbus_failed_events (queue_name, msg_id);
             SQL
             conn.close
           "

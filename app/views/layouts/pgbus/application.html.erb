@@ -13,23 +13,69 @@
         (!localStorage.getItem('pgbus-dark') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       document.documentElement.classList.add('dark');
     }
-    function toggleDarkMode() {
+    function pgbusToggleDarkMode() {
       var isDark = document.documentElement.classList.toggle('dark');
       localStorage.setItem('pgbus-dark', isDark);
     }
-    function toggleMobileMenu() {
+    function pgbusSyncAriaExpanded(menuId, expanded) {
+      var btn = document.querySelector('[aria-controls="' + menuId + '"]');
+      if (btn) btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+    function pgbusToggleMobileMenu() {
       var menu = document.getElementById('pgbus-mobile-menu');
       var openIcon = document.getElementById('pgbus-menu-open');
       var closeIcon = document.getElementById('pgbus-menu-close');
-      menu.classList.toggle('hidden');
-      openIcon.classList.toggle('hidden');
-      closeIcon.classList.toggle('hidden');
+      if (!menu) return;
+      var isOpen = menu.classList.toggle('hidden') === false;
+      if (openIcon) openIcon.classList.toggle('hidden');
+      if (closeIcon) closeIcon.classList.toggle('hidden');
+      pgbusSyncAriaExpanded('pgbus-mobile-menu', isOpen);
     }
+    function pgbusToggleLocaleMenu() {
+      var menu = document.getElementById('pgbus-locale-menu');
+      if (!menu) return;
+      var isOpen = menu.classList.toggle('hidden') === false;
+      pgbusSyncAriaExpanded('pgbus-locale-menu', isOpen);
+    }
+    function pgbusBulkRowToggle(checkbox) {
+      var first = checkbox.nextElementSibling;
+      var second = first && first.nextElementSibling;
+      if (first) first.disabled = !checkbox.checked;
+      if (second) second.disabled = !checkbox.checked;
+    }
+    function pgbusBindActions(root) {
+      (root || document).querySelectorAll('[data-pgbus-action]').forEach(function(el) {
+        if (el.dataset.pgbusBound === 'true') return;
+        el.dataset.pgbusBound = 'true';
+        var action = el.dataset.pgbusAction;
+        if (action === 'toggle-dark-mode') {
+          el.addEventListener('click', pgbusToggleDarkMode);
+        } else if (action === 'toggle-mobile-menu') {
+          el.addEventListener('click', pgbusToggleMobileMenu);
+        } else if (action === 'toggle-locale-menu') {
+          el.addEventListener('click', pgbusToggleLocaleMenu);
+        } else if (action === 'bulk-row-toggle') {
+          el.addEventListener('change', function() { pgbusBulkRowToggle(el); });
+        }
+      });
+    }
+    document.addEventListener('DOMContentLoaded', function() { pgbusBindActions(); });
+    document.addEventListener('turbo:load', function() { pgbusBindActions(); });
+    document.addEventListener('turbo:frame-load', function(e) { pgbusBindActions(e.target); });
+    <%# Turbo Drive caches pages via cloneNode(true), which keeps attributes
+        but drops event listeners. Clear the binding sentinel before caching
+        so pgbusBindActions() actually rebinds when the snapshot is restored. %>
+    document.addEventListener('turbo:before-cache', function() {
+      document.querySelectorAll('[data-pgbus-bound]').forEach(function(el) {
+        el.removeAttribute('data-pgbus-bound');
+      });
+    });
     document.addEventListener('click', function(e) {
       var switcher = document.getElementById('pgbus-locale-switcher');
       var menu = document.getElementById('pgbus-locale-menu');
-      if (menu && switcher && !switcher.contains(e.target)) {
+      if (menu && switcher && !switcher.contains(e.target) && !menu.classList.contains('hidden')) {
         menu.classList.add('hidden');
+        pgbusSyncAriaExpanded('pgbus-locale-menu', false);
       }
     });
   </script>
@@ -37,9 +83,9 @@
   <%# Self-hosted assets — no external CDN dependencies %>
   <%= tag.link rel: "stylesheet", href: frontend_static_path(:style, format: :css, locale: nil), nonce: content_security_policy_nonce %>
 
-  <%# Importmap for ES modules %>
+  <%# Importmap for ES modules — keys are internal symbols, values are app-controlled paths, no user input %>
   <% importmaps = Pgbus::FrontendsController.js_modules.keys.index_with { |mod| frontend_module_path(mod, format: :js, locale: nil) } %>
-  <%= tag.script({ imports: importmaps }.to_json.html_safe, type: "importmap", nonce: content_security_policy_nonce) %>
+  <%= tag.script({ imports: importmaps }.to_json.html_safe, type: "importmap", nonce: content_security_policy_nonce) %> <%# herb:disable erb-no-unsafe-raw %>
   <%= tag.script("", src: frontend_static_path(:apexcharts, format: :js, locale: nil), nonce: content_security_policy_nonce) %>
 
   <script type="module" nonce="<%= content_security_policy_nonce %>">
@@ -94,7 +140,7 @@
           <div class="flex items-center space-x-2">
             <!-- Locale switcher -->
             <div class="relative" id="pgbus-locale-switcher">
-              <button type="button" onclick="document.getElementById('pgbus-locale-menu').classList.toggle('hidden')" class="rounded-md px-2 py-1 text-sm text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" data-pgbus-action="toggle-locale-menu" aria-controls="pgbus-locale-menu" aria-expanded="false" aria-haspopup="true" class="rounded-md px-2 py-1 text-sm text-gray-300 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <%= pgbus_locale_flag(I18n.locale) %> <%= I18n.locale.to_s.upcase %>
               </button>
               <div id="pgbus-locale-menu" class="hidden absolute right-0 z-50 mt-1 w-44 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
@@ -109,7 +155,7 @@
             </div>
 
             <!-- Dark mode toggle -->
-            <button onclick="toggleDarkMode()" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
+            <button type="button" data-pgbus-action="toggle-dark-mode" class="rounded-md p-2 text-gray-400 hover:text-white focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-900" aria-label="<%= t("pgbus.layout.toggle_dark_mode") %>">
               <svg class="h-5 w-5 hidden dark:block" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"/>
               </svg>
@@ -119,7 +165,7 @@
             </button>
 
             <!-- Mobile menu button (hidden on large screens) -->
-            <button onclick="toggleMobileMenu()" class="lg:hidden rounded-md p-2 text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="<%= t("pgbus.layout.toggle_menu") %>">
+            <button type="button" data-pgbus-action="toggle-mobile-menu" aria-controls="pgbus-mobile-menu" aria-expanded="false" class="lg:hidden rounded-md p-2 text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="<%= t("pgbus.layout.toggle_menu") %>">
               <!-- Hamburger icon -->
               <svg id="pgbus-menu-open" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/>
@@ -171,7 +217,7 @@
             </svg>
           </div>
           <div class="flex-1">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white" id="pgbus-confirm-title"></h3>
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white" id="pgbus-confirm-title"><%= t("pgbus.dialogs.confirm_title", default: "Are you sure?") %></h3>
             <p class="mt-2 text-sm text-gray-600 dark:text-gray-300" id="pgbus-confirm-message"></p>
           </div>
         </div>
