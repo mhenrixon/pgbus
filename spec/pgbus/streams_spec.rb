@@ -235,5 +235,25 @@ RSpec.describe Pgbus::Streams do
     it "wraps the same name on subsequent calls" do
       expect(Pgbus.stream("chat").name).to eq("chat")
     end
+
+    it "caches Stream instances by name (returns the same object for the same name)" do
+      a = Pgbus.stream("cache_hit_test")
+      b = Pgbus.stream("cache_hit_test")
+      expect(a).to be(b)
+    end
+
+    it "returns different instances for different names" do
+      a = Pgbus.stream("cache_a")
+      b = Pgbus.stream("cache_b")
+      expect(a).not_to be(b)
+    end
+
+    it "treats GlobalID-equivalent inputs as the same cache key" do
+      account = double("Account", to_gid_param: "gid://app/Account/42")
+      a = Pgbus.stream(account)
+      b = Pgbus.stream(account)
+      expect(a).to be(b)
+      expect(a.name).to eq("gid://app/Account/42")
+    end
   end
 end

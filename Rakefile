@@ -36,6 +36,11 @@ namespace :bench do
     ruby "benchmarks/integration_bench.rb"
   end
 
+  desc "Run streams benchmarks (requires PGBUS_DATABASE_URL; boots real Puma + SSE)"
+  task :streams do
+    ruby "benchmarks/streams_bench.rb"
+  end
+
   desc "Run all benchmarks (unit-level, no DB required)"
   task all: %i[serialization client executor]
 end
