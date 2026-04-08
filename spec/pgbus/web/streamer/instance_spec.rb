@@ -132,6 +132,27 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       reader.close
       conn.io.close
     end
+
+    it "rejects a registration that races worker shutdown" do
+      # Without the @shutdown_mutex guard in register, a request thread
+      # arriving after shutdown! has stopped the dispatcher would push
+      # a ConnectMessage onto a queue no one is draining, leaving the
+      # socket outside the registry and outside close_all_connections.
+      # The fix marks such late connections dead so the caller knows
+      # registration was rejected.
+      streamer.start
+      fake_pg.push_timeout
+      streamer.shutdown!
+
+      conn, reader = build_sse_connection(id: "late")
+      streamer.register(conn)
+
+      expect(conn.dead?).to be true
+      expect(streamer.registry.connections_for("chat")).not_to include(conn)
+      expect(streamer.dispatch_queue).to be_empty
+      reader.close
+      conn.io.close
+    end
   end
 
   describe "#shutdown!" do
@@ -201,6 +222,32 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       Pgbus::Web::Streamer.reset!
 
       expect(Pgbus::Web::Streamer.instance_variable_get(:@current)).to be_nil
+    end
+
+    it "serialises concurrent first-callers so only one Instance is built" do
+      # Without @current_mutex, two threads racing into Streamer.current
+      # would both build and start an Instance, leaking the loser of
+      # the `@current ||=` race.
+      build_count = Concurrent::AtomicFixnum.new(0)
+      original_new = described_class.method(:new)
+      allow(described_class).to receive(:new) do |**kwargs|
+        build_count.increment
+        sleep 0.01 # widen the race window so the GVL doesn't accidentally serialise
+        original_new.call(**kwargs)
+      end
+
+      fake_pgs = Array.new(10) { fake_pg.class.new }
+      instances = Concurrent::Array.new
+      threads = Array.new(10) do |i|
+        Thread.new do
+          instances << Pgbus::Web::Streamer.current(client: client, config: config, pg_connection: fake_pgs[i], logger: Logger.new(IO::NULL))
+        end
+      end
+      threads.each(&:join)
+      fake_pgs.each(&:push_timeout)
+
+      expect(instances.uniq.size).to eq(1)
+      expect(build_count.value).to eq(1)
     end
   end
 end

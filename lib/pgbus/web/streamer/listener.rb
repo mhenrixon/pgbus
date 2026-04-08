@@ -76,12 +76,25 @@ module Pgbus
           self
         end
 
-        # Post a LISTEN command into the listener thread's command queue. The
-        # listener will drain the queue between notify polls.
+        # Synchronously enable LISTEN on a queue's NOTIFY channel.
+        # Blocks until the listener thread has actually executed the
+        # LISTEN SQL — this matters because Dispatcher#handle_connect
+        # needs the LISTEN to be active *before* it issues read_after,
+        # otherwise a broadcast committed in the gap would be neither
+        # in the read_after result nor delivered as a WakeMessage.
+        #
+        # The wait is bounded by the next wait_for_notify timeout
+        # (streams_listen_health_check_ms, default 250ms) plus a small
+        # margin so a stuck listener can't hang the dispatcher forever.
         def ensure_listening(queue_name)
-          @commands << [:listen, queue_name]
+          ack = Queue.new
+          @commands << [:listen, queue_name, ack]
+          ack.pop(timeout: ack_timeout)
         end
 
+        # Asynchronous: lazy GC of LISTENs whose subscriber count
+        # has dropped to zero. No correctness path depends on this
+        # completing before the caller proceeds, so we don't block.
         def remove_listening(queue_name)
           @commands << [:unlisten, queue_name]
         end
@@ -115,7 +128,17 @@ module Pgbus
           loop do
             cmd = @commands.pop(true)
             case cmd[0]
-            when :listen   then do_listen(cmd[1])
+            when :listen
+              ack = cmd[2]
+              begin
+                do_listen(cmd[1])
+              ensure
+                # Always ack so the caller is never left blocked, even
+                # if do_listen raised. The caller can still detect
+                # failure by checking @listening_to or by other means;
+                # we just promise not to deadlock the dispatcher.
+                ack&.push(:done)
+              end
             when :unlisten then do_unlisten(cmd[1])
             when :stop     then @running = false
                                 return
@@ -124,6 +147,15 @@ module Pgbus
             # empty queue
             return
           end
+        end
+
+        # Caller wait budget for ensure_listening's ack. The listener
+        # thread will process the command at most one wait_for_notify
+        # cycle from now (bounded by health_check_ms); add a small
+        # safety margin so the dispatcher fails loud rather than
+        # hanging if the listener thread is dead.
+        def ack_timeout
+          (@health_check_ms / 1000.0) + 1.0
         end
 
         def do_listen(queue_name)
@@ -155,12 +187,18 @@ module Pgbus
 
         def reconnect!
           @conn.reset
+          # Don't clear @listening_to until the new set is built. If a
+          # mid-loop LISTEN raises, we keep the original set so the
+          # next reconnect cycle still knows which channels need to
+          # come back. The previous version cleared first and lost
+          # any channels not yet retried on a transient error.
           to_relisten = @listening_to.to_a
-          @listening_to.clear
+          new_listening = Set.new
           to_relisten.each do |channel|
             @conn.exec(%(LISTEN "#{channel}"))
-            @listening_to.add(channel)
+            new_listening.add(channel)
           end
+          @listening_to = new_listening
         rescue PG::Error => e
           @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
           sleep 0.5

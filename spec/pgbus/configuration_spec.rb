@@ -847,8 +847,8 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_idle_timeout).to eq(3_600)
     end
 
-    it "has a 5 second LISTEN health check interval" do
-      expect(config.streams_listen_health_check_ms).to eq(5_000)
+    it "has a 250ms LISTEN health check interval" do
+      expect(config.streams_listen_health_check_ms).to eq(250)
     end
 
     it "has a 5 second write deadline" do
