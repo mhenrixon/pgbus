@@ -148,3 +148,22 @@ def cleanup_tables
 rescue StandardError => e
   warn "[pgbus integration] Table cleanup warning: #{e.message}"
 end
+
+# Build a dedicated PG::Connection for tests that need to LISTEN on the
+# same database the integration suite is using. Parses every credential
+# from PGBUS_DATABASE_URL — including the password, which is required
+# in CI where Postgres has authentication enabled. Previously each
+# streams integration spec defined its own copy of this helper, and
+# every copy forgot the password, so all PG.connect calls in CI failed
+# with `fe_sendauth: no password supplied`.
+def build_pg_listen_connection
+  require "pg"
+  uri = URI.parse(PGBUS_DATABASE_URL)
+  PG.connect(
+    host: uri.host || "localhost",
+    port: (uri.port || 5432).to_i,
+    dbname: uri.path.delete_prefix("/"),
+    user: uri.user || ENV.fetch("USER"),
+    password: uri.password
+  )
+end
