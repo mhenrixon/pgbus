@@ -296,15 +296,39 @@ RSpec.describe Pgbus::Configuration do
     end
 
     context "when given a String (new DSL form)" do
-      it "parses the string into the legacy array shape" do
+      it "parses the wildcard form to an anonymous capsule (no :name)" do
+        # Wildcards never get auto-named — see the long comment on
+        # Configuration#workers= for the rationale. Anonymous capsules
+        # let the user run multiple identical forks without colliding
+        # with the named-capsule overlap check.
         config.workers = "*: 5"
-        expect(config.workers).to eq([{ queues: ["*"], threads: 5, name: "*" }])
+        expect(config.workers).to eq([{ queues: ["*"], threads: 5 }])
+        expect(config.workers.first).not_to have_key(:name)
       end
 
-      it "auto-names each capsule by its first queue" do
+      it "auto-names each capsule whose first-queue is unique and not the wildcard" do
         config.workers = "critical, default: 5; mailers: 2"
         names = config.workers.map { |c| c[:name] }
         expect(names).to eq(%w[critical mailers])
+      end
+
+      it "leaves duplicate-first-queue capsules anonymous (the 'N forks' pattern)" do
+        # Restores the legacy YAML pattern: 5 × {queues: ["*"], threads: 3}.
+        # Each capsule becomes its own forked process at boot time.
+        config.workers = "*: 3; *: 3; *: 3"
+        expect(config.workers.size).to eq(3)
+        expect(config.workers).to all(eq(queues: ["*"], threads: 3))
+        config.workers.each { |c| expect(c).not_to have_key(:name) }
+      end
+
+      it "leaves duplicate non-wildcard first-queues anonymous too" do
+        # Same logic — if naming would collide, neither side gets a name.
+        config.workers = "default: 5; default: 3"
+        expect(config.workers).to eq([
+                                       { queues: ["default"], threads: 5 },
+                                       { queues: ["default"], threads: 3 }
+                                     ])
+        config.workers.each { |c| expect(c).not_to have_key(:name) }
       end
 
       it "raises CapsuleDSL::ParseError for invalid strings" do
@@ -458,19 +482,59 @@ RSpec.describe Pgbus::Configuration do
   end
 
   describe "wildcard overlap detection" do
-    it "rejects adding a capsule when an existing capsule has '*'" do
-      config.workers = "*: 5"
+    # Anonymous capsules (parsed from "*: N" or duplicate-first-queue
+    # strings) are intentionally invisible to overlap detection — they
+    # represent "N forks of the same pool" rather than addressable units.
+    # Only named capsules trigger the overlap rule.
+    it "allows adding a named capsule when an existing anonymous '*' capsule exists" do
+      config.workers = "*: 5" # anonymous (wildcard never gets auto-named)
       expect do
         config.capsule(:critical, queues: %w[critical], threads: 3)
-      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+      end.not_to raise_error
     end
 
-    it "rejects adding a '*' capsule when other queues already exist" do
+    it "allows adding a wildcard capsule on top of anonymous wildcards" do
+      config.workers = "*: 3; *: 3"
+      expect do
+        config.capsule(:catch_all, queues: ["*"], threads: 5)
+      end.not_to raise_error
+    end
+
+    it "rejects adding a wildcard capsule when an existing NAMED capsule exists" do
       config.workers = nil
       config.capsule(:critical, queues: %w[critical], threads: 3)
       expect do
         config.capsule(:catch_all, queues: ["*"], threads: 5)
       end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+    end
+
+    it "rejects adding a named capsule when an existing NAMED wildcard capsule exists" do
+      config.workers = nil
+      config.capsule(:catch_all, queues: ["*"], threads: 5)
+      expect do
+        config.capsule(:critical, queues: %w[critical], threads: 3)
+      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+    end
+  end
+
+  describe "anonymous N-forks pattern (legacy YAML compatibility)" do
+    # The pattern that triggered the v0.5.1 regression fix: legacy YAML
+    # could declare 5 × {queues: ["*"], threads: 3} to mean "5 forked
+    # processes each running 3 threads, all reading every queue". The
+    # PR-3 capsule DSL initially rejected this as a queue overlap. The
+    # fix: anonymous capsules can overlap freely, named capsules cannot.
+    it "produces N capsules from N-fork wildcard syntax" do
+      config.workers = "*: 3; *: 3; *: 3; *: 3; *: 3"
+      expect(config.workers.size).to eq(5)
+      expect(config.workers.map { |c| c[:threads] }.sum).to eq(15)
+    end
+
+    it "still rejects two named capsules with the same explicit queue" do
+      config.workers = nil
+      config.capsule(:foo, queues: %w[shared], threads: 5)
+      expect do
+        config.capsule(:bar, queues: %w[shared], threads: 5)
+      end.to raise_error(ArgumentError, /shared.*already.*capsule/i)
     end
   end
 
@@ -847,7 +911,7 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_idle_timeout).to eq(3_600)
     end
 
-    it "has a 250ms LISTEN health check interval (bounds dispatcher mutex wait)" do
+    it "has a 250ms LISTEN health check interval" do
       expect(config.streams_listen_health_check_ms).to eq(250)
     end
 
@@ -879,6 +943,21 @@ RSpec.describe Pgbus::Configuration do
     it "rejects non-Hash streams_retention" do
       config.streams_retention = "nope"
       expect { config.validate! }.to raise_error(ArgumentError, /streams_retention/)
+    end
+
+    it "rejects non-positive streams_idle_timeout" do
+      config.streams_idle_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_idle_timeout/)
+    end
+
+    it "rejects non-positive streams_listen_health_check_ms" do
+      config.streams_listen_health_check_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_listen_health_check_ms/)
+    end
+
+    it "rejects non-positive streams_write_deadline_ms" do
+      config.streams_write_deadline_ms = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_write_deadline_ms/)
     end
 
     it "accepts a valid streams config" do
