@@ -68,17 +68,6 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
     Pgbus::Streams::SignedName.sign(name)
   end
 
-  def build_pg_listen_connection
-    require "pg"
-    uri = URI.parse(PGBUS_DATABASE_URL)
-    PG.connect(
-      host: uri.host || "localhost",
-      port: (uri.port || 5432).to_i,
-      dbname: uri.path.delete_prefix("/"),
-      user: uri.user || ENV.fetch("USER")
-    )
-  end
-
   def connect_sse_client(last_event_id: nil)
     @harness_started = true
     url = harness.url("/#{signed(stream_name)}?since=0")
