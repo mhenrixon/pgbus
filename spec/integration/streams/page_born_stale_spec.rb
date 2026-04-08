@@ -32,6 +32,10 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
   # restore it after each test so we don't contaminate sibling specs.
   before(:all) do
     @saved_listen_notify = Pgbus.configuration.listen_notify
+    @saved_signed_name_secret = Pgbus.configuration.streams_signed_name_secret
+    @saved_listen_health_check_ms = Pgbus.configuration.streams_listen_health_check_ms
+    @saved_heartbeat_interval = Pgbus.configuration.streams_heartbeat_interval
+    @saved_write_deadline_ms = Pgbus.configuration.streams_write_deadline_ms
     Pgbus.configuration.listen_notify = true
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
     Pgbus.configuration.streams_listen_health_check_ms = 50
@@ -43,7 +47,10 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
 
   after(:all) do
     Pgbus.configuration.listen_notify = @saved_listen_notify
-    Pgbus.configuration.streams_signed_name_secret = nil
+    Pgbus.configuration.streams_signed_name_secret = @saved_signed_name_secret
+    Pgbus.configuration.streams_listen_health_check_ms = @saved_listen_health_check_ms
+    Pgbus.configuration.streams_heartbeat_interval = @saved_heartbeat_interval
+    Pgbus.configuration.streams_write_deadline_ms = @saved_write_deadline_ms
     Pgbus.reset_client!
   end
 
@@ -76,7 +83,7 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    harness.shutdown if @harness_started
   end
 
   def signed(name)

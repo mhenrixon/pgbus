@@ -24,6 +24,10 @@ require_relative "../../support/sse_test_client"
 RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
   before(:all) do
     @saved_listen_notify = Pgbus.configuration.listen_notify
+    @saved_signed_name_secret = Pgbus.configuration.streams_signed_name_secret
+    @saved_listen_health_check_ms = Pgbus.configuration.streams_listen_health_check_ms
+    @saved_heartbeat_interval = Pgbus.configuration.streams_heartbeat_interval
+    @saved_write_deadline_ms = Pgbus.configuration.streams_write_deadline_ms
     Pgbus.configuration.listen_notify = true
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
     Pgbus.configuration.streams_listen_health_check_ms = 50
@@ -34,7 +38,10 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
 
   after(:all) do
     Pgbus.configuration.listen_notify = @saved_listen_notify
-    Pgbus.configuration.streams_signed_name_secret = nil
+    Pgbus.configuration.streams_signed_name_secret = @saved_signed_name_secret
+    Pgbus.configuration.streams_listen_health_check_ms = @saved_listen_health_check_ms
+    Pgbus.configuration.streams_heartbeat_interval = @saved_heartbeat_interval
+    Pgbus.configuration.streams_write_deadline_ms = @saved_write_deadline_ms
     Pgbus.reset_client!
   end
 
@@ -66,7 +73,7 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    harness.shutdown if @harness_started
   end
 
   def signed(name)
@@ -74,8 +81,14 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
   end
 
   def connect_sse_client(since_id: nil, last_event_id: nil)
-    @harness_started = true
+    # Set the teardown flag AFTER harness.url succeeds. If the lazy
+    # `let(:harness)` raises (e.g. Puma fails to boot), the flag
+    # stays unset and the `after` hook won't try to shut down an
+    # instance that was never successfully constructed — which
+    # would otherwise re-trigger the lazy let and attempt a second
+    # Puma boot during teardown.
     url = harness.url("/#{signed(stream_name)}").to_s
+    @harness_started = true
     url += "?since=#{since_id}" if since_id
     headers = last_event_id ? { "Last-Event-ID" => last_event_id.to_s } : {}
     SseTestSupport::SseTestClient.connect(url: url, headers: headers, timeout: 5)
