@@ -26,3 +26,6 @@ Switching to Pgbus from another job backend? These guides cover what changes, wh
 | Recurring/cron jobs | `sidekiq-cron` gem | `config/recurring.yml` | `config.good_job.cron` | Planned |
 | Batches | Pro | No | `GoodJob::Batch` | `Pgbus::Batch` |
 | Web dashboard | `Sidekiq::Web` | Mission Control | `GoodJob::Engine` | `Pgbus::Engine` |
+| Turbo Streams transport | ActionCable (Redis) | ActionCable (Redis or PG) | ActionCable (Redis or PG) | Built-in SSE (`pgbus_stream_from`) |
+| Lost messages on reconnect | Yes (rails/rails#52420) | Yes | Yes | No (PGMQ msg_id cursor) |
+| Transactional broadcasts | No | No | No | Yes (deferred until commit) |
