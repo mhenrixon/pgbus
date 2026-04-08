@@ -84,6 +84,17 @@ module Pgbus
       @client ||= Client.new(configuration)
     end
 
+    # Entry point for the streams subsystem — `Pgbus.stream(name).broadcast(html)`
+    # or `Pgbus.stream(@order).current_msg_id`. Defined on Pgbus itself rather
+    # than inside lib/pgbus/streams.rb because that file is only Zeitwerk-loaded
+    # when Pgbus::Streams::Stream is first referenced — the chicken-and-egg
+    # problem means `Pgbus.stream(...)` would be undefined on the first call.
+    # Referencing Streams::Stream inside the method body forces Zeitwerk to
+    # load lib/pgbus/streams.rb lazily on first use, which is fine.
+    def stream(streamables)
+      Streams::Stream.new(streamables)
+    end
+
     def reset!
       @client&.close
       @client = nil

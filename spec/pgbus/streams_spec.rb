@@ -23,10 +23,13 @@ RSpec.describe Pgbus::Streams do
     end
 
     describe "#broadcast" do
-      it "ensures the stream queue exists, then publishes the payload" do
+      it "ensures the stream queue exists, then publishes the payload wrapped for PGMQ's JSONB column" do
         stream.broadcast("<turbo-stream>X</turbo-stream>")
         expect(client).to have_received(:ensure_stream_queue).with("chat")
-        expect(client).to have_received(:send_message).with("chat", "<turbo-stream>X</turbo-stream>")
+        # The HTML is wrapped as {"html" => ...} because PGMQ stores messages
+        # as JSONB and won't accept raw HTML. Dispatcher unwraps before
+        # delivering to the SSE client.
+        expect(client).to have_received(:send_message).with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
       end
 
       it "returns the assigned msg_id" do

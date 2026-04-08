@@ -43,6 +43,13 @@ module Pgbus
           @read_limit = read_limit
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
+          # Bidirectional map between logical stream names (what users pass
+          # to Pgbus.stream) and the PGMQ full table names PG emits on
+          # NOTIFY channels. The Dispatcher is the single source of truth
+          # for this translation; Registry and Connection stay blissfully
+          # unaware of the pgbus queue prefix.
+          @logical_to_full = {}
+          @full_to_logical = {}
           # @running is a soft hint, not the authoritative stop signal.
           # The :__stop__ sentinel pushed onto @queue is what actually
           # terminates run_loop — even if a torn read of @running ever
@@ -105,14 +112,19 @@ module Pgbus
         end
 
         def handle_wake(msg)
-          stream = msg.queue_name
+          # msg.queue_name is the PGMQ full table name (pgbus_int_pbns_xxx),
+          # but connections are registered under the logical name (pbns_xxx).
+          # Translate before looking up.
+          stream = @full_to_logical[msg.queue_name] || msg.queue_name
           registered = @registry.connections_for(stream)
           in_flight_pairs = @in_flight[stream]
           return if registered.empty? && in_flight_pairs.empty?
 
           min_seen = minimum_cursor(registered, in_flight_pairs)
-          envelopes = @client.read_after(stream, after_id: min_seen, limit: @read_limit)
-          return if envelopes.empty?
+          raw_envelopes = @client.read_after(stream, after_id: min_seen, limit: @read_limit)
+          return if raw_envelopes.empty?
+
+          envelopes = raw_envelopes.map { |e| unwrap_stream_envelope(e) }
 
           registered.each { |conn| safe_enqueue(conn, envelopes) }
           in_flight_pairs.each { |(_conn, buffer)| buffer.concat(envelopes) }
@@ -126,7 +138,14 @@ module Pgbus
 
           # Step 1: subscribe first. Any WakeMessage that arrives after
           # this line will see our in-flight buffer and fan out into it.
-          @listener.ensure_listening(stream)
+          # The Listener is told the PGMQ full table name because that's
+          # what PG NOTIFY channels are keyed on; the Registry and the
+          # in-flight buffer use the logical stream name. The Dispatcher
+          # is the single translator between the two naming worlds.
+          full_name = full_table_name_for(stream)
+          @full_to_logical[full_name] = stream
+          @logical_to_full[stream] = full_name
+          @listener.ensure_listening(full_name)
 
           # Step 2: install the in-flight buffer BEFORE any read.
           buffer = []
@@ -134,11 +153,12 @@ module Pgbus
 
           # Step 3: read the archive for anything published before this
           # connect landed, and write to the connection.
-          initial = @client.read_after(
+          raw_initial = @client.read_after(
             stream,
             after_id: connection.last_msg_id_sent,
             limit: @read_limit
           )
+          initial = raw_initial.map { |e| unwrap_stream_envelope(e) }
           safe_enqueue(connection, initial)
 
           # Step 4: drain the in-flight buffer (anything published between
@@ -183,6 +203,38 @@ module Pgbus
           pairs = @in_flight[stream]
           pairs.reject! { |(conn, _buf)| conn.equal?(connection) }
           @in_flight.delete(stream) if pairs.empty?
+        end
+
+        # Translates a logical stream name (pbns_xxx) into the PGMQ full
+        # table name (pgbus_int_pbns_xxx) that the NOTIFY trigger fires
+        # on. Uses Pgbus::Client's config.queue_name to match the prefix
+        # the Client already applied when send_message was called.
+        def full_table_name_for(stream_name)
+          @client.config.queue_name(stream_name)
+        end
+
+        # Pgbus::Streams::Stream#broadcast wraps HTML payloads as
+        # {"html": "..."} so PGMQ's JSONB column accepts them. Here we
+        # unwrap the html field and return a new envelope whose payload
+        # is the raw HTML, ready for the SSE `data:` line. If the
+        # payload is not a valid JSON object with an html key (e.g. a
+        # legacy broadcast that predates this subsystem), we fall back
+        # to passing it through untouched — a permissive approach that
+        # plays nicely with ad-hoc `Pgbus.client.send_message` calls
+        # pointed at stream queues by mistake.
+        def unwrap_stream_envelope(envelope)
+          parsed = JSON.parse(envelope.payload.to_s)
+          html = parsed.is_a?(Hash) ? parsed["html"] : nil
+          return envelope unless html.is_a?(String)
+
+          Pgbus::Client::ReadAfter::Envelope.new(
+            msg_id: envelope.msg_id,
+            enqueued_at: envelope.enqueued_at,
+            payload: html,
+            source: envelope.source
+          )
+        rescue JSON::ParserError
+          envelope
         end
       end
     end
