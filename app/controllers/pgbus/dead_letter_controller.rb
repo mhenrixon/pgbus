@@ -13,9 +13,7 @@ module Pgbus
 
     def retry
       queue_name = params[:queue_name].to_s
-      unless queue_name.end_with?(Pgbus.configuration.dead_letter_queue_suffix)
-        return redirect_to dead_letter_index_path, alert: "Invalid DLQ queue."
-      end
+      return redirect_to dead_letter_index_path, alert: "Invalid DLQ queue." unless queue_name.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
 
       if data_source.retry_dlq_message(queue_name, params[:id])
         redirect_to dead_letter_index_path, notice: "Message re-enqueued to original queue."
@@ -26,9 +24,7 @@ module Pgbus
 
     def discard
       queue_name = params[:queue_name].to_s
-      unless queue_name.end_with?(Pgbus.configuration.dead_letter_queue_suffix)
-        return redirect_to dead_letter_index_path, alert: "Invalid DLQ queue."
-      end
+      return redirect_to dead_letter_index_path, alert: "Invalid DLQ queue." unless queue_name.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
 
       if data_source.discard_dlq_message(queue_name, params[:id])
         redirect_to dead_letter_index_path, notice: "Message discarded."
@@ -57,7 +53,7 @@ module Pgbus
       count = 0
       selections.each do |sel|
         queue_name = sel[:queue_name].to_s
-        next unless queue_name.end_with?(Pgbus.configuration.dead_letter_queue_suffix)
+        next unless queue_name.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
 
         count += 1 if data_source.discard_dlq_message(queue_name, sel[:msg_id])
       end
