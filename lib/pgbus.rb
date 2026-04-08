@@ -39,6 +39,12 @@ module Pgbus
         )
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
+        # lib/puma/plugin/pgbus_streams.rb is a Puma plugin — it's required
+        # explicitly by the user from config/puma.rb via `plugin :pgbus_streams`.
+        # Without this ignore, Zeitwerk scans lib/puma/ under the pgbus loader
+        # root and tries to autoload Puma::Plugin, which collides with the real
+        # Puma::Plugin class defined by the puma gem itself.
+        loader.ignore("#{__dir__}/puma")
         loader
       end
     end
