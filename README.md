@@ -838,9 +838,27 @@ ActionCable can't do this because its broadcast path goes through Redis pub/sub,
 
 Outside an open transaction, broadcasts are synchronous and return the assigned `msg_id` as before. Inside a transaction, they return `nil` (the id isn't known until commit time).
 
+### Replaying history on connect (`replay:`)
+
+By default `pgbus_stream_from @room` captures `MAX(msg_id)` at render time and replays only broadcasts published after that — the page-born-stale fix. For chat-history-style applications where the page should show backlog on load, pass `replay:`:
+
+```erb
+<%# Show the last 50 messages on load, then stream live %>
+<%= pgbus_stream_from @room, replay: 50 %>
+
+<%# Show everything in PGMQ retention on load %>
+<%= pgbus_stream_from @room, replay: :all %>
+
+<%# Default behavior (post-render only) — same as omitting the option %>
+<%= pgbus_stream_from @room, replay: :watermark %>
+```
+
+The replay cap is applied server-side: the helper computes `since_id = max(0, current_msg_id - N)` for integer `N` and writes that into the HTML attribute. The client just reads the attribute and sends it as `?since=` on connect. Nothing else changes about the transport.
+
+How much history is actually available depends on the stream's retention setting (`streams_retention` or `streams_default_retention`, both in seconds). A chat stream configured with `streams_retention = { /^chat_/ => 7.days }` will replay up to seven days of history with `replay: :all`; a notification stream with the 5-minute default will only go back five minutes.
+
 ### What's NOT included (yet)
 
-- `broadcasts_with_replay`: chat-history-as-a-stream where new subscribers replay from the beginning of retention rather than just the render watermark.
 - Server-side audience filtering (per-connection authorization that filters individual broadcasts).
 - Presence as a first-class primitive.
 

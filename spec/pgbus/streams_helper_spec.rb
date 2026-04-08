@@ -105,4 +105,63 @@ RSpec.describe Pgbus::StreamsHelper do
       expect(html).to include("&quot;&gt;evil&lt;")
     end
   end
+
+  describe "#pgbus_stream_from with replay: option" do
+    it "sets since-id=0 when replay: :all so the client receives the full retained backlog" do
+      html = view.pgbus_stream_from("chat", replay: :all)
+      expect(html).to include('since-id="0"')
+    end
+
+    it "sets since-id to (current_msg_id - N) when replay: is an integer" do
+      # current_msg_id is stubbed to 1247 in the outer before block.
+      # replay: 10 → since_id = 1247 - 10 = 1237
+      html = view.pgbus_stream_from("chat", replay: 10)
+      expect(html).to include('since-id="1237"')
+    end
+
+    it "clamps replay: N to 0 when N > current_msg_id (fresh queue with a huge replay)" do
+      allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id).and_return(5)
+      html = view.pgbus_stream_from("chat", replay: 1000)
+      expect(html).to include('since-id="0"')
+    end
+
+    it "uses the watermark (current behavior) when replay: is omitted" do
+      html = view.pgbus_stream_from("chat")
+      expect(html).to include('since-id="1247"')
+    end
+
+    it "uses the watermark when replay: :watermark is explicit" do
+      html = view.pgbus_stream_from("chat", replay: :watermark)
+      expect(html).to include('since-id="1247"')
+    end
+
+    it "rejects negative replay: values" do
+      expect { view.pgbus_stream_from("chat", replay: -5) }
+        .to raise_error(ArgumentError, /replay/)
+    end
+
+    it "rejects unknown replay: symbols" do
+      expect { view.pgbus_stream_from("chat", replay: :something) }
+        .to raise_error(ArgumentError, /replay/)
+    end
+
+    it "does not pass the replay: keyword through as an HTML attribute" do
+      html = view.pgbus_stream_from("chat", replay: :all)
+      expect(html).not_to include("replay=")
+    end
+
+    it "caches the watermark lookup when used with replay: (avoids double-query)" do
+      call_count = 0
+      allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id) do
+        call_count += 1
+        1247
+      end
+
+      view.pgbus_stream_from("chat", replay: 10)
+      view.pgbus_stream_from("chat", replay: :all)
+      view.pgbus_stream_from("chat") # watermark path
+
+      expect(call_count).to eq(1)
+    end
+  end
 end
