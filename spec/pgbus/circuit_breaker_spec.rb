@@ -8,9 +8,6 @@ RSpec.describe Pgbus::CircuitBreaker do
   let(:config) do
     Pgbus::Configuration.new.tap do |c|
       c.circuit_breaker_enabled = true
-      c.circuit_breaker_threshold = 3
-      c.circuit_breaker_base_backoff = 10
-      c.circuit_breaker_max_backoff = 60
     end
   end
 
@@ -18,7 +15,14 @@ RSpec.describe Pgbus::CircuitBreaker do
     stub_const("Pgbus::QueueState", Class.new)
   end
 
+  # Stub the tuning constants down to small values so we don't have to record
+  # 5 failures and wait 30s in tests. THRESHOLD/BASE_BACKOFF/MAX_BACKOFF live
+  # on Pgbus::CircuitBreaker (no longer config) — see PR that culled silent
+  # configuration knobs.
   before do
+    stub_const("Pgbus::CircuitBreaker::THRESHOLD", 3)
+    stub_const("Pgbus::CircuitBreaker::BASE_BACKOFF", 10)
+    stub_const("Pgbus::CircuitBreaker::MAX_BACKOFF", 60)
     queue_state_class
     allow(Pgbus::QueueState).to receive(:pause!)
     allow(Pgbus::QueueState).to receive(:resume!)
@@ -30,20 +34,20 @@ RSpec.describe Pgbus::CircuitBreaker do
     it "resets the failure counter" do
       breaker.record_failure("test_queue")
       breaker.record_success("test_queue")
-      # After reset, we should be able to fail threshold-1 times without tripping
-      (config.circuit_breaker_threshold - 1).times { breaker.record_failure("test_queue") }
+      # After reset, we should be able to fail THRESHOLD-1 times without tripping
+      (Pgbus::CircuitBreaker::THRESHOLD - 1).times { breaker.record_failure("test_queue") }
       expect(Pgbus::QueueState).not_to have_received(:find_or_initialize_by)
     end
   end
 
   describe "#record_failure" do
     it "trips after reaching threshold" do
-      config.circuit_breaker_threshold.times { breaker.record_failure("test_queue") }
+      Pgbus::CircuitBreaker::THRESHOLD.times { breaker.record_failure("test_queue") }
       expect(Pgbus::QueueState).to have_received(:find_or_initialize_by).with(queue_name: "test_queue")
     end
 
     it "does not trip below threshold" do
-      (config.circuit_breaker_threshold - 1).times { breaker.record_failure("test_queue") }
+      (Pgbus::CircuitBreaker::THRESHOLD - 1).times { breaker.record_failure("test_queue") }
       expect(Pgbus::QueueState).not_to have_received(:find_or_initialize_by)
     end
 
