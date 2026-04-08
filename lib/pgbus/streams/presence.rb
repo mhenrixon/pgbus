@@ -179,7 +179,17 @@ module Pgbus
         return {} if value.nil? || value.empty?
 
         JSON.parse(value)
-      rescue JSON::ParserError
+      rescue JSON::ParserError => e
+        # Resilience fallback: return an empty hash rather than
+        # crashing the presence member list on one corrupt row. Debug
+        # log so operators can still find the corruption without
+        # impacting production throughput (debug is off by default).
+        # Truncate the value so a huge metadata payload doesn't bloat
+        # the log line.
+        truncated = value.to_s[0, 200]
+        Pgbus.logger&.debug do
+          "[Pgbus::Streams::Presence] parse_metadata failed (#{e.class}: #{e.message}); raw: #{truncated.inspect}"
+        end
         {}
       end
 
