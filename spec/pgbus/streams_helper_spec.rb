@@ -104,5 +104,28 @@ RSpec.describe Pgbus::StreamsHelper do
       expect(html).not_to include('">evil<')
       expect(html).to include("&quot;&gt;evil&lt;")
     end
+
+    it "builds the src URL from the engine's url_helpers so custom mounts work" do
+      # The helper delegates src construction to a private
+      # pgbus_stream_src(signed_name) method that asks
+      # Pgbus::Engine.routes.url_helpers.streams_path for the
+      # engine's actual mount point and appends /:signed_name. Stub
+      # the private method to simulate what it would return when
+      # the engine is mounted at a custom location like
+      # /admin/dashboard — loading Pgbus::Engine for real in a
+      # unit spec triggers `isolate_namespace Pgbus` which requires
+      # a full Rails stack. The fallback path (rescue NameError)
+      # is covered by every other example in this file, since the
+      # plain Class.new view_class has no url_helpers wired in.
+      allow(view).to receive(:pgbus_stream_src) do |signed_name|
+        "/admin/dashboard/streams/#{signed_name}"
+      end
+
+      html = view.pgbus_stream_from("chat")
+
+      match = html.match(/src="([^"]+)"/)
+      expect(match[1]).to start_with("/admin/dashboard/streams/")
+      expect(match[1]).not_to include("/pgbus/streams")
+    end
   end
 end

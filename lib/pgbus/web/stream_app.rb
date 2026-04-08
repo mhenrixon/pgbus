@@ -65,7 +65,6 @@ module Pgbus
         logger.error { "[Pgbus::StreamApp] #{e.class}: #{e.message}" }
         server_error
       end
-      # rubocop:enable Metrics/CyclomaticComplexity
 
       private
 
@@ -98,8 +97,13 @@ module Pgbus
       end
 
       def hijack_and_register(env, stream_name:, since_id:)
-        env["rack.hijack"].call
-        io = env["rack.hijack_io"] || env["rack.hijack"].call
+        # Rack hijack is a one-time transition per the Rack spec. Call
+        # once, use the return value, and fall back to the side-effect
+        # `rack.hijack_io` variable only if the return was nil (some
+        # older Rack versions populate the side-effect var instead of
+        # returning the IO).
+        hijack_result = env["rack.hijack"].call
+        io = hijack_result || env["rack.hijack_io"]
 
         write_headers(io, stream_name: stream_name, since_id: since_id)
 

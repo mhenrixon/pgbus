@@ -50,6 +50,11 @@ module Pgbus
           # unaware of the pgbus queue prefix.
           @logical_to_full = {}
           @full_to_logical = {}
+          # @running is a soft hint, not the authoritative stop signal.
+          # The :__stop__ sentinel pushed onto @queue is what actually
+          # terminates run_loop — even if a torn read of @running ever
+          # happened (it cannot under MRI's GVL for a single-word
+          # boolean assignment), the sentinel break would still fire.
           @running = false
           @thread = nil
         end
@@ -67,7 +72,15 @@ module Pgbus
 
           @running = false
           @queue << :__stop__
-          @thread&.join(5)
+          if @thread && @thread.join(5).nil?
+            # join returned nil → 5s timeout. The thread is still running
+            # (probably blocked inside an unresponsive client write or a
+            # slow Postgres query). We log and clear the reference rather
+            # than calling Thread#kill, which leaves IO state corrupt.
+            # The orphaned thread will exit on its own once the blocking
+            # call returns and it sees @running == false on the next loop.
+            @logger.warn { "[Pgbus::Streamer::Dispatcher] thread did not terminate within 5s" }
+          end
           @thread = nil
           self
         end
