@@ -29,19 +29,21 @@ module Pgbus
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
-    # Circuit breaker
-    attr_accessor :circuit_breaker_enabled, :circuit_breaker_threshold,
-                  :circuit_breaker_base_backoff, :circuit_breaker_max_backoff
+    # Circuit breaker. Only `enabled` is user-facing — the trip threshold and
+    # backoff curve are tuned via constants on Pgbus::CircuitBreaker because
+    # they are implementation details that have never been worth exposing.
+    attr_accessor :circuit_breaker_enabled
 
     # Dead letter queue
-    attr_accessor :max_retries, :dead_letter_queue_suffix
+    attr_accessor :max_retries
 
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
-    # Archive compaction
-    attr_accessor :archive_compaction_interval, :archive_compaction_batch_size
-    attr_reader :archive_retention # rubocop:disable Style/AccessorGrouping
+    # Archive compaction. Only the user-facing retention window is configurable;
+    # the loop interval and batch size are tuned via constants on
+    # Pgbus::Process::Dispatcher.
+    attr_reader :archive_retention
 
     # Transactional outbox
     attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size
@@ -54,8 +56,10 @@ module Pgbus
     # Logging
     attr_accessor :logger
 
-    # LISTEN/NOTIFY
-    attr_accessor :listen_notify, :notify_throttle_ms
+    # LISTEN/NOTIFY. Only the on/off switch is user-facing — the throttle
+    # interval is a Postgres-side tuning knob that lives as a constant on
+    # Pgbus::Client (NOTIFY_THROTTLE_MS).
+    attr_accessor :listen_notify
 
     # PGMQ schema installation mode (:auto, :extension, :embedded)
     attr_reader :pgmq_schema_mode
@@ -103,19 +107,13 @@ module Pgbus
       @dispatch_interval = 1.0
 
       @circuit_breaker_enabled = true
-      @circuit_breaker_threshold = 5
-      @circuit_breaker_base_backoff = 30
-      @circuit_breaker_max_backoff = 600
 
       @max_retries = 5
-      @dead_letter_queue_suffix = "_dlq"
 
       @priority_levels = nil
       @default_priority = 1
 
       @archive_retention = 7 * 24 * 3600 # 7 days
-      @archive_compaction_interval = 3600
-      @archive_compaction_batch_size = 1000
 
       @outbox_enabled = false
       @outbox_poll_interval = 1.0
@@ -128,7 +126,6 @@ module Pgbus
       @logger = (defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger) || Logger.new($stdout)
 
       @listen_notify = true
-      @notify_throttle_ms = 250
 
       @pgmq_schema_mode = :auto
 
@@ -162,7 +159,7 @@ module Pgbus
     end
 
     def dead_letter_queue_name(name)
-      "#{queue_name(name)}#{dead_letter_queue_suffix}"
+      "#{queue_name(name)}#{Pgbus::DEAD_LETTER_SUFFIX}"
     end
 
     def priority_queue_name(name, priority)

@@ -529,16 +529,19 @@ Pgbus automatically pauses queues that fail repeatedly, preventing cascading fai
 ```ruby
 Pgbus.configure do |config|
   config.circuit_breaker_enabled = true   # default
-  config.circuit_breaker_threshold = 5    # consecutive failures before tripping
-  config.circuit_breaker_base_backoff = 30  # seconds (doubles per trip)
-  config.circuit_breaker_max_backoff = 600  # 10 minute cap
 end
 ```
+
+The trip threshold (`5` consecutive failures), base backoff (`30s`), and
+max backoff (`600s`) are tuned via constants on `Pgbus::CircuitBreaker`.
+Override the constants in an initializer if you need different values —
+they are not exposed as configuration because tweaking them at runtime
+has never proved useful in practice.
 
 When a queue hits the failure threshold:
 1. The circuit breaker **auto-pauses** the queue with exponential backoff
 2. After the backoff expires, the queue **auto-resumes** and the trip counter resets
-3. If failures continue, each trip doubles the backoff (capped at `max_backoff`)
+3. If failures continue, each trip doubles the backoff (capped at `MAX_BACKOFF`)
 
 You can also **manually pause/resume** queues from the dashboard. The pause state is stored in the `pgbus_queue_states` table and survives restarts.
 
@@ -601,12 +604,16 @@ PGMQ archive tables grow unbounded. Pgbus automatically purges old entries:
 ```ruby
 Pgbus.configure do |config|
   config.archive_retention = 7.days               # ActiveSupport::Duration (default 7 days)
-  config.archive_compaction_interval = 3600       # run every hour (default)
-  config.archive_compaction_batch_size = 1000     # delete in batches (default)
 end
 ```
 
-The dispatcher runs archive compaction as part of its maintenance loop, deleting archived messages older than `archive_retention` in batches to avoid long-running transactions.
+The compaction loop runs every hour and deletes up to 1000 rows per
+queue per cycle. Both knobs live as constants on
+`Pgbus::Process::Dispatcher` (`ARCHIVE_COMPACTION_INTERVAL`,
+`ARCHIVE_COMPACTION_BATCH_SIZE`) — they have never been worth surfacing
+as configuration. The dispatcher runs archive compaction as part of its
+maintenance loop, deleting archived messages older than `archive_retention`
+in batches to avoid long-running transactions.
 
 ## Configuration reference
 
@@ -627,15 +634,10 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
 | `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
 | `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
-| `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures |
-| `circuit_breaker_threshold` | `5` | Consecutive failures before tripping |
-| `circuit_breaker_base_backoff` | `30` | Base backoff seconds (doubles per trip) |
-| `circuit_breaker_max_backoff` | `600` | Max backoff cap in seconds |
+| `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures (threshold and backoff are tuned via `Pgbus::CircuitBreaker` constants) |
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
 | `archive_retention` | `604800` (7 days) | How long to keep archived messages. Accepts seconds, `ActiveSupport::Duration` (e.g. `7.days`), or `nil` to disable cleanup |
-| `archive_compaction_interval` | `3600` | Seconds between archive cleanup runs |
-| `archive_compaction_batch_size` | `1000` | Rows deleted per batch during compaction |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |
 | `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
 | `outbox_batch_size` | `100` | Max entries per outbox poll cycle |

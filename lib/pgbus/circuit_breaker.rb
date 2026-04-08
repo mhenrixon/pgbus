@@ -4,6 +4,20 @@ require "concurrent"
 
 module Pgbus
   class CircuitBreaker
+    # Number of consecutive failures on a queue before the breaker trips
+    # and pauses the queue. Tuned via constants rather than configuration
+    # because the value rarely needs adjusting and exposing it as a setting
+    # never proved useful in practice.
+    THRESHOLD = 5
+
+    # Initial backoff (seconds) on the first trip. Doubles on each
+    # subsequent trip up to MAX_BACKOFF.
+    BASE_BACKOFF = 30
+
+    # Cap on the exponential backoff (seconds). After ~5 trips the curve
+    # plateaus here so a perpetually-failing queue stops spamming retries.
+    MAX_BACKOFF = 600
+
     attr_reader :config
 
     def initialize(config: Pgbus.configuration)
@@ -22,7 +36,7 @@ module Pgbus
 
       count = @failure_counts.compute(queue_name) { |val| (val || 0) + 1 }
 
-      return unless count >= config.circuit_breaker_threshold
+      return unless count >= THRESHOLD
 
       trip!(queue_name, count)
     end
@@ -105,8 +119,8 @@ module Pgbus
     end
 
     def calculate_backoff(trip_count)
-      backoff = config.circuit_breaker_base_backoff * (2**(trip_count - 1))
-      [backoff, config.circuit_breaker_max_backoff].min
+      backoff = BASE_BACKOFF * (2**(trip_count - 1))
+      [backoff, MAX_BACKOFF].min
     end
   end
 end

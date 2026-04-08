@@ -3,6 +3,13 @@
 require "zeitwerk"
 
 module Pgbus
+  # Suffix appended to a queue name to derive its dead-letter companion
+  # (e.g. "pgbus_default" -> "pgbus_default_dlq"). Hard-coded here because
+  # changing it on a running deployment would orphan every existing DLQ
+  # message; nothing in the codebase or in user reports has ever needed
+  # this to be configurable.
+  DEAD_LETTER_SUFFIX = "_dlq"
+
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class SerializationError < Error; end

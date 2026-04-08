@@ -108,7 +108,7 @@ RSpec.describe Pgbus::Client do
       config.listen_notify = true
       client.ensure_queue("jobs")
 
-      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: config.notify_throttle_ms)
+      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: Pgbus::Client::NOTIFY_THROTTLE_MS)
     end
 
     it "skips LISTEN/NOTIFY when listen_notify is false" do

@@ -9,6 +9,14 @@ module Pgbus
     PGMQ_REQUIRE_MUTEX = Mutex.new
     private_constant :PGMQ_REQUIRE_MUTEX
 
+    # Throttle window for PGMQ's enable_notify_insert trigger. Postgres
+    # NOTIFYs are coalesced into one wake-up per window, so a value of 250ms
+    # means: at most 4 broadcasts/sec per queue, regardless of insert rate.
+    # The trigger is a Postgres-level concern; exposing it as a setting
+    # never came up in practice and changing it on the fly would require
+    # re-running the trigger DDL on every queue.
+    NOTIFY_THROTTLE_MS = 250
+
     def initialize(config = Pgbus.configuration)
       # Define the PGMQ module before requiring the gem so that Zeitwerk's
       # eager_load (called inside pgmq.rb) can resolve the constant.
@@ -432,7 +440,7 @@ module Pgbus
       @queues_created.compute_if_absent(full_name) do
         synchronized do
           @pgmq.create(full_name)
-          @pgmq.enable_notify_insert(full_name, throttle_interval_ms: config.notify_throttle_ms) if config.listen_notify
+          @pgmq.enable_notify_insert(full_name, throttle_interval_ms: NOTIFY_THROTTLE_MS) if config.listen_notify
         end
         true
       end

@@ -174,6 +174,36 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
       end
     end
 
+    context "with culled settings that moved to constants" do
+      # These settings used to be config knobs but were silent (nobody
+      # tuned them) so they were moved to constants on their owning
+      # classes. The converter drops them silently — users on legacy
+      # YAML get a clean migration without manual cleanup.
+      let(:input) do
+        {
+          "production" => {
+            "notify_throttle_ms" => 500,
+            "circuit_breaker_threshold" => 10,
+            "circuit_breaker_base_backoff" => 60,
+            "circuit_breaker_max_backoff" => 1200,
+            "archive_compaction_interval" => 7200,
+            "archive_compaction_batch_size" => 5000,
+            "dead_letter_queue_suffix" => "_dead",
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }]
+          }
+        }
+      end
+
+      it "drops every culled setting from the generated initializer" do
+        %w[notify_throttle_ms
+           circuit_breaker_threshold circuit_breaker_base_backoff circuit_breaker_max_backoff
+           archive_compaction_interval archive_compaction_batch_size
+           dead_letter_queue_suffix].each do |key|
+          expect(output).not_to include(key)
+        end
+      end
+    end
+
     context "with a non-default pool_timeout" do
       let(:input) do
         {
