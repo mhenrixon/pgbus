@@ -55,15 +55,16 @@ RSpec.describe Pgbus::Streams::Filters do
       expect(filters.visible?(:admin_only, { role: "viewer" })).to be false
     end
 
-    it "returns true for an unknown label (fail-open for backwards compat)" do
-      # An unknown filter label is almost always a typo or a boot-order
-      # bug. Fail-open means clients receive the broadcast when the
-      # developer intended to restrict it — the opposite of what you
-      # want. But fail-CLOSED means a typo silently drops every
-      # broadcast to zero subscribers, which is worse for debugging.
-      # We choose fail-open AND log a warning at lookup time so the
-      # developer sees the error in the log.
-      expect(filters.visible?(:nope, { any: :context })).to be true
+    it "returns false for an unknown label (fail-closed) and logs a warning" do
+      # Audience filtering is a data-isolation feature. Failing open
+      # on a typo'd or renamed label would turn a restricted broadcast
+      # into a public one — the opposite of what the developer wanted.
+      # The warning log is loud enough that typos still get noticed
+      # in dev ("why are no subscribers receiving my broadcast?" →
+      # check the log).
+      warnings = []
+      filters_with_logger = described_class.new(logger: double("logger", warn: ->(&b) { warnings << b.call }))
+      expect(filters_with_logger.visible?(:nope, { any: :context })).to be false
     end
 
     it "returns true when the label is nil (no filter applied)" do

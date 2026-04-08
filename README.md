@@ -770,7 +770,7 @@ Pgbus.stream("ops").broadcast(html, visible_to: :admin_only)        # admins onl
 
 Failure semantics:
 
-- **Unknown filter label** → fail-OPEN with a warning log. Typos shouldn't silently drop every broadcast to zero subscribers.
+- **Unknown filter label** → fail-CLOSED with a warning log. Audience filtering is a data-isolation feature; failing open on a typo would turn a restricted broadcast into a public one. The warning log is loud enough that typos still get noticed in dev ("why are no subscribers receiving my broadcast?" → check the log).
 - **Filter predicate raises** → fail-CLOSED. A buggy predicate that crashes is treated as "deny" so private data doesn't leak on an exception path.
 - **No `visible_to` on the broadcast** → no filter applied; everyone sees it.
 

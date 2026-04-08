@@ -80,8 +80,13 @@ RSpec.describe "Streams: server-side audience filtering", :integration do
 
   after do
     streamer.shutdown!
-    admin_harness.shutdown if defined?(@admin_started)
-    viewer_harness.shutdown if defined?(@viewer_started)
+    # Capture-then-shutdown: the helpers below assign the booted
+    # harness to @booted_admin/@booted_viewer only after the lazy
+    # `let(:*_harness)` successfully returned. If boot raises, the
+    # ivar stays nil and the `&.shutdown` is a safe no-op — no
+    # re-triggered lazy let, no second Puma boot during teardown.
+    @booted_admin&.shutdown
+    @booted_viewer&.shutdown
   end
 
   def signed(name)
@@ -89,17 +94,17 @@ RSpec.describe "Streams: server-side audience filtering", :integration do
   end
 
   def connect_admin(since_id:)
-    @admin_started = true
+    @booted_admin = admin_harness
     SseTestSupport::SseTestClient.connect(
-      url: "#{admin_harness.url("/#{signed(stream_name)}")}?since=#{since_id}",
+      url: "#{@booted_admin.url("/#{signed(stream_name)}")}?since=#{since_id}",
       timeout: 5
     )
   end
 
   def connect_viewer(since_id:)
-    @viewer_started = true
+    @booted_viewer = viewer_harness
     SseTestSupport::SseTestClient.connect(
-      url: "#{viewer_harness.url("/#{signed(stream_name)}")}?since=#{since_id}",
+      url: "#{@booted_viewer.url("/#{signed(stream_name)}")}?since=#{since_id}",
       timeout: 5
     )
   end

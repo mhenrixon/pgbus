@@ -320,16 +320,19 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
       expect(viewer_conn.enqueued.map(&:msg_id)).to eq([101])
     end
 
-    it "fail-opens on an unknown filter label (delivers to all and logs)" do
-      allow(logger).to receive(:warn)
+    it "fail-closes on an unknown filter label (drops the envelope and logs)" do
+      # Audience filtering is a data-isolation feature; failing open
+      # on a typo would turn a restricted broadcast into a public
+      # one. The Filters registry is expected to log a warning and
+      # return false for unknown labels.
       raw = double("raw", payload: '{"html":"<turbo-stream/>","visible_to":"nope"}',
                           msg_id: 102, enqueued_at: nil, source: "live")
       allow(client).to receive(:read_after).and_return([raw])
 
       dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
 
-      expect(admin_conn.enqueued.map(&:msg_id)).to eq([102])
-      expect(viewer_conn.enqueued.map(&:msg_id)).to eq([102])
+      expect(admin_conn.enqueued).to be_empty
+      expect(viewer_conn.enqueued).to be_empty
     end
 
     it "fail-closes when the filter predicate raises (drops the envelope)" do
@@ -343,6 +346,39 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
 
       expect(admin_conn.enqueued).to be_empty
       expect(viewer_conn.enqueued).to be_empty
+    end
+
+    it "advances the scanned cursor past filtered-out batches so later public messages are not starved" do
+      # Without the scanned cursor, a run of invisible messages pins
+      # minimum_cursor on connection.last_msg_id_sent forever and the
+      # next read_after returns the same hidden window. Simulate a
+      # batch of admin-only messages followed by a public one and
+      # assert the viewer eventually gets the public message.
+      admin_raw = Array.new(3) do |i|
+        double("raw_admin_#{i}",
+               payload: %({"html":"<turbo-stream>admin-#{i}</turbo-stream>","visible_to":"admin_only"}),
+               msg_id: 200 + i, enqueued_at: nil, source: "live")
+      end
+      public_raw = double("raw_public",
+                          payload: '{"html":"<turbo-stream>public</turbo-stream>"}',
+                          msg_id: 210, enqueued_at: nil, source: "live")
+
+      # First handle_wake: return the admin-only batch. The viewer
+      # should see nothing but the scanned cursor should advance
+      # past 202 so the next read_after starts from > 202.
+      allow(client).to receive(:read_after).with("chat", after_id: 0, limit: 500).and_return(admin_raw)
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+      expect(viewer_conn.enqueued).to be_empty
+
+      # Second handle_wake: return the public message from the
+      # advanced cursor position. Without scanned cursor advancement,
+      # read_after would be called with after_id: 0 again and return
+      # the same hidden batch forever.
+      allow(client).to receive(:read_after).with("chat", after_id: 202, limit: 500).and_return([public_raw])
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(viewer_conn.enqueued.map(&:msg_id)).to eq([210])
+      expect(admin_conn.enqueued.map(&:msg_id)).to eq([200, 201, 202, 210])
     end
 
     it "applies the filter on the in-flight buffer path during handle_connect" do

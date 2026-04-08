@@ -64,6 +64,16 @@ module Pgbus
           # that's what PG NOTIFY channels carry) into the logical name
           # used by Registry and the in-flight buffer.
           @full_to_logical = {}
+          # Per-connection "scanned" cursor — the highest msg_id this
+          # Dispatcher has examined for a given connection, whether or
+          # not it was actually delivered. Needed because an audience
+          # filter can drop an entire read_after batch; without a
+          # separate scan cursor the dispatcher would re-read the
+          # same hidden window forever and starve later public
+          # messages. Connection#last_msg_id_sent still drives the
+          # client-visible Last-Event-ID; this cursor only feeds
+          # minimum_cursor so subsequent read_after calls advance.
+          @scanned_cursor = {}
           # @running is a soft hint, not the authoritative stop signal.
           # The :__stop__ sentinel pushed onto @queue is what actually
           # terminates run_loop — even if a torn read of @running ever
@@ -144,15 +154,26 @@ module Pgbus
           return if raw_envelopes.empty?
 
           envelopes = raw_envelopes.map { |e| unwrap_stream_envelope(e) }
+          # The maximum msg_id in THIS batch. We advance every
+          # connection's scanned cursor past this value even if the
+          # filter drops everything — otherwise a 500-message run
+          # of invisible broadcasts would pin minimum_cursor and
+          # the dispatcher would re-read the same window forever,
+          # starving later public messages. Connection#enqueue still
+          # gates the client-facing cursor on actual successful
+          # writes, so this advance is invisible to clients.
+          max_msg_id = envelopes.map(&:msg_id).max
 
           # Each connection gets a per-connection filtered subset. We
           # can't pre-filter once because different connections have
           # different authorize contexts.
           registered.each do |conn|
             safe_enqueue(conn, visible_envelopes_for(envelopes, conn))
+            advance_scanned_cursor(conn, max_msg_id)
           end
           in_flight_pairs.each do |(conn, buffer)|
             buffer.concat(visible_envelopes_for(envelopes, conn))
+            advance_scanned_cursor(conn, max_msg_id)
           end
 
           prune_dead(registered)
@@ -203,6 +224,7 @@ module Pgbus
           # life of the worker.
           remove_in_flight(stream, connection)
           if connection.dead?
+            @scanned_cursor.delete(connection)
             cleanup_stream_if_unused(stream)
           else
             @registry.register(connection)
@@ -213,6 +235,7 @@ module Pgbus
           # doesn't permanently bloat @full_to_logical or leave a
           # dangling LISTEN on the PG connection.
           remove_in_flight(stream, connection)
+          @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
           connection.mark_dead!
           @logger.error { "[Pgbus::Streamer::Dispatcher] connect failed for #{connection.id}: #{e.class}: #{e.message}" }
@@ -222,6 +245,7 @@ module Pgbus
           connection = msg.connection
           stream = connection.stream_name
           @registry.unregister(connection)
+          @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
         end
 
@@ -244,9 +268,28 @@ module Pgbus
         end
 
         def minimum_cursor(registered, in_flight_pairs)
-          cursors = registered.map(&:last_msg_id_sent)
-          in_flight_pairs.each { |(conn, _buf)| cursors << conn.last_msg_id_sent }
+          # Prefer the scanned cursor (per-connection max msg_id this
+          # Dispatcher has examined) over Connection#last_msg_id_sent
+          # (per-connection max successfully written). The two only
+          # differ when an audience filter drops envelopes: the scanned
+          # cursor advances past the hidden window so the next
+          # read_after moves forward. Falls back to last_msg_id_sent
+          # for connections that haven't been scanned yet (fresh
+          # in-flight entries on their first handle_wake pass).
+          cursors = registered.map { |c| cursor_for(c) }
+          in_flight_pairs.each { |(conn, _buf)| cursors << cursor_for(conn) }
           cursors.min || 0
+        end
+
+        def cursor_for(connection)
+          [@scanned_cursor.fetch(connection, 0), connection.last_msg_id_sent].max
+        end
+
+        def advance_scanned_cursor(connection, msg_id)
+          return if msg_id.nil?
+
+          current = @scanned_cursor[connection] || 0
+          @scanned_cursor[connection] = msg_id if msg_id > current
         end
 
         def safe_enqueue(connection, envelopes_or_buffer)
