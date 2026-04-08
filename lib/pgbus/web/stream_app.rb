@@ -103,12 +103,13 @@ module Pgbus
       end
 
       def hijack_and_register(env, stream_name:, since_id:, context: nil)
-        # Rack's full-hijack API: calling env["rack.hijack"] returns
-        # the IO on some servers (Puma) and populates env["rack.hijack_io"]
-        # as a side effect on all servers. Use the side-effect variable
-        # if set (more portable), else fall back to the return value.
-        returned_io = env["rack.hijack"].call
-        io = env["rack.hijack_io"] || returned_io
+        # Rack hijack is a one-time transition per the Rack spec. Call
+        # once, use the return value, and fall back to the side-effect
+        # `rack.hijack_io` variable only if the return was nil (some
+        # older Rack versions populate the side-effect var instead of
+        # returning the IO).
+        hijack_result = env["rack.hijack"].call
+        io = hijack_result || env["rack.hijack_io"]
 
         write_headers(io, stream_name: stream_name, since_id: since_id)
 

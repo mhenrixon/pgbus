@@ -32,10 +32,11 @@ module Pgbus
     def pgbus_stream_from(*streamables, replay: :watermark, **html_attributes)
       stream_name = Pgbus::Streams::Stream.name_from(streamables.length == 1 ? streamables.first : streamables)
       signed_name = Pgbus::Streams::SignedName.sign(stream_name)
+
       since_id = compute_since_id(stream_name, replay)
 
       attributes = {
-        "src" => "/pgbus/streams/#{signed_name}",
+        "src" => pgbus_stream_src(signed_name),
         "signed-stream-name" => signed_name,
         "since-id" => since_id.to_s,
         # Compatibility shim: turbo-rails' cable_stream_source_element reads
@@ -72,6 +73,25 @@ module Pgbus
       else
         raise ArgumentError, "replay: must be :watermark, :all, or a non-negative Integer (got #{replay.inspect})"
       end
+    end
+
+    # Build the SSE endpoint URL by asking the engine where its
+    # `:streams` mount point lives, then appending the signed name.
+    # The base comes from Pgbus::Engine.routes.url_helpers.streams_path
+    # so the URL follows whatever mount point the host app chose for
+    # the engine ("/pgbus", "/admin/dashboard", etc.). A
+    # `NoMethodError` fallback covers the test-only context where
+    # the helper is included in a plain class outside a Rails
+    # request and the engine's url_helpers aren't wired in.
+    def pgbus_stream_src(signed_name)
+      base = Pgbus::Engine.routes.url_helpers.streams_path
+      "#{base}/#{signed_name}"
+    rescue NameError
+      # NameError covers both uninitialized-constant (Pgbus::Engine
+      # not loaded, e.g. plain-Ruby unit specs) and NoMethodError
+      # (a NameError subclass) when the routes helper chain isn't
+      # wired in.
+      "/pgbus/streams/#{signed_name}"
     end
 
     def fetch_watermark(stream_name)

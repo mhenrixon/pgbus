@@ -9,22 +9,20 @@ module Pgbus
       # thread does the actual read_after + fanout.
       #
       # Threading:
-      #   - #start spawns ONE listener thread that sits in wait_for_notify
-      #   - ensure_listening / remove_listening execute LISTEN/UNLISTEN SQL
-      #     synchronously on the caller's thread, guarded by @conn_mutex
-      #     so they interleave safely with the listener's wait_for_notify.
-      #     The listener's run_loop does `sleep 0` between iterations to
-      #     release the mutex long enough for the dispatcher thread to
-      #     acquire it. Deferring LISTEN onto the listener thread would
-      #     open a race where a NOTIFY fires before the listener processes
-      #     the LISTEN command, silently dropping the notification.
+      #   - #start spawns ONE listener thread
+      #   - ensure_listening / remove_listening are called from the
+      #     dispatcher thread, which means the listener thread itself is
+      #     only running `wait_for_notify` — all LISTEN/UNLISTEN SQL goes
+      #     through a command queue that the listener thread drains between
+      #     notifies
       #   - #stop joins the thread cleanly
       #
       # Health check: `wait_for_notify(timeout)` returns nil on timeout. When
       # it does, the listener runs `SELECT 1` as a TCP keepalive. If that
       # raises, the connection is reset (`conn.reset`) and every channel in
-      # `@listening_to` is re-LISTENed. This is the fix for silently dropped
-      # LISTEN connections from NAT / PG restart / network blips.
+      # `@listening_to` is re-LISTENed. This is the fix for design doc §11 #1
+      # (silently dropped LISTEN connections from NAT / PG restart / network
+      # blips).
       #
       # NOTIFY channel naming (from pgmq_v1.11.0.sql:1634):
       #   PG_NOTIFY('pgmq.' || TG_TABLE_NAME || '.' || TG_OP, NULL)
@@ -44,16 +42,9 @@ module Pgbus
           @health_check_ms = health_check_ms
           @logger = logger
           @listening_to = Set.new
+          @commands = Queue.new
           @running = false
           @thread = nil
-          # Mutex to serialise PG::Connection access between the listener
-          # thread (which sits in wait_for_notify) and the dispatcher thread
-          # (which calls ensure_listening synchronously). libpq is not
-          # thread-safe for concurrent calls on the same connection, so we
-          # guard every call with this mutex. wait_for_notify holds the
-          # lock for at most health_check_ms before releasing it, which
-          # bounds dispatcher wait time.
-          @conn_mutex = Mutex.new
         end
 
         def start
@@ -68,12 +59,13 @@ module Pgbus
           return unless @running
 
           @running = false
+          @commands << [:stop]
           # Interrupt the blocking wait_for_notify by closing the PG
           # connection. Without this, the listener thread would sit
           # inside wait_for_notify until a NOTIFY arrived, which may
-          # never happen. Closing the socket raises PG::Error / IOError
-          # inside wait_for_notify; the rescue clause sees @running ==
-          # false and exits cleanly.
+          # never happen. Closing the socket raises PG::Error inside
+          # wait_for_notify; our rescue clause sees @running == false
+          # on the next iteration and exits cleanly.
           begin
             @conn.close if @conn.respond_to?(:close)
           rescue StandardError
@@ -84,77 +76,102 @@ module Pgbus
           self
         end
 
-        # Synchronously issues LISTEN on the PG connection. Called from
-        # the Dispatcher thread during handle_connect — we CANNOT defer
-        # this to the listener thread because the race window between
-        # "listener has not yet drained the command queue" and "a new
-        # broadcast fires a NOTIFY" would silently lose the NOTIFY
-        # (PG only delivers NOTIFYs to sessions that were already
-        # LISTENing when the NOTIFY was issued).
+        # Synchronously enable LISTEN on a queue's NOTIFY channel.
+        # Blocks until the listener thread has actually executed the
+        # LISTEN SQL — this matters because Dispatcher#handle_connect
+        # needs the LISTEN to be active *before* it issues read_after,
+        # otherwise a broadcast committed in the gap would be neither
+        # in the read_after result nor delivered as a WakeMessage.
+        #
+        # The wait is bounded by the next wait_for_notify timeout
+        # (streams_listen_health_check_ms, default 250ms) plus a small
+        # margin so a stuck listener can't hang the dispatcher forever.
         def ensure_listening(queue_name)
-          channel = channel_for(queue_name)
-          @conn_mutex.synchronize do
-            return if @listening_to.include?(channel)
-
-            # Briefly acquires the mutex from under the listener thread's
-            # wait_for_notify. The listener's run_loop does `sleep 0`
-            # between iterations specifically to yield the scheduler
-            # here, so this synchronize call waits at most
-            # health_check_ms (default 5s) before the listener releases.
-            @conn.exec(%(LISTEN "#{channel}"))
-            @listening_to.add(channel)
-          end
+          ack = Queue.new
+          @commands << [:listen, queue_name, ack]
+          ack.pop(timeout: ack_timeout)
         end
 
+        # Asynchronous: lazy GC of LISTENs whose subscriber count
+        # has dropped to zero. No correctness path depends on this
+        # completing before the caller proceeds, so we don't block.
         def remove_listening(queue_name)
-          channel = channel_for(queue_name)
-          @conn_mutex.synchronize do
-            return unless @listening_to.include?(channel)
-
-            @conn.exec(%(UNLISTEN "#{channel}"))
-            @listening_to.delete(channel)
-          end
+          @commands << [:unlisten, queue_name]
         end
 
         private
 
         def run_loop
-          timeout_s = @health_check_ms / 1000.0
           loop do
             break unless @running
 
+            drain_commands
+            break unless @running
+
+            timeout_s = @health_check_ms / 1000.0
             begin
-              notified = false
-              @conn_mutex.synchronize do
-                break unless @running
-
-                notified = @conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
-                  handle_notify(channel)
-                end
-              end
-
-              # Yield the scheduler between iterations. Without this, the
-              # listener thread re-acquires the mutex for the next
-              # wait_for_notify immediately and starves other threads (the
-              # dispatcher calling ensure_listening) that want to grab the
-              # lock between iterations. A zero-second sleep is enough to
-              # trigger a Ruby thread reschedule.
-              sleep 0
-
-              run_health_check unless notified
-            rescue PG::Error, IOError => e
-              # During shutdown we expect wait_for_notify to raise because
-              # we deliberately closed the connection to unblock this
-              # thread (see #stop). In that case @running is already
-              # false — exit cleanly, don't try to reconnect.
+              @conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
+                handle_notify(channel)
+              end || run_health_check
+            rescue PG::Error => e
               break unless @running
 
-              @logger.warn { "[Pgbus::Streamer::Listener] #{e.class} (#{e.message}) — reconnecting" }
+              @logger.warn { "[Pgbus::Streamer::Listener] PG error (#{e.class}: #{e.message}) — reconnecting" }
               reconnect!
             end
           end
         ensure
           safe_unlisten_all
+        end
+
+        def drain_commands
+          loop do
+            cmd = @commands.pop(true)
+            case cmd[0]
+            when :listen
+              ack = cmd[2]
+              begin
+                do_listen(cmd[1])
+              ensure
+                # Always ack so the caller is never left blocked, even
+                # if do_listen raised. The caller can still detect
+                # failure by checking @listening_to or by other means;
+                # we just promise not to deadlock the dispatcher.
+                ack&.push(:done)
+              end
+            when :unlisten then do_unlisten(cmd[1])
+            when :stop     then @running = false
+                                return
+            end
+          rescue ThreadError
+            # empty queue
+            return
+          end
+        end
+
+        # Caller wait budget for ensure_listening's ack. The listener
+        # thread will process the command at most one wait_for_notify
+        # cycle from now (bounded by health_check_ms); add a small
+        # safety margin so the dispatcher fails loud rather than
+        # hanging if the listener thread is dead.
+        def ack_timeout
+          (@health_check_ms / 1000.0) + 1.0
+        end
+
+        def do_listen(queue_name)
+          channel = channel_for(queue_name)
+          return if @listening_to.include?(channel)
+
+          @conn.exec(%(LISTEN "#{channel}"))
+          @listening_to.add(channel)
+        end
+
+        def do_unlisten(queue_name)
+          channel = channel_for(queue_name)
+          return unless @listening_to.include?(channel)
+
+          @conn.exec(%(UNLISTEN "#{channel}"))
+          @listening_to.delete(channel)
         end
 
         def handle_notify(channel)
@@ -165,19 +182,23 @@ module Pgbus
         end
 
         def run_health_check
-          @conn_mutex.synchronize { @conn.exec("SELECT 1") }
+          @conn.exec("SELECT 1")
         end
 
         def reconnect!
-          @conn_mutex.synchronize do
-            @conn.reset
-            to_relisten = @listening_to.to_a
-            @listening_to.clear
-            to_relisten.each do |channel|
-              @conn.exec(%(LISTEN "#{channel}"))
-              @listening_to.add(channel)
-            end
+          @conn.reset
+          # Don't clear @listening_to until the new set is built. If a
+          # mid-loop LISTEN raises, we keep the original set so the
+          # next reconnect cycle still knows which channels need to
+          # come back. The previous version cleared first and lost
+          # any channels not yet retried on a transient error.
+          to_relisten = @listening_to.to_a
+          new_listening = Set.new
+          to_relisten.each do |channel|
+            @conn.exec(%(LISTEN "#{channel}"))
+            new_listening.add(channel)
           end
+          @listening_to = new_listening
         rescue PG::Error => e
           @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
           sleep 0.5

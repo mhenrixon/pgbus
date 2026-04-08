@@ -62,9 +62,12 @@ module Pgbus
         validate_input_type!
         validate_input_not_empty!
 
-        capsules = split_capsules(@input).map { |segment| parse_capsule(segment) }
-        validate_no_duplicate_queues_across_capsules!(capsules)
-        capsules
+        # Pure tokenization: split, parse each capsule, return them in order.
+        # Cross-capsule overlap rules live in Pgbus::Configuration#workers=
+        # because they depend on whether the resulting capsules are named or
+        # anonymous, and naming is a Configuration concern (not a parser one).
+        # Within-capsule duplicate-queue checks still happen in parse_capsule.
+        split_capsules(@input).map { |segment| parse_capsule(segment) }
       end
 
       private
@@ -166,23 +169,6 @@ module Pgbus
                   "duplicate queues within a capsule are not allowed"
           end
           seen[q] = true
-        end
-      end
-
-      def validate_no_duplicate_queues_across_capsules!(capsules)
-        return if capsules.size < 2
-
-        seen = {}
-        capsules.each_with_index do |capsule, idx|
-          capsule[:queues].each do |q|
-            if seen[q]
-              label = (q == WILDCARD ? "wildcard '*'" : "queue #{q.inspect}")
-              raise ParseError,
-                    "#{label} appears in two capsules (positions #{seen[q]} and #{idx + 1}) " \
-                    "in #{@input.inspect} — each queue can only be assigned to one capsule"
-            end
-            seen[q] = idx + 1
-          end
         end
       end
     end

@@ -3,9 +3,10 @@
 module Pgbus
   class Client
     # Idempotent stream-queue setup. Creates the PGMQ queue (delegating to
-    # `ensure_queue` which already handles schema bootstrap and dedup) and
-    # then adds an `msg_id` index on the archive table that PGMQ does not
-    # ship with.
+    # `ensure_queue` which already handles schema bootstrap and dedup),
+    # overrides the NOTIFY throttle to 0 so every broadcast fires its
+    # own NOTIFY, and adds an `msg_id` index on the archive table that
+    # PGMQ does not ship with.
     #
     # PGMQ's archive tables (`pgmq.a_<name>`) only carry an `archived_at`
     # index by default. `Client#read_after`'s replay query filters by
@@ -28,6 +29,12 @@ module Pgbus
         # Override the throttle to 0 specifically for stream queues.
         synchronized { @pgmq.enable_notify_insert(full_name, throttle_interval_ms: 0) } if config.listen_notify
 
+        # CREATE INDEX IF NOT EXISTS is idempotent in Postgres but still
+        # requires a roundtrip and a brief ACCESS SHARE lock on the archive
+        # table. Broadcast-per-after_commit loops can hit this 1000x/sec on
+        # the same stream, so memoize per-process after the first success.
+        return if @stream_indexes_created[stream_name]
+
         sanitized = QueueNameValidator.sanitize!(full_name)
         sql = <<~SQL
           CREATE INDEX IF NOT EXISTS a_#{sanitized}_msg_id_idx
@@ -39,6 +46,8 @@ module Pgbus
             conn.exec(sql)
           end
         end
+
+        @stream_indexes_created[stream_name] = true
       end
     end
   end

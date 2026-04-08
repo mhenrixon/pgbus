@@ -41,14 +41,27 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
         .with(a_string_matching(/CREATE INDEX IF NOT EXISTS\s+a_pgbus_test_chat_msg_id_idx\s+ON pgmq\.a_pgbus_test_chat\s*\(msg_id\)/m))
     end
 
-    it "is idempotent — calling twice runs ensure_queue twice (it has its own dedup) and CREATE INDEX IF NOT EXISTS twice" do
+    it "is idempotent — calling twice skips the second CREATE INDEX via per-process memoization" do
       allow(raw_conn).to receive(:exec)
 
       client.ensure_stream_queue("chat")
       client.ensure_stream_queue("chat")
 
-      expect(raw_conn).to have_received(:exec).twice
+      # ensure_queue still runs twice — its own memoization is on a
+      # different layer (@queues_created) and this spec mocks it out.
+      # The CREATE INDEX SQL only runs on the first call because we
+      # now memoize on @stream_indexes_created.
+      expect(raw_conn).to have_received(:exec).once
       expect(client).to have_received(:ensure_queue).twice
+    end
+
+    it "memoizes index creation per stream, not globally" do
+      allow(raw_conn).to receive(:exec)
+
+      client.ensure_stream_queue("chat")
+      client.ensure_stream_queue("orders")
+
+      expect(raw_conn).to have_received(:exec).twice
     end
 
     it "rejects unsanitised stream names via QueueNameValidator" do

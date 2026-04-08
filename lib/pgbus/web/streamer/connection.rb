@@ -22,17 +22,17 @@ module Pgbus
           @last_msg_id_sent = since_id.to_i
           @writer = writer
           @write_deadline_ms = write_deadline_ms
+          @mutex = Mutex.new
+          @dead = false
+          @closed = false
+          @created_at = monotonic
+          @last_write_at = @created_at
           # Context is whatever the StreamApp's authorize hook returned
           # (a truthy non-boolean value). Typically a user model or a
           # session hash. The Dispatcher passes it to the Filters
           # registry when evaluating visible_to predicates. Defaults to
           # nil for tests that don't need audience filtering.
           @context = context
-          @mutex = Mutex.new
-          @dead = false
-          @closed = false
-          @created_at = monotonic
-          @last_write_at = @created_at
         end
 
         def enqueue(envelopes)
@@ -86,14 +86,26 @@ module Pgbus
         # heartbeat idle reaper. Wraps the respond_to? / closed? dance
         # so callers don't need to know about StringIO-in-tests vs real
         # Socket-in-prod or about the mark_dead! ordering.
+        #
+        # Takes the same mutex as IoWriter.write so it can't fire
+        # mid-write — otherwise the write loop could hit a half-closed
+        # socket and corrupt the `last_msg_id_sent` cursor by marking
+        # the connection dead between successful writes. The rescue
+        # narrows to IO-related exceptions; unrelated errors (bugs in
+        # the fake IO used by tests, nil-dereferences, etc.) should
+        # still propagate so the test suite catches them.
         def close
-          return if @closed
+          @mutex.synchronize do
+            return if @closed
 
-          @closed = true
-          mark_dead!
-          @io.close if @io.respond_to?(:close) && !@io.closed?
-        rescue StandardError
-          # best effort — the IO may already be half-closed
+            @closed = true
+            mark_dead!
+            return unless @io.respond_to?(:close)
+
+            @io.close unless @io.respond_to?(:closed?) && @io.closed?
+          end
+        rescue IOError, SystemCallError => e
+          Pgbus.logger&.debug { "[Pgbus::Streamer::Connection] close failed: #{e.class}: #{e.message}" }
         end
 
         private
