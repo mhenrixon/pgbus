@@ -73,7 +73,7 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    harness.shutdown if @harness_started
   end
 
   def signed(name)

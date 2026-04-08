@@ -701,9 +701,27 @@ One Puma worker hosts one `Pgbus::Web::Streamer::Instance` singleton with three 
 
 Per-stream retention is handled by the main pgbus dispatcher process on the same interval as the dispatcher's `ARCHIVE_COMPACTION_INTERVAL` constant. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
 
+### Transactional broadcasts
+
+**This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change that the database never persisted.
+
+```ruby
+ActiveRecord::Base.transaction do
+  @order.update!(status: "shipped")
+  @order.broadcast_replace_to :account           # ← deferred until commit
+  RelatedService.update_counters!(@order)        # ← might raise, rolling back the update
+end
+# If RelatedService raised, the database state is unchanged AND no SSE client
+# ever saw a "shipped" broadcast. The broadcast and the data mutation are
+# atomic with respect to each other.
+```
+
+ActionCable can't do this because its broadcast path goes through Redis pub/sub, which has no concept of your application's transaction boundary. Pgbus detects the open AR transaction via `ActiveRecord::Base.connection.current_transaction.after_commit`, which is a first-class Rails API — no outbox table, no background worker, no extra storage.
+
+Outside an open transaction, broadcasts are synchronous and return the assigned `msg_id` as before. Inside a transaction, they return `nil` (the id isn't known until commit time).
+
 ### What's NOT included (yet)
 
-- Transactional broadcasts as the default. `broadcast_replace_to` inside an `ActiveRecord::Base.transaction` currently fires before the transaction commits (same as turbo-rails). Use `broadcast_replace_later_to` for now; a future release will make sync broadcasts transactional.
 - `broadcasts_with_replay`: chat-history-as-a-stream where new subscribers replay from the beginning of retention rather than just the render watermark.
 - Server-side audience filtering (per-connection authorization that filters individual broadcasts).
 - Presence as a first-class primitive.
