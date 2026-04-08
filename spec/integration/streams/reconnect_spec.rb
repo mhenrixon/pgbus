@@ -73,7 +73,11 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if @harness_started
+    # Capture-then-shutdown avoids re-triggering the lazy `let(:harness)`
+    # if boot failed mid-test. RSpec doesn't memoize a let block that
+    # raises, so a naive `harness.shutdown` in `after` would attempt a
+    # second Puma boot during teardown.
+    @booted_harness&.shutdown
   end
 
   def signed(name)
@@ -81,14 +85,8 @@ RSpec.describe "Streams: reconnect with Last-Event-ID", :integration do
   end
 
   def connect_sse_client(since_id: nil, last_event_id: nil)
-    # Set the teardown flag AFTER harness.url succeeds. If the lazy
-    # `let(:harness)` raises (e.g. Puma fails to boot), the flag
-    # stays unset and the `after` hook won't try to shut down an
-    # instance that was never successfully constructed — which
-    # would otherwise re-trigger the lazy let and attempt a second
-    # Puma boot during teardown.
-    url = harness.url("/#{signed(stream_name)}").to_s
-    @harness_started = true
+    @booted_harness = harness
+    url = @booted_harness.url("/#{signed(stream_name)}").to_s
     url += "?since=#{since_id}" if since_id
     headers = last_event_id ? { "Last-Event-ID" => last_event_id.to_s } : {}
     SseTestSupport::SseTestClient.connect(url: url, headers: headers, timeout: 5)

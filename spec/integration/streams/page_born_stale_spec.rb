@@ -83,7 +83,11 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if @harness_started
+    # Capture-then-shutdown avoids re-triggering the lazy `let(:harness)`
+    # if boot failed mid-test. RSpec doesn't memoize a let block that
+    # raises, so a naive `harness.shutdown` in `after` would attempt a
+    # second Puma boot during teardown.
+    @booted_harness&.shutdown
   end
 
   def signed(name)
@@ -91,8 +95,8 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
   end
 
   def connect_sse_client(since_id:, extra_headers: {})
-    url = "#{harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
-    @harness_started = true
+    @booted_harness = harness
+    url = "#{@booted_harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
     SseTestSupport::SseTestClient.connect(url: url, headers: extra_headers, timeout: 5)
   end
 

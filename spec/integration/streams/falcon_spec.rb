@@ -69,7 +69,11 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    # Capture-then-shutdown avoids re-triggering the lazy `let(:harness)`
+    # if boot failed mid-test. RSpec doesn't memoize a let block that
+    # raises, so a naive `harness.shutdown` in `after` would attempt a
+    # second Falcon boot during teardown.
+    @booted_harness&.shutdown
   end
 
   def signed(name)
@@ -77,8 +81,8 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
   end
 
   def connect_sse_client(since_id:)
-    @harness_started = true
-    url = "#{harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
+    @booted_harness = harness
+    url = "#{@booted_harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
     SseTestSupport::SseTestClient.connect(url: url, timeout: 5)
   end
 
