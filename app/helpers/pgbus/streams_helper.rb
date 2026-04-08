@@ -1,0 +1,87 @@
+# frozen_string_literal: true
+
+require "cgi"
+
+module Pgbus
+  # View helper for subscribing a page to one or more pgbus streams. This
+  # is the drop-in replacement for `turbo_stream_from` — same API, same
+  # streamable resolution (GlobalID objects, symbols, arrays), same
+  # signed-name verification path — but the rendered element speaks to
+  # `Pgbus::Web::StreamApp` via SSE instead of ActionCable.
+  #
+  # The critical difference from `turbo_stream_from` is the `since-id`
+  # attribute: it carries the current PGMQ `msg_id` watermark at render
+  # time so the streamer can replay anything published in the gap between
+  # the controller render and the client connecting. This is the fix for
+  # rails/rails#52420.
+  module StreamsHelper
+    # Renders a <pgbus-stream-source> custom element. The element's JS
+    # (shipped separately under app/javascript/pgbus/stream_source_element.js)
+    # opens an SSE connection to /pgbus/streams/<signed-name>?since=<watermark>,
+    # listens for messages, and forwards each turbo-stream HTML payload
+    # into Turbo via `connectStreamSource`.
+    def pgbus_stream_from(*streamables, **html_attributes)
+      stream_name = Pgbus::Streams::Stream.name_from(streamables.length == 1 ? streamables.first : streamables)
+      signed_name = Pgbus::Streams::SignedName.sign(stream_name)
+
+      # Compute the watermark. This is the load-bearing query for the
+      # page-born-stale fix: every broadcast with msg_id <= watermark
+      # has already been assigned before this render returns, and every
+      # broadcast with msg_id > watermark will be replayed by the
+      # streamer on (re)connect via the ?since= query param.
+      since_id = fetch_watermark(stream_name)
+
+      attributes = {
+        "src" => pgbus_stream_src(signed_name),
+        "signed-stream-name" => signed_name,
+        "since-id" => since_id.to_s,
+        # Compatibility shim: turbo-rails' cable_stream_source_element reads
+        # `channel` to decide which ActionCable channel to subscribe to.
+        # We emit the same attribute so a page that mistakenly uses the
+        # turbo-rails element still renders (with ActionCable semantics).
+        "channel" => "Turbo::StreamsChannel"
+      }.merge(html_attributes.transform_keys(&:to_s))
+
+      render_tag("pgbus-stream-source", attributes)
+    end
+
+    private
+
+    # Build the SSE endpoint URL by asking the engine where its
+    # `:streams` mount point lives, then appending the signed name.
+    # The base comes from Pgbus::Engine.routes.url_helpers.streams_path
+    # so the URL follows whatever mount point the host app chose for
+    # the engine ("/pgbus", "/admin/dashboard", etc.). A
+    # `NoMethodError` fallback covers the test-only context where
+    # the helper is included in a plain class outside a Rails
+    # request and the engine's url_helpers aren't wired in.
+    def pgbus_stream_src(signed_name)
+      base = Pgbus::Engine.routes.url_helpers.streams_path
+      "#{base}/#{signed_name}"
+    rescue NameError
+      # NameError covers both uninitialized-constant (Pgbus::Engine
+      # not loaded, e.g. plain-Ruby unit specs) and NoMethodError
+      # (a NameError subclass) when the routes helper chain isn't
+      # wired in.
+      "/pgbus/streams/#{signed_name}"
+    end
+
+    def fetch_watermark(stream_name)
+      # Avoid hitting Postgres multiple times within a single render when
+      # the page uses several pgbus_stream_from helpers. We cache per
+      # thread-local for the duration of the current request — Rails'
+      # RequestStore gem is the idiomatic fit but we don't want to add
+      # a runtime dep, so a plain Thread.current hash is used. The engine
+      # initializer clears this hash between requests via a Rack middleware
+      # (Phase 4.5).
+      cache = Thread.current[:pgbus_streams_watermark_cache] ||= {}
+      cache[stream_name] ||= Pgbus.stream(stream_name).current_msg_id
+    end
+
+    def render_tag(name, attributes)
+      attr_string = attributes.map { |k, v| %(#{k}="#{CGI.escape_html(v.to_s)}") }.join(" ")
+      html = "<#{name} #{attr_string}></#{name}>"
+      html.respond_to?(:html_safe) ? html.html_safe : html
+    end
+  end
+end

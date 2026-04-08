@@ -33,6 +33,7 @@ module Pgbus
         @last_batch_cleanup_at = monotonic_now
         @last_recurring_cleanup_at = monotonic_now
         @last_archive_compaction_at = monotonic_now
+        @last_stream_archive_compaction_at = monotonic_now
         @last_outbox_cleanup_at = monotonic_now
         @last_job_lock_cleanup_at = monotonic_now
         @last_stats_cleanup_at = monotonic_now
@@ -79,6 +80,7 @@ module Pgbus
         run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
         run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
         run_if_due(now, :@last_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { compact_archives }
+        run_if_due(now, :@last_stream_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { prune_stream_archives }
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
@@ -239,6 +241,55 @@ module Pgbus
         end
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Archive compaction failed: #{e.message}" }
+      end
+
+      # Prunes per-stream archive tables. Unlike compact_archives (which
+      # uses the global archive_retention, typically 7 days), streams need
+      # per-stream retention because a chat-history stream and a
+      # presence-ping stream have wildly different storage requirements.
+      # Lookup order for a given queue: exact string match, then regex
+      # match, then streams_default_retention (5 minutes by default).
+      def prune_stream_archives
+        prefix = config.streams_queue_prefix
+        return if prefix.nil? || prefix.empty?
+
+        batch_size = config.archive_compaction_batch_size || 1000
+        conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
+        queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+
+        queue_names.each do |full_name|
+          next unless full_name.start_with?("#{prefix}_")
+
+          retention = retention_for_stream_queue(full_name)
+          next unless retention.positive?
+
+          cutoff = Time.current - retention
+          stripped = full_name.delete_prefix("#{config.queue_prefix}_")
+          deleted = Pgbus.client.purge_archive(stripped, older_than: cutoff, batch_size: batch_size)
+          if deleted.positive?
+            Pgbus.logger.debug do
+              "[Pgbus] Compacted #{deleted} stream archive entries from #{full_name}"
+            end
+          end
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed for #{full_name}: #{e.message}" }
+        end
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed: #{e.message}" }
+      end
+
+      def retention_for_stream_queue(full_name)
+        retention_map = config.streams_retention || {}
+        # Exact-match first — cheapest and most common path
+        exact = retention_map[full_name]
+        return exact.to_f if exact
+
+        # Regex-match second for pattern-based overrides (e.g. /^chat_/)
+        retention_map.each do |key, value|
+          return value.to_f if key.is_a?(Regexp) && key.match?(full_name)
+        end
+
+        config.streams_default_retention.to_f
       end
 
       def cleanup_recurring_executions
