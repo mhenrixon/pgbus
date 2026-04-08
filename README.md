@@ -776,9 +776,59 @@ Failure semantics:
 
 The filter registry is process-local. Each Puma worker (or Falcon reactor) has its own copy populated at boot. Filter predicates run **on the subscriber side** — the predicate itself can't be serialized through PGMQ, so the broadcast carries only the label name.
 
-### What's NOT included (yet)
+### Presence
 
-- Presence as a first-class primitive.
+Pgbus tracks who is currently subscribed to a stream via a `pgbus_presence_members` table. This is the standard "X people are in this room" feature that chat apps and collaboration tools need:
+
+```ruby
+rails generate pgbus:add_presence
+rails db:migrate
+```
+
+```ruby
+class RoomsController < ApplicationController
+  def show
+    @room = Room.find(params[:id])
+    Pgbus.stream(@room).presence.join(
+      member_id: current_user.id.to_s,
+      metadata: { name: current_user.name, avatar: current_user.avatar_url }
+    ) do |member|
+      render_to_string(partial: "presence/joined", locals: { member: member })
+    end
+  end
+
+  def destroy
+    Pgbus.stream(@room).presence.leave(member_id: current_user.id.to_s) do |member|
+      "<turbo-stream action=\"remove\" target=\"presence-#{member['id']}\"></turbo-stream>"
+    end
+  end
+end
+```
+
+The block passed to `join`/`leave` is rendered into HTML and broadcast through the regular pgbus stream pipeline — so it shows up in every connected client's DOM in real time, alongside the normal `broadcasts_to` output. Reading the current member list:
+
+```ruby
+Pgbus.stream(@room).presence.members
+# => [{ "id" => "7", "metadata" => {...}, "joined_at" => "...", "last_seen_at" => "..." }]
+
+Pgbus.stream(@room).presence.count
+# => 5
+```
+
+**Heartbeat and expiry.** Members that don't ping `presence.touch(member_id: ...)` periodically can be expired by a sweeper:
+
+```ruby
+# Run from a cron, ActiveJob, or after each subscriber heartbeat
+Pgbus.stream(@room).presence.sweep!(older_than: 60.seconds.ago)
+```
+
+The sweep uses `DELETE ... RETURNING` so multiple workers running it concurrently won't double-emit leave events.
+
+**Not included in v1**:
+
+- Automatic connection-driven join/leave (the application calls join/leave explicitly).
+- Automatic stale-member sweeping inside the Dispatcher (the sweep is manual).
+- Built-in DOM events on `<pgbus-stream-source>` for join/leave (the application's broadcast block decides the HTML — much more flexible than a fixed schema).
 
 ## Operations
 
