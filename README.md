@@ -573,7 +573,7 @@ Pgbus.configure do |config|
   config.outbox_enabled = true
   config.outbox_poll_interval = 1.0  # seconds
   config.outbox_batch_size = 100
-  config.outbox_retention = 24 * 3600  # keep published entries for 24h
+  config.outbox_retention = 1.day    # ActiveSupport::Duration also accepted
 end
 ```
 
@@ -600,7 +600,7 @@ PGMQ archive tables grow unbounded. Pgbus automatically purges old entries:
 
 ```ruby
 Pgbus.configure do |config|
-  config.archive_retention = 7 * 24 * 3600       # 7 days (default)
+  config.archive_retention = 7.days               # ActiveSupport::Duration (default 7 days)
   config.archive_compaction_interval = 3600       # run every hour (default)
   config.archive_compaction_batch_size = 1000     # delete in batches (default)
 end
@@ -619,7 +619,7 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `workers` | `[{queues: ["default"], threads: 5}]` | Worker process definitions |
 | `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
 | `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |
-| `visibility_timeout` | `30` | Seconds before unacked message becomes visible again |
+| `visibility_timeout` | `30` | Time before unacked message becomes visible again. Accepts seconds or `ActiveSupport::Duration` (e.g. `10.minutes`) |
 | `max_retries` | `5` | Failed reads before routing to dead letter queue |
 | `max_jobs_per_worker` | `nil` | Recycle worker after N jobs (nil = unlimited) |
 | `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
@@ -633,21 +633,21 @@ The dispatcher runs archive compaction as part of its maintenance loop, deleting
 | `circuit_breaker_max_backoff` | `600` | Max backoff cap in seconds |
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
-| `archive_retention` | `604800` | Seconds to keep archived messages (7 days) |
+| `archive_retention` | `604800` (7 days) | How long to keep archived messages. Accepts seconds, `ActiveSupport::Duration` (e.g. `7.days`), or `nil` to disable cleanup |
 | `archive_compaction_interval` | `3600` | Seconds between archive cleanup runs |
 | `archive_compaction_batch_size` | `1000` | Rows deleted per batch during compaction |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |
 | `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
 | `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
-| `outbox_retention` | `86400` | Seconds to keep published outbox entries (1 day) |
-| `idempotency_ttl` | `604800` | Seconds to keep processed event records (7 days, cleaned hourly) |
+| `outbox_retention` | `86400` (1 day) | How long to keep published outbox entries. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `idempotency_ttl` | `604800` (7 days) | How long to keep processed event records. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
 | `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
 | `web_refresh_interval` | `5000` | Dashboard auto-refresh interval in milliseconds |
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
 | `stats_enabled` | `true` | Record job execution stats for insights dashboard |
-| `stats_retention` | `604800` | Seconds to keep job stats (7 days) |
+| `stats_retention` | `2592000` (30 days) | How long to keep job stats. Accepts seconds, Duration, or `nil` to disable cleanup |
 
 ## Architecture
 

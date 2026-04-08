@@ -11,8 +11,8 @@ module Pgbus
     attr_accessor :default_queue, :queue_prefix
 
     # Worker settings
-    attr_accessor :polling_interval, :visibility_timeout, :prefetch_limit
-    attr_reader :workers
+    attr_accessor :polling_interval, :prefetch_limit
+    attr_reader :workers, :visibility_timeout # rubocop:disable Style/AccessorGrouping
 
     # Supervisor role selection.
     # nil = boot all roles (default behavior).
@@ -40,13 +40,16 @@ module Pgbus
     attr_accessor :priority_levels, :default_priority
 
     # Archive compaction
-    attr_accessor :archive_retention, :archive_compaction_interval, :archive_compaction_batch_size
+    attr_accessor :archive_compaction_interval, :archive_compaction_batch_size
+    attr_reader :archive_retention # rubocop:disable Style/AccessorGrouping
 
     # Transactional outbox
-    attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size, :outbox_retention
+    attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size
+    attr_reader :outbox_retention # rubocop:disable Style/AccessorGrouping
 
     # Event bus
-    attr_accessor :idempotency_ttl, :allowed_global_id_models
+    attr_accessor :allowed_global_id_models
+    attr_reader :idempotency_ttl # rubocop:disable Style/AccessorGrouping
 
     # Logging
     attr_accessor :logger
@@ -61,8 +64,8 @@ module Pgbus
     attr_accessor :event_consumers
 
     # Recurring jobs
-    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file,
-                  :skip_recurring, :recurring_execution_retention
+    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
+    attr_reader :recurring_execution_retention # rubocop:disable Style/AccessorGrouping
 
     # Multi-database support (optional separate database for pgbus tables)
     # Set to { database: { writing: :pgbus, reading: :pgbus } } to use a separate database.
@@ -70,7 +73,8 @@ module Pgbus
     attr_accessor :connects_to
 
     # Job stats
-    attr_accessor :stats_retention, :stats_enabled
+    attr_accessor :stats_enabled
+    attr_reader :stats_retention # rubocop:disable Style/AccessorGrouping
 
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
@@ -314,6 +318,38 @@ module Pgbus
       @roles = normalized
     end
 
+    # Duration setters: each accepts either a Numeric (seconds) or an
+    # ActiveSupport::Duration (e.g. 10.minutes, 7.days). Validation runs
+    # immediately on assignment so misconfigurations crash at boot rather
+    # than leaving stale state until a `validate!` call somewhere.
+    #
+    # Numeric values are stored unchanged (preserving Float for sub-second
+    # values). Duration values are coerced to Integer seconds via .to_i.
+
+    def visibility_timeout=(value)
+      @visibility_timeout = coerce_duration!(value, :visibility_timeout)
+    end
+
+    def archive_retention=(value)
+      @archive_retention = coerce_duration!(value, :archive_retention)
+    end
+
+    def outbox_retention=(value)
+      @outbox_retention = coerce_duration!(value, :outbox_retention)
+    end
+
+    def idempotency_ttl=(value)
+      @idempotency_ttl = coerce_duration!(value, :idempotency_ttl)
+    end
+
+    def stats_retention=(value)
+      @stats_retention = coerce_duration!(value, :stats_retention)
+    end
+
+    def recurring_execution_retention=(value)
+      @recurring_execution_retention = coerce_duration!(value, :recurring_execution_retention)
+    end
+
     # Returns the connection pool size to use for the PGMQ client.
     #
     # If +pool_size+ was explicitly set, returns that value unchanged. Otherwise
@@ -370,11 +406,41 @@ module Pgbus
 
     private
 
-    # Sum the +:threads+ values across a list of worker/consumer entries.
-    # Uses +default_threads+ when an entry omits the key. Rejects anything
-    # that isn't a positive Integer with a clear error — silent coercion via
-    # +to_i+ would let "abc" → 0 produce a critically under-sized pool with
-    # no indication that something was wrong.
+    # Coerce a duration setting value to a positive Numeric.
+    #
+    # Accepts an ActiveSupport::Duration (coerced to Integer seconds via .to_i)
+    # or a Numeric (stored as-is, preserving Float for sub-second values).
+    # Raises ArgumentError immediately for nil, zero, negative, or non-numeric
+    # input — callers crash at boot rather than carrying silently-broken state.
+    def coerce_duration!(value, name)
+      # nil is a valid sentinel for "feature disabled" (e.g. archive_retention,
+      # idempotency_ttl, recurring_execution_retention all use nil to skip the
+      # corresponding maintenance task in the dispatcher).
+      return nil if value.nil?
+
+      # Check Duration FIRST because ActiveSupport overrides Numeric#is_a?
+      # to return true for Integer, so a duration would otherwise be caught
+      # by the Numeric branch and stored as-is (uncoerced).
+      duration_class_loaded = defined?(ActiveSupport::Duration)
+      return validate_positive_duration!(value.to_i, name) if duration_class_loaded && value.is_a?(ActiveSupport::Duration)
+
+      # Plain Numeric (Integer, Float, Rational). Use class identity rather
+      # than is_a? for the Duration exclusion because ActiveSupport overrides
+      # is_a? — see comment above.
+      if value.is_a?(Numeric) && (!defined?(ActiveSupport::Duration) || value.class != ActiveSupport::Duration)
+        return validate_positive_duration!(value, name)
+      end
+
+      raise ArgumentError,
+            "#{name} must be a Numeric (seconds), ActiveSupport::Duration, or nil to disable, got #{value.inspect}"
+    end
+
+    def validate_positive_duration!(numeric, name)
+      raise ArgumentError, "#{name} must be a positive number, got #{numeric}" unless numeric.positive?
+
+      numeric
+    end
+
     # Read a capsule's name from either symbol or string key, normalized
     # to a string for comparison. Returns nil for unnamed (legacy) entries.
     def capsule_name(entry)
