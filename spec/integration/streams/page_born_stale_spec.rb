@@ -83,24 +83,6 @@ RSpec.describe "Streams: page-born-stale race fix", :integration do
     Pgbus::Streams::SignedName.sign(name)
   end
 
-  def build_pg_listen_connection
-    require "pg"
-    PG.connect(
-      host: ENV.fetch("PGBUS_DATABASE_HOST", "localhost"),
-      port: ENV.fetch("PGBUS_DATABASE_PORT", "5432").to_i,
-      dbname: pgbus_database_name,
-      user: pgbus_database_user
-    )
-  end
-
-  def pgbus_database_name
-    URI.parse(PGBUS_DATABASE_URL).path.delete_prefix("/")
-  end
-
-  def pgbus_database_user
-    URI.parse(PGBUS_DATABASE_URL).user || ENV.fetch("USER")
-  end
-
   def connect_sse_client(since_id:, extra_headers: {})
     url = "#{harness.url("/#{signed(stream_name)}")}?since=#{since_id}"
     @harness_started = true
