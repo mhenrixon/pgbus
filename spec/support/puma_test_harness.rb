@@ -87,8 +87,11 @@ module SseTestSupport
     private
 
     def wait_until_accepting(timeout:)
-      deadline = Time.now + timeout
-      while Time.now < deadline
+      # Monotonic clock so the wait can't be fooled by NTP corrections
+      # or system-time jumps mid-boot. Matches SseTestClient's existing
+      # use of CLOCK_MONOTONIC for its own wait loops.
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+      while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
         begin
           sock = TCPSocket.new(@host, @port)
           sock.close
