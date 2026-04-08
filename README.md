@@ -35,7 +35,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 ## Features
 
 - **ActiveJob adapter** -- drop-in replacement, zero config migration from other backends
-- **Turbo Streams replacement** -- `pgbus_stream_from` drops into turbo-rails apps with no ActionCable, no Redis, no lost messages on reconnect (fixes rails/rails#52420, hotwired/turbo#1261)
+- **Turbo Streams replacement** -- `pgbus_stream_from` drops into turbo-rails apps with no ActionCable, no Redis, no lost messages on reconnect. Includes transactional broadcasts (deferred until commit), backlog replay on connect, server-side audience filtering, and presence tracking. Fixes rails/rails#52420, hotwired/turbo#1261, and hotwired/turbo-rails#674.
 - **Event bus** -- publish/subscribe with AMQP-style topic routing (`orders.#`, `payments.*`)
 - **Dead letter queues** -- automatic DLQ routing after configurable retries
 - **Worker recycling** -- memory, job count, and lifetime limits prevent runaway processes
@@ -817,6 +817,8 @@ Stream broadcasts are stored in PGMQ queues prefixed `pgbus_stream_*`. Each broa
 
 One Puma worker (or Falcon reactor) hosts one `Pgbus::Web::Streamer::Instance` singleton with three threads (Listener / Dispatcher / Heartbeat) and one dedicated PG connection for LISTEN. Hijacked SSE sockets are held outside the web server's thread pool on Puma (confirmed by an integration test that fires 20 concurrent hijacked connections and observes them complete in parallel on an 8-thread Puma server, [puma/puma#1009](https://github.com/puma/puma/issues/1009)) and inside a fiber on Falcon (one fiber per hijacked connection, scheduler-backed non-blocking IO).
 
+> **Don't use `ActionController::Live` for pgbus streams.** It's the conventional Rails answer for SSE and it's the wrong one. `Live` blocks inside `@app.call(env)` for the lifetime of the connection, which ties up a Puma thread *per subscriber* — the exact problem the `rack.hijack`-based architecture above exists to avoid. Pgbus's streams endpoint is a mounted Rack app (not a Rails controller) so the temptation isn't even available, and a `rake pgbus:streams:lint_no_live` task fails CI if any pgbus controller `include`s it. If you're tempted to wire SSE through a Rails controller, use `pgbus_stream_from` in your view instead — the helper handles the cursor, replay, reconnect, and Puma-thread-release concerns for you.
+
 Per-stream retention is handled by the main pgbus dispatcher process on the same interval as `archive_compaction_interval`. Streams default to a 5-minute retention because SSE clients reconnect within seconds; chat-style applications override the retention to days via `streams_retention`.
 
 ### Transactional broadcasts
@@ -942,11 +944,11 @@ Pgbus.stream(@room).presence.sweep!(older_than: 60.seconds.ago)
 
 The sweep uses `DELETE ... RETURNING` so multiple workers running it concurrently won't double-emit leave events.
 
-**Not included in v1**:
+**Deliberately left to the application**:
 
-- Automatic connection-driven join/leave (the application calls join/leave explicitly).
-- Automatic stale-member sweeping inside the Dispatcher (the sweep is manual).
-- Built-in DOM events on `<pgbus-stream-source>` for join/leave (the application's broadcast block decides the HTML — much more flexible than a fixed schema).
+- Join/leave is explicit, not connection-driven. The controller decides who is "present" — a connected SSE client is not always a present user (think tab-in-background, multi-tab dedup).
+- The stale-member sweep is manual. Run it from a cron, an ActiveJob, or your existing heartbeat — pgbus does not assume one over the others.
+- The DOM markup for join/leave is whatever your `join`/`leave` block returns. Pgbus does not impose a fixed presence schema on `<pgbus-stream-source>`.
 
 ## Database tables
 
@@ -995,6 +997,14 @@ bun install
 bunx --bun playwright install chromium
 bundle exec rspec spec/system/
 ```
+
+End-to-end streams benchmarks (real Puma + real PGMQ + real SSE clients):
+
+```bash
+PGBUS_DATABASE_URL=postgres://user@host/db bundle exec rake bench:streams
+```
+
+The harness measures single-broadcast roundtrip latency, burst throughput, fanout to many clients, and concurrent connect under thundering herd. See `benchmarks/streams_bench.rb`.
 
 ## License
 
