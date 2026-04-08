@@ -19,6 +19,10 @@ require_relative "../../support/sse_test_client"
 RSpec.describe "Streams: transactional broadcasts", :integration do
   before(:all) do
     @saved_listen_notify = Pgbus.configuration.listen_notify
+    @saved_signed_name_secret = Pgbus.configuration.streams_signed_name_secret
+    @saved_listen_health_check_ms = Pgbus.configuration.streams_listen_health_check_ms
+    @saved_heartbeat_interval = Pgbus.configuration.streams_heartbeat_interval
+    @saved_write_deadline_ms = Pgbus.configuration.streams_write_deadline_ms
     Pgbus.configuration.listen_notify = true
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
     Pgbus.configuration.streams_listen_health_check_ms = 100
@@ -29,7 +33,10 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
 
   after(:all) do
     Pgbus.configuration.listen_notify = @saved_listen_notify
-    Pgbus.configuration.streams_signed_name_secret = nil
+    Pgbus.configuration.streams_signed_name_secret = @saved_signed_name_secret
+    Pgbus.configuration.streams_listen_health_check_ms = @saved_listen_health_check_ms
+    Pgbus.configuration.streams_heartbeat_interval = @saved_heartbeat_interval
+    Pgbus.configuration.streams_write_deadline_ms = @saved_write_deadline_ms
     Pgbus.reset_client!
   end
 
@@ -61,7 +68,11 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
 
   after do
     streamer.shutdown!
-    harness.shutdown if defined?(@harness_started)
+    # Capture-then-shutdown avoids re-triggering the lazy `let(:harness)`
+    # if boot failed mid-test. RSpec doesn't memoize a let block that
+    # raises, so a naive `harness.shutdown` in `after` would attempt a
+    # second Puma boot during teardown.
+    @booted_harness&.shutdown
   end
 
   def signed(name)
@@ -69,8 +80,8 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
   end
 
   def connect_sse_client(last_event_id: nil)
-    @harness_started = true
-    url = harness.url("/#{signed(stream_name)}?since=0")
+    @booted_harness = harness
+    url = @booted_harness.url("/#{signed(stream_name)}?since=0")
     headers = last_event_id ? { "Last-Event-ID" => last_event_id.to_s } : {}
     SseTestSupport::SseTestClient.connect(url: url, headers: headers, timeout: 5)
   end
@@ -99,6 +110,10 @@ RSpec.describe "Streams: transactional broadcasts", :integration do
       raise ActiveRecord::Rollback
     end
 
+    # Negative assertion: give any erroneously-delivered event time to
+    # arrive through the SSE pipeline before checking. A rolled-back
+    # transaction should produce zero events — the sleep bounds how
+    # long we'll wait for the "never happens" assertion to become true.
     sleep 0.3
     expect(client.events).to be_empty
 

@@ -56,18 +56,22 @@ module Pgbus
       #
       # Policy decisions:
       #   - label=nil → visible (no filter attached to the broadcast)
-      #   - unknown label → visible + warning log (fail-open on typo
-      #     so developers notice the bug; a fail-closed alternative
-      #     would silently drop every broadcast with zero feedback)
+      #   - unknown label → NOT visible + warning log. Fail-closed so
+      #     a typo or renamed filter doesn't turn a restricted
+      #     broadcast into a public one. The whole point of audience
+      #     filtering is data isolation; failing open on a typo
+      #     defeats the feature. The warning log is loud enough that
+      #     typos still get noticed in dev (check the log or wonder
+      #     why no subscriber sees your broadcast).
       #   - predicate raises → NOT visible (fail-closed on runtime
-      #     error to avoid leaking data on an exception path)
+      #     error to avoid leaking data on an exception path).
       def visible?(label, context)
         return true if label.nil?
 
         predicate = lookup(label)
         if predicate.nil?
-          log_warn("unknown filter label #{label.inspect} — broadcast delivered anyway (fail-open)")
-          return true
+          log_warn("unknown filter label #{label.inspect} — broadcast dropped (fail-closed)")
+          return false
         end
 
         begin
