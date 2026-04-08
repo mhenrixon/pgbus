@@ -23,6 +23,15 @@ module Pgbus
             existing = @by_id[connection.id]
             return if existing.equal?(connection)
 
+            # Registration of a new object under an existing id is a
+            # defensive path — SecureRandom.hex(8) collisions are
+            # astronomical, but the Registry's invariant is "@by_stream
+            # only contains objects that are also in @by_id", so we
+            # must scrub the old entry from its stream index before
+            # overwriting. Otherwise connections_for(stream) would
+            # return orphaned objects and writes would go nowhere.
+            evict_from_stream(existing) if existing
+
             @by_id[connection.id] = connection
             (@by_stream[connection.stream_name] ||= Set.new).add(connection)
           end
@@ -76,6 +85,17 @@ module Pgbus
         def each_connection(&)
           snapshot = @mutex.synchronize { @by_id.values.dup }
           snapshot.each(&)
+        end
+
+        private
+
+        # Must be called while holding @mutex.
+        def evict_from_stream(connection)
+          set = @by_stream[connection.stream_name]
+          return unless set
+
+          set.delete(connection)
+          @by_stream.delete(connection.stream_name) if set.empty?
         end
       end
     end

@@ -74,10 +74,25 @@ module Pgbus
         # Enqueue a new SSE client. The dispatcher picks this up on its next
         # iteration and runs the 5-step race-free replay sequence. The StreamApp
         # calls this right after hijacking the socket.
+        #
+        # Guarded against the worker-shutdown race: if the request thread
+        # arrives here after `shutdown!` has flipped @started, we mark the
+        # connection dead and bail out instead of enqueueing a
+        # ConnectMessage. Otherwise the message would land on a dispatch
+        # queue that no one is draining, leaving the socket outside the
+        # registry and outside close_all_connections — the client would
+        # never see the pgbus:shutdown sentinel.
         def register(connection)
           return if connection.dead?
 
-          @dispatch_queue << Dispatcher::ConnectMessage.new(connection: connection)
+          @shutdown_mutex.synchronize do
+            unless @started
+              connection.mark_dead!
+              return
+            end
+
+            @dispatch_queue << Dispatcher::ConnectMessage.new(connection: connection)
+          end
         end
 
         # Graceful shutdown for Puma worker restart. Order matters:

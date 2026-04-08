@@ -165,11 +165,14 @@ module Pgbus
       @streams_heartbeat_interval = 15
       @streams_max_connections = 2_000
       @streams_idle_timeout = 3_600 # 1 hour
-      # Short by design: this is both the TCP keepalive interval for
-      # the streamer's PG LISTEN connection AND the upper bound on how
-      # long Dispatcher#handle_connect waits for the listener's mutex.
-      # 250ms is plenty for keepalive (nowhere near NAT timeouts) and
-      # keeps p99 connect latency low under bursty subscribe traffic.
+      # 250ms — this value plays two roles: (1) the TCP keepalive
+      # interval for the streamer's PG LISTEN connection, and (2) the
+      # upper bound on how long Dispatcher#handle_connect waits for
+      # the Listener to acknowledge a synchronous ensure_listening
+      # call. 5s was unbounded enough to drop messages on a
+      # realistic subscribe burst; 250ms keeps the connect-path race
+      # window tight while still leaving headroom over a typical
+      # PG keepalive interval.
       @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
       @streams_falcon_streaming_body = false
@@ -247,6 +250,18 @@ module Pgbus
 
       unless streams_heartbeat_interval.is_a?(Numeric) && streams_heartbeat_interval.positive?
         raise ArgumentError, "streams_heartbeat_interval must be a positive number"
+      end
+
+      unless streams_idle_timeout.is_a?(Numeric) && streams_idle_timeout.positive?
+        raise ArgumentError, "streams_idle_timeout must be a positive number"
+      end
+
+      unless streams_listen_health_check_ms.is_a?(Integer) && streams_listen_health_check_ms.positive?
+        raise ArgumentError, "streams_listen_health_check_ms must be a positive integer"
+      end
+
+      unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
+        raise ArgumentError, "streams_write_deadline_ms must be a positive integer"
       end
 
       raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
