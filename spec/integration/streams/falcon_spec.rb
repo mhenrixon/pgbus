@@ -20,6 +20,10 @@ require_relative "../../support/sse_test_client"
 RSpec.describe "Streams: Falcon server compatibility", :integration do
   before(:all) do
     @saved_listen_notify = Pgbus.configuration.listen_notify
+    @saved_signed_name_secret = Pgbus.configuration.streams_signed_name_secret
+    @saved_listen_health_check_ms = Pgbus.configuration.streams_listen_health_check_ms
+    @saved_heartbeat_interval = Pgbus.configuration.streams_heartbeat_interval
+    @saved_write_deadline_ms = Pgbus.configuration.streams_write_deadline_ms
     Pgbus.configuration.listen_notify = true
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
     Pgbus.configuration.streams_listen_health_check_ms = 100
@@ -30,7 +34,10 @@ RSpec.describe "Streams: Falcon server compatibility", :integration do
 
   after(:all) do
     Pgbus.configuration.listen_notify = @saved_listen_notify
-    Pgbus.configuration.streams_signed_name_secret = nil
+    Pgbus.configuration.streams_signed_name_secret = @saved_signed_name_secret
+    Pgbus.configuration.streams_listen_health_check_ms = @saved_listen_health_check_ms
+    Pgbus.configuration.streams_heartbeat_interval = @saved_heartbeat_interval
+    Pgbus.configuration.streams_write_deadline_ms = @saved_write_deadline_ms
     Pgbus.reset_client!
   end
 
