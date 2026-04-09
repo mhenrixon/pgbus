@@ -334,5 +334,99 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         )
       end
     end
+
+    # Uniqueness locking has three code paths in Executor#execute:
+    #   1. No uniqueness key → no locking calls, no lock release
+    #   2. Strategy = :until_executed → release on success OR dead-letter
+    #   3. Strategy = :while_executing → acquire before perform, release on success
+    # All three have been shipped without direct unit coverage; the audit
+    # agents flagged this as one of the top test gaps.
+    context "with uniqueness key in payload" do
+      let(:uniqueness_payload) do
+        job_payload.merge(
+          "pgbus_uniqueness_key" => "TestJob:user-42",
+          "pgbus_uniqueness_strategy" => "until_executed"
+        )
+      end
+      let(:message_json) { JSON.generate(uniqueness_payload) }
+      let(:message) { build_message_double(msg_id: 70, message: message_json, read_ct: 1) }
+
+      before do
+        allow(ActiveJob::Base).to receive(:deserialize).with(uniqueness_payload).and_return(job_double)
+        allow(Pgbus::Uniqueness).to receive_messages(extract_key: "TestJob:user-42", extract_strategy: :until_executed)
+        allow(Pgbus::Uniqueness).to receive(:release_lock)
+      end
+
+      context "with the until_executed strategy" do
+        it "releases the lock after a successful run" do
+          executor.execute(message, queue_name)
+
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42")
+        end
+
+        it "does not release the lock if archive_from fails (retry path)" do
+          # If archive fails, job_succeeded stays false, the ensure block
+          # skips release — so the next retry still sees the lock and
+          # enforces at-most-once semantics.
+          allow(mock_client).to receive(:archive_message).and_raise(StandardError, "DB gone")
+
+          executor.execute(message, queue_name)
+
+          expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+        end
+
+        it "does not release the lock when perform_now raises (retry path)" do
+          allow(job_double).to receive(:perform_now).and_raise(StandardError, "transient")
+
+          executor.execute(message, queue_name)
+
+          expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+        end
+
+        it "releases the lock on dead-lettering (terminal state)" do
+          dlq_message = build_message_double(msg_id: 71, message: message_json, read_ct: config.max_retries + 1)
+
+          executor.execute(dlq_message, queue_name)
+
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42")
+        end
+      end
+
+      context "with the while_executing strategy" do
+        before do
+          allow(Pgbus::Uniqueness).to receive_messages(extract_strategy: :while_executing, acquire_execution_lock: true)
+        end
+
+        it "acquires the execution lock before perform_now and releases on success" do
+          executor.execute(message, queue_name)
+
+          expect(Pgbus::Uniqueness).to have_received(:acquire_execution_lock).with(
+            "TestJob:user-42", uniqueness_payload
+          )
+          expect(job_double).to have_received(:perform_now)
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42")
+        end
+
+        it "returns :skipped without performing if another worker already holds the lock" do
+          allow(Pgbus::Uniqueness).to receive(:acquire_execution_lock).and_return(false)
+
+          result = executor.execute(message, queue_name)
+
+          expect(job_double).not_to have_received(:perform_now)
+          expect(mock_client).not_to have_received(:archive_message)
+          expect(result).to eq(:skipped)
+        end
+      end
+
+      it "does not crash when uniqueness_key is nil (payload has strategy but no key)" do
+        allow(Pgbus::Uniqueness).to receive(:extract_key).and_return(nil)
+
+        expect do
+          executor.execute(message, queue_name)
+        end.not_to raise_error
+        # ensure block guards with `if uniqueness_key` — no release call
+        expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+      end
+    end
   end
 end
