@@ -152,13 +152,20 @@ module Pgbus
 
       # Returns [constant_settings, varying_settings].
       # constant_settings: { "key" => value }   (same value in EVERY env)
-      # varying_settings:  { "key" => { env => value, ... } }
+      # varying_settings:  { "key" => { env => value_or_:__missing__ } }
       #
       # A setting is only "constant" when it is present in every env
       # and all envs agree on the value. If any env is missing the
       # setting entirely (e.g. `polling_interval: 0.01` set only under
       # `test:`), emitting it as an unconditional line would silently
       # apply the value to envs that never asked for it — see #93.
+      #
+      # Varying settings are passed to the renderer with the
+      # :__missing__ sentinel still intact so the renderer can
+      # distinguish "covered in every env with different values"
+      # (safe to emit as a `case Rails.env` block) from subset
+      # coverage (must emit guarded `if Rails.env.X?` lines so
+      # uncovered envs keep their gem default).
       def partition_by_variance(all_settings)
         constant = {}
         varying = {}
@@ -170,7 +177,7 @@ module Pgbus
           if all_envs_present && unique_values.size <= 1
             constant[key] = unique_values.first
           else
-            varying[key] = present_values
+            varying[key] = env_values
           end
         end
         [constant, varying]
@@ -189,31 +196,37 @@ module Pgbus
       end
 
       def render_varying_setting(key, env_values)
-        envs = env_values.keys
+        present = env_values.reject { |_, v| v == :__missing__ }
+        subset_coverage = present.size < env_values.size
 
-        # Single-env coverage: the setting exists in exactly one env.
-        # Emit an `if Rails.env.X?` modifier rather than a case block
-        # so other envs fall back to the gem default. This is the
-        # fix for #93 — without it, a `test:`-only `polling_interval`
-        # would leak into dev and prod as an unconditional assignment.
-        if envs.size == 1
-          env = envs.first
-          value = env_values[env]
-          return ["c.#{key} = #{render_value(key, value)} if Rails.env.#{env}?"]
+        # Subset coverage: the setting exists in fewer envs than are
+        # configured. Emit `if Rails.env.X?` guards per covered env
+        # so unconfigured envs keep the gem default — a `case`
+        # expression with no `else` returns nil in unmatched envs,
+        # which would trip `Configuration#validate!` (e.g.
+        # `polling_interval must be > 0`) at initializer load time.
+        # Single-env coverage is a natural subset of this case.
+        if subset_coverage
+          return present.map do |env, value|
+            "c.#{key} = #{render_value(key, value)} if Rails.env.#{env}?"
+          end
         end
 
+        envs = present.keys
         if envs.size == 2 && envs.include?("development")
           # Special case: "everything except dev" — common pattern
-          non_dev_value = env_values.except("development").values.first
-          dev_value = env_values["development"]
+          non_dev_value = present.except("development").values.first
+          dev_value = present["development"]
           return ["c.#{key} = #{render_value(key, non_dev_value)} unless Rails.env.development?"] if dev_value.nil? && non_dev_value
         end
 
-        # Fallback: case Rails.env block — `when` clauses indented one
-        # level inside the case, `end` flush with `c.X` (standard Ruby
-        # formatting for assigned case expressions).
+        # Fallback: full-coverage `case Rails.env` block. Every env
+        # has a value here, so the case always matches — no nil
+        # assignment risk. `when` clauses indented one level inside
+        # the case, `end` flush with `c.X` (standard Ruby formatting
+        # for assigned case expressions).
         lines = ["c.#{key} = case Rails.env"]
-        env_values.each do |env, value|
+        present.each do |env, value|
           lines << "  when \"#{env}\" then #{render_value(key, value)}"
         end
         lines << "end"
@@ -227,11 +240,24 @@ module Pgbus
         end
 
         if varying_workers
-          # Different worker config per env. when clauses indented one
-          # level inside the case, end flush with c.workers (standard
-          # Ruby formatting for assigned case expressions).
+          present = varying_workers.reject { |_, v| v == :__missing__ }
+
+          # Subset coverage: one or more envs didn't configure
+          # workers at all. Emit guarded assignments so uncovered
+          # envs keep the gem default rather than an unmatched
+          # case assigning nil. Mirrors render_varying_setting.
+          if present.size < varying_workers.size
+            return present.map do |env, workers|
+              string_form = workers_as_string(workers)
+              value = string_form ? string_form.inspect : workers.inspect
+              "c.workers = #{value} if Rails.env.#{env}?"
+            end
+          end
+
+          # Full coverage: every env has a worker config. `case
+          # Rails.env` always matches — no nil-assignment risk.
           lines = ["c.workers = case Rails.env"]
-          varying_workers.each do |env, workers|
+          present.each do |env, workers|
             string_form = workers_as_string(workers)
             value = string_form ? string_form.inspect : workers.inspect
             lines << "  when \"#{env}\" then #{value}"

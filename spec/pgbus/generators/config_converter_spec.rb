@@ -181,6 +181,31 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
       # Related to #93: two of three envs set the value, one doesn't.
       # Whatever the formatter shape is (case block vs guarded line),
       # the value MUST NOT leak to the environment that didn't set it.
+
+      # Minimal Rails.env stub that answers `production?` / `test?`
+      # etc. based on the name it was constructed with. Lets the
+      # end-to-end spec eval the generated initializer body.
+      def stub_rails_env(name)
+        env_obj = Class.new do
+          def initialize(n)
+            @name = n
+          end
+
+          def method_missing(m, *)
+            return @name == m.to_s.chomp("?") if m.to_s.end_with?("?")
+
+            super
+          end
+
+          def respond_to_missing?(m, _ = false)
+            m.to_s.end_with?("?") || super
+          end
+        end.new(name)
+        fake = Module.new
+        fake.define_singleton_method(:env) { env_obj }
+        stub_const("Rails", fake)
+      end
+
       let(:input) do
         {
           "development" => {
@@ -213,6 +238,41 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
         # capsule/worker config); polling_interval must not.
         polling_block = output[/c\.polling_interval[\s\S]*?(?:\n  end|$)/]
         expect(polling_block).not_to include("production")
+      end
+
+      it "does not emit a nil-producing case block for polling_interval" do
+        # Regression for the subset-coverage nil bug: a naive
+        #   c.polling_interval = case Rails.env
+        #     when "development" then 0.05
+        #     when "test" then 0.01
+        #   end
+        # returns nil in production and blows up Configuration#validate!
+        # (`polling_interval must be > 0`) at initializer load time.
+        # The renderer must emit guarded lines (`... if Rails.env.X?`)
+        # so envs that did not set the value keep the gem default.
+        expect(output).not_to match(/c\.polling_interval = case Rails\.env/)
+        expect(output).to include("c.polling_interval = 0.05 if Rails.env.development?")
+        expect(output).to include("c.polling_interval = 0.01 if Rails.env.test?")
+      end
+
+      it "keeps the gem default for envs that did not set the value" do
+        # End-to-end: evaluate the generated body under a fake
+        # `Rails.env == "production"` and assert the configuration
+        # is left with its gem default — never nil. This is the
+        # scenario that would crash `Configuration#validate!`.
+        stub_rails_env("production")
+
+        # Extract the body between `Pgbus.configure do |c|` and `end`
+        # and eval it with `c = config`. This mirrors what the real
+        # initializer load would do.
+        body = output[/Pgbus\.configure do \|c\|\n(.*)\nend\n\z/m, 1]
+        c = Pgbus::Configuration.new
+        eval(body) # rubocop:disable Security/Eval
+
+        # Configuration defaults to 0.1. Subset coverage must not
+        # overwrite production's default with nil.
+        expect(c.polling_interval).to eq(0.1)
+        expect { c.validate! }.not_to raise_error
       end
     end
 
