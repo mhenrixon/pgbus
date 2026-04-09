@@ -68,6 +68,66 @@ RSpec.describe Pgbus::StreamStat do
     end
   end
 
+  describe "scope names" do
+    # Regression for issue #92 — `turbo-rails` auto-includes
+    # Turbo::Broadcastable into every ActiveRecord::Base descendant,
+    # which defines a class method `broadcasts`. AR's
+    # dangerous_class_method? check then rejects any subsequent
+    # `scope :broadcasts` on an AR model, crashing eager_load.
+    #
+    # We must not define scopes whose names collide with turbo-rails'
+    # Broadcastable DSL. The equivalent filters live under
+    # broadcast_events / connect_events / disconnect_events.
+
+    # Inject a fake `broadcasts` class method onto ActiveRecord::Base
+    # (what Turbo::Broadcastable does via on_load(:active_record))
+    # and remove it after the example so later specs are not polluted.
+    around do |example|
+      fake_turbo = Module.new do
+        def broadcasts(*); end
+      end
+      ActiveRecord::Base.singleton_class.include(fake_turbo)
+      example.run
+    ensure
+      fake_turbo.send(:remove_method, :broadcasts)
+    end
+
+    it "reloads StreamStat cleanly when turbo-rails has injected `broadcasts`" do
+      # Sanity check: AR's dangerous_class_method? guard fires for
+      # any subsequent model declaring `scope :broadcasts`.
+      expect do
+        Class.new(ActiveRecord::Base) do
+          self.table_name = "pgbus_stream_stats"
+          scope :broadcasts, -> { where(event_type: "broadcast") }
+        end
+      end.to raise_error(ArgumentError, /already defined a class method/)
+
+      # With the turbo shim installed, reloading StreamStat must
+      # not raise. `load` re-evaluates the file the same way
+      # Zeitwerk's eager_load pass would. Silence the benign
+      # "already initialized constant" warning re-evaluation emits.
+      stream_stat_path = File.expand_path(
+        "../../app/models/pgbus/stream_stat.rb",
+        __dir__
+      )
+      expect do
+        original_verbose = $VERBOSE
+        $VERBOSE = nil
+        begin
+          load stream_stat_path
+        ensure
+          $VERBOSE = original_verbose
+        end
+      end.not_to raise_error
+    end
+
+    it "exposes broadcast_events / connect_events / disconnect_events scopes" do
+      expect(described_class).to respond_to(:broadcast_events)
+      expect(described_class).to respond_to(:connect_events)
+      expect(described_class).to respond_to(:disconnect_events)
+    end
+  end
+
   describe ".table_exists?" do
     before do
       described_class.remove_instance_variable(:@table_exists) if described_class.instance_variable_defined?(:@table_exists)
