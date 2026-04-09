@@ -71,12 +71,69 @@ RSpec.describe Pgbus::JobStat do
     end
   end
 
+  describe ".table_exists?" do
+    before do
+      # Undo the outer `before` that stubs table_exists? so we exercise
+      # the real memoization logic.
+      allow(described_class).to receive(:table_exists?).and_call_original
+      described_class.remove_instance_variable(:@table_exists) if described_class.instance_variable_defined?(:@table_exists)
+    end
+
+    after do
+      described_class.remove_instance_variable(:@table_exists) if described_class.instance_variable_defined?(:@table_exists)
+    end
+
+    it "returns false on connection error without poisoning the memo" do
+      allow(described_class).to receive(:connection).and_raise(StandardError, "no db")
+
+      expect(described_class.table_exists?).to be false
+      # The failed probe must NOT set @table_exists — otherwise a
+      # transient PG blip during boot permanently disables job stats
+      # for the process lifetime.
+      expect(described_class.instance_variable_defined?(:@table_exists)).to be false
+    end
+
+    it "memoizes a successful probe" do
+      fake_connection = instance_double(ActiveRecord::ConnectionAdapters::AbstractAdapter)
+      allow(fake_connection).to receive(:table_exists?).with(described_class.table_name).and_return(true)
+      allow(described_class).to receive(:connection).and_return(fake_connection)
+
+      expect(described_class.table_exists?).to be true
+      # Second call hits the memo, not the connection.
+      expect(described_class.table_exists?).to be true
+      expect(fake_connection).to have_received(:table_exists?).once
+    end
+  end
+
   describe ".latency_columns?" do
     before { described_class.remove_instance_variable(:@latency_columns) if described_class.instance_variable_defined?(:@latency_columns) }
+
+    after { described_class.remove_instance_variable(:@latency_columns) if described_class.instance_variable_defined?(:@latency_columns) }
 
     it "returns false when table does not exist" do
       allow(described_class).to receive(:table_exists?).and_return(false)
       expect(described_class.latency_columns?).to be false
+    end
+
+    it "returns false on error without poisoning the memo" do
+      allow(described_class).to receive(:table_exists?).and_return(true)
+      allow(described_class).to receive(:column_names).and_raise(StandardError, "no db")
+
+      expect(described_class.latency_columns?).to be false
+      # A transient error must not lock latency_columns? to false
+      # for the process lifetime.
+      expect(described_class.instance_variable_defined?(:@latency_columns)).to be false
+    end
+
+    it "memoizes a successful probe" do
+      allow(described_class).to receive_messages(
+        table_exists?: true,
+        column_names: %w[id job_class enqueue_latency_ms]
+      )
+
+      expect(described_class.latency_columns?).to be true
+      expect(described_class.latency_columns?).to be true
+      expect(described_class).to have_received(:column_names).once
     end
   end
 
