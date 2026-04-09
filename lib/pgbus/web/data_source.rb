@@ -636,7 +636,8 @@ module Pgbus
       # sections.
       def stream_stats_available?
         Pgbus.configuration.streams_stats_enabled && StreamStat.table_exists?
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error checking stream stats availability: #{e.message}" }
         false
       end
 

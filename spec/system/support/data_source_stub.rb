@@ -92,7 +92,7 @@ module Pgbus
 
       # Insights (job stats)
       def job_stats_summary(minutes: 60) = @insights_summary
-      def slowest_job_classes(limit: 10, minutes: 60) = @insights_slowest
+      def slowest_job_classes(limit: 10, minutes: 60) = @insights_slowest.first(limit)
       def latency_by_queue(minutes: 60) = @insights_latency_by_queue
       def latency_trend(minutes: 60) = @insights_latency_trend
       def job_throughput(minutes: 60) = @insights_throughput
@@ -101,7 +101,7 @@ module Pgbus
       # Insights (stream stats — opt-in, default unavailable)
       def stream_stats_available? = @stream_stats_available
       def stream_stats_summary(minutes: 60) = @stream_summary
-      def top_streams(limit: 10, minutes: 60) = @top_streams_list
+      def top_streams(limit: 10, minutes: 60) = @top_streams_list.first(limit)
 
       private
 

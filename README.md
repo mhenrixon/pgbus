@@ -846,7 +846,8 @@ end
 Then run the migration generator once:
 
 ```bash
-rails generate pgbus:add_stream_stats
+rails generate pgbus:add_stream_stats                  # Add the migration
+rails generate pgbus:add_stream_stats --database=pgbus # For separate database
 rails db:migrate
 ```
 

@@ -57,7 +57,7 @@ RSpec.describe "Insights", type: :system do
   end
 
   describe "stream stats (opt-in)" do
-    context "when streams_stats_available? is false (default)" do
+    context "when stream_stats_available? is false (default)" do
       it "does not render the Real-time Streams section" do
         visit "/pgbus/insights"
 
@@ -67,7 +67,7 @@ RSpec.describe "Insights", type: :system do
       end
     end
 
-    context "when streams_stats_available? is true but no data" do
+    context "when stream_stats_available? is true but no data" do
       before do
         @stub_data_source.stream_stats_available = true
       end
@@ -92,7 +92,7 @@ RSpec.describe "Insights", type: :system do
       end
     end
 
-    context "when streams_stats_available? is true with data" do
+    context "when stream_stats_available? is true with data" do
       before do
         @stub_data_source.stream_stats_available = true
         @stub_data_source.stream_summary = {

@@ -199,7 +199,7 @@ module DummyApp
         { stream_name: "chat:lobby", count: 420, avg_fanout: 18.2, avg_ms: 3.1 },
         { stream_name: "orders:dashboard", count: 312, avg_fanout: 4.5, avg_ms: 5.8 },
         { stream_name: "notifications:admin", count: 214, avg_fanout: 2.1, avg_ms: 2.4 }
-      ]
+      ].first(limit)
     end
 
     # Mutating actions (no-ops for QA)

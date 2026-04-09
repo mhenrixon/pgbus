@@ -37,12 +37,20 @@ module Pgbus
     # Memoized — intentionally never invalidated at runtime. If the
     # pgbus_stream_stats migration runs while the app is already
     # running, a restart is required for stat recording to begin.
+    #
+    # We only memoize a *successful* probe. A transient error (PG
+    # hiccup during boot, connection refused during a failover) is
+    # treated as "don't know yet" — the next call retries. Caching
+    # false on the first hiccup would permanently disable stream
+    # stats for the process lifetime, which is a worse failure mode
+    # than a few retries.
     def self.table_exists?
       return @table_exists if defined?(@table_exists)
 
       @table_exists = connection.table_exists?(table_name)
-    rescue StandardError
-      @table_exists = false
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus] Failed to check stream stat table: #{e.message}" }
+      false
     end
 
     # Single-query aggregate summary over the given window.

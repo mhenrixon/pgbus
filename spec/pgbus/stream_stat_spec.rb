@@ -77,10 +77,25 @@ RSpec.describe Pgbus::StreamStat do
       described_class.remove_instance_variable(:@table_exists) if described_class.instance_variable_defined?(:@table_exists)
     end
 
-    it "returns false and memoizes when the connection raises" do
+    it "returns false on connection error without poisoning the memo" do
       allow(described_class).to receive(:connection).and_raise(StandardError, "no db")
+
       expect(described_class.table_exists?).to be false
-      expect(described_class.table_exists?).to be false
+      # The failed probe must NOT set @table_exists — otherwise a
+      # transient PG blip during boot permanently disables stream
+      # stats for the process lifetime.
+      expect(described_class.instance_variable_defined?(:@table_exists)).to be false
+    end
+
+    it "memoizes a successful probe" do
+      fake_connection = instance_double(ActiveRecord::ConnectionAdapters::AbstractAdapter)
+      allow(fake_connection).to receive(:table_exists?).with(described_class.table_name).and_return(true)
+      allow(described_class).to receive(:connection).and_return(fake_connection)
+
+      expect(described_class.table_exists?).to be true
+      # Second call hits the memo, not the connection.
+      expect(described_class.table_exists?).to be true
+      expect(fake_connection).to have_received(:table_exists?).once
     end
   end
 end
