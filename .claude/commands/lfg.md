@@ -235,7 +235,7 @@ git push -u origin $(git branch --show-current)
 
 gh pr create --title "feat(scope): brief description" --body "$(cat <<'EOF'
 ## Summary
-- Key change 1
+- Key change 1 touching `lib/foo.rb`
 - Key change 2
 
 Closes #<issue_number>
@@ -246,6 +246,27 @@ Closes #<issue_number>
 EOF
 )"
 ```
+
+**Markdown inside the quoted heredoc is literal — do not escape.** The single-quoted `<<'EOF'` delimiter disables shell expansion on the body, so:
+
+- Write backticks as backticks: `` `foo` ``. Do NOT write `\`foo\``; that writes a literal backslash-backtick and breaks the code span.
+- Write dollar signs as-is: `$HOME`. No escaping needed.
+- Write backslashes as-is: `\n` stays `\n`.
+
+The body is copied verbatim into the PR / commit message. If you would not type a backslash in a GitHub comment, do not type one in the heredoc.
+
+If the body is long or contains many backticks / tables, prefer writing it to a temp file and passing `--body-file`:
+
+```bash
+cat > /tmp/pr-body.md << 'EOF'
+## Summary
+...any markdown...
+EOF
+gh pr create --title "..." --body-file /tmp/pr-body.md
+rm /tmp/pr-body.md
+```
+
+The `--body-file` path avoids the double-layer of shell interpretation entirely and makes long PR bodies easier to read in the terminal buffer.
 
 ---
 
