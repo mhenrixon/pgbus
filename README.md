@@ -113,7 +113,12 @@ end
 
 The capsule string DSL is the shortest form for the common case. Use `c.capsule` when you need named capsules with advanced options like `single_active_consumer` or `consumer_priority`. See [Routing and ordering](#routing-and-ordering) for the full set.
 
-> **Migrating from `config/pgbus.yml`?** Run `rails generate pgbus:update` to convert your YAML config to a Ruby initializer using the modern DSL. The original YAML stays in place for review; delete it once the new initializer looks right.
+> **Upgrading from an older pgbus?** Run `rails generate pgbus:update`. It does two things in one pass:
+>
+> - Converts any legacy `config/pgbus.yml` to a Ruby initializer at `config/initializers/pgbus.rb` (skipped if the initializer already exists).
+> - Inspects your live database and adds any missing pgbus migrations to `db/migrate` (or `db/pgbus_migrate` if you use `connects_to`). The generator detects your separate-database config automatically from `Pgbus.configuration.connects_to` or by scanning the initializer / `config/application.rb`, so you don't have to re-specify `--database=pgbus` every time.
+>
+> Useful flags: `--dry-run` (print the plan without creating files), `--skip-config`, `--skip-migrations`, `--quiet`. Running it on a database with no pgbus tables at all will redirect you to `pgbus:install` instead of stacking individual add_* migrations.
 
 ### 2. Use as ActiveJob backend
 
