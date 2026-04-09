@@ -38,7 +38,7 @@ module Pgbus
       # Broadcasts a Turbo Stream HTML payload through the pgbus streamer.
       # PGMQ's `message` column is JSONB, so raw HTML strings can't be passed
       # directly. We wrap as `{"html": "..."}` on the way in and unwrap in
-      # Pgbus::Web::Streamer::Dispatcher before delivering to the SSE client.
+      # Pgbus::Web::Streamer::StreamEventDispatcher before delivering to the SSE client.
       # Callers pass a plain HTML string; the wrapping is an implementation
       # detail.
       #

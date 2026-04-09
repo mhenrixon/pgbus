@@ -26,8 +26,12 @@ module Pgbus
       #
       # All state ownership lives on this one thread: the registry is
       # thread-safe (Phase 2.1) but the in-flight buffers are local to
-      # the Dispatcher and accessed only from this thread, so no locks.
-      class Dispatcher
+      # the dispatcher and accessed only from this thread, so no locks.
+      #
+      # Named StreamEventDispatcher (rather than just "Dispatcher") to
+      # disambiguate from Pgbus::Process::Dispatcher, which is an
+      # unrelated worker-side pool coordinator. See issue #98 item 8.
+      class StreamEventDispatcher
         WakeMessage       = Listener::WakeMessage
         ConnectMessage    = Data.define(:connection)
         DisconnectMessage = Data.define(:connection)
@@ -110,7 +114,7 @@ module Pgbus
             # than calling Thread#kill, which leaves IO state corrupt.
             # The orphaned thread will exit on its own once the blocking
             # call returns and it sees @running == false on the next loop.
-            @logger.warn { "[Pgbus::Streamer::Dispatcher] thread did not terminate within 5s" }
+            @logger.warn { "[Pgbus::Streamer::StreamEventDispatcher] thread did not terminate within 5s" }
           end
           @thread = nil
           self
@@ -141,7 +145,7 @@ module Pgbus
             end
           end
         rescue StandardError => e
-          @logger.error { "[Pgbus::Streamer::Dispatcher] crashed: #{e.class}: #{e.message}" }
+          @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] crashed: #{e.class}: #{e.message}" }
           raise
         end
 
@@ -176,7 +180,7 @@ module Pgbus
           when ConnectMessage    then handle_connect(msg)
           when DisconnectMessage then handle_disconnect(msg)
           else
-            @logger.warn { "[Pgbus::Streamer::Dispatcher] unknown message: #{msg.class}" }
+            @logger.warn { "[Pgbus::Streamer::StreamEventDispatcher] unknown message: #{msg.class}" }
           end
         rescue StandardError => e
           # Intentionally swallows per-message failures so one bad
@@ -184,7 +188,7 @@ module Pgbus
           # connected client. The top-level run_loop rescue (below)
           # does re-raise — a crash *between* messages is a real bug
           # and the supervisor should see it.
-          @logger.error { "[Pgbus::Streamer::Dispatcher] handling #{msg.class} raised #{e.class}: #{e.message}" }
+          @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] handling #{msg.class} raised #{e.class}: #{e.message}" }
         end
 
         def handle_wake(msg)
@@ -310,7 +314,7 @@ module Pgbus
           @scanned_cursor.delete(connection)
           cleanup_stream_if_unused(stream)
           connection.mark_dead!
-          @logger.error { "[Pgbus::Streamer::Dispatcher] connect failed for #{connection.id}: #{e.class}: #{e.message}" }
+          @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] connect failed for #{connection.id}: #{e.class}: #{e.message}" }
         end
 
         def handle_disconnect(msg)

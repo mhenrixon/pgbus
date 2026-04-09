@@ -84,7 +84,7 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
       heartbeat.tick
 
       msg = dispatch_queue.pop
-      expect(msg).to be_a(Pgbus::Web::Streamer::Dispatcher::DisconnectMessage)
+      expect(msg).to be_a(Pgbus::Web::Streamer::StreamEventDispatcher::DisconnectMessage)
       expect(msg.connection).to be(c1)
     end
 
@@ -97,7 +97,7 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
       expect(c1.dead?).to be true
       expect(c1.comments).to be_empty # idle connections don't get a heartbeat
       msg = dispatch_queue.pop
-      expect(msg).to be_a(Pgbus::Web::Streamer::Dispatcher::DisconnectMessage)
+      expect(msg).to be_a(Pgbus::Web::Streamer::StreamEventDispatcher::DisconnectMessage)
       expect(msg.connection).to be(c1)
     end
 

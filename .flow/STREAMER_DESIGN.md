@@ -42,7 +42,7 @@ lib/pgbus/web/streamer.rb                             # Worker-local singleton (
 lib/pgbus/web/streamer/registry.rb                    # Concurrent::Map<stream_name → Set<Connection>>
 lib/pgbus/web/streamer/connection.rb                  # One SSE client (io, cursor, per-io mutex, write_nonblock+deadline)
 lib/pgbus/web/streamer/listener.rb                    # One PG LISTEN connection, NOTIFY → dispatch_queue
-lib/pgbus/web/streamer/dispatcher.rb                  # Consumes dispatch_queue, runs read_after, fans out
+lib/pgbus/web/streamer/stream_event_dispatcher.rb     # Consumes dispatch_queue, runs read_after, fans out
 lib/pgbus/web/streamer/heartbeat.rb                   # Periodic SSE comment + dead-connection sweep
 lib/pgbus/web/streamer/io_writer.rb                   # write_nonblock + deadline, per-io mutex helpers
 lib/pgbus/web/streamer/puma_plugin.rb                 # before_worker_shutdown hook (close all sockets)
@@ -57,7 +57,7 @@ spec/lib/pgbus/web/streamer/registry_spec.rb
 spec/lib/pgbus/web/streamer/connection_spec.rb
 spec/lib/pgbus/web/streamer/io_writer_spec.rb         # write_nonblock semantics, EAGAIN handling, deadline
 spec/lib/pgbus/web/streamer/listener_spec.rb          # LISTEN health check + reconnect
-spec/lib/pgbus/web/streamer/dispatcher_spec.rb
+spec/lib/pgbus/web/streamer/stream_event_dispatcher_spec.rb
 spec/lib/pgbus/streams/cursor_spec.rb
 spec/lib/pgbus/streams/signed_name_spec.rb
 spec/lib/pgbus/streams/envelope_spec.rb
