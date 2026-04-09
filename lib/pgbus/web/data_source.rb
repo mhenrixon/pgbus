@@ -38,7 +38,10 @@ module Pgbus
       # different connection lifecycle than the worker processes).
       def queues_with_metrics
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        paused_queues = paused_queue_names
+        # paused_queue_names returns an Array; convert to Set so the
+        # per-queue membership check is O(1). With 100+ queues the
+        # Array#include? cost in the loop was O(n²) per dashboard load.
+        paused_queues = paused_queue_names.to_set
         queue_names.map { |name| queue_metrics_via_sql(name) }.compact.map do |q|
           q.merge(paused: paused_queues.include?(logical_queue_name(q[:name])))
         end
@@ -263,11 +266,7 @@ module Pgbus
         queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }
         offset = (page - 1) * per_page
 
-        messages = queues.flat_map do |q|
-          query_queue_messages_raw(q[:name], per_page + offset, 0)
-        end
-
-        messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, per_page) || []
+        paginated_queue_messages(queues.map { |q| q[:name] }, per_page, offset)
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error fetching DLQ messages: #{e.message}" }
         []
@@ -695,10 +694,41 @@ module Pgbus
       def all_queue_messages(limit, offset)
         dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.reject { |q| q[:name].end_with?(dlq_suffix) }
-        messages = queues.flat_map do |q|
-          query_queue_messages_raw(q[:name], limit + offset, 0)
+        paginated_queue_messages(queues.map { |q| q[:name] }, limit, offset)
+      end
+
+      # Returns messages from multiple PGMQ queues in a single paginated
+      # query. Builds a UNION ALL across the target tables and pushes the
+      # ORDER BY msg_id DESC + LIMIT + OFFSET down to Postgres so we don't
+      # load (limit + offset) rows from every queue into Ruby just to slice
+      # out one page. Returns [] if queue_names is empty.
+      #
+      # Each UNION ALL fragment selects a literal queue name so the outer
+      # query can tag every row with its source queue — the pre-SQL
+      # implementation tagged it from the iteration variable. The queue
+      # name goes through sanitize_name (which calls QueueNameValidator)
+      # so it's safe to interpolate into both the schema-qualified table
+      # and the literal column. limit/offset are bound parameters.
+      def paginated_queue_messages(queue_names, limit, offset)
+        return [] if queue_names.empty?
+
+        sanitized = queue_names.map { |name| [name, sanitize_name(name)] }
+        fragments = sanitized.map do |(name, qtable)|
+          <<~SQL.strip
+            SELECT msg_id, read_ct, enqueued_at, last_read_at, vt, message, headers,
+                   '#{name}' AS queue_name
+            FROM pgmq.q_#{qtable}
+          SQL
         end
-        messages.sort_by { |m| -m[:msg_id].to_i }.slice(offset, limit) || []
+
+        sql = <<~SQL
+          SELECT * FROM (#{fragments.join("\nUNION ALL\n")}) AS combined
+          ORDER BY msg_id DESC
+          LIMIT $1 OFFSET $2
+        SQL
+
+        rows = connection.select_all(sql, "Pgbus Paginated Queue Messages", [limit, offset])
+        rows.to_a.map { |r| format_message(r, r["queue_name"]) }
       end
 
       def queue_metrics_via_sql(queue_name)
@@ -903,12 +933,31 @@ module Pgbus
       end
 
       # Archive every queue message referenced by a failed_event row.
+      # Groups by queue and uses archive_batch so an N-event discard is
+      # one SQL statement per queue instead of N per-row roundtrips.
+      # Falls back to per-row archive inside a rescue if a batch fails,
+      # so one bad queue can't block progress on the others.
       def archive_all_failed_messages
         rows = connection.select_all(
           "SELECT id, queue_name, msg_id FROM pgbus_failed_events WHERE msg_id IS NOT NULL",
           "Pgbus Collect Failed Messages"
         )
-        rows.to_a.each { |row| archive_failed_message(row) }
+
+        grouped = rows.to_a.group_by { |row| row["queue_name"] }
+        grouped.each do |queue_name, events|
+          msg_ids = events.filter_map { |row| row["msg_id"]&.to_i }
+          next if msg_ids.empty?
+
+          begin
+            @client.archive_batch(queue_name, msg_ids)
+          rescue StandardError => e
+            Pgbus.logger.debug do
+              "[Pgbus::Web] archive_batch failed for #{queue_name} (#{e.message}); " \
+                "falling back to per-row archive"
+            end
+            events.each { |row| archive_failed_message(row) }
+          end
+        end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error archiving failed messages: #{e.message}" }
       end

@@ -1,0 +1,11 @@
+class AddPgbusJobStatsQueueIndex < ActiveRecord::Migration<%= migration_version %>
+  def change
+    # Supports InsightsController#latency_by_queue and any other
+    # per-queue aggregation over pgbus_job_stats. Without this, a
+    # 60-day window over 1M jobs/day seq-scans the whole table for
+    # every Insights page load with the latency tab open.
+    add_index :pgbus_job_stats, %i[queue_name created_at],
+              name: "idx_pgbus_job_stats_queue_time",
+              if_not_exists: true
+  end
+end
