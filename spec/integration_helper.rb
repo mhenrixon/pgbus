@@ -88,15 +88,36 @@ RSpec.configure do |config|
 
   # Connect ActiveRecord with a pool large enough for concurrent tests.
   # Merge pool via URI parsing to avoid breaking URLs with existing query params.
-  parsed = URI.parse(PGBUS_DATABASE_URL)
-  url_params = URI.decode_www_form(parsed.query || "").to_h
-  url_params["pool"] = "20"
-  parsed.query = URI.encode_www_form(url_params)
-  ActiveRecord::Base.establish_connection(parsed.to_s)
+  #
+  # gssencmode=disable is the macOS fix: libpq 1.6.x on darwin/arm64 initializes
+  # GSSAPI state lazily in a way that segfaults when a child process tries to
+  # open a new PG connection after fork. Disabling GSSAPI entirely skips the
+  # bad code path. Harmless on Linux (GSSAPI isn't used in pgbus anyway), so
+  # we set it unconditionally to keep one canonical URL for both platforms.
+  parsed_base = URI.parse(PGBUS_DATABASE_URL)
+  base_params = URI.decode_www_form(parsed_base.query || "").to_h
+  base_params["gssencmode"] = "disable"
 
-  # Configure pgbus with the real database
+  # Pgbus::Client#connection_options reads config.database_url and
+  # passes it straight to PG.connect (lib/pgbus/client.rb:431).
+  # libpq's conninfo_parse rejects "pool" (it's an AR-only param),
+  # so the pgbus URL must NOT include pool. It MUST include
+  # gssencmode=disable so forked children (which call
+  # Pgbus.reset_client! and open fresh PG connections) don't
+  # re-trigger the libpq GSSAPI post-fork segfault on macOS ARM64.
+  parsed_base.query = URI.encode_www_form(base_params)
+  pgbus_url = parsed_base.to_s
+
+  # ActiveRecord wants the same URL plus pool=20. Merge on top of
+  # the pgbus URL so they share the gssencmode fix.
+  parsed_ar = URI.parse(pgbus_url)
+  ar_params = URI.decode_www_form(parsed_ar.query || "").to_h
+  ar_params["pool"] = "20"
+  parsed_ar.query = URI.encode_www_form(ar_params)
+  ActiveRecord::Base.establish_connection(parsed_ar.to_s)
+
   Pgbus.configure do |c|
-    c.database_url = PGBUS_DATABASE_URL
+    c.database_url = pgbus_url
     c.queue_prefix = "pgbus_int"
     c.default_queue = "default"
     c.logger = Logger.new(IO::NULL)
