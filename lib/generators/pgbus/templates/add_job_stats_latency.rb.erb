@@ -3,7 +3,10 @@ class AddPgbusJobStatsLatency < ActiveRecord::Migration<%= migration_version %>
     add_column :pgbus_job_stats, :enqueue_latency_ms, :bigint
     add_column :pgbus_job_stats, :retry_count, :integer, default: 0
 
+    # idempotent: the standalone add_job_stats_queue_index generator
+    # creates the same index. Either order is safe.
     add_index :pgbus_job_stats, [:queue_name, :created_at],
-      name: "idx_pgbus_job_stats_queue_time"
+      name: "idx_pgbus_job_stats_queue_time",
+      if_not_exists: true
   end
 end
