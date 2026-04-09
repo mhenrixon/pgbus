@@ -214,6 +214,16 @@ RSpec.describe Pgbus::Client::ReadAfter do
       expect { client.stream_current_msg_id("chat") }.to raise_error(PG::UndefinedTable)
     end
 
+    # The rescue must not accidentally swallow errors about a table whose name
+    # merely starts with our stream's q_/a_ identifier — only the exact queue
+    # and archive tables count as "missing stream queue". See PR #106 review.
+    it "re-raises PG::UndefinedTable for a longer table name that merely shares a prefix" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat_archive_v2" does not exist'))
+
+      expect { client.stream_current_msg_id("chat") }.to raise_error(PG::UndefinedTable)
+    end
+
     it "re-raises other PG errors" do
       allow(raw_conn).to receive(:exec).and_raise(PG::ConnectionBad.new("server closed"))
 
