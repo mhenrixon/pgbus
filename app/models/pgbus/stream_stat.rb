@@ -14,9 +14,14 @@ module Pgbus
     EVENT_TYPES = %w[broadcast connect disconnect].freeze
 
     scope :since, ->(time) { where("created_at >= ?", time) }
-    scope :broadcasts, -> { where(event_type: "broadcast") }
-    scope :connects, -> { where(event_type: "connect") }
-    scope :disconnects, -> { where(event_type: "disconnect") }
+    # NOTE: scope names intentionally avoid `broadcasts` / `connects` /
+    # `disconnects`. `turbo-rails` auto-includes `Turbo::Broadcastable`
+    # into every AR model, which defines a class method `broadcasts`.
+    # AR's dangerous_class_method? guard then rejects a colliding
+    # scope name at load time, crashing eager_load. See issue #92.
+    scope :broadcast_events, -> { where(event_type: "broadcast") }
+    scope :connect_events, -> { where(event_type: "connect") }
+    scope :disconnect_events, -> { where(event_type: "disconnect") }
 
     # Records a stream event. Called from the Dispatcher when the
     # `streams_stats_enabled` flag is set. Errors are swallowed so a
@@ -79,7 +84,7 @@ module Pgbus
 
     # Top N streams by broadcast count in the window, with avg fanout.
     def self.top_streams(limit: 10, minutes: 60)
-      broadcasts
+      broadcast_events
         .since(minutes.minutes.ago)
         .group(:stream_name)
         .order(Arel.sql("COUNT(*) DESC"))
@@ -102,7 +107,7 @@ module Pgbus
 
     # Throughput: broadcast events per minute bucketed by minute.
     def self.throughput(minutes: 60)
-      broadcasts
+      broadcast_events
         .since(minutes.minutes.ago)
         .group("date_trunc('minute', created_at)")
         .order(Arel.sql("date_trunc('minute', created_at)"))
