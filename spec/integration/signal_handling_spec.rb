@@ -219,12 +219,26 @@ RSpec.describe "Signal handling (integration)", :integration do
             sleep 120
           end
           ready_w.close
-          # Wait for the child to confirm trap installation. If the
-          # handshake stalls, there's a deeper bug — bail out with a
-          # short timeout rather than hanging the whole test.
-          ready_r.wait_readable(5)
-          ready_r.read(1)
+          # Wait for the child to confirm trap installation.
+          #
+          # Three cases to handle explicitly:
+          #   a) wait_readable returns nil → 5s timeout elapsed. The
+          #      child is stuck somewhere before writing "R". Fail the
+          #      handshake rather than letting read(1) block forever
+          #      (which would defeat the timeout entirely).
+          #   b) wait_readable returns truthy but read(1) returns "" →
+          #      EOF. The child exited before writing "R". That means
+          #      it hit the DEFAULT trap during a signal race OR
+          #      crashed during trap setup. Either way, the child is
+          #      gone and we should fail loudly instead of registering
+          #      a dead pid in @forks.
+          #   c) read(1) returns "R" → child confirmed. Proceed.
+          ready = ready_r.wait_readable(5)
+          raise "child readiness handshake timed out after 5s (pid=#{child_pid})" unless ready
+
+          byte = ready_r.read(1)
           ready_r.close
+          raise "child exited before readiness handshake (pid=#{child_pid}, got=#{byte.inspect})" unless byte == "R"
 
           @forks[child_pid] = { type: :worker, config: {} }
           write_pipe.write("S")
