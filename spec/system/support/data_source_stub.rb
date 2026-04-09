@@ -5,7 +5,10 @@ module Pgbus
     class StubDataSource
       attr_accessor :stats, :queues, :processes_list, :failed_events_list,
                     :dlq_messages_list, :events_list, :subscribers_list, :jobs_list,
-                    :paused_queues, :locks_list, :recurring_tasks_list
+                    :paused_queues, :locks_list, :recurring_tasks_list,
+                    :insights_summary, :insights_slowest, :insights_latency_by_queue,
+                    :insights_latency_trend, :insights_throughput, :insights_status_counts,
+                    :stream_stats_available, :stream_summary, :top_streams_list
       attr_reader :calls
 
       def initialize
@@ -20,6 +23,15 @@ module Pgbus
         @paused_queues = []
         @locks_list = []
         @recurring_tasks_list = []
+        @insights_summary = default_insights_summary
+        @insights_slowest = []
+        @insights_latency_by_queue = []
+        @insights_latency_trend = []
+        @insights_throughput = []
+        @insights_status_counts = { "success" => 0, "failed" => 0, "dead_lettered" => 0 }
+        @stream_stats_available = false
+        @stream_summary = default_stream_summary
+        @top_streams_list = []
         @calls = Hash.new { |h, k| h[k] = [] }
       end
 
@@ -78,6 +90,19 @@ module Pgbus
 
       def called?(method_name) = @calls.key?(method_name)
 
+      # Insights (job stats)
+      def job_stats_summary(minutes: 60) = @insights_summary
+      def slowest_job_classes(limit: 10, minutes: 60) = @insights_slowest.first(limit)
+      def latency_by_queue(minutes: 60) = @insights_latency_by_queue
+      def latency_trend(minutes: 60) = @insights_latency_trend
+      def job_throughput(minutes: 60) = @insights_throughput
+      def job_status_counts(minutes: 60) = @insights_status_counts
+
+      # Insights (stream stats — opt-in, default unavailable)
+      def stream_stats_available? = @stream_stats_available
+      def stream_stats_summary(minutes: 60) = @stream_summary
+      def top_streams(limit: 10, minutes: 60) = @top_streams_list.first(limit)
+
       private
 
       def record(method_name, *args)
@@ -88,6 +113,23 @@ module Pgbus
       def default_stats
         { total_queues: 2, total_depth: 15, total_visible: 12,
           active_processes: 1, failed_count: 3, dlq_depth: 2 }
+      end
+
+      def default_insights_summary
+        {
+          total: 342, success: 335, failed: 5, dead_lettered: 2,
+          avg_duration_ms: 127.4, max_duration_ms: 4521.0,
+          avg_latency_ms: 0, p50_latency_ms: 0, p95_latency_ms: 0,
+          p99_latency_ms: 0, avg_retries: 0
+        }
+      end
+
+      def default_stream_summary
+        {
+          broadcasts: 0, connects: 0, disconnects: 0,
+          active_estimate: 0, avg_fanout: 0,
+          avg_broadcast_ms: 0, avg_connect_ms: 0
+        }
       end
 
       def default_queues

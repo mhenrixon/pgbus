@@ -10,8 +10,15 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
       listener: listener,
       dispatch_queue: dispatch_queue,
       logger: logger,
-      read_limit: 500
+      read_limit: 500,
+      config: dispatcher_config
     )
+  end
+
+  # Dispatcher config: independent of Pgbus.configuration so toggling
+  # streams_stats_enabled in one test can't bleed into another.
+  let(:dispatcher_config) do
+    instance_double(Pgbus::Configuration, streams_stats_enabled: false)
   end
 
   let(:client) do
@@ -462,6 +469,111 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
       coalesced.each { |w| dispatcher.send(:handle, w) }
 
       expect(client).to have_received(:read_after).once
+    end
+  end
+
+  describe "stream stat recording (opt-in)" do
+    # When streams_stats_enabled is false (the default in this suite),
+    # the Dispatcher must never touch Pgbus::StreamStat. Otherwise a
+    # misconfigured install would start writing rows on upgrade.
+    context "when streams_stats_enabled is false" do
+      it "does not record a broadcast on handle_wake" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        registry.register(c)
+        allow(client).to receive(:read_after).and_return([build_envelope(10)])
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+        expect(Pgbus::StreamStat).not_to have_received(:record!)
+      end
+
+      it "does not record a connect on handle_connect" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        allow(client).to receive(:read_after).and_return([])
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::ConnectMessage.new(connection: c))
+
+        expect(Pgbus::StreamStat).not_to have_received(:record!)
+      end
+
+      it "does not record a disconnect on handle_disconnect" do
+        c = build_conn(id: "a", stream_name: "chat")
+        registry.register(c)
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c))
+
+        expect(Pgbus::StreamStat).not_to have_received(:record!)
+      end
+    end
+
+    context "when streams_stats_enabled is true" do
+      let(:dispatcher_config) do
+        instance_double(Pgbus::Configuration, streams_stats_enabled: true)
+      end
+
+      it "records a broadcast with fanout = registered + in-flight subscriber count" do
+        c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        c2 = build_conn(id: "b", stream_name: "chat", last_msg_id_sent: 0)
+        registry.register(c1)
+        registry.register(c2)
+        allow(client).to receive(:read_after).and_return([build_envelope(5)])
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+        expect(Pgbus::StreamStat).to have_received(:record!).with(
+          hash_including(stream_name: "chat", event_type: "broadcast", fanout: 2)
+        )
+      end
+
+      it "does not record a broadcast when read_after returns empty" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        registry.register(c)
+        allow(client).to receive(:read_after).and_return([])
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+        expect(Pgbus::StreamStat).not_to have_received(:record!)
+      end
+
+      it "records a connect with no fanout" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        allow(client).to receive(:read_after).and_return([])
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::ConnectMessage.new(connection: c))
+
+        expect(Pgbus::StreamStat).to have_received(:record!).with(
+          hash_including(stream_name: "chat", event_type: "connect", fanout: nil)
+        )
+      end
+
+      it "records a disconnect" do
+        c = build_conn(id: "a", stream_name: "chat")
+        registry.register(c)
+        allow(Pgbus::StreamStat).to receive(:record!)
+
+        dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c))
+
+        expect(Pgbus::StreamStat).to have_received(:record!).with(
+          hash_including(stream_name: "chat", event_type: "disconnect", fanout: nil)
+        )
+      end
+
+      it "does not propagate StreamStat.record! errors to the dispatcher" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        registry.register(c)
+        allow(client).to receive(:read_after).and_return([build_envelope(1)])
+        allow(Pgbus::StreamStat).to receive(:record!).and_raise(StandardError, "boom")
+
+        expect do
+          dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+        end.not_to raise_error
+      end
     end
   end
 

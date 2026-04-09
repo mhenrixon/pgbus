@@ -1,0 +1,18 @@
+class AddPgbusStreamStats < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_stream_stats do |t|
+      t.string :stream_name, null: false
+      t.string :event_type, null: false # 'broadcast' | 'connect' | 'disconnect'
+      t.integer :duration_ms, null: false, default: 0
+      t.integer :fanout # nil for connect/disconnect
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_stream_stats, :created_at,
+              name: "idx_pgbus_stream_stats_time"
+    add_index :pgbus_stream_stats, %i[stream_name created_at],
+              name: "idx_pgbus_stream_stats_stream_time"
+    add_index :pgbus_stream_stats, %i[event_type created_at],
+              name: "idx_pgbus_stream_stats_type_time"
+  end
+end

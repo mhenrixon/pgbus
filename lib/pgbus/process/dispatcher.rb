@@ -142,13 +142,20 @@ module Pgbus
       end
 
       def cleanup_stats
-        return unless config.stats_enabled
-
         retention = config.stats_retention
         return unless retention&.positive?
 
-        deleted = JobStat.cleanup!(older_than: Time.current - retention)
-        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old job stats" } if deleted.positive?
+        cutoff = Time.current - retention
+
+        if config.stats_enabled
+          deleted = JobStat.cleanup!(older_than: cutoff)
+          Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old job stats" } if deleted.positive?
+        end
+
+        return unless config.streams_stats_enabled
+
+        deleted = StreamStat.cleanup!(older_than: cutoff)
+        Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old stream stats" } if deleted.positive?
       end
 
       def cleanup_job_locks

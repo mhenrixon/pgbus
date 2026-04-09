@@ -176,6 +176,32 @@ module DummyApp
       []
     end
 
+    def job_status_counts(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      { "success" => 335, "failed" => 5, "dead_lettered" => 2 }
+    end
+
+    # Stream stats — opt-in in production, always "available" in the
+    # dummy app so the Insights QA surface demos the section.
+    def stream_stats_available?
+      true
+    end
+
+    def stream_stats_summary(minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      {
+        broadcasts: 1_248, connects: 92, disconnects: 87,
+        active_estimate: 5, avg_fanout: 7.3,
+        avg_broadcast_ms: 4.1, avg_connect_ms: 12.6
+      }
+    end
+
+    def top_streams(limit: 10, minutes: 60) # rubocop:disable Lint/UnusedMethodArgument
+      [
+        { stream_name: "chat:lobby", count: 420, avg_fanout: 18.2, avg_ms: 3.1 },
+        { stream_name: "orders:dashboard", count: 312, avg_fanout: 4.5, avg_ms: 5.8 },
+        { stream_name: "notifications:admin", count: 214, avg_fanout: 2.1, avg_ms: 2.4 }
+      ].first(limit)
+    end
+
     # Mutating actions (no-ops for QA)
     def purge_queue(_name) = true
     def drop_queue(_name) = true

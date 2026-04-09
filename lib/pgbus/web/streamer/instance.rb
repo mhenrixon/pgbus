@@ -48,7 +48,8 @@ module Pgbus
             registry: @registry,
             listener: @listener,
             dispatch_queue: @dispatch_queue,
-            logger: @logger
+            logger: @logger,
+            config: @config
           )
           @heartbeat = Heartbeat.new(
             registry: @registry,

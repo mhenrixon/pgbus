@@ -78,6 +78,10 @@ RSpec.describe Pgbus::Configuration do
       expect(config.stats_retention).to eq(30 * 24 * 3600)
     end
 
+    it "has streams_stats_enabled disabled by default (opt-in)" do
+      expect(config.streams_stats_enabled).to be false
+    end
+
     it "has insights_default_minutes of 30 days" do
       expect(config.insights_default_minutes).to eq(30 * 24 * 60)
     end

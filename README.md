@@ -832,6 +832,29 @@ The sweep uses `DELETE ... RETURNING` so multiple workers running it concurrentl
 - The stale-member sweep is manual. Run it from a cron, an ActiveJob, or your existing heartbeat — pgbus does not assume one over the others.
 - The DOM markup for join/leave is whatever your `join`/`leave` block returns. Pgbus does not impose a fixed presence schema on `<pgbus-stream-source>`.
 
+### Stream stats (opt-in)
+
+Pgbus can record one row in `pgbus_stream_stats` per broadcast, connect, and disconnect so the `/pgbus/insights` dashboard shows stream throughput alongside job throughput. This is **disabled by default** because stream event volume can dwarf job volume in chat-style apps — enable it deliberately when you want the observability.
+
+```ruby
+# config/initializers/pgbus.rb
+Pgbus.configure do |c|
+  c.streams_stats_enabled = true
+end
+```
+
+Then run the migration generator once:
+
+```bash
+rails generate pgbus:add_stream_stats                  # Add the migration
+rails generate pgbus:add_stream_stats --database=pgbus # For separate database
+rails db:migrate
+```
+
+The Insights tab gains a "Real-time Streams" section with counts of broadcasts / connects / disconnects, an "active" estimate (connects − disconnects in the selected window), average fanout per broadcast, and a "Top Streams by Broadcast Volume" table. The existing `stats_retention` config covers cleanup, so there is no separate retention knob.
+
+Overhead on a real Puma + PGMQ setup (`bundle exec rake bench:streams`): the most visible cost is an INSERT per connect/disconnect pair, which shows up under thundering-herd connect scenarios (K=50 concurrent connects: ~+20% per-connect latency). Steady-state broadcast and fanout numbers stay in the run-to-run noise band. Enable it if Insights is useful; leave it off if the write traffic worries you.
+
 ## Operations
 
 Day-to-day running of Pgbus: starting and stopping processes, observing what is happening on the dashboard, the database tables Pgbus relies on, and how to migrate from an existing job backend.

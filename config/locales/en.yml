@@ -161,6 +161,22 @@ en:
             job_class: Job Class
             max: Max
           title: Slowest Job Classes (avg duration)
+        streams:
+          summary:
+            active: Active
+            avg_fanout: Avg Fanout
+            broadcasts: Broadcasts
+            connects: Connects
+            disconnects: Disconnects
+          title: Real-time Streams
+          top:
+            empty: No stream activity recorded in the selected window
+            headers:
+              avg_fanout: Avg Fanout
+              avg_ms: Avg Dispatch
+              broadcasts: Broadcasts
+              stream: Stream
+            title: Top Streams by Broadcast Volume
         summary:
           avg_duration: Avg Duration
           avg_latency: Avg Latency
