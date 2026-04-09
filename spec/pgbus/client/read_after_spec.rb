@@ -15,6 +15,8 @@ RSpec.describe Pgbus::Client::ReadAfter do
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)
+    stub_const("PG::UndefinedTable", Class.new(StandardError)) unless defined?(PG::UndefinedTable)
+    stub_const("PG::ConnectionBad", Class.new(StandardError)) unless defined?(PG::ConnectionBad)
     allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
   end
 
@@ -117,6 +119,24 @@ RSpec.describe Pgbus::Client::ReadAfter do
       envelopes = client.read_after("chat", after_id: 1247)
       expect(envelopes.map(&:source)).to eq(%w[live archive])
     end
+
+    # Full replay from a fresh database: before any broadcast has happened,
+    # pgmq.q_<stream> and pgmq.a_<stream> don't exist. A just-connected SSE
+    # client asking for history must get an empty array, not a crash.
+    # See issue #101.
+    it "returns [] when the PGMQ queue tables do not exist yet" do
+      allow(raw_conn).to receive(:exec_params)
+        .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat" does not exist'))
+
+      expect(client.read_after("chat", after_id: 0)).to eq([])
+    end
+
+    it "re-raises PG::UndefinedTable for unrelated tables" do
+      allow(raw_conn).to receive(:exec_params)
+        .and_raise(PG::UndefinedTable.new('relation "public.unrelated" does not exist'))
+
+      expect { client.read_after("chat", after_id: 0) }.to raise_error(PG::UndefinedTable)
+    end
   end
 
   describe "#stream_current_msg_id" do
@@ -142,6 +162,46 @@ RSpec.describe Pgbus::Client::ReadAfter do
     it "rejects unsafe queue names" do
       expect { client.stream_current_msg_id("nope; DROP") }.to raise_error(ArgumentError)
     end
+
+    # A fresh database has not yet created pgmq.q_<stream> — the queue is
+    # created lazily on the first broadcast. The canonical use case for
+    # streams is `pgbus_stream_from Current.user` in a layout, which calls
+    # current_msg_id on every page render to compute the watermark. On a
+    # fresh database this query runs before any broadcast, so the queue
+    # table does not yet exist. "No queue" is semantically equivalent to
+    # "no messages", so the watermark must be 0 rather than an exception.
+    # See issue #101.
+    it "returns 0 when the PGMQ queue table does not exist yet" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat" does not exist'))
+
+      expect(client.stream_current_msg_id("chat")).to eq(0)
+    end
+
+    it "returns 0 when ActiveRecord::StatementInvalid wraps a PG::UndefinedTable" do
+      stub_const("ActiveRecord::StatementInvalid", Class.new(StandardError)) unless defined?(ActiveRecord::StatementInvalid)
+      cause = PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat" does not exist')
+      wrapped = ActiveRecord::StatementInvalid.new(
+        'PG::UndefinedTable: ERROR:  relation "pgmq.q_pgbus_test_chat" does not exist'
+      )
+      allow(wrapped).to receive(:cause).and_return(cause)
+      allow(raw_conn).to receive(:exec).and_raise(wrapped)
+
+      expect(client.stream_current_msg_id("chat")).to eq(0)
+    end
+
+    it "re-raises PG::UndefinedTable for unrelated tables" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "public.some_other_table" does not exist'))
+
+      expect { client.stream_current_msg_id("chat") }.to raise_error(PG::UndefinedTable)
+    end
+
+    it "re-raises other PG errors" do
+      allow(raw_conn).to receive(:exec).and_raise(PG::ConnectionBad.new("server closed"))
+
+      expect { client.stream_current_msg_id("chat") }.to raise_error(PG::ConnectionBad)
+    end
   end
 
   describe "#stream_oldest_msg_id" do
@@ -162,6 +222,23 @@ RSpec.describe Pgbus::Client::ReadAfter do
       allow(result).to receive(:first).and_return({ "least" => nil })
       allow(raw_conn).to receive(:exec).and_return(result)
       expect(client.stream_oldest_msg_id("chat")).to be_nil
+    end
+
+    # Same missing-queue scenario as stream_current_msg_id — gap detection
+    # is called on every replay request, and on a fresh database the queue
+    # hasn't been created yet. See issue #101.
+    it "returns nil when the PGMQ queue tables do not exist yet" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat" does not exist'))
+
+      expect(client.stream_oldest_msg_id("chat")).to be_nil
+    end
+
+    it "re-raises PG::UndefinedTable for unrelated tables" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "public.unrelated" does not exist'))
+
+      expect { client.stream_oldest_msg_id("chat") }.to raise_error(PG::UndefinedTable)
     end
   end
 end

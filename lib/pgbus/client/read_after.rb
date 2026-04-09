@@ -24,6 +24,10 @@ module Pgbus
         end
 
         rows.map { |row| build_envelope(row) }
+      rescue StandardError => e
+        raise unless missing_stream_queue?(e, sanitized)
+
+        []
       end
 
       def stream_current_msg_id(stream_name)
@@ -34,6 +38,10 @@ module Pgbus
             conn.exec(sql).first.fetch("max").to_i
           end
         end
+      rescue StandardError => e
+        raise unless missing_stream_queue?(e, sanitized)
+
+        0
       end
 
       def stream_oldest_msg_id(stream_name)
@@ -50,9 +58,41 @@ module Pgbus
             value&.to_i
           end
         end
+      rescue StandardError => e
+        raise unless missing_stream_queue?(e, sanitized)
+
+        nil
       end
 
       private
+
+      # True if +error+ is a PG::UndefinedTable (or an
+      # ActiveRecord::StatementInvalid wrapping one) complaining about
+      # the stream's own PGMQ queue table (pgmq.q_<sanitized> or
+      # pgmq.a_<sanitized>).
+      #
+      # The stream-watermark and replay SQL above run on every page render
+      # for streams like `pgbus_stream_from Current.user`, but the queue
+      # table is only created on the FIRST broadcast via
+      # `ensure_stream_queue`. On a fresh database the very first page
+      # render therefore reads from a table that doesn't exist yet —
+      # semantically, "no queue" means "no messages" and must translate
+      # to a 0 watermark / empty replay rather than an exception. Any
+      # OTHER UndefinedTable (wrong schema, typo, operator error) still
+      # propagates so real bugs don't get swallowed.
+      #
+      # See issue #101.
+      def missing_stream_queue?(error, sanitized)
+        pg_error = pg_undefined_table?(error) ? error : error.cause
+        return false unless pg_undefined_table?(pg_error)
+
+        message = pg_error.message.to_s
+        message.include?("pgmq.q_#{sanitized}") || message.include?("pgmq.a_#{sanitized}")
+      end
+
+      def pg_undefined_table?(error)
+        defined?(::PG::UndefinedTable) && error.is_a?(::PG::UndefinedTable)
+      end
 
       # Builds the union of live and archive tables. The outer ORDER BY + LIMIT
       # ensures we never return more than `limit` rows total even if both
