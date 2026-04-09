@@ -3,23 +3,27 @@
 require_relative "../integration_helper"
 
 # These tests fork child processes that create new PG connections.
-# pg gem 1.6.x has a known segfault when connecting after fork on macOS ARM64
-# (libpq SSL context corruption). These tests run reliably on Linux (CI).
-FORK_PG_SAFE = !RUBY_PLATFORM.include?("darwin")
-
+#
+# Historical note: pg gem 1.6.x on macOS ARM64 segfaults when libpq
+# initializes GSSAPI state after fork. The fix is gssencmode=disable
+# in the connection URL — done in connection_url below and in
+# integration_helper.rb for the parent's AR connection. With that
+# flag, these tests run on both Linux (CI) and darwin.
 RSpec.describe "Signal handling (integration)", :integration do
   let(:client) { Pgbus.client }
 
   before do
-    skip "Fork + PG.connect segfaults on macOS ARM64 (pg gem bug)" unless FORK_PG_SAFE
     client.ensure_queue("default")
   end
 
   # Build a connection URL with the given pool size, safely merging query params.
+  # Always sets gssencmode=disable so fork+PG.connect doesn't segfault on
+  # macOS ARM64 (see module-level comment above).
   def connection_url(pool:)
     parsed = URI.parse(PGBUS_DATABASE_URL)
     params = URI.decode_www_form(parsed.query || "").to_h
     params["pool"] = pool.to_s
+    params["gssencmode"] = "disable"
     parsed.query = URI.encode_www_form(params)
     parsed.to_s
   end
@@ -178,13 +182,50 @@ RSpec.describe "Signal handling (integration)", :integration do
 
         # Override boot_processes to fork a simple child that sleeps,
         # register it in @forks so the supervisor manages it properly.
+        #
+        # CRITICAL: the forked child inherits the supervisor's signal
+        # handlers installed by setup_signals (see signal_handler.rb).
+        # Those handlers are closures over the supervisor's @signal_queue
+        # and @self_pipe_w — both of which are per-process. When the
+        # child receives SIGTERM before it installs its own trap, the
+        # inherited closure fires, writes to the CHILD'S copy of the
+        # queue/pipe (which nothing reads), and RETURNS NORMALLY instead
+        # of exiting. The child then continues to sleep 120 and the
+        # supervisor never sees its child die. That produced the
+        # intermittent 30-second timeout in CI.
+        #
+        # Fix: the child uses its own IO.pipe to notify its parent
+        # (the supervisor) that it has installed its TERM handler and
+        # is ready to receive signals. boot_processes blocks on that
+        # handshake before writing "S" back to the test runner. That
+        # guarantees signal_children cannot fire before the child has
+        # a working trap installed.
         supervisor.define_singleton_method(:boot_processes) do
+          ready_r, ready_w = IO.pipe
           child_pid = fork do
-            # Simple child that exits on TERM
+            ready_r.close
+            # Reset inherited traps to default first — harmless if the
+            # signal arrives before we install our own: the default
+            # SIGTERM handler kills the process, which is the correct
+            # behavior for a sleep-forever test child.
+            %w[INT TERM QUIT].each { |sig| Signal.trap(sig, "DEFAULT") }
             trap("TERM") { exit 0 }
             trap("QUIT") { exit 0 }
+            # Tell the supervisor we're ready. Any signal delivered
+            # before this point either hits the DEFAULT handler (kill)
+            # or our own trap (clean exit) — both valid.
+            ready_w.write("R")
+            ready_w.close
             sleep 120
           end
+          ready_w.close
+          # Wait for the child to confirm trap installation. If the
+          # handshake stalls, there's a deeper bug — bail out with a
+          # short timeout rather than hanging the whole test.
+          ready_r.wait_readable(5)
+          ready_r.read(1)
+          ready_r.close
+
           @forks[child_pid] = { type: :worker, config: {} }
           write_pipe.write("S")
           write_pipe.flush

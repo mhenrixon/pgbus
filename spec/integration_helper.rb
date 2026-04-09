@@ -88,9 +88,16 @@ RSpec.configure do |config|
 
   # Connect ActiveRecord with a pool large enough for concurrent tests.
   # Merge pool via URI parsing to avoid breaking URLs with existing query params.
+  #
+  # gssencmode=disable is the macOS fix: libpq 1.6.x on darwin/arm64 initializes
+  # GSSAPI state lazily in a way that segfaults when a child process tries to
+  # open a new PG connection after fork. Disabling GSSAPI entirely skips the
+  # bad code path. Harmless on Linux (GSSAPI isn't used in pgbus anyway), so
+  # we set it unconditionally to keep one canonical URL for both platforms.
   parsed = URI.parse(PGBUS_DATABASE_URL)
   url_params = URI.decode_www_form(parsed.query || "").to_h
   url_params["pool"] = "20"
+  url_params["gssencmode"] = "disable"
   parsed.query = URI.encode_www_form(url_params)
   ActiveRecord::Base.establish_connection(parsed.to_s)
 
