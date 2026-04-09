@@ -193,14 +193,36 @@ RSpec.describe Pgbus::Streams::Presence do
         expect(result[0]["metadata"]).to eq({})
       end
 
-      it "logs the failure at debug level with truncation" do
+      it "logs the failure at debug level with the raw metadata truncated to 200 chars" do
+        # Inject a metadata blob much longer than the 200-char cap so
+        # we can distinguish "truncated" from "not truncated". The
+        # production code does value.to_s[0, 200], then interpolates
+        # via .inspect — the logged string contains the first 200
+        # source characters and must NOT contain characters past 200.
+        long_invalid = "{#{"x" * 500}"
+        allow(raw_connection).to receive(:exec_params).and_return([
+                                                                    {
+                                                                      "member_id" => "1",
+                                                                      "metadata" => long_invalid,
+                                                                      "joined_at" => "2026-04-09T00:00:00Z",
+                                                                      "last_seen_at" => "2026-04-09T00:00:00Z"
+                                                                    }
+                                                                  ])
+
+        logged_message = nil
         fake_logger = double("logger")
-        allow(fake_logger).to receive(:debug).and_yield
+        allow(fake_logger).to receive(:debug) { |&blk| logged_message = blk&.call }
         allow(Pgbus).to receive(:logger).and_return(fake_logger)
 
         presence.members
 
         expect(fake_logger).to have_received(:debug)
+        expect(logged_message).to include("parse_metadata failed")
+        # First 200 chars are preserved in the log line
+        expect(logged_message).to include(long_invalid[0, 200])
+        # Characters past the 200-char boundary are dropped
+        tail = long_invalid[200..]
+        expect(logged_message).not_to include(tail)
       end
     end
 

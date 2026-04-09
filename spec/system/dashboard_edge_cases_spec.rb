@@ -99,8 +99,10 @@ RSpec.describe "Dashboard edge cases", type: :system do
 
       it "does not 500 on an off-the-end page number" do
         # page=999 is well past the end; the controller should clamp
-        # or render empty without raising. Status <400 means the view
-        # rendered (Capybara raises on 5xx by default).
+        # or render empty without raising. The have_css assertion
+        # doubles as a health check — if the server 500'd, the H1
+        # would never render and the test would fail, regardless of
+        # whether the Capybara driver surfaces the status code.
         visit "/pgbus/jobs?page=999"
         expect(page).to have_css("h1", text: "Jobs")
       end
