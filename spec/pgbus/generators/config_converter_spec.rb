@@ -138,6 +138,84 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
       end
     end
 
+    context "with a setting present in only one environment" do
+      # Regression for issue #93. When a YAML uses `<<: *default`
+      # anchors and a setting like `polling_interval: 0.01` is added
+      # ONLY under `test:`, the other envs have no value for it at
+      # all. The generator must not emit the setting as an
+      # unconditional line — doing so silently applies a dev/test
+      # tuning knob to production. (10ms polling = 10x the default
+      # DB load under a 100ms default.)
+      let(:input) do
+        {
+          "development" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }]
+          },
+          "test" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }],
+            "polling_interval" => 0.01
+          },
+          "production" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }]
+          }
+        }
+      end
+
+      it "does not emit the setting as an unconditional line" do
+        # This is the exact regression from #93 — without the fix,
+        # the generator emitted `c.polling_interval = 0.01` flat,
+        # applying the 10ms test tuning to dev + test + prod.
+        expect(output).not_to match(/^\s*c\.polling_interval = 0\.01\s*$/)
+      end
+
+      it "guards the setting with `if Rails.env.test?`" do
+        expect(output).to include("c.polling_interval = 0.01 if Rails.env.test?")
+      end
+
+      it "still emits the constant workers line unconditionally" do
+        expect(output).to include('c.workers = "*: 5"')
+      end
+    end
+
+    context "with a setting present in a subset of environments" do
+      # Related to #93: two of three envs set the value, one doesn't.
+      # Whatever the formatter shape is (case block vs guarded line),
+      # the value MUST NOT leak to the environment that didn't set it.
+      let(:input) do
+        {
+          "development" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }],
+            "polling_interval" => 0.05
+          },
+          "test" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }],
+            "polling_interval" => 0.01
+          },
+          "production" => {
+            "workers" => [{ "queues" => ["*"], "threads" => 5 }]
+          }
+        }
+      end
+
+      it "does not emit polling_interval as an unconditional line" do
+        expect(output).not_to match(/^\s*c\.polling_interval = 0\.\d+\s*$/)
+      end
+
+      it "scopes the setting to only the environments that declared it" do
+        # Must mention development and test (the envs that set it)
+        # but NOT production. A case block with only dev+test clauses
+        # is an acceptable shape — what we must prevent is the
+        # production env silently inheriting the value.
+        expect(output).to match(/polling_interval/)
+        expect(output).to match(/development/)
+        expect(output).to match(/\btest\b/)
+        # Only `workers` should mention production (from a production:
+        # capsule/worker config); polling_interval must not.
+        polling_block = output[/c\.polling_interval[\s\S]*?(?:\n  end|$)/]
+        expect(polling_block).not_to include("production")
+      end
+    end
+
     context "with three or more environments having different values" do
       let(:input) do
         {

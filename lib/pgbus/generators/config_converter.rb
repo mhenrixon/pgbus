@@ -151,15 +151,23 @@ module Pgbus
       end
 
       # Returns [constant_settings, varying_settings].
-      # constant_settings: { "key" => value }   (same value across all envs)
+      # constant_settings: { "key" => value }   (same value in EVERY env)
       # varying_settings:  { "key" => { env => value, ... } }
+      #
+      # A setting is only "constant" when it is present in every env
+      # and all envs agree on the value. If any env is missing the
+      # setting entirely (e.g. `polling_interval: 0.01` set only under
+      # `test:`), emitting it as an unconditional line would silently
+      # apply the value to envs that never asked for it — see #93.
       def partition_by_variance(all_settings)
         constant = {}
         varying = {}
         all_settings.each do |key, env_values|
           present_values = env_values.reject { |_, v| v == :__missing__ }
           unique_values = present_values.values.uniq
-          if unique_values.size <= 1
+          all_envs_present = present_values.size == env_values.size
+
+          if all_envs_present && unique_values.size <= 1
             constant[key] = unique_values.first
           else
             varying[key] = present_values
@@ -182,6 +190,18 @@ module Pgbus
 
       def render_varying_setting(key, env_values)
         envs = env_values.keys
+
+        # Single-env coverage: the setting exists in exactly one env.
+        # Emit an `if Rails.env.X?` modifier rather than a case block
+        # so other envs fall back to the gem default. This is the
+        # fix for #93 — without it, a `test:`-only `polling_interval`
+        # would leak into dev and prod as an unconditional assignment.
+        if envs.size == 1
+          env = envs.first
+          value = env_values[env]
+          return ["c.#{key} = #{render_value(key, value)} if Rails.env.#{env}?"]
+        end
+
         if envs.size == 2 && envs.include?("development")
           # Special case: "everything except dev" — common pattern
           non_dev_value = env_values.except("development").values.first
