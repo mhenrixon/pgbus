@@ -10,6 +10,8 @@ RSpec.describe Pgbus::Client do
     # Pre-mark PGMQ schema as ensured for most tests.
     # Schema installation tests override this.
     c.instance_variable_set(:@schema_ensured, true)
+    # Stub autovacuum tuning — runs raw SQL which needs a real PG connection.
+    allow(c).to receive(:tune_autovacuum)
     c
   end
 

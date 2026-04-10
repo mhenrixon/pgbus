@@ -150,6 +150,10 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     # Create default queues via PGMQ
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
+
+    # Tune autovacuum for queue/archive tables — default settings are too
+    # conservative for the high insert/delete churn of queue processing.
+    execute Pgbus::AutovacuumTuning.sql_for_all_queues
   end
 
   def down
