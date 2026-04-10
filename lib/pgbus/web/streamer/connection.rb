@@ -70,6 +70,10 @@ module Pgbus
           result
         end
 
+        def write_sentinel(bytes)
+          @writer.write(self, bytes, deadline_ms: @write_deadline_ms)
+        end
+
         def idle_for
           monotonic - @last_write_at
         end

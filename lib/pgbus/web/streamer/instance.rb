@@ -134,14 +134,9 @@ module Pgbus
             event: "pgbus:shutdown",
             data: '{"reason":"worker_restart"}'
           )
-          deadline_ms = @config.streams_write_deadline_ms
 
           @registry.each_connection do |connection|
-            # IoWriter holds the connection's mutex, so this write is
-            # serialised against any write the dispatcher/heartbeat
-            # might still be performing if their stop hadn't fully
-            # returned yet.
-            safely { IoWriter.write(connection, sentinel_bytes, deadline_ms: deadline_ms) }
+            safely { connection.write_sentinel(sentinel_bytes) }
             safely { connection.close }
           end
         end
