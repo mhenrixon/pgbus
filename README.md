@@ -705,7 +705,7 @@ Without the plugin, Puma closes hijacked SSE sockets abruptly during graceful re
 
 ### Requirements
 
-- **Puma 6.1+ or Falcon.** Streams use `rack.hijack`. Puma 6.1+ supports it via partial hijack (thread-releasing, see [puma/puma#1009](https://github.com/puma/puma/issues/1009)). Falcon supports it via [protocol-rack](https://github.com/socketry/protocol-rack)'s adapter layer — same `env["rack.hijack?"]` + `env["rack.hijack"]` shape as Puma, so `Pgbus::Web::StreamApp` needs no server-specific code paths. Unicorn, Pitchfork, and Passenger return HTTP 501 from the streams endpoint.
+- **Puma 6.1+ or Falcon.** Streams use `rack.hijack` by default. Puma 6.1+ supports it via partial hijack (thread-releasing, see [puma/puma#1009](https://github.com/puma/puma/issues/1009)). Falcon supports both the hijack path (via [protocol-rack](https://github.com/socketry/protocol-rack)'s emulation) and a native streaming body path (`streams_falcon_streaming_body = true`) that integrates with Falcon's fiber scheduler for better backpressure and connection lifecycle management. Unicorn, Pitchfork, and Passenger return HTTP 501 from the streams endpoint.
 - **PostgreSQL LISTEN/NOTIFY.** `config.listen_notify = true` (the default). Stream queues override PGMQ's 250ms NOTIFY throttle to 0 so every broadcast fires individually.
 - **HTTP/2 or HTTP/3 in production.** SSE has a 6-connection-per-origin limit on HTTP/1.1; HTTP/2 lifts it. Falcon supports HTTP/2 natively without a reverse proxy.
 
@@ -725,8 +725,21 @@ Pgbus.configure do |c|
   c.streams_idle_timeout           = 3_600         # close idle connections after 1h
   c.streams_listen_health_check_ms = 250           # PG LISTEN keepalive + ensure_listening ack budget
   c.streams_write_deadline_ms      = 5_000         # write_nonblock deadline
+  c.streams_falcon_streaming_body  = false         # opt-in: Falcon-native streaming body
 end
 ```
+
+#### Falcon-native streaming body (opt-in)
+
+When running on Falcon, enable native streaming body support for better integration with Falcon's fiber scheduler:
+
+```ruby
+c.streams_falcon_streaming_body = true
+```
+
+With this flag, `StreamApp` returns `[200, headers, Writable]` instead of hijacking the socket. Falcon drives the response lifecycle with proper backpressure, connection cleanup, and fiber-scheduled IO. SSE writes go through `Protocol::HTTP::Body::Writable` which is fiber-safe and yields to other fibers when blocked.
+
+Without the flag (default), Falcon uses the same `rack.hijack` path as Puma via protocol-rack's emulation. Both paths are tested and work correctly — the streaming body path is an optimization for Falcon deployments that want tighter scheduler integration.
 
 ### How it works
 
