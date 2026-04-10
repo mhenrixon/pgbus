@@ -78,9 +78,10 @@ RSpec.describe Pgbus::Client::ReadAfter do
       expect(client.read_after("chat", after_id: 9999)).to eq([])
     end
 
-    it "rejects unsanitised stream names via QueueNameValidator" do
-      expect { client.read_after("bad'; DROP TABLE", after_id: 0) }
-        .to raise_error(ArgumentError)
+    it "normalizes stream names with invalid characters via QueueNameValidator" do
+      # After normalization: "bad'; DROP TABLE" → "badDROPTABLE" (safe for SQL)
+      allow(raw_conn).to receive(:exec_params).and_return(double("PG::Result", to_a: []))
+      expect { client.read_after("bad'; DROP TABLE", after_id: 0) }.not_to raise_error
     end
 
     it "passes after_id and limit as positional bind parameters" do
@@ -159,8 +160,12 @@ RSpec.describe Pgbus::Client::ReadAfter do
       expect(client.stream_current_msg_id("chat")).to eq(0)
     end
 
-    it "rejects unsafe queue names" do
-      expect { client.stream_current_msg_id("nope; DROP") }.to raise_error(ArgumentError)
+    it "normalizes unsafe queue names instead of rejecting" do
+      # After normalization: "nope; DROP" → "nopeDROP" (safe for SQL)
+      result = double("PG::Result")
+      allow(result).to receive(:first).and_return({ "max" => "0" })
+      allow(raw_conn).to receive(:exec).and_return(result)
+      expect { client.stream_current_msg_id("nope; DROP") }.not_to raise_error
     end
 
     # A fresh database has not yet created pgmq.q_<stream> — the queue is

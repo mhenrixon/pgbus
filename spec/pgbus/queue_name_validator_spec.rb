@@ -43,6 +43,37 @@ RSpec.describe Pgbus::QueueNameValidator do
     end
   end
 
+  describe ".normalize" do
+    it "replaces hyphens with underscores" do
+      expect(described_class.normalize("hotwire-livereload")).to eq("hotwire_livereload")
+    end
+
+    it "replaces dots with underscores" do
+      expect(described_class.normalize("my.queue.name")).to eq("my_queue_name")
+    end
+
+    it "collapses consecutive underscores after replacement" do
+      expect(described_class.normalize("my--queue")).to eq("my_queue")
+    end
+
+    it "strips leading/trailing underscores after replacement" do
+      expect(described_class.normalize("-leading")).to eq("leading")
+      expect(described_class.normalize("trailing-")).to eq("trailing")
+    end
+
+    it "strips characters that are not alphanumeric, hyphens, dots, or underscores" do
+      expect(described_class.normalize("queue!@#name")).to eq("queuename")
+    end
+
+    it "passes through already-valid names unchanged" do
+      expect(described_class.normalize("pgbus_default")).to eq("pgbus_default")
+    end
+
+    it "raises when normalized result is blank" do
+      expect { described_class.normalize("---!!!") }.to raise_error(ArgumentError, /cannot be blank/)
+    end
+  end
+
   describe ".sanitize!" do
     it "strips invalid characters and returns the result" do
       expect(described_class.sanitize!("my-queue.name!")).to eq("myqueuename")

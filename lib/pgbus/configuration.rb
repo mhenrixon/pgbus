@@ -191,8 +191,7 @@ module Pgbus
 
     def queue_name(name)
       full = "#{queue_prefix}_#{name}"
-      QueueNameValidator.validate!(full)
-      full
+      QueueNameValidator.normalize(full)
     end
 
     def dead_letter_queue_name(name)

@@ -64,9 +64,9 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
       expect(raw_conn).to have_received(:exec).twice
     end
 
-    it "rejects unsanitised stream names via QueueNameValidator" do
-      expect { client.ensure_stream_queue("nope; DROP TABLE") }
-        .to raise_error(ArgumentError)
+    it "normalizes stream names with invalid characters via QueueNameValidator" do
+      # After normalization: "nope; DROP TABLE" → "nopeDROPTABLE" (safe for SQL)
+      expect { client.ensure_stream_queue("nope; DROP TABLE") }.not_to raise_error
     end
   end
 end

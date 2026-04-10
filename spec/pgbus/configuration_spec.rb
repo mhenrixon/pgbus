@@ -114,6 +114,14 @@ RSpec.describe Pgbus::Configuration do
     it "prefixes the queue name" do
       expect(config.queue_name("critical")).to eq("pgbus_critical")
     end
+
+    it "normalizes hyphens to underscores" do
+      expect(config.queue_name("hotwire-livereload")).to eq("pgbus_hotwire_livereload")
+    end
+
+    it "normalizes dots to underscores" do
+      expect(config.queue_name("my.queue")).to eq("pgbus_my_queue")
+    end
   end
 
   describe "#dead_letter_queue_name" do
