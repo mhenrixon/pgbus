@@ -62,11 +62,15 @@ module Pgbus
         cursor = parse_cursor(env, request)
         return bad_request("invalid cursor: #{cursor}") if cursor.is_a?(String)
 
-        return unsupported_server unless env["rack.hijack?"]
-
         return over_capacity if streamer.registry.size >= config.streams_max_connections
 
-        hijack_and_register(env, stream_name: stream_name, since_id: cursor, context: context)
+        if config.streams_falcon_streaming_body
+          streaming_body_response(stream_name: stream_name, since_id: cursor, context: context)
+        elsif env["rack.hijack?"]
+          hijack_and_register(env, stream_name: stream_name, since_id: cursor, context: context)
+        else
+          unsupported_server
+        end
       rescue StandardError => e
         logger.error { "[Pgbus::StreamApp] #{e.class}: #{e.message}" }
         server_error
@@ -125,6 +129,38 @@ module Pgbus
         streamer.register(connection)
 
         [-1, {}, []]
+      end
+
+      def streaming_body_response(stream_name:, since_id:, context: nil)
+        require "protocol/http/body/writable" unless defined?(::Protocol::HTTP::Body::Writable)
+        require_relative "streamer/falcon_connection" unless defined?(Pgbus::Web::Streamer::FalconConnection)
+
+        body = ::Protocol::HTTP::Body::Writable.new
+
+        body.write(Pgbus::Streams::Envelope.retry_directive(2_000))
+        body.write(Pgbus::Streams::Envelope.comment(
+                     "pgbus stream open since_id=#{since_id} stream=#{stream_name}"
+                   ))
+
+        connection = Pgbus::Web::Streamer::FalconConnection.new(
+          id: SecureRandom.hex(8),
+          stream_name: stream_name,
+          body: body,
+          since_id: since_id,
+          write_deadline_ms: config.streams_write_deadline_ms,
+          context: context
+        )
+        streamer.register(connection)
+
+        [200, sse_headers, body]
+      end
+
+      def sse_headers
+        {
+          "content-type" => "text/event-stream",
+          "cache-control" => "no-cache, no-transform",
+          "x-accel-buffering" => "no"
+        }
       end
 
       def write_headers(io, stream_name:, since_id:)

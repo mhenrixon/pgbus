@@ -196,6 +196,24 @@ RSpec.describe Pgbus::Web::Streamer::Connection do
     end
   end
 
+  describe "#write_sentinel" do
+    it "delegates to the writer with the connection's deadline" do
+      result = conn.write_sentinel("sentinel bytes")
+      expect(result).to eq(:ok)
+      expect(writer.writes.last[:bytes]).to eq("sentinel bytes")
+      expect(writer.writes.last[:deadline_ms]).to eq(5_000)
+    end
+
+    it "returns :closed when the writer fails" do
+      failing_writer = writer.class.new(result: :closed)
+      c = described_class.new(
+        id: "c2", stream_name: stream, io: io, since_id: 0,
+        writer: failing_writer, write_deadline_ms: 100
+      )
+      expect(c.write_sentinel("bytes")).to eq(:closed)
+    end
+  end
+
   describe "#idle_for" do
     it "returns seconds since the last successful write" do
       # Simulate a write at t=0, advance the monotonic clock, check idle_for

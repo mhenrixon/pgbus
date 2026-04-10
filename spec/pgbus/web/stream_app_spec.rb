@@ -209,4 +209,80 @@ RSpec.describe Pgbus::Web::StreamApp do
       expect(streamer.registered.first.last_msg_id_sent).to eq(200)
     end
   end
+
+  describe "Falcon streaming body path" do
+    before { Pgbus.configuration.streams_falcon_streaming_body = true }
+    after { Pgbus.configuration.streams_falcon_streaming_body = false }
+
+    it "returns [200, sse_headers, Writable] when flag is enabled" do
+      env = get_env("/#{signed("chat")}")
+      status, headers, body = app.call(env)
+
+      expect(status).to eq(200)
+      expect(headers["content-type"]).to eq("text/event-stream")
+      expect(headers["cache-control"]).to eq("no-cache, no-transform")
+      expect(headers["x-accel-buffering"]).to eq("no")
+      expect(body).to be_a(Protocol::HTTP::Body::Writable)
+    ensure
+      body&.close
+    end
+
+    it "registers a FalconConnection with the streamer" do
+      env = get_env("/#{signed("chat")}")
+      _, _, body = app.call(env)
+
+      expect(streamer.registered.length).to eq(1)
+      expect(streamer.registered.first).to be_a(Pgbus::Web::Streamer::FalconConnection)
+      expect(streamer.registered.first.stream_name).to eq("chat")
+    ensure
+      body&.close
+    end
+
+    it "body contains opening SSE frames" do
+      env = get_env("/#{signed("chat")}", "QUERY_STRING" => "since=42")
+      _, _, body = app.call(env)
+
+      # Read the first two chunks (retry directive + opening comment)
+      chunk1 = body.read
+      chunk2 = body.read
+
+      expect(chunk1).to include("retry: 2000")
+      expect(chunk2).to include("since_id=42")
+      expect(chunk2).to include("stream=chat")
+    ensure
+      body&.close
+    end
+
+    it "carries the since_id through to the FalconConnection" do
+      env = get_env("/#{signed("chat")}", "QUERY_STRING" => "since=999")
+      _, _, body = app.call(env)
+
+      expect(streamer.registered.first.last_msg_id_sent).to eq(999)
+    ensure
+      body&.close
+    end
+
+    it "takes priority over rack.hijack? when flag is set" do
+      env = get_env("/#{signed("chat")}", "rack.hijack?" => true)
+      status, _, body = app.call(env)
+
+      # Should return 200 (streaming body), not -1 (hijack sentinel)
+      expect(status).to eq(200)
+      expect(body).to be_a(Protocol::HTTP::Body::Writable)
+    ensure
+      body&.close
+    end
+
+    it "returns 503 when at capacity" do
+      Pgbus.configuration.streams_max_connections = 0
+      env = get_env("/#{signed("chat")}")
+
+      status, headers, _body = app.call(env)
+
+      expect(status).to eq(503)
+      expect(headers["retry-after"]).to eq("2")
+    ensure
+      Pgbus.configuration.streams_max_connections = 2_000
+    end
+  end
 end
