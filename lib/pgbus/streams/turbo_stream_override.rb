@@ -17,7 +17,17 @@ module Pgbus
     # After this patch, `turbo_stream_from` renders a `<pgbus-stream-source>`
     # element instead, so both sides use PGMQ/SSE. When `streams_enabled`
     # is false, the original turbo-rails behavior is preserved via `super`.
+    #
+    # The `include Pgbus::StreamsHelper` is required because some callers
+    # invoke `turbo_stream_from` from a Rack middleware context (e.g.
+    # hotwire-livereload's Middleware uses `ActionController::Base.helpers`)
+    # where `Turbo::StreamsHelper` is available but `Pgbus::StreamsHelper`
+    # is not — the engine's `isolate_namespace` scopes helpers to its own
+    # views. Including it here ensures `pgbus_stream_from` is always
+    # reachable on the receiver.
     module TurboStreamOverride
+      include Pgbus::StreamsHelper
+
       def turbo_stream_from(*streamables, **attributes)
         if Pgbus.configuration.streams_enabled
           pgbus_stream_from(*streamables, **attributes)
