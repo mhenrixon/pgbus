@@ -37,6 +37,10 @@ module Pgbus
     # Dead letter queue
     attr_accessor :max_retries
 
+    # Retry backoff for the VT-based retry path (unhandled exceptions).
+    # Jobs can override these per-class via Pgbus::RetryBackoff::JobMixin.
+    attr_accessor :retry_backoff, :retry_backoff_max, :retry_backoff_jitter
+
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
@@ -117,6 +121,9 @@ module Pgbus
       @circuit_breaker_enabled = true
 
       @max_retries = 5
+      @retry_backoff = 5          # seconds — first VT-retry delay
+      @retry_backoff_max = 300    # 5 minutes cap
+      @retry_backoff_jitter = 0.15
 
       @priority_levels = nil
       @default_priority = 1
@@ -228,6 +235,11 @@ module Pgbus
       raise ArgumentError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
       raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
       raise ArgumentError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
+      raise ArgumentError, "retry_backoff must be > 0" unless retry_backoff.is_a?(Numeric) && retry_backoff.positive?
+      raise ArgumentError, "retry_backoff_max must be > 0" unless retry_backoff_max.is_a?(Numeric) && retry_backoff_max.positive?
+      unless retry_backoff_jitter.is_a?(Numeric) && retry_backoff_jitter >= 0 && retry_backoff_jitter <= 1
+        raise ArgumentError, "retry_backoff_jitter must be between 0 and 1"
+      end
 
       Array(workers).each do |w|
         threads = w[:threads] || w["threads"] || 5

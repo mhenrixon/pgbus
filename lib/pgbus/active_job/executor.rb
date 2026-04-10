@@ -161,6 +161,36 @@ module Pgbus
           error: error,
           retry_count: [message.read_ct.to_i - 1, 0].max
         )
+
+        apply_retry_backoff(message, queue_name, payload)
+      end
+
+      # Extend the message's visibility timeout with exponential backoff
+      # so retries aren't all bunched at the default flat VT interval.
+      # Skipped on the first read (read_ct=1) — that's the initial
+      # attempt, not a retry.
+      def apply_retry_backoff(message, queue_name, payload)
+        attempt = message.read_ct.to_i - 1
+        return if attempt < 1
+
+        job_class = resolve_job_class(payload)
+        delay = if job_class
+                  RetryBackoff.compute_delay_for_job(job_class, attempt: attempt)
+                else
+                  RetryBackoff.compute_delay(attempt: attempt)
+                end
+
+        client.set_visibility_timeout(queue_name, message.msg_id.to_i, vt: delay)
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Retry backoff VT update failed: #{e.message}" }
+      end
+
+      def resolve_job_class(payload)
+        return unless payload.is_a?(Hash) && payload["job_class"]
+
+        payload["job_class"].constantize
+      rescue NameError
+        nil
       end
 
       def instrument(event_name, payload = {})
