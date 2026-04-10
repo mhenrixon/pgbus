@@ -82,11 +82,12 @@ RSpec.describe "Security" do
       expect(config.queue_name("default")).to eq("pgbus_default")
     end
 
-    it "rejects queue names with special characters" do
+    it "normalizes queue names with special characters instead of rejecting" do
       config = Pgbus::Configuration.new
       config.queue_prefix = "pgbus"
 
-      expect { config.queue_name("my;queue") }.to raise_error(ArgumentError)
+      # Semicolons are stripped, hyphens/dots become underscores — safe for SQL
+      expect(config.queue_name("my;queue")).to eq("pgbus_myqueue")
     end
   end
 

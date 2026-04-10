@@ -34,6 +34,23 @@ module Pgbus
       name
     end
 
+    # Normalizes a queue name by replacing common separators (hyphens, dots)
+    # with underscores, stripping remaining invalid characters, and collapsing
+    # consecutive underscores. Use this for names from external sources
+    # (e.g., Turbo stream names like "hotwire-livereload") where the intent
+    # is to derive a valid PGMQ queue name that preserves readability.
+    def normalize(name)
+      name = name.to_s
+      return validate!(name) if VALID_QUEUE_NAME_PATTERN.match?(name)
+
+      normalized = name.gsub(/[-.]/, "_")           # hyphens/dots → underscores
+                       .gsub(/[^a-zA-Z0-9_]/, "")   # strip remaining invalid chars
+                       .gsub(/_+/, "_")              # collapse consecutive underscores
+                       .gsub(/\A_|_\z/, "")          # strip leading/trailing underscores
+      validate!(normalized)
+      normalized
+    end
+
     # Sanitizes a queue name by removing invalid characters, then validates.
     # Use this for names from untrusted sources (e.g., URL params).
     def sanitize!(name)
