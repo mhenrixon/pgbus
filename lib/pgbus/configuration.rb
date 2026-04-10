@@ -485,6 +485,11 @@ module Pgbus
     # default formula provides.
     POOL_SIZE_WARN_THRESHOLD = 50
 
+    # Connections needed per async worker: one for the reactor's serial
+    # execution, one for polling, one for headroom. Fibers share connections
+    # because only one runs at a time per reactor thread.
+    ASYNC_POOL_CONNECTIONS = 3
+
     def resolved_pool_size
       return pool_size if pool_size
 
@@ -624,8 +629,17 @@ module Pgbus
           raise ArgumentError,
                 "#{group} threads must be a positive integer, got #{threads.inspect}"
         end
-        threads
+
+        if async_execution_mode?(entry)
+          ASYNC_POOL_CONNECTIONS
+        else
+          threads
+        end
       end
+    end
+
+    def async_execution_mode?(entry)
+      execution_mode_for(entry) == :async
     end
 
     def warn_if_oversized(size)

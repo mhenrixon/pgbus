@@ -108,14 +108,17 @@ RSpec.describe Pgbus::Client do
     end
 
     it "retains zero objects across 100 send_message cycles" do
-      10.times { plain_client.send_message("default", small_payload) }
+      # Warmup: force all lazy initialization (gem globals, JSON parser
+      # caches, connection_pool singletons) to complete before measuring.
+      # The first MemoryProfiler run captures any one-time retained objects;
+      # the second run should retain zero — proving send_message itself
+      # doesn't leak. This two-pass approach is immune to Ruby version
+      # differences in GC timing and gem autoloading order.
+      50.times { plain_client.send_message("default", small_payload) }
+      MemoryProfiler.report { 50.times { plain_client.send_message("default", small_payload) } }
+      GC.start
 
-      # Scope to lib/pgbus/ so retained objects from external gems
-      # (async fiber scheduler hooks, connection_pool singletons, JSON
-      # parser caches) loaded by other specs in the same process don't
-      # pollute the measurement. This test validates that Pgbus's own
-      # send_message path leaks nothing.
-      report = MemoryProfiler.report(allow_files: "lib/pgbus") do
+      report = MemoryProfiler.report do
         100.times { plain_client.send_message("default", small_payload) }
       end
 
