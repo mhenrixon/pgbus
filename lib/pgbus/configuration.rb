@@ -82,7 +82,8 @@ module Pgbus
 
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
-                  :insights_default_minutes, :base_controller_class, :return_to_app_url
+                  :insights_default_minutes, :base_controller_class, :return_to_app_url,
+                  :metrics_enabled
 
     # Streams (turbo-rails replacement, SSE-based)
     attr_accessor :streams_enabled, :streams_queue_prefix, :streams_signed_name_secret,
@@ -157,6 +158,7 @@ module Pgbus
       @insights_default_minutes = 30 * 24 * 60 # 30 days
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
+      @metrics_enabled = true
 
       @streams_enabled = true
       @streams_queue_prefix = "pgbus_stream"
