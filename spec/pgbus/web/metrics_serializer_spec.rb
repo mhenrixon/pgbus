@@ -1,0 +1,187 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+RSpec.describe Pgbus::Web::MetricsSerializer do
+  subject(:serializer) { described_class.new(data_source) }
+
+  let(:data_source) { instance_double(Pgbus::Web::DataSource) }
+
+  let(:queue_metrics) do
+    [
+      { name: "pgbus_default", queue_length: 42, queue_visible_length: 40,
+        total_messages: 1000, oldest_msg_age_sec: 120, newest_msg_age_sec: 1, paused: false },
+      { name: "pgbus_default_dlq", queue_length: 3, queue_visible_length: 3,
+        total_messages: 50, oldest_msg_age_sec: 3600, newest_msg_age_sec: 60, paused: false },
+      { name: "pgbus_critical", queue_length: 0, queue_visible_length: 0,
+        total_messages: 500, oldest_msg_age_sec: nil, newest_msg_age_sec: nil, paused: true }
+    ]
+  end
+
+  let(:job_status_counts) { { "success" => 150, "failed" => 5, "dead_lettered" => 1 } }
+
+  let(:job_summary) do
+    {
+      total: 156, success: 150, failed: 5, dead_lettered: 1,
+      avg_duration_ms: 42.5, max_duration_ms: 500
+    }
+  end
+
+  let(:job_summary_with_latency) do
+    job_summary.merge(
+      avg_latency_ms: 12.3, p50_latency_ms: 10.0,
+      p95_latency_ms: 25.0, p99_latency_ms: 50.0,
+      avg_retries: 0.3
+    )
+  end
+
+  let(:processes) { [{ pid: 1 }, { pid: 2 }] }
+
+  let(:summary_stats) do
+    { total_queues: 3, total_depth: 45, total_visible: 43,
+      active_processes: 2, failed_count: 8, dlq_depth: 3,
+      recurring_count: 4, throughput_rate: 10.5 }
+  end
+
+  before do
+    allow(data_source).to receive_messages(
+      queues_with_metrics: queue_metrics,
+      job_status_counts: job_status_counts,
+      job_stats_summary: job_summary,
+      processes: processes,
+      summary_stats: summary_stats,
+      stream_stats_available?: false
+    )
+  end
+
+  describe "#serialize" do
+    let(:output) { serializer.serialize }
+
+    it "returns a string" do
+      expect(output).to be_a(String)
+    end
+
+    it "includes queue depth gauges with queue label" do
+      expect(output).to include('pgbus_queue_depth{queue="pgbus_default"} 42')
+      expect(output).to include('pgbus_queue_depth{queue="pgbus_default_dlq"} 3')
+      expect(output).to include('pgbus_queue_depth{queue="pgbus_critical"} 0')
+    end
+
+    it "includes queue visible depth gauges" do
+      expect(output).to include('pgbus_queue_visible_depth{queue="pgbus_default"} 40')
+    end
+
+    it "includes queue total messages gauges" do
+      expect(output).to include('pgbus_queue_total_messages{queue="pgbus_default"} 1000')
+    end
+
+    it "includes queue oldest message age" do
+      expect(output).to include('pgbus_queue_oldest_message_age_seconds{queue="pgbus_default"} 120')
+    end
+
+    it "omits oldest message age when nil" do
+      expect(output).not_to include('pgbus_queue_oldest_message_age_seconds{queue="pgbus_critical"}')
+    end
+
+    it "includes queue paused gauge (1 for paused, 0 for active)" do
+      expect(output).to include('pgbus_queue_paused{queue="pgbus_default"} 0')
+      expect(output).to include('pgbus_queue_paused{queue="pgbus_critical"} 1')
+    end
+
+    it "includes job status counts with status label" do
+      expect(output).to include('pgbus_jobs_total{status="success"} 150')
+      expect(output).to include('pgbus_jobs_total{status="failed"} 5')
+      expect(output).to include('pgbus_jobs_total{status="dead_lettered"} 1')
+    end
+
+    it "includes job duration summary" do
+      expect(output).to include("pgbus_job_duration_avg_seconds 0.0425")
+      expect(output).to include("pgbus_job_duration_max_seconds 0.5")
+    end
+
+    it "includes active processes gauge" do
+      expect(output).to include("pgbus_active_processes 2")
+    end
+
+    it "includes failed events total" do
+      expect(output).to include("pgbus_failed_events_total 8")
+    end
+
+    it "includes DLQ depth" do
+      expect(output).to include("pgbus_dlq_depth 3")
+    end
+
+    it "includes HELP and TYPE comments for each metric family" do
+      expect(output).to include("# HELP pgbus_queue_depth")
+      expect(output).to include("# TYPE pgbus_queue_depth gauge")
+      expect(output).to include("# HELP pgbus_jobs_total")
+      expect(output).to include("# TYPE pgbus_jobs_total gauge")
+    end
+
+    context "when job stats have latency columns" do
+      before do
+        allow(data_source).to receive(:job_stats_summary).and_return(job_summary_with_latency)
+        allow(Pgbus::JobStat).to receive(:latency_columns?).and_return(true)
+      end
+
+      it "includes enqueue latency percentiles" do
+        expect(output).to include('pgbus_job_enqueue_latency_seconds{quantile="0.5"} 0.01')
+        expect(output).to include('pgbus_job_enqueue_latency_seconds{quantile="0.95"} 0.025')
+        expect(output).to include('pgbus_job_enqueue_latency_seconds{quantile="0.99"} 0.05')
+      end
+
+      it "includes average retries" do
+        expect(output).to include("pgbus_job_avg_retries 0.3")
+      end
+    end
+
+    context "when stream stats are available" do
+      let(:stream_summary) do
+        {
+          broadcasts: 200, connects: 50, disconnects: 45,
+          active_estimate: 5, avg_fanout: 3.2,
+          avg_broadcast_ms: 1.5, avg_connect_ms: 8.0
+        }
+      end
+
+      before do
+        allow(data_source).to receive_messages(
+          stream_stats_available?: true,
+          stream_stats_summary: stream_summary
+        )
+      end
+
+      it "includes stream event counts" do
+        expect(output).to include('pgbus_stream_events_total{event_type="broadcast"} 200')
+        expect(output).to include('pgbus_stream_events_total{event_type="connect"} 50')
+        expect(output).to include('pgbus_stream_events_total{event_type="disconnect"} 45')
+      end
+
+      it "includes active stream connections" do
+        expect(output).to include("pgbus_stream_active_connections 5")
+      end
+
+      it "includes average fanout" do
+        expect(output).to include("pgbus_stream_avg_fanout 3.2")
+      end
+    end
+
+    context "when stream stats are not available" do
+      it "omits stream metrics entirely" do
+        expect(output).not_to include("pgbus_stream_")
+      end
+    end
+
+    context "when data source raises" do
+      before do
+        allow(data_source).to receive(:queues_with_metrics).and_raise(StandardError, "db error")
+      end
+
+      it "does not raise — returns whatever metrics it can" do
+        expect { output }.not_to raise_error
+        # Other sections still present
+        expect(output).to include("pgbus_jobs_total")
+      end
+    end
+  end
+end

@@ -82,6 +82,7 @@ Pgbus::Engine.routes.draw do
   namespace :api do
     get :stats, to: "stats#show"
     get :insights, to: "insights#show"
+    get :metrics, to: "metrics#show"
   end
 
   scope :frontend, controller: :frontends, defaults: { version: Pgbus::VERSION.tr(".", "-") } do
