@@ -6,7 +6,14 @@ RSpec.describe Pgbus::Process::Worker do
   let(:heartbeat) { instance_double(Pgbus::Process::Heartbeat, start: true, stop: true) }
   let(:mock_client) { build_mock_client }
   let(:executor) { instance_double(Pgbus::ActiveJob::Executor) }
-  let(:pool) { instance_double(Concurrent::FixedThreadPool, max_length: 5, queue_length: 0, shutdown: true, kill: true) }
+  let(:pool) do
+    instance_double(
+      Pgbus::ExecutionPools::ThreadPool,
+      capacity: 5, available_capacity: 5, idle?: true,
+      shutdown: true, kill: true, wait_for_termination: true,
+      metadata: { mode: :threads, capacity: 5, busy: 0 }
+    )
+  end
   let(:circuit_breaker) { instance_double(Pgbus::CircuitBreaker, paused?: false, record_success: nil, record_failure: nil) }
   let(:worker) { described_class.new(queues: %w[default], threads: 5) }
 
@@ -14,16 +21,37 @@ RSpec.describe Pgbus::Process::Worker do
     allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(heartbeat)
     allow(Pgbus).to receive(:client).and_return(mock_client)
     allow(Pgbus::ActiveJob::Executor).to receive(:new).and_return(executor)
-    allow(Concurrent::FixedThreadPool).to receive(:new).and_return(pool)
+    allow(Pgbus::ExecutionPools).to receive(:build).and_return(pool)
     allow(Pgbus::CircuitBreaker).to receive(:new).and_return(circuit_breaker)
   end
 
   describe "#initialize" do
-    it "stores config, queues, and creates a thread pool" do
+    it "stores config, queues, and creates an execution pool" do
       expect(worker.queues).to eq(%w[default])
       expect(worker.threads).to eq(5)
       expect(worker.config).to be_a(Pgbus::Configuration)
-      expect(Concurrent::FixedThreadPool).to have_received(:new).with(5)
+      expect(Pgbus::ExecutionPools).to have_received(:build).with(
+        mode: :threads, capacity: 5, on_state_change: an_instance_of(Proc)
+      )
+    end
+
+    it "defaults to threads execution mode" do
+      expect(worker.execution_mode).to eq(:threads)
+    end
+
+    it "accepts async execution mode" do
+      async_pool = instance_double(
+        Pgbus::ExecutionPools::AsyncPool,
+        capacity: 50, available_capacity: 50, idle?: true,
+        shutdown: true, kill: true, wait_for_termination: true,
+        metadata: { mode: :async, capacity: 50, busy: 0 }
+      )
+      allow(Pgbus::ExecutionPools).to receive(:build)
+        .with(mode: :async, capacity: 50, on_state_change: an_instance_of(Proc))
+        .and_return(async_pool)
+
+      async_worker = described_class.new(queues: %w[default], threads: 50, execution_mode: :async)
+      expect(async_worker.execution_mode).to eq(:async)
     end
 
     it "initializes stats tracking" do
@@ -31,7 +59,10 @@ RSpec.describe Pgbus::Process::Worker do
       expect(worker.stats[:jobs_failed]).to eq(0)
       expect(worker.stats[:in_flight]).to eq(0)
       expect(worker.stats[:state]).to eq(:starting)
+      expect(worker.stats[:execution_mode]).to eq(:threads)
       expect(worker.stats[:started_at]).to be_a(Time)
+      expect(worker.stats[:mode]).to eq(:threads)
+      expect(worker.stats[:capacity]).to eq(5)
     end
   end
 

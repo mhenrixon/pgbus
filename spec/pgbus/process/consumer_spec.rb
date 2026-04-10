@@ -5,7 +5,14 @@ require "json"
 
 RSpec.describe Pgbus::Process::Consumer do
   let(:mock_client) { build_mock_client }
-  let(:mock_pool) { instance_double(Concurrent::FixedThreadPool, kill: nil, shutdown: nil, wait_for_termination: nil) }
+  let(:mock_pool) do
+    instance_double(
+      Pgbus::ExecutionPools::ThreadPool,
+      capacity: 3, available_capacity: 3, idle?: true,
+      kill: nil, shutdown: nil, wait_for_termination: nil,
+      metadata: { mode: :threads, capacity: 3, busy: 0 }
+    )
+  end
   let(:mock_heartbeat) { instance_double(Pgbus::Process::Heartbeat, start: nil, stop: nil) }
   let(:subscriber_a) { instance_double(Pgbus::EventBus::Subscriber, pattern: "orders.#", queue_name: "q_orders") }
   let(:subscriber_b) { instance_double(Pgbus::EventBus::Subscriber, pattern: "payments.completed", queue_name: "q_payments") }
@@ -14,7 +21,7 @@ RSpec.describe Pgbus::Process::Consumer do
 
   before do
     allow(Pgbus).to receive(:client).and_return(mock_client)
-    allow(Concurrent::FixedThreadPool).to receive(:new).and_return(mock_pool)
+    allow(Pgbus::ExecutionPools).to receive(:build).and_return(mock_pool)
     allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(mock_heartbeat)
     allow(Pgbus::EventBus::Registry).to receive(:instance).and_return(registry)
   end

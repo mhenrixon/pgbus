@@ -42,6 +42,7 @@ module Pgbus
       options = parse_start_options(args)
 
       Pgbus.configuration.workers = options[:queues] if options[:queues]
+      Pgbus.configuration.execution_mode = options[:execution_mode].to_sym if options[:execution_mode]
       apply_capsule_filter(options[:capsule]) if options[:capsule]
       apply_role_filter(options)
     end
@@ -69,6 +70,10 @@ module Pgbus
 
         opts.on("--dispatcher-only", "Run only the dispatcher (the maintenance pod pattern)") do
           options[:dispatcher_only] = true
+        end
+
+        opts.on("--execution-mode MODE", "Execution mode: threads (default) or async") do |v|
+          options[:execution_mode] = v
         end
       end.parse!(args.dup)
       options
@@ -165,6 +170,8 @@ module Pgbus
                              pattern — exactly one of these per deployment)
           --dispatcher-only  Run only the dispatcher (the maintenance pod
                              pattern)
+          --execution-mode   Execution mode: threads (default) or async
+                             (fiber-based, lower connection usage)
       HELP
     end
   end

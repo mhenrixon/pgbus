@@ -11,7 +11,7 @@ module Pgbus
     attr_accessor :default_queue, :queue_prefix
 
     # Worker settings
-    attr_accessor :polling_interval, :prefetch_limit
+    attr_accessor :polling_interval, :prefetch_limit, :execution_mode
     attr_reader :workers, :visibility_timeout # rubocop:disable Style/AccessorGrouping
 
     # Supervisor role selection.
@@ -111,6 +111,7 @@ module Pgbus
       @visibility_timeout = 30
 
       @prefetch_limit = nil
+      @execution_mode = :threads
 
       @max_jobs_per_worker = nil
       @max_memory_mb = nil
@@ -216,6 +217,13 @@ module Pgbus
       (0...priority_levels).map { |p| priority_queue_name(name, p) }
     end
 
+    # Returns the execution mode for a specific worker config hash,
+    # falling back to the global execution_mode setting.
+    def execution_mode_for(worker_config)
+      mode = worker_config[:execution_mode] || worker_config["execution_mode"] || execution_mode
+      ExecutionPools.normalize_mode(mode)
+    end
+
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
 
     def pgmq_schema_mode=(mode)
@@ -242,9 +250,16 @@ module Pgbus
         raise ArgumentError, "retry_backoff_jitter must be between 0 and 1"
       end
 
+      # Validate global execution_mode
+      ExecutionPools.normalize_mode(execution_mode)
+
       Array(workers).each do |w|
         threads = w[:threads] || w["threads"] || 5
         raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
+
+        # Validate per-worker execution_mode override if present
+        mode = w[:execution_mode] || w["execution_mode"]
+        ExecutionPools.normalize_mode(mode) if mode
       end
 
       raise ArgumentError, "prefetch_limit must be > 0" if prefetch_limit && !(prefetch_limit.is_a?(Integer) && prefetch_limit.positive?)

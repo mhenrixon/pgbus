@@ -463,6 +463,36 @@ end
 
 When a limit is hit, the worker drains its thread pool, exits, and the supervisor forks a fresh process. RSS memory is sampled from `/proc/self/statm` (Linux) or `ps -o rss` (macOS).
 
+### Async execution mode (fibers)
+
+Workers can optionally execute jobs as fibers instead of threads. This is ideal for I/O-bound workloads (HTTP calls, email delivery, LLM API calls) where jobs spend most of their time waiting on network I/O.
+
+```ruby
+Pgbus.configure do |config|
+  # Global: all workers use async mode
+  config.execution_mode = :async
+
+  # Or per-worker: mix thread and async workers
+  config.workers = [
+    { queues: %w[webhooks emails], threads: 100, execution_mode: :async },
+    { queues: %w[default], threads: 5 }  # stays thread-based
+  ]
+end
+```
+
+**Prerequisites:**
+
+1. Add `gem "async"` to your Gemfile
+2. Set `config.active_support.isolation_level = :fiber` in your Rails app
+
+**Why it reduces connections:** In thread mode, each thread holds a database connection while waiting on I/O. With 50 threads, that's 50 connections. In async mode, 50 fibers share 3-5 connections because fibers yield during I/O and only one runs at a time.
+
+**CLI flag:** `pgbus start --execution-mode async`
+
+**Safety:** Messages stay in PGMQ with visibility timeout protection regardless of execution mode. If a fiber or worker crashes, the visibility timeout expires and messages become available for re-read. No data loss risk.
+
+**Not recommended for:** CPU-bound jobs (image processing, heavy computation). These block the single reactor thread and should use thread mode.
+
 ## Routing and ordering
 
 How messages flow between producers and the workers that handle them: priority sub-queues, consumer priority for active/standby workers, and single-active-consumer for strict ordering.

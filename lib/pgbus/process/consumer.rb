@@ -7,14 +7,15 @@ module Pgbus
     class Consumer
       include SignalHandler
 
-      attr_reader :topics, :threads, :config
+      attr_reader :topics, :threads, :config, :execution_mode
 
-      def initialize(topics:, threads: 3, config: Pgbus.configuration)
+      def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads)
         @topics = Array(topics)
         @threads = threads
         @config = config
+        @execution_mode = ExecutionPools.normalize_mode(execution_mode)
         @shutting_down = false
-        @pool = Concurrent::FixedThreadPool.new(threads)
+        @pool = ExecutionPools.build(mode: @execution_mode, capacity: threads)
         @registry = EventBus::Registry.instance
       end
 
@@ -53,7 +54,7 @@ module Pgbus
       end
 
       def consume
-        idle = @pool.max_length - @pool.queue_length
+        idle = @pool.available_capacity
         return interruptible_sleep(config.polling_interval) if idle <= 0
 
         tagged_messages = if @queue_names.size == 1
