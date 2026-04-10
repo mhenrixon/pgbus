@@ -284,6 +284,14 @@ RSpec.describe Pgbus::Configuration do
         expect(config.resolved_pool_size).to eq(5)
       end
 
+      it "honors global execution_mode when workers have no per-entry override" do
+        config.pool_size = nil
+        config.execution_mode = :async
+        config.workers = [{ queues: %w[default], threads: 50 }]
+        # Global async: 3 + 1 dispatcher + 1 scheduler = 5
+        expect(config.resolved_pool_size).to eq(5)
+      end
+
       it "does not warn for normal sizes" do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: 5 }]

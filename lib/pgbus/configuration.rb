@@ -639,10 +639,7 @@ module Pgbus
     end
 
     def async_execution_mode?(entry)
-      mode = entry[:execution_mode] || entry["execution_mode"]
-      return false unless mode
-
-      ExecutionPools.normalize_mode(mode) == :async
+      execution_mode_for(entry) == :async
     end
 
     def warn_if_oversized(size)
