@@ -190,9 +190,36 @@ RSpec.describe Pgbus::Client::ReadAfter do
       expect(client.stream_current_msg_id("chat")).to eq(0)
     end
 
+    # GlobalID-keyed streams (`pgbus_stream_from Current.user`) produce sanitized
+    # queue names like `pgbus_test_stream_Z2lkOi8vY29zbW9zL1VzZXIvMQ` — base64
+    # always contains uppercase letters. Postgres downcases unquoted identifiers
+    # in its error messages, so a naive case-sensitive substring match on the
+    # mixed-case sanitized name never fires and the PG::UndefinedTable bubbles
+    # up to the host app. See issue #104 (regression from #103).
+    it "returns 0 for a mixed-case GlobalID-style stream name when Postgres downcases the identifier" do
+      # Simulate Postgres downcasing: our SQL sent `...pgmq.q_pgbus_test_stream_Z2lk...`,
+      # the error reports `...pgmq.q_pgbus_test_stream_z2lk...`.
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new(
+                     'relation "pgmq.q_pgbus_test_stream_z2lkoi8vy29zbw9zl1vzzxivmq" does not exist'
+                   ))
+
+      expect(client.stream_current_msg_id("stream_Z2lkOi8vY29zbW9zL1VzZXIvMQ")).to eq(0)
+    end
+
     it "re-raises PG::UndefinedTable for unrelated tables" do
       allow(raw_conn).to receive(:exec)
         .and_raise(PG::UndefinedTable.new('relation "public.some_other_table" does not exist'))
+
+      expect { client.stream_current_msg_id("chat") }.to raise_error(PG::UndefinedTable)
+    end
+
+    # The rescue must not accidentally swallow errors about a table whose name
+    # merely starts with our stream's q_/a_ identifier — only the exact queue
+    # and archive tables count as "missing stream queue". See PR #106 review.
+    it "re-raises PG::UndefinedTable for a longer table name that merely shares a prefix" do
+      allow(raw_conn).to receive(:exec)
+        .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat_archive_v2" does not exist'))
 
       expect { client.stream_current_msg_id("chat") }.to raise_error(PG::UndefinedTable)
     end

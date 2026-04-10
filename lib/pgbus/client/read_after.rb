@@ -81,13 +81,24 @@ module Pgbus
       # OTHER UndefinedTable (wrong schema, typo, operator error) still
       # propagates so real bugs don't get swallowed.
       #
-      # See issue #101.
+      # See issues #101 and #104. The comparison is case-insensitive because
+      # Postgres downcases unquoted identifiers in its error output, while
+      # `sanitized` can contain uppercase characters for GlobalID-keyed streams
+      # (e.g. `pgbus_stream_Z2lkOi8vY29zbW9zL1VzZXIvMQ` from
+      # `pgbus_stream_from Current.user`). A case-sensitive substring match
+      # would miss the downcased relation name and let the exception escape.
+      #
+      # The regex uses `\b` word boundaries so `pgmq.q_<needle>` doesn't
+      # accidentally match longer related identifiers like
+      # `pgmq.q_<needle>_archive` — a PGMQ internal object we'd want to
+      # propagate as a real error rather than silently swallow.
       def missing_stream_queue?(error, sanitized)
         pg_error = pg_undefined_table?(error) ? error : error.cause
         return false unless pg_undefined_table?(pg_error)
 
-        message = pg_error.message.to_s
-        message.include?("pgmq.q_#{sanitized}") || message.include?("pgmq.a_#{sanitized}")
+        message = pg_error.message.to_s.downcase
+        needle = Regexp.escape(sanitized.downcase)
+        message.match?(/\bpgmq\.(?:q|a)_#{needle}\b/)
       end
 
       def pg_undefined_table?(error)
