@@ -446,10 +446,19 @@ module Pgbus
       @queues_created.compute_if_absent(full_name) do
         synchronized do
           @pgmq.create(full_name)
+          tune_autovacuum(full_name)
           @pgmq.enable_notify_insert(full_name, throttle_interval_ms: NOTIFY_THROTTLE_MS) if config.listen_notify
         end
         true
       end
+    end
+
+    def tune_autovacuum(queue_name)
+      with_raw_connection do |conn|
+        conn.exec(AutovacuumTuning.sql_for_queue(queue_name))
+      end
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus::Client] Autovacuum tuning failed for #{queue_name}: #{e.message}" }
     end
 
     # Serialize PGMQ operations through a mutex when sharing a connection
