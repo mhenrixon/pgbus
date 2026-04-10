@@ -16,11 +16,16 @@ module Pgbus
 
       def post(&block)
         @available_capacity.decrement
-        @pool.post do
-          block.call
-        ensure
+        begin
+          @pool.post do
+            block.call
+          ensure
+            @available_capacity.increment
+            @on_state_change&.call
+          end
+        rescue StandardError
           @available_capacity.increment
-          @on_state_change&.call
+          raise
         end
       end
 

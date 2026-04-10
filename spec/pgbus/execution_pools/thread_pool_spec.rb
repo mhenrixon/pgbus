@@ -20,6 +20,19 @@ RSpec.describe Pgbus::ExecutionPools::ThreadPool do
   end
 
   describe "#post" do
+    it "fires on_state_change when work completes" do
+      callback_called = Concurrent::Event.new
+      pool_with_cb = described_class.new(
+        capacity: 3,
+        on_state_change: -> { callback_called.set }
+      )
+
+      pool_with_cb.post { nil }
+      expect(callback_called.wait(2)).to be true
+    ensure
+      pool_with_cb&.kill
+    end
+
     it "executes the submitted block" do
       result = Concurrent::IVar.new
       pool.post { result.set(42) }

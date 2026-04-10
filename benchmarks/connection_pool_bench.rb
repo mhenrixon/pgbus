@@ -9,7 +9,6 @@
 # Usage:
 #   PGBUS_DATABASE_URL=postgres://user@localhost/pgbus_test ruby benchmarks/connection_pool_bench.rb
 
-require "benchmark/ips"
 require "json"
 require "securerandom"
 require "concurrent"
@@ -35,9 +34,11 @@ def monitor_connection(url)
 end
 
 def count_active_connections(conn, prefix = "pgbus_connbench")
-  result = conn.exec(
+  pattern = "%#{prefix}%"
+  result = conn.exec_params(
     "SELECT count(*) FROM pg_stat_activity " \
-    "WHERE application_name LIKE '%#{prefix}%' OR query LIKE '%#{prefix}%'"
+    "WHERE application_name LIKE $1 OR query LIKE $1",
+    [pattern]
   )
   result[0]["count"].to_i
 rescue PG::Error => e

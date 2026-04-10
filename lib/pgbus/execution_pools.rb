@@ -6,7 +6,7 @@ module Pgbus
       def build(mode:, capacity:, on_state_change: nil)
         case normalize_mode(mode)
         when :threads
-          ThreadPool.new(capacity: capacity)
+          ThreadPool.new(capacity: capacity, on_state_change: on_state_change)
         when :async
           AsyncPool.new(capacity: capacity, on_state_change: on_state_change)
         end
