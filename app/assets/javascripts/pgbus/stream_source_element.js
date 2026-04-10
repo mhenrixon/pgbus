@@ -35,7 +35,8 @@
 //     automatically based on the last id: we observed. The native
 //     client is more battle-tested for reconnection backoff.
 
-import { connectStreamSource, disconnectStreamSource } from "@hotwired/turbo"
+import { Turbo } from "@hotwired/turbo-rails"
+const { connectStreamSource, disconnectStreamSource } = Turbo
 
 class PgbusStreamSourceElement extends HTMLElement {
   static get observedAttributes() {
@@ -51,6 +52,7 @@ class PgbusStreamSourceElement extends HTMLElement {
   }
 
   connectedCallback() {
+    this.closed = false
     connectStreamSource(this)
     const sinceId = this.getAttribute("since-id")
     this.lastEventId = sinceId && sinceId !== "" ? sinceId : null
@@ -106,7 +108,11 @@ class PgbusStreamSourceElement extends HTMLElement {
 
       while (!this.closed) {
         const { value, done } = await reader.read()
-        if (done) break
+        if (done) {
+          this.removeAttribute("connected")
+          this.switchToEventSource()
+          return
+        }
 
         buffer += decoder.decode(value, { stream: true })
         const events = buffer.split("\n\n")
@@ -131,7 +137,7 @@ class PgbusStreamSourceElement extends HTMLElement {
   switchToEventSource() {
     if (this.closed) return
 
-    const url = this.buildUrl({ includeSince: false })
+    const url = this.buildUrl({ includeSince: true })
     this.eventSource = new EventSource(url, { withCredentials: true })
 
     this.eventSource.addEventListener("open", () => {

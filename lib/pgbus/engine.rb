@@ -66,6 +66,29 @@ module Pgbus
       app.middleware.use Pgbus::Streams::WatermarkCacheMiddleware if Pgbus.configuration.streams_enabled
     end
 
+    # Make stream_source_element.js available to the host app's asset
+    # pipeline (Propshaft or Sprockets) so it can be included via
+    # `javascript_include_tag "pgbus/stream_source_element"` or pinned
+    # in importmap. When importmap-rails is loaded, auto-pin it so
+    # host apps get it without manual configuration.
+    initializer "pgbus.streams.assets" do |app|
+      if Pgbus.configuration.streams_enabled && app.config.respond_to?(:assets)
+        app.config.assets.precompile += %w[pgbus/stream_source_element.js]
+      end
+    end
+
+    initializer "pgbus.streams.importmap" do
+      if Pgbus.configuration.streams_enabled && defined?(::Importmap::Map)
+        ActiveSupport.on_load(:after_initialize) do
+          next unless Rails.application.respond_to?(:importmap)
+
+          Rails.application.importmap.pin(
+            "pgbus/stream_source_element", to: "pgbus/stream_source_element.js"
+          )
+        end
+      end
+    end
+
     # Install the Turbo::StreamsChannel patch after turbo-rails has been
     # loaded. The patch redirects broadcast_stream_to through Pgbus.stream
     # instead of ActionCable. When turbo-rails is not loaded, this is a

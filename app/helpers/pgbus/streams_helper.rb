@@ -46,7 +46,11 @@ module Pgbus
         "channel" => "Turbo::StreamsChannel"
       }.merge(html_attributes.transform_keys(&:to_s))
 
-      render_tag("pgbus-stream-source", attributes)
+      element = render_tag("pgbus-stream-source", attributes)
+      script = pgbus_stream_source_script_tag
+      return element unless script
+
+      safe_concat(script, element)
     end
 
     private
@@ -116,6 +120,34 @@ module Pgbus
       # (Phase 4.5).
       cache = Thread.current[:pgbus_streams_watermark_cache] ||= {}
       cache[stream_name] ||= Pgbus.stream(stream_name).current_msg_id
+    end
+
+    # Emits a <script type="module"> tag that imports the custom element
+    # definition exactly once per request. Without this, <pgbus-stream-source>
+    # is an inert unknown element — no SSE connection opens. Uses a
+    # thread-local flag cleared by the WatermarkCacheMiddleware.
+    def pgbus_stream_source_script_tag
+      cache = Thread.current[:pgbus_streams_watermark_cache] ||= {}
+      return nil if cache[:script_emitted]
+
+      cache[:script_emitted] = true
+      script = '<script type="module">import "pgbus/stream_source_element"</script>'
+      script.respond_to?(:html_safe) ? script.html_safe : script
+    end
+
+    # Concatenates two HTML-safe strings without losing the safety flag.
+    # ActiveSupport::SafeBuffer#+ preserves safety when both operands
+    # are safe. Plain string interpolation ("#{a}#{b}") creates a new
+    # String, dropping html_safe — which causes Phlex and safe_join to
+    # HTML-escape the output.
+    def safe_concat(*parts)
+      if defined?(ActiveSupport::SafeBuffer)
+        buf = ActiveSupport::SafeBuffer.new
+        parts.each { |p| buf.safe_concat(p) }
+        buf
+      else
+        parts.join
+      end
     end
 
     def render_tag(name, attributes)
