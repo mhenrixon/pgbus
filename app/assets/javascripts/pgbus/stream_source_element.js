@@ -35,7 +35,8 @@
 //     automatically based on the last id: we observed. The native
 //     client is more battle-tested for reconnection backoff.
 
-import { connectStreamSource, disconnectStreamSource } from "@hotwired/turbo"
+import { Turbo } from "@hotwired/turbo-rails"
+const { connectStreamSource, disconnectStreamSource } = Turbo
 
 class PgbusStreamSourceElement extends HTMLElement {
   static get observedAttributes() {
