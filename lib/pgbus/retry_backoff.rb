@@ -22,6 +22,12 @@ module Pgbus
 
       class_methods do
         def pgbus_retry_backoff(base: nil, max: nil, jitter: nil)
+          raise ArgumentError, "retry_backoff base must be > 0" if !base.nil? && (!base.is_a?(Numeric) || base <= 0)
+          raise ArgumentError, "retry_backoff max must be > 0" if !max.nil? && (!max.is_a?(Numeric) || max <= 0)
+          if !jitter.nil? && (!jitter.is_a?(Numeric) || jitter.negative? || jitter > 1)
+            raise ArgumentError, "retry_backoff jitter must be between 0 and 1"
+          end
+
           @pgbus_retry_backoff = {
             base: base,
             max: max,
@@ -68,7 +74,7 @@ module Pgbus
         delay = base * (2**exponent)
         delay = [delay, max].min
 
-        apply_jitter(delay, jitter)
+        [apply_jitter(delay, jitter), max].min
       end
 
       private

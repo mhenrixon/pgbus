@@ -812,6 +812,28 @@ RSpec.describe Pgbus::Configuration do
       config.insights_default_minutes = 90.5
       expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
     end
+
+    it "rejects negative retry_backoff" do
+      config.retry_backoff = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff must be > 0/)
+    end
+
+    it "rejects nil retry_backoff_max" do
+      config.retry_backoff_max = nil
+      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff_max must be > 0/)
+    end
+
+    it "rejects jitter > 1" do
+      config.retry_backoff_jitter = 1.5
+      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff_jitter must be between 0 and 1/)
+    end
+
+    it "accepts valid backoff settings" do
+      config.retry_backoff = 10
+      config.retry_backoff_max = 600
+      config.retry_backoff_jitter = 0.2
+      expect { config.validate! }.not_to raise_error
+    end
   end
 
   describe "#connection_options" do

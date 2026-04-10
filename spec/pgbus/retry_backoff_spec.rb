@@ -82,5 +82,39 @@ RSpec.describe Pgbus::RetryBackoff do
         expect(delay).to eq(Pgbus.configuration.retry_backoff)
       end
     end
+
+    context "with jitter near the cap" do
+      it "never exceeds max even with jitter" do
+        max = 10
+        delays = Array.new(200) { described_class.compute_delay(attempt: 10, base: 5, max: max, jitter: 0.5) }
+        expect(delays).to all(be <= max)
+      end
+    end
+
+    context "with invalid per-job DSL values" do
+      it "rejects a negative base" do
+        klass = Class.new
+        klass.extend(Pgbus::RetryBackoff::JobMixin::ClassMethods)
+        expect { klass.pgbus_retry_backoff(base: -1) }.to raise_error(ArgumentError, /base must be > 0/)
+      end
+
+      it "rejects a string base" do
+        klass = Class.new
+        klass.extend(Pgbus::RetryBackoff::JobMixin::ClassMethods)
+        expect { klass.pgbus_retry_backoff(base: "5") }.to raise_error(ArgumentError, /base must be > 0/)
+      end
+
+      it "rejects jitter > 1" do
+        klass = Class.new
+        klass.extend(Pgbus::RetryBackoff::JobMixin::ClassMethods)
+        expect { klass.pgbus_retry_backoff(jitter: 2) }.to raise_error(ArgumentError, /jitter must be between 0 and 1/)
+      end
+
+      it "accepts valid values" do
+        klass = Class.new
+        klass.extend(Pgbus::RetryBackoff::JobMixin::ClassMethods)
+        expect { klass.pgbus_retry_backoff(base: 10, max: 60, jitter: 0.3) }.not_to raise_error
+      end
+    end
   end
 end
