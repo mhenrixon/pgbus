@@ -37,6 +37,10 @@ module Pgbus
     # Dead letter queue
     attr_accessor :max_retries
 
+    # Retry backoff for the VT-based retry path (unhandled exceptions).
+    # Jobs can override these per-class via Pgbus::RetryBackoff::JobMixin.
+    attr_accessor :retry_backoff, :retry_backoff_max, :retry_backoff_jitter
+
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
@@ -117,6 +121,9 @@ module Pgbus
       @circuit_breaker_enabled = true
 
       @max_retries = 5
+      @retry_backoff = 5          # seconds — first VT-retry delay
+      @retry_backoff_max = 300    # 5 minutes cap
+      @retry_backoff_jitter = 0.15
 
       @priority_levels = nil
       @default_priority = 1

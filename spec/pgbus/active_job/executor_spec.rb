@@ -428,5 +428,47 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
       end
     end
+
+    describe "retry backoff (VT-based retry path)" do
+      let(:message) { build_message_double(msg_id: 50, message: message_json, read_ct: 2) }
+
+      before do
+        allow(job_double).to receive(:perform_now).and_raise(StandardError, "transient")
+      end
+
+      it "extends the visibility timeout with exponential backoff on failure" do
+        executor.execute(message, queue_name)
+
+        # read_ct=2 → attempt=1 (first retry), base=5 → delay=5
+        expect(mock_client).to have_received(:set_visibility_timeout).with(
+          queue_name, 50, vt: a_value_between(4, 6)
+        )
+      end
+
+      it "increases backoff with higher read_ct" do
+        msg = build_message_double(msg_id: 51, message: message_json, read_ct: 4)
+
+        executor.execute(msg, queue_name)
+
+        # read_ct=4 → attempt=3, base=5 → 5*2^2=20
+        expect(mock_client).to have_received(:set_visibility_timeout).with(
+          queue_name, 51, vt: a_value_between(17, 23)
+        )
+      end
+
+      it "does not set VT on first read (read_ct=1)" do
+        msg = build_message_double(msg_id: 52, message: message_json, read_ct: 1)
+
+        executor.execute(msg, queue_name)
+
+        expect(mock_client).not_to have_received(:set_visibility_timeout)
+      end
+
+      it "does not blow up if set_visibility_timeout raises" do
+        allow(mock_client).to receive(:set_visibility_timeout).and_raise(StandardError, "pg gone")
+
+        expect { executor.execute(message, queue_name) }.not_to raise_error
+      end
+    end
   end
 end
