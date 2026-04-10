@@ -48,7 +48,9 @@ module Pgbus
 
       element = render_tag("pgbus-stream-source", attributes)
       script = pgbus_stream_source_script_tag
-      script ? "#{script}#{element}" : element
+      return element unless script
+
+      safe_concat(script, element)
     end
 
     private
@@ -131,6 +133,21 @@ module Pgbus
       cache[:script_emitted] = true
       script = '<script type="module">import "pgbus/stream_source_element"</script>'
       script.respond_to?(:html_safe) ? script.html_safe : script
+    end
+
+    # Concatenates two HTML-safe strings without losing the safety flag.
+    # ActiveSupport::SafeBuffer#+ preserves safety when both operands
+    # are safe. Plain string interpolation ("#{a}#{b}") creates a new
+    # String, dropping html_safe — which causes Phlex and safe_join to
+    # HTML-escape the output.
+    def safe_concat(*parts)
+      if defined?(ActiveSupport::SafeBuffer)
+        buf = ActiveSupport::SafeBuffer.new
+        parts.each { |p| buf.safe_concat(p) }
+        buf
+      else
+        parts.join
+      end
     end
 
     def render_tag(name, attributes)
