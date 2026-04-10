@@ -18,6 +18,8 @@ module Pgbus
     # element instead, so both sides use PGMQ/SSE. When `streams_enabled`
     # is false, the original turbo-rails behavior is preserved via `super`.
     module TurboStreamOverride
+      include Pgbus::StreamsHelper
+
       def turbo_stream_from(*streamables, **attributes)
         if Pgbus.configuration.streams_enabled
           pgbus_stream_from(*streamables, **attributes)

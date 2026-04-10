@@ -135,5 +135,19 @@ RSpec.describe Pgbus::Streams::TurboStreamOverride do
     ensure
       Pgbus.configuration.streams_enabled = true
     end
+
+    it "works in Rack middleware context where only Turbo::StreamsHelper is included" do
+      # Simulates hotwire-livereload's middleware: ActionController::Base.helpers
+      # includes Turbo::StreamsHelper but the host app doesn't explicitly
+      # include Pgbus::StreamsHelper. The override carries StreamsHelper via
+      # its own `include`, so pgbus_stream_from is always available.
+      turbo_only_class = Class.new { include Turbo::StreamsHelper }
+      turbo_only_view = turbo_only_class.new
+
+      html = turbo_only_view.turbo_stream_from("hotwire-livereload")
+
+      expect(html).to include("<pgbus-stream-source")
+      expect(html).not_to include("<turbo-cable-stream-source")
+    end
   end
 end
