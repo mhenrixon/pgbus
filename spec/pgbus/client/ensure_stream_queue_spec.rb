@@ -65,8 +65,14 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
     end
 
     it "normalizes stream names with invalid characters via QueueNameValidator" do
-      # After normalization: "nope; DROP TABLE" → "nopeDROPTABLE" (safe for SQL)
+      received_sql = nil
+      allow(raw_conn).to receive(:exec) do |sql|
+        received_sql = sql
+      end
+
       expect { client.ensure_stream_queue("nope; DROP TABLE") }.not_to raise_error
+      expect(received_sql).to match(/pgmq\.a_pgbus_test_nopeDROPTABLE/i)
+      expect(received_sql).not_to include(";")
     end
   end
 end

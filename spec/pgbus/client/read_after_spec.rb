@@ -79,9 +79,16 @@ RSpec.describe Pgbus::Client::ReadAfter do
     end
 
     it "normalizes stream names with invalid characters via QueueNameValidator" do
-      # After normalization: "bad'; DROP TABLE" → "badDROPTABLE" (safe for SQL)
-      allow(raw_conn).to receive(:exec_params).and_return(double("PG::Result", to_a: []))
+      received_sql = nil
+      allow(raw_conn).to receive(:exec_params) do |sql, _params|
+        received_sql = sql
+        double("PG::Result", to_a: [])
+      end
+
       expect { client.read_after("bad'; DROP TABLE", after_id: 0) }.not_to raise_error
+      expect(received_sql).to match(/pgmq\.q_pgbus_test_badDROPTABLE/i)
+      expect(received_sql).to match(/pgmq\.a_pgbus_test_badDROPTABLE/i)
+      expect(received_sql).not_to include(";")
     end
 
     it "passes after_id and limit as positional bind parameters" do
@@ -161,11 +168,18 @@ RSpec.describe Pgbus::Client::ReadAfter do
     end
 
     it "normalizes unsafe queue names instead of rejecting" do
-      # After normalization: "nope; DROP" → "nopeDROP" (safe for SQL)
       result = double("PG::Result")
       allow(result).to receive(:first).and_return({ "max" => "0" })
-      allow(raw_conn).to receive(:exec).and_return(result)
+
+      received_sql = nil
+      allow(raw_conn).to receive(:exec) do |sql|
+        received_sql = sql
+        result
+      end
+
       expect { client.stream_current_msg_id("nope; DROP") }.not_to raise_error
+      expect(received_sql).to match(/pgmq\.q_pgbus_test_nopeDROP/i)
+      expect(received_sql).not_to include(";")
     end
 
     # A fresh database has not yet created pgmq.q_<stream> — the queue is
