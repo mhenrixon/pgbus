@@ -115,6 +115,17 @@ RSpec.describe Pgbus::StreamsHelper do
       Pgbus.configuration.streams_path = nil
     end
 
+    it "normalizes a trailing slash on config.streams_path" do
+      Pgbus.configuration.streams_path = "/pgbus/streams/"
+      html = view.pgbus_stream_from("chat")
+
+      match = html.match(/src="([^"]+)"/)
+      expect(match[1]).not_to include("//")
+      expect(match[1]).to start_with("/pgbus/streams/")
+    ensure
+      Pgbus.configuration.streams_path = nil
+    end
+
     it "builds the src URL from the engine's url_helpers so custom mounts work" do
       # The helper delegates src construction to a private
       # pgbus_stream_src(signed_name) method that asks

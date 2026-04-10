@@ -98,7 +98,7 @@ module Pgbus
     #      engine's url_helpers aren't wired in.
     def pgbus_stream_src(signed_name)
       base = Pgbus.configuration.streams_path
-      return "#{base}/#{signed_name}" if base
+      return "#{base.delete_suffix("/")}/#{signed_name}" if base
 
       base = Pgbus::Engine.routes.url_helpers.streams_path
       "#{base}/#{signed_name}"
