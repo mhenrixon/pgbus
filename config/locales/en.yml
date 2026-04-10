@@ -10,6 +10,25 @@ en:
           pid: PID
           status: Status
         title: Active Processes
+      queue_health:
+        dead_tuples: Dead Tuples
+        headers:
+          bloat: Bloat
+          dead: Dead
+          kind: Kind
+          last_vacuum: Last Vacuum
+          live: Live
+          table: Table
+        last_vacuum: Last Vacuum
+        live: live
+        mvcc_horizon: MVCC Horizon
+        oldest_open_txn: oldest open transaction
+        oldest_vacuum_ago: oldest table vacuum
+        tables_need_vacuum:
+          one: "%{count} table needs vacuum"
+          other: "%{count} tables need vacuum"
+        title: Queue Health
+        worst_bloat: Worst Bloat
       queues_table:
         empty: No queues found
         headers:
@@ -399,6 +418,15 @@ en:
         resume: Resume
         retry: Retry
         retry_confirm: Reset visibility timeout and retry?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Dead
+            last_vacuum: Last Vacuum
+            live: Live
+            table: Table
+          oldest_txn: 'Oldest open transaction:'
+          title: Table Health
         total: 'Total:'
         visible: 'Visible:'
     recurring_tasks:
@@ -407,10 +435,6 @@ en:
           one: "%{count} task configured"
           other: "%{count} tasks configured"
         title: Recurring Tasks
-      toggle:
-        disabled: Task disabled
-        enabled: Task enabled
-        failed: Failed to toggle task
       show:
         back: Back
         configuration: Configuration
@@ -454,3 +478,7 @@ en:
           task: Task
         never: Never
         run_now: Run Now
+      toggle:
+        disabled: Task disabled
+        enabled: Task enabled
+        failed: Failed to toggle task
