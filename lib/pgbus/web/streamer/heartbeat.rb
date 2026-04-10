@@ -13,7 +13,7 @@ module Pgbus
       #      SSE clients.
       #
       #   2. Mark connections that have been idle longer than the
-      #      configured idle_timeout as dead. The Dispatcher's next pass
+      #      configured idle_timeout as dead. The StreamEventDispatcher's next pass
       #      picks them up via its disconnect path.
       #
       #   3. Post a DisconnectMessage for any connection already flagged
@@ -97,7 +97,7 @@ module Pgbus
         end
 
         def enqueue_disconnect(connection)
-          @queue << Dispatcher::DisconnectMessage.new(connection: connection)
+          @queue << StreamEventDispatcher::DisconnectMessage.new(connection: connection)
         end
       end
     end

@@ -87,6 +87,11 @@ module Pgbus
 
       WILDCARD_REFRESH_INTERVAL = 30 # seconds
 
+      # Matches the physical queue name inside a "relation \"pgmq.q_foo\" does
+      # not exist" error. Frozen module constant to avoid recompiling the
+      # regex on every queue-missing error in hot fetch/read paths.
+      MISSING_QUEUE_REGEX = /pgmq\.q_(\w+)/
+
       private
 
       def claim_and_execute
@@ -255,8 +260,8 @@ module Pgbus
       # Extract the queue name from the error and remove it from the active list.
       def evict_missing_queues(error)
         prefix = "#{config.queue_prefix}_"
-        if error.message =~ /pgmq\.q_(\w+)/
-          physical_name = Regexp.last_match(1)
+        if (match = MISSING_QUEUE_REGEX.match(error.message))
+          physical_name = match[1]
           logical_name = physical_name.delete_prefix(prefix)
           if @queues.delete(logical_name)
             Pgbus.logger.warn { "[Pgbus] Evicted deleted queue '#{logical_name}' (#{physical_name}) from worker" }

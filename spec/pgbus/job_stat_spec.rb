@@ -115,13 +115,24 @@ RSpec.describe Pgbus::JobStat do
       expect(described_class.latency_columns?).to be false
     end
 
-    it "returns false on error without poisoning the memo" do
+    it "returns false on column_names error without poisoning the memo" do
       allow(described_class).to receive(:table_exists?).and_return(true)
       allow(described_class).to receive(:column_names).and_raise(StandardError, "no db")
 
       expect(described_class.latency_columns?).to be false
       # A transient error must not lock latency_columns? to false
       # for the process lifetime.
+      expect(described_class.instance_variable_defined?(:@latency_columns)).to be false
+    end
+
+    it "returns false when table_exists? transiently fails without poisoning the memo" do
+      # table_exists? returns false due to its own rescue path (transient PG
+      # error), not because the table genuinely doesn't exist. This must NOT
+      # memoize @latency_columns = false — the table may exist on the next
+      # call once the connection recovers.
+      allow(described_class).to receive(:table_exists?).and_return(false)
+
+      expect(described_class.latency_columns?).to be false
       expect(described_class.instance_variable_defined?(:@latency_columns)).to be false
     end
 

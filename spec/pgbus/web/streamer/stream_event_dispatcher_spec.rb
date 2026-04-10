@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-RSpec.describe Pgbus::Web::Streamer::Dispatcher do
+RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
   subject(:dispatcher) do
     described_class.new(
       client: client,
@@ -286,7 +286,7 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
     end
 
     def admin_envelope
-      Pgbus::Web::Streamer::Dispatcher::StreamEnvelope.new(
+      Pgbus::Web::Streamer::StreamEventDispatcher::StreamEnvelope.new(
         msg_id: 100,
         enqueued_at: nil,
         payload: "<turbo-stream>secret</turbo-stream>",
@@ -296,7 +296,7 @@ RSpec.describe Pgbus::Web::Streamer::Dispatcher do
     end
 
     def public_envelope
-      Pgbus::Web::Streamer::Dispatcher::StreamEnvelope.new(
+      Pgbus::Web::Streamer::StreamEventDispatcher::StreamEnvelope.new(
         msg_id: 101,
         enqueued_at: nil,
         payload: "<turbo-stream>everyone</turbo-stream>",

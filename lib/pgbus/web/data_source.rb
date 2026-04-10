@@ -875,28 +875,14 @@ module Pgbus
 
       # Extract uniqueness key from a JSON payload string and release its lock.
       def release_lock_for_payload(payload_str)
-        return unless payload_str
-
-        payload = payload_str.is_a?(String) ? JSON.parse(payload_str) : payload_str
-        key = payload[Uniqueness::METADATA_KEY]
+        key = extract_uniqueness_key_from_payload_str(payload_str)
         UniquenessKey.release!(key) if key
-      rescue JSON::ParserError => e
-        Pgbus.logger.debug { "[Pgbus::Web] Error parsing payload for lock release: #{e.message}" }
       end
 
       # Extract uniqueness keys from a collection of formatted messages and
       # release all associated locks in a single query.
       def release_locks_for_messages(messages)
-        keys = messages.filter_map do |m|
-          payload = m[:message]
-          next unless payload
-
-          parsed = payload.is_a?(String) ? JSON.parse(payload) : payload
-          parsed[Uniqueness::METADATA_KEY]
-        rescue JSON::ParserError
-          nil
-        end
-
+        keys = messages.filter_map { |m| extract_uniqueness_key_from_payload_str(m[:message]) }
         UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for messages: #{e.message}" }
@@ -908,16 +894,26 @@ module Pgbus
           "SELECT payload FROM pgbus_failed_events", "Pgbus Collect Failed Keys"
         )
 
-        keys = rows.to_a.filter_map do |row|
-          payload = JSON.parse(row["payload"])
-          payload[Uniqueness::METADATA_KEY]
-        rescue JSON::ParserError
-          nil
-        end
-
+        keys = rows.to_a.filter_map { |row| extract_uniqueness_key_from_payload_str(row["payload"]) }
         UniquenessKey.where(lock_key: keys).delete_all if keys.any?
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error releasing locks for failed events: #{e.message}" }
+      end
+
+      # Single unwrap point for PGMQ message / failed_event payload strings.
+      # Accepts a raw JSON string or an already-parsed Hash and returns the
+      # uniqueness metadata key, or nil when the payload is blank, unparseable,
+      # or carries no uniqueness metadata. Parse errors are swallowed at debug
+      # level because callers treat missing keys and malformed payloads
+      # identically (no lock to release).
+      def extract_uniqueness_key_from_payload_str(payload_str)
+        return nil unless payload_str
+
+        payload = payload_str.is_a?(String) ? JSON.parse(payload_str) : payload_str
+        payload[Uniqueness::METADATA_KEY]
+      rescue JSON::ParserError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error parsing payload for uniqueness key: #{e.message}" }
+        nil
       end
 
       # Archive the queue message a failed_event row points to. Idempotent —

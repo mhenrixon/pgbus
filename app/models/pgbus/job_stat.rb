@@ -52,8 +52,9 @@ module Pgbus
     # enable latency recording.
     def self.latency_columns?
       return @latency_columns if defined?(@latency_columns)
+      return false unless table_exists?
 
-      @latency_columns = table_exists? && column_names.include?("enqueue_latency_ms")
+      @latency_columns = column_names.include?("enqueue_latency_ms")
     rescue StandardError => e
       Pgbus.logger.debug { "[Pgbus] Failed to check job stat latency columns: #{e.message}" }
       false

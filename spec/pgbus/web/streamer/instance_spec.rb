@@ -93,7 +93,7 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       streamer.start
       fake_pg.push_timeout
       expect(streamer.listener).to be_a(Pgbus::Web::Streamer::Listener)
-      expect(streamer.dispatcher).to be_a(Pgbus::Web::Streamer::Dispatcher)
+      expect(streamer.dispatcher).to be_a(Pgbus::Web::Streamer::StreamEventDispatcher)
       expect(streamer.heartbeat).to be_a(Pgbus::Web::Streamer::Heartbeat)
     end
 

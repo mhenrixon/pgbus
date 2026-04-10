@@ -43,7 +43,7 @@ module Pgbus
             health_check_ms: @config.streams_listen_health_check_ms,
             logger: @logger
           )
-          @dispatcher = Dispatcher.new(
+          @dispatcher = StreamEventDispatcher.new(
             client: @client,
             registry: @registry,
             listener: @listener,
@@ -92,7 +92,7 @@ module Pgbus
               return
             end
 
-            @dispatch_queue << Dispatcher::ConnectMessage.new(connection: connection)
+            @dispatch_queue << StreamEventDispatcher::ConnectMessage.new(connection: connection)
           end
         end
 
