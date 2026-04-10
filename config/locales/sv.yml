@@ -10,6 +10,25 @@ sv:
           pid: PID
           status: Status
         title: Aktiva processer
+      queue_health:
+        dead_tuples: Döda tuplar
+        headers:
+          bloat: Bloat
+          dead: Döda
+          kind: Typ
+          last_vacuum: Senaste Vacuum
+          live: Levande
+          table: Tabell
+        last_vacuum: Senaste Vacuum
+        live: levande
+        mvcc_horizon: MVCC-horisont
+        oldest_open_txn: äldsta öppna transaktion
+        oldest_vacuum_ago: äldsta tabell-vacuum
+        tables_need_vacuum:
+          one: "%{count} tabell behöver vacuum"
+          other: "%{count} tabeller behöver vacuum"
+        title: Köhälsa
+        worst_bloat: Värsta Bloat
       queues_table:
         empty: Inga köer hittades
         headers:
@@ -337,6 +356,15 @@ sv:
         resume: Återuppta
         retry: Försök igen
         retry_confirm: Återställ synlighetstimeout och försök igen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Döda
+            last_vacuum: Senaste Vacuum
+            live: Levande
+            table: Tabell
+          oldest_txn: 'Äldsta öppna transaktion:'
+          title: Tabellhälsa
         total: 'Totalt:'
         visible: 'Synliga:'
     recurring_tasks:
@@ -345,10 +373,6 @@ sv:
           one: "%{count} uppgift konfigurerad"
           other: "%{count} uppgifter konfigurerade"
         title: Återkommande uppgifter
-      toggle:
-        disabled: Uppgift inaktiverad
-        enabled: Uppgift aktiverad
-        failed: Kunde inte ändra uppgift
       show:
         back: Tillbaka
         configuration: Konfiguration
@@ -392,3 +416,7 @@ sv:
           task: Uppgift
         never: Aldrig
         run_now: Kör nu
+      toggle:
+        disabled: Uppgift inaktiverad
+        enabled: Uppgift aktiverad
+        failed: Kunde inte ändra uppgift

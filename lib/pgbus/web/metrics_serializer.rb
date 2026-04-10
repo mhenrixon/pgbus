@@ -24,6 +24,7 @@ module Pgbus
         append_process_metrics(lines)
         append_summary_metrics(lines)
         append_stream_metrics(lines)
+        append_health_metrics(lines)
         "#{lines.join("\n")}\n"
       end
 
@@ -97,9 +98,41 @@ module Pgbus
       end
 
       def append_process_metrics(lines)
-        count = @data_source.processes.count
+        procs = @data_source.processes
         gauge(lines, "pgbus_active_processes", "Number of active pgbus worker processes") do
-          [[count]]
+          [[procs.count]]
+        end
+
+        workers = procs.select { |p| p[:kind] == "worker" && p[:metadata].is_a?(Hash) }
+        unless workers.empty?
+          gauge(lines, "pgbus_worker_pool_capacity", "Total thread/async pool capacity per worker") do
+            workers.filter_map do |w|
+              capacity = w[:metadata]["capacity"]
+              next unless capacity
+
+              [capacity, { pid: w[:pid], hostname: w[:hostname] }]
+            end
+          end
+
+          gauge(lines, "pgbus_worker_pool_busy", "Number of busy threads/slots per worker") do
+            workers.filter_map do |w|
+              busy = w[:metadata]["busy"]
+              next unless busy
+
+              [busy, { pid: w[:pid], hostname: w[:hostname] }]
+            end
+          end
+
+          gauge(lines, "pgbus_worker_pool_utilization", "Pool utilization ratio (busy / capacity)") do
+            workers.filter_map do |w|
+              capacity = w[:metadata]["capacity"].to_i
+              busy = w[:metadata]["busy"].to_i
+              next unless capacity.positive?
+
+              ratio = (busy.to_f / capacity).round(4)
+              [ratio, { pid: w[:pid], hostname: w[:hostname] }]
+            end
+          end
         end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Metrics] Error serializing process metrics: #{e.message}" }
@@ -139,6 +172,42 @@ module Pgbus
         end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Metrics] Error serializing stream metrics: #{e.message}" }
+      end
+
+      def append_health_metrics(lines)
+        health = @data_source.queue_health_stats
+        return if health[:tables].empty? && health[:oldest_transaction_age_sec].nil?
+
+        tables = health[:tables]
+        unless tables.empty?
+          gauge(lines, "pgbus_table_dead_tuples", "Number of dead tuples in queue/archive table") do
+            tables.map { |t| [t[:dead_tuples], { table: t[:table], kind: t[:kind] }] }
+          end
+
+          gauge(lines, "pgbus_table_live_tuples", "Number of live tuples in queue/archive table") do
+            tables.map { |t| [t[:live_tuples], { table: t[:table], kind: t[:kind] }] }
+          end
+
+          gauge(lines, "pgbus_table_bloat_ratio", "Dead tuple ratio (dead / total) per table") do
+            tables.map { |t| [t[:bloat_ratio], { table: t[:table], kind: t[:kind] }] }
+          end
+
+          vacuum_tables = tables.select { |t| t[:last_vacuum_ago_sec] }
+          unless vacuum_tables.empty?
+            gauge(lines, "pgbus_table_last_vacuum_age_seconds", "Seconds since last vacuum") do
+              vacuum_tables.map { |t| [t[:last_vacuum_ago_sec], { table: t[:table], kind: t[:kind] }] }
+            end
+          end
+        end
+
+        if health[:oldest_transaction_age_sec]
+          gauge(lines, "pgbus_oldest_transaction_age_seconds",
+                "Age of the oldest open transaction (MVCC horizon pin risk)") do
+            [[health[:oldest_transaction_age_sec]]]
+          end
+        end
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Metrics] Error serializing health metrics: #{e.message}" }
       end
 
       # Emits a Prometheus gauge metric family. The block must return an array

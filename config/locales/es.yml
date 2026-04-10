@@ -10,6 +10,25 @@ es:
           pid: PID
           status: Estado
         title: Procesos activos
+      queue_health:
+        dead_tuples: Tuplas muertas
+        headers:
+          bloat: Bloat
+          dead: Muertas
+          kind: Tipo
+          last_vacuum: Último Vacuum
+          live: Activas
+          table: Tabla
+        last_vacuum: Último Vacuum
+        live: activas
+        mvcc_horizon: Horizonte MVCC
+        oldest_open_txn: transacción abierta más antigua
+        oldest_vacuum_ago: vacuum de tabla más antiguo
+        tables_need_vacuum:
+          one: "%{count} tabla necesita vacuum"
+          other: "%{count} tablas necesitan vacuum"
+        title: Salud de Colas
+        worst_bloat: Peor Bloat
       queues_table:
         empty: No se encontraron colas
         headers:
@@ -337,6 +356,15 @@ es:
         resume: Reanudar
         retry: Reintentar
         retry_confirm: "¿Restablecer tiempo de visibilidad y reintentar?"
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Muertas
+            last_vacuum: Último Vacuum
+            live: Activas
+            table: Tabla
+          oldest_txn: 'Transacción abierta más antigua:'
+          title: Salud de Tablas
         total: 'Total:'
         visible: 'Visible:'
     recurring_tasks:
@@ -345,10 +373,6 @@ es:
           one: Tarea %{count} configurada
           other: Tareas %{count} configuradas
         title: Tareas recurrentes
-      toggle:
-        disabled: Tarea deshabilitada
-        enabled: Tarea habilitada
-        failed: No se pudo cambiar la tarea
       show:
         back: Atrás
         configuration: Configuración
@@ -392,3 +416,7 @@ es:
           task: Tarea
         never: Nunca
         run_now: Ejecutar ahora
+      toggle:
+        disabled: Tarea deshabilitada
+        enabled: Tarea habilitada
+        failed: No se pudo cambiar la tarea

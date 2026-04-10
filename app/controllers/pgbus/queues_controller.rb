@@ -12,6 +12,7 @@ module Pgbus
 
       @paused = data_source.queue_paused?(params[:name])
       @messages = data_source.jobs(queue_name: params[:name], page: page_param, per_page: per_page)
+      @health = data_source.queue_health_detail(params[:name])
     end
 
     def purge

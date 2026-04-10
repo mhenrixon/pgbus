@@ -103,6 +103,10 @@ module Pgbus
       def stream_stats_summary(minutes: 60) = @stream_summary
       def top_streams(limit: 10, minutes: 60) = @top_streams_list.first(limit)
 
+      # Queue health
+      def queue_health_stats = default_health_stats
+      def queue_health_detail(_name) = { tables: [], oldest_transaction_age_sec: nil }
+
       private
 
       def record(method_name, *args)
@@ -112,7 +116,10 @@ module Pgbus
 
       def default_stats
         { total_queues: 2, total_depth: 15, total_visible: 12,
-          active_processes: 1, failed_count: 3, dlq_depth: 2 }
+          active_processes: 1, failed_count: 3, dlq_depth: 2,
+          recurring_count: 0, throughput_rate: 0.0,
+          total_dead_tuples: 0, tables_needing_vacuum: 0,
+          oldest_transaction_age_sec: nil }
       end
 
       def default_insights_summary
@@ -129,6 +136,14 @@ module Pgbus
           broadcasts: 0, connects: 0, disconnects: 0,
           active_estimate: 0, avg_fanout: 0,
           avg_broadcast_ms: 0, avg_connect_ms: 0
+        }
+      end
+
+      def default_health_stats
+        {
+          total_dead_tuples: 0, total_live_tuples: 0, worst_bloat_ratio: 0.0,
+          tables_needing_vacuum: 0, oldest_vacuum_ago_sec: nil,
+          oldest_transaction_age_sec: nil, tables: []
         }
       end
 

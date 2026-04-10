@@ -21,6 +21,8 @@ module Pgbus
 
         throughput = compute_throughput(queues)
 
+        health = queue_health_stats
+
         {
           total_queues: queues.size,
           total_depth: total_depth,
@@ -29,7 +31,10 @@ module Pgbus
           failed_count: failed_events_count,
           dlq_depth: dlq_depth,
           recurring_count: recurring_tasks_count,
-          throughput_rate: throughput
+          throughput_rate: throughput,
+          total_dead_tuples: health[:total_dead_tuples],
+          tables_needing_vacuum: health[:tables_needing_vacuum],
+          oldest_transaction_age_sec: health[:oldest_transaction_age_sec]
         }
       end
 
@@ -629,6 +634,51 @@ module Pgbus
         []
       end
 
+      # Queue health — vacuum stats, dead tuples, bloat, MVCC horizon.
+      # Returns aggregate health across all queue and archive tables, plus
+      # the oldest open transaction age (MVCC horizon pinning risk).
+      def queue_health_stats
+        queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        tables = queue_names.flat_map { |n| table_health_for(n) }.compact
+
+        total_dead = tables.sum { |t| t[:dead_tuples] }
+        total_live = tables.sum { |t| t[:live_tuples] }
+        worst_bloat = tables.map { |t| t[:bloat_ratio] }.max || 0.0
+        needs_vacuum = tables.count { |t| t[:bloat_ratio] > 0.1 }
+        oldest_vacuum = tables.filter_map { |t| t[:last_vacuum_ago_sec] }.max
+
+        {
+          total_dead_tuples: total_dead,
+          total_live_tuples: total_live,
+          worst_bloat_ratio: worst_bloat.round(4),
+          tables_needing_vacuum: needs_vacuum,
+          oldest_vacuum_ago_sec: oldest_vacuum,
+          oldest_transaction_age_sec: oldest_transaction_age,
+          tables: tables
+        }
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching queue health stats: #{e.class}: #{e.message}" }
+        {
+          total_dead_tuples: 0, total_live_tuples: 0, worst_bloat_ratio: 0.0,
+          tables_needing_vacuum: 0, oldest_vacuum_ago_sec: nil,
+          oldest_transaction_age_sec: nil, tables: []
+        }
+      end
+
+      # Per-queue health stats for the queue detail view.
+      def queue_health_detail(queue_name)
+        sanitized = sanitize_name(queue_name)
+        tables = [
+          fetch_table_stats("pgmq", "q_#{sanitized}", "queue"),
+          fetch_table_stats("pgmq", "a_#{sanitized}", "archive")
+        ].compact
+
+        { tables: tables, oldest_transaction_age_sec: oldest_transaction_age }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching health detail for #{queue_name}: #{e.message}" }
+        { tables: [], oldest_transaction_age_sec: nil }
+      end
+
       # Stream stats — only populated when streams_stats_enabled is
       # true AND the migration has been run. Controllers should gate
       # rendering on `stream_stats_available?` to avoid showing empty
@@ -672,6 +722,65 @@ module Pgbus
 
       def connection
         Pgbus::BusRecord.connection
+      end
+
+      # Fetch pg_stat_user_tables stats for a single table.
+      def fetch_table_stats(schema, table_name, kind)
+        row = connection.select_one(<<~SQL, "Pgbus Table Health")
+          SELECT
+            n_live_tup,
+            n_dead_tup,
+            EXTRACT(epoch FROM (NOW() - COALESCE(last_vacuum, last_autovacuum)))::int AS last_vacuum_ago_sec,
+            last_vacuum,
+            last_autovacuum
+          FROM pg_stat_user_tables
+          WHERE schemaname = '#{schema}' AND relname = '#{table_name}'
+        SQL
+
+        return nil unless row
+
+        live = row["n_live_tup"].to_i
+        dead = row["n_dead_tup"].to_i
+        total = live + dead
+        bloat = total.positive? ? (dead.to_f / total) : 0.0
+
+        {
+          table: "#{schema}.#{table_name}",
+          kind: kind,
+          live_tuples: live,
+          dead_tuples: dead,
+          bloat_ratio: bloat.round(4),
+          last_vacuum_ago_sec: row["last_vacuum_ago_sec"]&.to_i,
+          last_vacuum: row["last_vacuum"],
+          last_autovacuum: row["last_autovacuum"]
+        }
+      end
+
+      # Gather health for both the queue table and archive table of a queue.
+      def table_health_for(queue_name)
+        sanitized = sanitize_name(queue_name)
+        [
+          fetch_table_stats("pgmq", "q_#{sanitized}", "queue"),
+          fetch_table_stats("pgmq", "a_#{sanitized}", "archive")
+        ]
+      end
+
+      # Age of the oldest open transaction in seconds — indicates MVCC
+      # horizon pinning risk. Returns nil if no active transactions.
+      def oldest_transaction_age
+        row = connection.select_one(<<~SQL, "Pgbus Oldest Transaction")
+          SELECT EXTRACT(epoch FROM (NOW() - xact_start))::int AS age_sec
+          FROM pg_stat_activity
+          WHERE state != 'idle'
+            AND xact_start IS NOT NULL
+            AND pid != pg_backend_pid()
+          ORDER BY xact_start ASC
+          LIMIT 1
+        SQL
+
+        row&.dig("age_sec")&.to_i
+      rescue StandardError
+        nil
       end
 
       # name is the full PGMQ queue name (already prefixed)
