@@ -82,7 +82,10 @@ RSpec.describe Pgbus::ExecutionPools::ThreadPool do
   describe "#shutdown" do
     it "finishes in-progress work" do
       result = Concurrent::IVar.new
-      pool.post { sleep 0.05; result.set(:done) }
+      pool.post do
+        sleep 0.05
+        result.set(:done)
+      end
       pool.shutdown
 
       expect(result.value(2)).to eq(:done)
@@ -92,7 +95,10 @@ RSpec.describe Pgbus::ExecutionPools::ThreadPool do
   describe "#wait_for_termination" do
     it "blocks until all work completes" do
       result = Concurrent::IVar.new
-      pool.post { sleep 0.05; result.set(:done) }
+      pool.post do
+        sleep 0.05
+        result.set(:done)
+      end
       pool.shutdown
       pool.wait_for_termination(5)
 

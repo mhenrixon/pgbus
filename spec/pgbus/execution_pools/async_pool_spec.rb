@@ -22,8 +22,11 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
     end
 
     it "boots the reactor thread synchronously" do
-      # If we get here without hanging, boot sync worked
-      expect(pool.available_capacity).to eq(3)
+      # If we get here without hanging, boot sync worked.
+      # Verify the pool is functional by posting and completing a task.
+      result = Concurrent::IVar.new
+      pool.post { result.set(:booted) }
+      expect(result.value(5)).to eq(:booted)
     end
   end
 
