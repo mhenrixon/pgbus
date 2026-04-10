@@ -46,7 +46,9 @@ module Pgbus
         "channel" => "Turbo::StreamsChannel"
       }.merge(html_attributes.transform_keys(&:to_s))
 
-      render_tag("pgbus-stream-source", attributes)
+      element = render_tag("pgbus-stream-source", attributes)
+      script = pgbus_stream_source_script_tag
+      script ? "#{script}#{element}" : element
     end
 
     private
@@ -116,6 +118,19 @@ module Pgbus
       # (Phase 4.5).
       cache = Thread.current[:pgbus_streams_watermark_cache] ||= {}
       cache[stream_name] ||= Pgbus.stream(stream_name).current_msg_id
+    end
+
+    # Emits a <script type="module"> tag that imports the custom element
+    # definition exactly once per request. Without this, <pgbus-stream-source>
+    # is an inert unknown element — no SSE connection opens. Uses a
+    # thread-local flag cleared by the WatermarkCacheMiddleware.
+    def pgbus_stream_source_script_tag
+      cache = Thread.current[:pgbus_streams_watermark_cache] ||= {}
+      return nil if cache[:script_emitted]
+
+      cache[:script_emitted] = true
+      script = '<script type="module">import "pgbus/stream_source_element"</script>'
+      script.respond_to?(:html_safe) ? script.html_safe : script
     end
 
     def render_tag(name, attributes)
