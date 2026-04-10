@@ -75,22 +75,34 @@ module Pgbus
       end
     end
 
-    # Build the SSE endpoint URL by asking the engine where its
-    # `:streams` mount point lives, then appending the signed name.
-    # The base comes from Pgbus::Engine.routes.url_helpers.streams_path
-    # so the URL follows whatever mount point the host app chose for
-    # the engine ("/pgbus", "/admin/dashboard", etc.). A
-    # `NoMethodError` fallback covers the test-only context where
-    # the helper is included in a plain class outside a Rails
-    # request and the engine's url_helpers aren't wired in.
+    # Build the SSE endpoint URL for the given signed stream name.
+    #
+    # Resolution order:
+    #   1. `config.streams_path` — explicit override, useful when the
+    #      engine is mounted behind an auth constraint but the SSE
+    #      endpoint is mounted publicly at a separate path:
+    #
+    #        # config/routes.rb
+    #        authenticate :user, ->(u) { u.admin? } do
+    #          mount Pgbus::Engine => "/admin/jobs"
+    #        end
+    #        mount Pgbus::Web::StreamApp.new => "/pgbus/streams"
+    #
+    #        # config/initializers/pgbus.rb
+    #        Pgbus.configure { |c| c.streams_path = "/pgbus/streams" }
+    #
+    #   2. Engine route helper — derives the path from wherever the
+    #      host app mounted the engine.
+    #
+    #   3. Fallback `/pgbus/streams` — test-only context where the
+    #      engine's url_helpers aren't wired in.
     def pgbus_stream_src(signed_name)
+      base = Pgbus.configuration.streams_path
+      return "#{base.delete_suffix("/")}/#{signed_name}" if base
+
       base = Pgbus::Engine.routes.url_helpers.streams_path
       "#{base}/#{signed_name}"
     rescue NameError
-      # NameError covers both uninitialized-constant (Pgbus::Engine
-      # not loaded, e.g. plain-Ruby unit specs) and NoMethodError
-      # (a NameError subclass) when the routes helper chain isn't
-      # wired in.
       "/pgbus/streams/#{signed_name}"
     end
 

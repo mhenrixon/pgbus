@@ -90,7 +90,7 @@ module Pgbus
                   :metrics_enabled
 
     # Streams (turbo-rails replacement, SSE-based)
-    attr_accessor :streams_enabled, :streams_queue_prefix, :streams_signed_name_secret,
+    attr_accessor :streams_enabled, :streams_path, :streams_queue_prefix, :streams_signed_name_secret,
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
@@ -168,6 +168,7 @@ module Pgbus
       @metrics_enabled = true
 
       @streams_enabled = true
+      @streams_path = nil
       @streams_queue_prefix = "pgbus_stream"
       @streams_signed_name_secret = nil
       @streams_default_retention = 5 * 60 # 5 minutes
