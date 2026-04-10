@@ -84,6 +84,15 @@ module Pgbus
           # `_` keeps RuboCop's Lint/Void from deleting the line.
           _autoload_trigger = Pgbus::Streams::TurboBroadcastable
           Pgbus::Streams.install_turbo_broadcastable_patch!
+
+          # Subscribe-side patch: override turbo_stream_from to render
+          # <pgbus-stream-source> (SSE) instead of <turbo-cable-stream-source>
+          # (ActionCable). Without this, third-party gems like
+          # hotwire-livereload that call turbo_stream_from in their views
+          # subscribe via ActionCable while the broadcast (patched above)
+          # goes through PGMQ — the message never arrives.
+          _autoload_trigger_override = Pgbus::Streams::TurboStreamOverride
+          Pgbus::Streams.install_turbo_stream_override!
         end
       end
     end
