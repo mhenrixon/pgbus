@@ -158,14 +158,14 @@ RSpec.describe Pgbus::Web::Streamer::FalconConnection do
   describe "#idle_for" do
     it "returns seconds since last write" do
       fake_clock = 0.0
-      allow(::Process).to receive(:clock_gettime)
-        .with(::Process::CLOCK_MONOTONIC).and_return(fake_clock)
+      allow(Process).to receive(:clock_gettime)
+        .with(Process::CLOCK_MONOTONIC).and_return(fake_clock)
 
       conn.enqueue([build_envelope(msg_id: 101)])
 
       fake_clock = 10.0
-      allow(::Process).to receive(:clock_gettime)
-        .with(::Process::CLOCK_MONOTONIC).and_return(fake_clock)
+      allow(Process).to receive(:clock_gettime)
+        .with(Process::CLOCK_MONOTONIC).and_return(fake_clock)
 
       expect(conn.idle_for).to be_within(0.01).of(10.0)
     end
