@@ -7,14 +7,16 @@ module Pgbus
     class Worker
       include SignalHandler
 
-      attr_reader :queues, :threads, :config
+      attr_reader :queues, :threads, :config, :execution_mode
 
       def initialize(queues:, threads: 5, config: Pgbus.configuration,
-                     single_active_consumer: false, consumer_priority: 0)
+                     single_active_consumer: false, consumer_priority: 0,
+                     execution_mode: :threads)
         @queues = Array(queues)
         @wildcard = @queues.include?("*")
         @threads = threads
         @config = config
+        @execution_mode = ExecutionPools.normalize_mode(execution_mode)
         @single_active_consumer = single_active_consumer
         @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
@@ -27,10 +29,14 @@ module Pgbus
         @started_at_monotonic = monotonic_now
         @stat_buffer = config.stats_enabled ? Pgbus::StatBuffer.new : nil
         @executor = Pgbus::ActiveJob::Executor.new(stat_buffer: @stat_buffer)
-        @pool = Concurrent::FixedThreadPool.new(threads)
+        @wake_signal = WakeSignal.new
+        @pool = ExecutionPools.build(
+          mode: @execution_mode,
+          capacity: threads,
+          on_state_change: -> { @wake_signal.notify! }
+        )
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @queue_lock = QueueLock.new if @single_active_consumer
-        @wake_signal = WakeSignal.new
       end
 
       def stats
@@ -39,12 +45,13 @@ module Pgbus
           jobs_failed: @jobs_failed.value,
           in_flight: @in_flight.value,
           state: @lifecycle.state,
+          execution_mode: @execution_mode,
           consumer_priority: @consumer_priority,
           single_active_consumer: @single_active_consumer,
           locked_queues: @queue_lock&.held_queues || [],
           rates: @rate_counter.rates,
           started_at: @started_at
-        }
+        }.merge(@pool.metadata)
       end
 
       def run
@@ -52,7 +59,10 @@ module Pgbus
         start_heartbeat
         resolve_wildcard_queues
         @lifecycle.transition_to!(:running)
-        Pgbus.logger.info { "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} pid=#{::Process.pid}" }
+        Pgbus.logger.info do
+          "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} " \
+            "mode=#{@execution_mode} pid=#{::Process.pid}"
+        end
 
         loop do
           process_signals
@@ -60,7 +70,7 @@ module Pgbus
           refresh_wildcard_queues
 
           break if @lifecycle.stopped?
-          break if @lifecycle.draining? && @pool.queue_length.zero?
+          break if @lifecycle.draining? && @pool.idle?
 
           claim_and_execute if @lifecycle.can_process?
           @stat_buffer&.flush_if_due
@@ -97,7 +107,7 @@ module Pgbus
       def claim_and_execute
         poll_interval = effective_polling_interval
 
-        idle = @pool.max_length - @pool.queue_length
+        idle = @pool.available_capacity
         return @wake_signal.wait(timeout: poll_interval) if idle <= 0
 
         if config.prefetch_limit
@@ -332,7 +342,7 @@ module Pgbus
           kind: "worker",
           metadata: {
             queues: queues, threads: threads, pid: ::Process.pid,
-            consumer_priority: @consumer_priority
+            execution_mode: @execution_mode, consumer_priority: @consumer_priority
           },
           on_beat: -> { @rate_counter.snapshot! }
         )

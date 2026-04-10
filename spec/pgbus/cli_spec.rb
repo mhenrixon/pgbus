@@ -137,6 +137,24 @@ RSpec.describe Pgbus::CLI do
       end
     end
 
+    context "with --execution-mode flag" do
+      it "sets config.execution_mode to :async" do
+        original_mode = Pgbus.configuration.execution_mode
+        described_class.start(["start", "--execution-mode", "async"])
+        expect(Pgbus.configuration.execution_mode).to eq(:async)
+      ensure
+        Pgbus.configuration.execution_mode = original_mode
+      end
+
+      it "sets config.execution_mode to :threads" do
+        original_mode = Pgbus.configuration.execution_mode
+        described_class.start(["start", "--execution-mode", "threads"])
+        expect(Pgbus.configuration.execution_mode).to eq(:threads)
+      ensure
+        Pgbus.configuration.execution_mode = original_mode
+      end
+    end
+
     context "with multiple --*-only flags (mutually exclusive)" do
       it "raises ArgumentError when --workers-only and --scheduler-only are both passed" do
         expect do

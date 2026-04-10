@@ -55,6 +55,7 @@ bundle exec rake           # Both
 Layer 6: Dashboard       app/controllers/pgbus/, app/views/pgbus/
 Layer 5: CLI             lib/pgbus/cli.rb
 Layer 4: Process Model   lib/pgbus/process/ (supervisor, worker, dispatcher, consumer)
+         Execution Pools lib/pgbus/execution_pools/ (thread_pool, async_pool)
 Layer 3: Event Bus       lib/pgbus/event_bus/ (publisher, subscriber, registry, handler)
 Layer 2: ActiveJob       lib/pgbus/active_job/ (adapter, executor)
 Layer 1: Client          lib/pgbus/client.rb (PGMQ wrapper)

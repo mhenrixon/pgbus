@@ -60,6 +60,7 @@ module Pgbus
         threads = worker_config[:threads] || worker_config["threads"] || 5
         single_active = worker_config[:single_active_consumer] || worker_config["single_active_consumer"] || false
         priority = worker_config[:consumer_priority] || worker_config["consumer_priority"] || 0
+        exec_mode = config.execution_mode_for(worker_config)
 
         pid = fork do
           restore_signals
@@ -68,7 +69,8 @@ module Pgbus
           bootstrap_queues
           worker = Worker.new(
             queues: queues, threads: threads, config: config,
-            single_active_consumer: single_active, consumer_priority: priority
+            single_active_consumer: single_active, consumer_priority: priority,
+            execution_mode: exec_mode
           )
           worker.run
         end
@@ -79,7 +81,7 @@ module Pgbus
         end
 
         @forks[pid] = { type: :worker, config: worker_config }
-        Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")}" }
+        Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         Pgbus.logger.error { "[Pgbus] Fork failed for worker: #{e.message}" }
       end

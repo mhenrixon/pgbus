@@ -108,6 +108,33 @@ RSpec.describe Pgbus::Configuration do
     it "has default recurring execution retention of 7 days" do
       expect(config.recurring_execution_retention).to eq(7 * 24 * 3600)
     end
+
+    it "defaults execution_mode to :threads" do
+      expect(config.execution_mode).to eq(:threads)
+    end
+  end
+
+  describe "#execution_mode_for" do
+    it "returns the global default when worker has no override" do
+      expect(config.execution_mode_for({})).to eq(:threads)
+    end
+
+    it "returns the worker-level override when present" do
+      expect(config.execution_mode_for(execution_mode: :async)).to eq(:async)
+    end
+
+    it "normalizes :fiber to :async" do
+      expect(config.execution_mode_for(execution_mode: :fiber)).to eq(:async)
+    end
+
+    it "falls back to global execution_mode" do
+      config.execution_mode = :async
+      expect(config.execution_mode_for({})).to eq(:async)
+    end
+
+    it "accepts string keys" do
+      expect(config.execution_mode_for("execution_mode" => "async")).to eq(:async)
+    end
   end
 
   describe "#queue_name" do
@@ -832,6 +859,28 @@ RSpec.describe Pgbus::Configuration do
       config.retry_backoff = 10
       config.retry_backoff_max = 600
       config.retry_backoff_jitter = 0.2
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects invalid global execution_mode" do
+      config.execution_mode = :bogus
+      expect { config.validate! }.to raise_error(ArgumentError, /execution_mode/i)
+    end
+
+    it "accepts valid execution_mode values" do
+      %i[threads async fiber].each do |mode|
+        config.execution_mode = mode
+        expect { config.validate! }.not_to raise_error
+      end
+    end
+
+    it "rejects invalid per-worker execution_mode" do
+      config.workers = [{ queues: %w[default], threads: 5, execution_mode: :bogus }]
+      expect { config.validate! }.to raise_error(ArgumentError, /execution_mode/i)
+    end
+
+    it "accepts per-worker execution_mode override" do
+      config.workers = [{ queues: %w[default], threads: 50, execution_mode: :async }]
       expect { config.validate! }.not_to raise_error
     end
   end
