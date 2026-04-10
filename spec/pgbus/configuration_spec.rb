@@ -259,6 +259,31 @@ RSpec.describe Pgbus::Configuration do
         expect(warned_message).to match(/pool_size .* 62/)
       end
 
+      it "uses fewer connections for async workers (fibers share connections)" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[webhooks], threads: 100, execution_mode: :async }]
+        # Async workers need ~3 connections (reactor + polling + headroom),
+        # not 100 (one per fiber). Total: 3 + 1 dispatcher + 1 scheduler = 5
+        expect(config.resolved_pool_size).to eq(5)
+      end
+
+      it "mixes async and thread workers correctly" do
+        config.pool_size = nil
+        config.workers = [
+          { queues: %w[webhooks], threads: 50, execution_mode: :async },
+          { queues: %w[default], threads: 5 }
+        ]
+        # 3 (async) + 5 (threads) + 1 dispatcher + 1 scheduler = 10
+        expect(config.resolved_pool_size).to eq(10)
+      end
+
+      it "uses fewer connections for fiber mode (alias for async)" do
+        config.pool_size = nil
+        config.workers = [{ queues: %w[llm], threads: 200, execution_mode: :fiber }]
+        # 3 + 1 + 1 = 5
+        expect(config.resolved_pool_size).to eq(5)
+      end
+
       it "does not warn for normal sizes" do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: 5 }]
