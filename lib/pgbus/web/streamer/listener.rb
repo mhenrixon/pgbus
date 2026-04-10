@@ -113,6 +113,11 @@ module Pgbus
               @conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
                 handle_notify(channel)
               end || run_health_check
+            rescue IOError
+              # #stop closes the PG connection to interrupt
+              # wait_for_notify, which raises IOError ("stream closed
+              # in another thread"). This is expected — exit cleanly.
+              break unless @running
             rescue PG::Error => e
               break unless @running
 
