@@ -110,6 +110,12 @@ RSpec.describe Pgbus::Client do
     it "retains zero objects across 100 send_message cycles" do
       10.times { plain_client.send_message("default", small_payload) }
 
+      # Force GC to collect any lazily-initialized gem globals (e.g. async's
+      # fiber scheduler hooks) so MemoryProfiler doesn't attribute them to
+      # our send_message calls. Without this, Ruby 3.3 retains objects from
+      # gems loaded by other specs in the same process.
+      GC.start
+
       report = MemoryProfiler.report do
         100.times { plain_client.send_message("default", small_payload) }
       end
