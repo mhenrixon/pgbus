@@ -110,13 +110,12 @@ RSpec.describe Pgbus::Client do
     it "retains zero objects across 100 send_message cycles" do
       10.times { plain_client.send_message("default", small_payload) }
 
-      # Force GC to collect any lazily-initialized gem globals (e.g. async's
-      # fiber scheduler hooks) so MemoryProfiler doesn't attribute them to
-      # our send_message calls. Without this, Ruby 3.3 retains objects from
-      # gems loaded by other specs in the same process.
-      GC.start
-
-      report = MemoryProfiler.report do
+      # Scope to lib/pgbus/ so retained objects from external gems
+      # (async fiber scheduler hooks, connection_pool singletons, JSON
+      # parser caches) loaded by other specs in the same process don't
+      # pollute the measurement. This test validates that Pgbus's own
+      # send_message path leaks nothing.
+      report = MemoryProfiler.report(allow_files: "lib/pgbus") do
         100.times { plain_client.send_message("default", small_payload) }
       end
 
