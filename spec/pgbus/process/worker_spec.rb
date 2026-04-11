@@ -432,6 +432,8 @@ RSpec.describe Pgbus::Process::Worker do
 
         worker.send(:claim_and_execute)
 
+        expect(Pgbus::FailedEventRecorder).to have_received(:exists?)
+          .with(queue_name: "default", msg_id: 99)
         zombie_log = warn_messages.find { |m| m.include?("Zombie message redelivered") }
         expect(zombie_log).to include("msg_id=99")
         expect(zombie_log).to include("read_ct=2")
