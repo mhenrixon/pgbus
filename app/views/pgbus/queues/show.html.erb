@@ -44,7 +44,7 @@
       <% if @health[:oldest_transaction_age_sec] %>
         <p class="text-xs text-gray-500 mt-1">
           <%= t("pgbus.queues.show.table_health.oldest_txn") %>
-          <span class="font-mono <%= @health[:oldest_transaction_age_sec] > 60 ? 'text-red-600' : 'text-gray-700' %>"><%= pgbus_duration(@health[:oldest_transaction_age_sec]) %></span>
+          <span class="font-mono <%= @health[:oldest_transaction_age_sec] > 60 ? 'text-red-600 dark:text-red-400' : @health[:oldest_transaction_age_sec] > 30 ? 'text-amber-600 dark:text-amber-400' : 'text-green-600 dark:text-green-400' %>"><%= pgbus_duration(@health[:oldest_transaction_age_sec]) %></span>
         </p>
       <% end %>
     </div>

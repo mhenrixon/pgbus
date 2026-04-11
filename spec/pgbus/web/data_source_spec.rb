@@ -500,7 +500,7 @@ RSpec.describe Pgbus::Web::DataSource do
       }
 
       allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Table Health")
+        .with(anything, "Pgbus Table Health", anything)
         .and_return(stats_row)
 
       allow(mock_connection).to receive(:select_one)

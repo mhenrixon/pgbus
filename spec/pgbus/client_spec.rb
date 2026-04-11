@@ -153,6 +153,12 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#ensure_dead_letter_queue" do
+    it "tunes autovacuum when creating a DLQ" do
+      client.ensure_dead_letter_queue("jobs")
+
+      expect(client).to have_received(:tune_autovacuum).with("pgbus_test_jobs_dlq")
+    end
+
     it "creates the DLQ with correct suffix" do
       client.ensure_dead_letter_queue("jobs")
 
