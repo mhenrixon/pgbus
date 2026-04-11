@@ -87,7 +87,7 @@ module Pgbus
         handle_failure(message, queue_name, e, payload: payload)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
         record_stat(payload, queue_name, "failed", execution_start, message: message)
-        Pgbus.logger.debug { "[Pgbus::Executor] failed #{tag} error=#{e.class}" }
+        Pgbus.logger.debug { "[Pgbus::Executor] failed #{tag} job_class=#{payload&.dig("job_class")} error=#{e.class}" }
         # Don't signal concurrency on transient failure — the job will be retried.
         # Semaphore is released only on success or dead-lettering.
         :failed

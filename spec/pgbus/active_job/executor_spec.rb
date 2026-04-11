@@ -481,12 +481,15 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       let(:message) { build_message_double(msg_id: 80, message: message_json, read_ct: 1) }
       let(:log_output) { StringIO.new }
 
+      let(:previous_logger) { config.logger }
+
       before do
+        previous_logger # memoize before overwriting
         config.logger = Logger.new(log_output, level: Logger::DEBUG)
       end
 
       after do
-        config.logger = Logger.new($stdout)
+        config.logger = previous_logger
       end
 
       it "emits debug logs at each phase on success" do
