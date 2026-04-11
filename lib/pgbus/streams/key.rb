@@ -6,12 +6,14 @@ module Pgbus
   module Streams
     # Short, pgbus-safe stream identifiers.
     #
-    # PGMQ queue names are subject to PostgreSQL's NAMEDATALEN ceiling
-    # (63 chars for `pgmq.q_<name>`), and pgbus reserves two of those
-    # for PGMQ's own `q_`/`a_` prefix — leaving 61 chars (see
-    # QueueNameValidator::MAX_QUEUE_NAME_LENGTH). Any stream name composed
-    # from UUID primary keys and turbo-rails-style dom ids blows past that
-    # budget almost immediately:
+    # PGMQ queue names are bounded by two ceilings: PostgreSQL's
+    # NAMEDATALEN (63 chars for `pgmq.q_<name>`) and pgmq-ruby's own
+    # stricter runtime check (`length >= 48` in
+    # `PGMQ::Client#validate_queue_name!`). The effective budget is the
+    # lower of the two, exposed as `QueueNameValidator::MAX_QUEUE_NAME_LENGTH`
+    # (currently 47). Any stream name composed from UUID primary keys
+    # and turbo-rails-style dom ids blows past that budget almost
+    # immediately:
     #
     #     "gid://app/Ai::Chat/9c14e8b2-94c3-4c6f-8ca1-f50d2f5e22ca:messages"
     #     # => 63 chars, already too long before the "pgbus_" prefix is added.
