@@ -85,6 +85,10 @@ module Pgbus
     # Requires a matching entry in config/database.yml under the "pgbus" key.
     attr_accessor :connects_to
 
+    # Zombie message detection — logs a warning when a message is redelivered
+    # (read_ct > 1) without any prior failure recorded in pgbus_failed_events.
+    attr_accessor :zombie_detection
+
     # Job stats
     attr_accessor :stats_enabled
     attr_reader :stats_retention # rubocop:disable Style/AccessorGrouping
@@ -159,6 +163,8 @@ module Pgbus
       @recurring_tasks_file = nil
       @skip_recurring = false
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
+
+      @zombie_detection = true
 
       @stats_enabled = true
       @stats_retention = 30 * 24 * 3600 # 30 days

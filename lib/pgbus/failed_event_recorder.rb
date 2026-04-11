@@ -35,6 +35,18 @@ module Pgbus
         ErrorReporter.report(e, { action: "record_failed_event", queue: queue_name, msg_id: msg_id })
       end
 
+      def exists?(queue_name:, msg_id:)
+        result = connection.select_value(
+          "SELECT 1 FROM pgbus_failed_events WHERE queue_name = $1 AND msg_id = $2 LIMIT 1",
+          "FailedEvent Exists",
+          [queue_name, msg_id.to_i]
+        )
+        !result.nil?
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] FailedEvent exists? check failed: #{e.class}: #{e.message}" }
+        false
+      end
+
       def clear!(queue_name:, msg_id:)
         connection.exec_delete(
           "DELETE FROM pgbus_failed_events WHERE queue_name = $1 AND msg_id = $2",

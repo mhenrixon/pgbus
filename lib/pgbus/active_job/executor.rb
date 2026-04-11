@@ -19,7 +19,11 @@ module Pgbus
 
       def execute(message, queue_name, source_queue: nil)
         execution_start = monotonic_now
+        tag = "msg_id=#{message.msg_id} queue=#{queue_name} read_ct=#{message.read_ct}"
+        Pgbus.logger.debug { "[Pgbus::Executor] start #{tag}" }
+
         payload = JSON.parse(message.message)
+        job_class = payload["job_class"]
         read_count = message.read_ct.to_i
 
         if read_count > config.max_retries
@@ -29,10 +33,9 @@ module Pgbus
           signal_batch_discarded(payload)
           Uniqueness.release_lock(Uniqueness.extract_key(payload))
           record_stat(payload, queue_name, "dead_lettered", execution_start, message: message)
+          Pgbus.logger.debug { "[Pgbus::Executor] dead_lettered #{tag} job_class=#{job_class}" }
           return :dead_lettered
         end
-
-        job_class = payload["job_class"]
         uniqueness_key = Uniqueness.extract_key(payload)
         uniqueness_strategy = Uniqueness.extract_strategy(payload)
 
@@ -53,28 +56,24 @@ module Pgbus
           end
         end
 
+        Pgbus.logger.debug { "[Pgbus::Executor] deserialized #{tag} job_class=#{job_class}" }
         job_succeeded = false
 
-        # Debug-level phase markers. Silent at INFO+, but invaluable when a
-        # fiber interrupt or connection issue loses control flow between phases
-        # (issue #126). Each line identifies msg_id + phase so the gap is
-        # visible in logs: "deserialized" without "archived" means the job
-        # ran but its message was never archived.
         msg_id = message.msg_id.to_i
         Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
-          Pgbus.logger.debug { "[Pgbus] Executor phase=deserialize msg_id=#{msg_id} job=#{job_class}" }
           job = ::ActiveJob::Base.deserialize(payload)
-          Pgbus.logger.debug { "[Pgbus] Executor phase=perform msg_id=#{msg_id} job=#{job_class}" }
+          Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
           execute_job(job)
-          Pgbus.logger.debug { "[Pgbus] Executor phase=archive msg_id=#{msg_id} job=#{job_class}" }
+          Pgbus.logger.debug { "[Pgbus::Executor] perform_returned #{tag} job_class=#{job_class}" }
           archive_from(queue_name, msg_id, source_queue: source_queue)
+          Pgbus.logger.debug { "[Pgbus::Executor] archived #{tag} job_class=#{job_class}" }
           FailedEventRecorder.clear!(queue_name: queue_name, msg_id: msg_id)
           job_succeeded = true
-          Pgbus.logger.debug { "[Pgbus] Executor phase=succeeded msg_id=#{msg_id} job=#{job_class}" }
         end
 
         instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
         record_stat(payload, queue_name, "success", execution_start, message: message)
+        Pgbus.logger.debug { "[Pgbus::Executor] done #{tag} job_class=#{job_class}" }
         :success
       rescue *FATAL_EXCEPTIONS
         # Process-fatal: propagate so the supervisor/OS can react.
@@ -88,6 +87,7 @@ module Pgbus
         handle_failure(message, queue_name, e, payload: payload)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
         record_stat(payload, queue_name, "failed", execution_start, message: message)
+        Pgbus.logger.debug { "[Pgbus::Executor] failed #{tag} job_class=#{payload&.dig("job_class")} error=#{e.class}" }
         # Don't signal concurrency on transient failure — the job will be retried.
         # Semaphore is released only on success or dead-lettering.
         :failed

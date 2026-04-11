@@ -126,6 +126,7 @@ module Pgbus
 
         @rate_counter.increment(:dequeued, tagged_messages.size)
         tagged_messages.each do |queue_name, message, source_queue|
+          detect_zombie(queue_name, message)
           @in_flight.increment
           @pool.post { process_message(message, queue_name, source_queue: source_queue) }
         end
@@ -283,6 +284,21 @@ module Pgbus
           end
         end
         Pgbus.logger.error { "[Pgbus] Queue table missing: #{error.message}" }
+      end
+
+      def detect_zombie(queue_name, message)
+        return unless config.zombie_detection
+        return unless message.read_ct.to_i > 1
+
+        return if FailedEventRecorder.exists?(queue_name: queue_name, msg_id: message.msg_id.to_i)
+
+        Pgbus.logger.warn do
+          "[Pgbus] Zombie message redelivered: queue=#{queue_name} msg_id=#{message.msg_id} " \
+            "read_ct=#{message.read_ct} — previous read did not record a failure. " \
+            "The worker may have crashed mid-execute or the executor silently dropped the job."
+        end
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Zombie detection failed: #{e.class}: #{e.message}" }
       end
 
       def check_recycle

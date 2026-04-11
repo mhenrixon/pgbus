@@ -477,6 +477,79 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    describe "lifecycle debug logging" do
+      let(:message) { build_message_double(msg_id: 80, message: message_json, read_ct: 1) }
+      let(:log_output) { StringIO.new }
+
+      let(:previous_logger) { config.logger }
+
+      before do
+        previous_logger # memoize before overwriting
+        config.logger = Logger.new(log_output, level: Logger::DEBUG)
+      end
+
+      after do
+        config.logger = previous_logger
+      end
+
+      it "emits debug logs at each phase on success" do
+        executor.execute(message, queue_name)
+
+        output = log_output.string
+        expect(output).to include("[Pgbus::Executor] start msg_id=80")
+        expect(output).to include("[Pgbus::Executor] deserialized msg_id=80")
+        expect(output).to include("[Pgbus::Executor] running msg_id=80")
+        expect(output).to include("[Pgbus::Executor] perform_returned msg_id=80")
+        expect(output).to include("[Pgbus::Executor] archived msg_id=80")
+        expect(output).to include("[Pgbus::Executor] done msg_id=80")
+      end
+
+      it "includes queue and read_ct in the tag" do
+        executor.execute(message, queue_name)
+
+        output = log_output.string
+        expect(output).to include("queue=default")
+        expect(output).to include("read_ct=1")
+      end
+
+      it "includes job_class after deserialization" do
+        executor.execute(message, queue_name)
+
+        output = log_output.string
+        expect(output).to include("job_class=TestJob")
+      end
+
+      it "emits debug logs for dead letter path" do
+        dlq_message = build_message_double(msg_id: 81, message: message_json, read_ct: config.max_retries + 1)
+
+        executor.execute(dlq_message, queue_name)
+
+        output = log_output.string
+        expect(output).to include("[Pgbus::Executor] start msg_id=81")
+        expect(output).to include("[Pgbus::Executor] dead_lettered msg_id=81")
+        expect(output).to include("job_class=TestJob")
+      end
+
+      it "emits debug log on failure" do
+        allow(job_double).to receive(:perform_now).and_raise(StandardError, "boom")
+
+        executor.execute(message, queue_name)
+
+        output = log_output.string
+        expect(output).to include("[Pgbus::Executor] start msg_id=80")
+        expect(output).to include("[Pgbus::Executor] failed msg_id=80")
+      end
+
+      it "does not evaluate debug blocks when logger level is above debug" do
+        config.logger = Logger.new(log_output, level: Logger::INFO)
+
+        executor.execute(message, queue_name)
+
+        output = log_output.string
+        expect(output).not_to include("[Pgbus::Executor]")
+      end
+    end
+
     describe "retry backoff (VT-based retry path)" do
       let(:message) { build_message_double(msg_id: 50, message: message_json, read_ct: 2) }
 
