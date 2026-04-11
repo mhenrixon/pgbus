@@ -638,8 +638,7 @@ module Pgbus
       # Returns aggregate health across all queue and archive tables, plus
       # the oldest open transaction age (MVCC horizon pinning risk).
       def queue_health_stats
-        queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        tables = queue_names.flat_map { |n| table_health_for(n) }.compact
+        tables = fetch_all_table_stats
 
         total_dead = tables.sum { |t| t[:dead_tuples] }
         total_live = tables.sum { |t| t[:live_tuples] }
@@ -657,7 +656,7 @@ module Pgbus
           tables: tables
         }
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus::Web] Error fetching queue health stats: #{e.class}: #{e.message}" }
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching queue health stats: #{e.class}: #{e.message}" }
         {
           total_dead_tuples: 0, total_live_tuples: 0, worst_bloat_ratio: 0.0,
           tables_needing_vacuum: 0, oldest_vacuum_ago_sec: nil,
@@ -724,7 +723,33 @@ module Pgbus
         Pgbus::BusRecord.connection
       end
 
-      # Fetch pg_stat_user_tables stats for a single table.
+      # Single query to fetch pg_stat_user_tables stats for all queue and
+      # archive tables. Avoids 2*N catalog queries on the dashboard.
+      def fetch_all_table_stats
+        rows = connection.select_all(<<~SQL, "Pgbus All Table Health")
+          WITH rels AS (
+            SELECT queue_name, 'q_' || queue_name AS relname, 'queue' AS kind FROM pgmq.meta
+            UNION ALL
+            SELECT queue_name, 'a_' || queue_name AS relname, 'archive' AS kind FROM pgmq.meta
+          )
+          SELECT
+            'pgmq.' || r.relname AS table_name,
+            r.kind,
+            s.n_live_tup,
+            s.n_dead_tup,
+            EXTRACT(epoch FROM (NOW() - COALESCE(s.last_vacuum, s.last_autovacuum)))::int AS last_vacuum_ago_sec,
+            s.last_vacuum,
+            s.last_autovacuum
+          FROM rels r
+          LEFT JOIN pg_stat_user_tables s
+            ON s.schemaname = 'pgmq' AND s.relname = r.relname
+          ORDER BY r.queue_name, r.kind
+        SQL
+
+        rows.to_a.filter_map { |row| build_table_health_row(row) }
+      end
+
+      # Fetch pg_stat_user_tables stats for a single table (used by queue_health_detail).
       def fetch_table_stats(schema, table_name, kind)
         row = connection.select_one(<<~SQL, "Pgbus Table Health")
           SELECT
@@ -739,14 +764,20 @@ module Pgbus
 
         return nil unless row
 
+        build_table_health_row(row.merge("table_name" => "#{schema}.#{table_name}", "kind" => kind))
+      end
+
+      def build_table_health_row(row)
+        return nil unless row["n_live_tup"] || row["n_dead_tup"]
+
         live = row["n_live_tup"].to_i
         dead = row["n_dead_tup"].to_i
         total = live + dead
         bloat = total.positive? ? (dead.to_f / total) : 0.0
 
         {
-          table: "#{schema}.#{table_name}",
-          kind: kind,
+          table: row["table_name"],
+          kind: row["kind"],
           live_tuples: live,
           dead_tuples: dead,
           bloat_ratio: bloat.round(4),
@@ -754,15 +785,6 @@ module Pgbus
           last_vacuum: row["last_vacuum"],
           last_autovacuum: row["last_autovacuum"]
         }
-      end
-
-      # Gather health for both the queue table and archive table of a queue.
-      def table_health_for(queue_name)
-        sanitized = sanitize_name(queue_name)
-        [
-          fetch_table_stats("pgmq", "q_#{sanitized}", "queue"),
-          fetch_table_stats("pgmq", "a_#{sanitized}", "archive")
-        ]
       end
 
       # Age of the oldest open transaction in seconds — indicates MVCC
@@ -779,7 +801,8 @@ module Pgbus
         SQL
 
         row&.dig("age_sec")&.to_i
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching oldest transaction age: #{e.class}: #{e.message}" }
         nil
       end
 

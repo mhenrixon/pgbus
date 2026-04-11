@@ -19,11 +19,14 @@ fi:
           last_vacuum: Viimeisin Vacuum
           live: Elävät
           table: Taulu
+        kinds:
+          archive: Arkisto
+          queue: Jono
         last_vacuum: Viimeisin Vacuum
-        live: elävät
+        live: Elävät
         mvcc_horizon: MVCC-horisontti
-        oldest_open_txn: vanhin avoin transaktio
-        oldest_vacuum_ago: vanhin taulun vacuum
+        oldest_open_txn: Vanhin avoin transaktio
+        oldest_vacuum_ago: Vanhin taulun vacuum
         tables_need_vacuum:
           one: "%{count} taulu tarvitsee vacuum-käsittelyn"
           other: "%{count} taulua tarvitsee vacuum-käsittelyn"

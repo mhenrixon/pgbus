@@ -19,11 +19,14 @@ fr:
           last_vacuum: Dernier Vacuum
           live: Actives
           table: Table
+        kinds:
+          archive: Archive
+          queue: File d'attente
         last_vacuum: Dernier Vacuum
-        live: actives
+        live: Actives
         mvcc_horizon: Horizon MVCC
-        oldest_open_txn: plus ancienne transaction ouverte
-        oldest_vacuum_ago: plus ancien vacuum de table
+        oldest_open_txn: Plus ancienne transaction ouverte
+        oldest_vacuum_ago: Plus ancien vacuum de table
         tables_need_vacuum:
           one: "%{count} table nécessite un vacuum"
           other: "%{count} tables nécessitent un vacuum"

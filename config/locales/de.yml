@@ -19,11 +19,14 @@ de:
           last_vacuum: Letztes Vacuum
           live: Aktiv
           table: Tabelle
+        kinds:
+          archive: Archiv
+          queue: Warteschlange
         last_vacuum: Letztes Vacuum
-        live: aktiv
+        live: Aktiv
         mvcc_horizon: MVCC-Horizont
-        oldest_open_txn: älteste offene Transaktion
-        oldest_vacuum_ago: ältestes Tabellen-Vacuum
+        oldest_open_txn: Älteste offene Transaktion
+        oldest_vacuum_ago: Ältestes Tabellen-Vacuum
         tables_need_vacuum:
           one: "%{count} Tabelle benötigt Vacuum"
           other: "%{count} Tabellen benötigen Vacuum"

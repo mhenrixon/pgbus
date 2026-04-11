@@ -60,7 +60,8 @@ ALTER TABLE pgmq.q_pgbus_default SET (
 -- Archive tables: append-heavy, vacuum less critical but still important
 ALTER TABLE pgmq.a_pgbus_default SET (
   autovacuum_vacuum_scale_factor = 0.05,
-  autovacuum_vacuum_cost_delay = 5
+  autovacuum_vacuum_cost_delay = 5,
+  autovacuum_analyze_scale_factor = 0.05
 );
 ```
 
