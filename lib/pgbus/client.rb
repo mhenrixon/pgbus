@@ -75,7 +75,10 @@ module Pgbus
       return if @queues_created[dlq_name]
 
       @queues_created.compute_if_absent(dlq_name) do
-        synchronized { @pgmq.create(dlq_name) }
+        synchronized do
+          @pgmq.create(dlq_name)
+          tune_autovacuum(dlq_name)
+        end
         true
       end
     end

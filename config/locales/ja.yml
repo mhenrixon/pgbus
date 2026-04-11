@@ -19,6 +19,9 @@ ja:
           last_vacuum: 最終Vacuum
           live: ライブ
           table: テーブル
+        kinds:
+          archive: アーカイブ
+          queue: キュー
         last_vacuum: 最終Vacuum
         live: ライブ
         mvcc_horizon: MVCCホライズン

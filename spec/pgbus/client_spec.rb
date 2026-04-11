@@ -100,6 +100,12 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#ensure_queue" do
+    it "tunes autovacuum when creating a queue" do
+      client.ensure_queue("jobs")
+
+      expect(client).to have_received(:tune_autovacuum).with("pgbus_test_jobs")
+    end
+
     it "creates the queue with the prefixed name" do
       client.ensure_queue("jobs")
 

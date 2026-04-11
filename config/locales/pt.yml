@@ -19,11 +19,14 @@ pt:
           last_vacuum: Último Vacuum
           live: Ativas
           table: Tabela
+        kinds:
+          archive: Arquivo
+          queue: Fila
         last_vacuum: Último Vacuum
-        live: ativas
+        live: Ativas
         mvcc_horizon: Horizonte MVCC
-        oldest_open_txn: transação aberta mais antiga
-        oldest_vacuum_ago: vacuum de tabela mais antigo
+        oldest_open_txn: Transação aberta mais antiga
+        oldest_vacuum_ago: Vacuum de tabela mais antigo
         tables_need_vacuum:
           one: "%{count} tabela precisa de vacuum"
           other: "%{count} tabelas precisam de vacuum"

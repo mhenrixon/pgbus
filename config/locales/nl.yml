@@ -19,11 +19,14 @@ nl:
           last_vacuum: Laatste Vacuum
           live: Actief
           table: Tabel
+        kinds:
+          archive: Archief
+          queue: Wachtrij
         last_vacuum: Laatste Vacuum
-        live: actief
+        live: Actief
         mvcc_horizon: MVCC-horizon
-        oldest_open_txn: oudste open transactie
-        oldest_vacuum_ago: oudste tabel-vacuum
+        oldest_open_txn: Oudste open transactie
+        oldest_vacuum_ago: Oudste tabel-vacuum
         tables_need_vacuum:
           one: "%{count} tabel heeft vacuum nodig"
           other: "%{count} tabellen hebben vacuum nodig"

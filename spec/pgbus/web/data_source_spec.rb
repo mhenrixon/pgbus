@@ -80,7 +80,7 @@ RSpec.describe Pgbus::Web::DataSource do
       )
 
       # Stub health-related queries (called by queue_health_stats within summary_stats)
-      allow(mock_connection).to receive(:select_one).with(anything, "Pgbus Table Health").and_return(nil)
+      allow(mock_connection).to receive(:select_all).with(anything, "Pgbus All Table Health").and_return([])
       allow(mock_connection).to receive(:select_one).with(anything, "Pgbus Oldest Transaction").and_return(nil)
 
       allow(data_source).to receive_messages(failed_events_count: 3, processes: [{ id: 1 }, { id: 2 }])
@@ -428,26 +428,23 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#queue_health_stats" do
-    let(:table_stats_row) do
-      {
-        "n_live_tup" => 1000,
-        "n_dead_tup" => 200,
-        "last_vacuum_ago_sec" => 300,
-        "last_vacuum" => "2026-04-10 10:00:00",
-        "last_autovacuum" => "2026-04-10 09:00:00"
-      }
+    let(:all_table_rows) do
+      [
+        { "table_name" => "pgmq.q_pgbus_default", "kind" => "queue",
+          "n_live_tup" => 1000, "n_dead_tup" => 200,
+          "last_vacuum_ago_sec" => 300, "last_vacuum" => "2026-04-10 10:00:00",
+          "last_autovacuum" => "2026-04-10 09:00:00" },
+        { "table_name" => "pgmq.a_pgbus_default", "kind" => "archive",
+          "n_live_tup" => 1000, "n_dead_tup" => 200,
+          "last_vacuum_ago_sec" => 300, "last_vacuum" => nil,
+          "last_autovacuum" => "2026-04-10 09:00:00" }
+      ]
     end
 
-    before do
-      allow(mock_connection).to receive(:select_values)
-        .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        .and_return(["pgbus_default"])
-    end
-
-    it "returns aggregated health stats across queue and archive tables" do
-      allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Table Health")
-        .and_return(table_stats_row)
+    it "returns aggregated health stats via a single query" do
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus All Table Health")
+        .and_return(all_table_rows)
 
       allow(mock_connection).to receive(:select_one)
         .with(anything, "Pgbus Oldest Transaction")
@@ -455,17 +452,19 @@ RSpec.describe Pgbus::Web::DataSource do
 
       result = data_source.queue_health_stats
 
-      expect(result[:total_dead_tuples]).to eq(400) # 200 per table * 2 tables
+      expect(result[:total_dead_tuples]).to eq(400)
       expect(result[:total_live_tuples]).to eq(2000)
       expect(result[:worst_bloat_ratio]).to be_within(0.001).of(0.1667)
-      expect(result[:tables_needing_vacuum]).to eq(2) # both > 0.1
+      expect(result[:tables_needing_vacuum]).to eq(2)
       expect(result[:oldest_vacuum_ago_sec]).to eq(300)
       expect(result[:oldest_transaction_age_sec]).to eq(5)
       expect(result[:tables].size).to eq(2)
     end
 
     it "returns zero defaults on error" do
-      allow(mock_connection).to receive(:select_values).and_raise(StandardError, "db gone")
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus All Table Health")
+        .and_raise(StandardError, "db gone")
 
       result = data_source.queue_health_stats
 
@@ -473,10 +472,10 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result[:tables]).to eq([])
     end
 
-    it "handles missing pg_stat rows gracefully" do
-      allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Table Health")
-        .and_return(nil)
+    it "handles empty results gracefully" do
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus All Table Health")
+        .and_return([])
 
       allow(mock_connection).to receive(:select_one)
         .with(anything, "Pgbus Oldest Transaction")
