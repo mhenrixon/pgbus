@@ -146,7 +146,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect(result).to eq(:failed)
       end
 
-      it "does not re-raise truly fatal signals (SystemExit, Interrupt)" do
+      it "re-raises truly fatal signals (SystemExit, Interrupt) instead of swallowing them" do
         allow(job_double).to receive(:perform_now).and_raise(SystemExit)
 
         expect { executor.execute(message, queue_name) }.to raise_error(SystemExit)
