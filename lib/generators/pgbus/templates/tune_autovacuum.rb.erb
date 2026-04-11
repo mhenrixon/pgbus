@@ -9,6 +9,12 @@ class TunePgbusAutovacuum < ActiveRecord::Migration<%= migration_version %>
     # New queues created after this migration automatically receive these
     # settings via Pgbus::Client at queue creation time.
     execute Pgbus::AutovacuumTuning.sql_for_all_queues
+
+    # Also tune pgbus-owned tables with high write churn:
+    # - pgbus_semaphores: rapid upsert+increment per job, periodic expiry
+    # - pgbus_uniqueness_keys: INSERT on enqueue, DELETE on completion
+    # - pgbus_processed_events: INSERT per event, bulk DELETE on TTL expiry
+    execute Pgbus::AutovacuumTuning.sql_for_high_churn_tables
   end
 
   def down
@@ -24,5 +30,9 @@ class TunePgbusAutovacuum < ActiveRecord::Migration<%= migration_version %>
         END LOOP;
       END $$;
     SQL
+
+    Pgbus::AutovacuumTuning::HIGH_CHURN_TABLES.each do |table|
+      execute "ALTER TABLE #{table} RESET (autovacuum_vacuum_scale_factor, autovacuum_vacuum_cost_delay, autovacuum_analyze_scale_factor)"
+    end
   end
 end

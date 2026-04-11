@@ -151,9 +151,11 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
 
-    # Tune autovacuum for queue/archive tables — default settings are too
-    # conservative for the high insert/delete churn of queue processing.
+    # Tune autovacuum for queue/archive tables and high-churn pgbus tables.
+    # Default settings are too conservative for the insert/delete churn of
+    # queue processing and concurrency lock management.
     execute Pgbus::AutovacuumTuning.sql_for_all_queues
+    execute Pgbus::AutovacuumTuning.sql_for_high_churn_tables
   end
 
   def down

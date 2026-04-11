@@ -61,4 +61,40 @@ RSpec.describe Pgbus::AutovacuumTuning do
       expect(archive_sf).to be > queue_sf
     end
   end
+
+  describe ".sql_for_high_churn_tables" do
+    subject(:sql) { described_class.sql_for_high_churn_tables }
+
+    it "includes ALTER TABLE for all high-churn tables" do
+      expect(sql).to include("ALTER TABLE pgbus_semaphores SET")
+      expect(sql).to include("ALTER TABLE pgbus_uniqueness_keys SET")
+      expect(sql).to include("ALTER TABLE pgbus_processed_events SET")
+    end
+
+    it "applies the high-churn settings" do
+      expect(sql).to include("autovacuum_vacuum_scale_factor = 0.02")
+      expect(sql).to include("autovacuum_vacuum_cost_delay = 2")
+    end
+  end
+
+  describe "HIGH_CHURN_TABLES" do
+    it "lists the three highest-churn pgbus tables" do
+      expect(described_class::HIGH_CHURN_TABLES).to contain_exactly(
+        "pgbus_semaphores",
+        "pgbus_uniqueness_keys",
+        "pgbus_processed_events"
+      )
+    end
+  end
+
+  describe "HIGH_CHURN_SETTINGS" do
+    it "is less aggressive than queue settings but more than archive settings" do
+      queue_sf = described_class::QUEUE_SETTINGS["autovacuum_vacuum_scale_factor"].to_f
+      high_sf = described_class::HIGH_CHURN_SETTINGS["autovacuum_vacuum_scale_factor"].to_f
+      archive_sf = described_class::ARCHIVE_SETTINGS["autovacuum_vacuum_scale_factor"].to_f
+
+      expect(high_sf).to be > queue_sf
+      expect(high_sf).to be < archive_sf
+    end
+  end
 end
