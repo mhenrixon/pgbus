@@ -151,7 +151,7 @@ module Pgbus
         if undefined_queue_table_error?(e)
           evict_missing_queues(e)
         else
-          Pgbus.logger.error { "[Pgbus] Error fetching messages: #{e.message}" }
+          ErrorReporter.report(e, { action: "fetch_messages", queues: active_queues })
         end
         []
       end
@@ -223,7 +223,7 @@ module Pgbus
         @jobs_failed.increment
         @rate_counter.increment(:failed)
         @circuit_breaker.record_failure(queue_name)
-        Pgbus.logger.error { "[Pgbus] Unhandled error processing message: #{e.message}" }
+        ErrorReporter.report(e, { action: "process_message", queue: queue_name })
       ensure
         @in_flight.decrement
       end

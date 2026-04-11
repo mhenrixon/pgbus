@@ -94,7 +94,7 @@ module Pgbus
         yield
         instance_variable_set(ivar, now)
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Dispatcher maintenance error: #{e.message}" }
+        ErrorReporter.report(e, { action: "dispatcher_maintenance", task: ivar.to_s.delete_prefix("@last_").delete_suffix("_at") })
       end
 
       def cleanup_processed_events

@@ -65,7 +65,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Outbox published #{published} entries" } if published.positive?
         published
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Outbox poll error: #{e.message}" }
+        ErrorReporter.report(e, { action: "outbox_poll" })
         0
       end
 
@@ -92,7 +92,7 @@ module Pgbus
         entry.update!(published_at: Time.current)
         true
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Failed to publish outbox entry #{entry.id}: #{e.message}" }
+        ErrorReporter.report(e, { action: "outbox_publish_topic", entry_id: entry.id })
         false
       end
 
@@ -112,7 +112,7 @@ module Pgbus
           group.each { |e| e.update!(published_at: now) }
           succeeded += group.size
         rescue StandardError => e
-          Pgbus.logger.error { "[Pgbus] Failed to batch-publish #{group.size} outbox entries: #{e.message}" }
+          ErrorReporter.report(e, { action: "outbox_batch_publish", queue: queue, batch_size: group.size })
           # Fall back to individual publishing for this group
           group.each { |entry| succeeded += 1 if publish_single_queue(entry) }
         end
@@ -133,7 +133,7 @@ module Pgbus
         entry.update!(published_at: Time.current)
         true
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Failed to publish outbox entry #{entry.id}: #{e.message}" }
+        ErrorReporter.report(e, { action: "outbox_publish_queue", entry_id: entry.id })
         false
       end
 

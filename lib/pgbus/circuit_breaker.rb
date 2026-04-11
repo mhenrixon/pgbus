@@ -92,7 +92,7 @@ module Pgbus
       @failure_counts.delete(queue_name)
       invalidate_cache(queue_name)
     rescue StandardError => e
-      Pgbus.logger.error { "[Pgbus] Circuit breaker trip failed for #{queue_name}: #{e.message}" }
+      ErrorReporter.report(e, { action: "circuit_breaker_trip", queue: queue_name })
     end
 
     def check_paused(queue_name)
