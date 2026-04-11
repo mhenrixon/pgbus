@@ -65,10 +65,10 @@ RSpec.describe Pgbus::AutovacuumTuning do
   describe ".sql_for_high_churn_tables" do
     subject(:sql) { described_class.sql_for_high_churn_tables }
 
-    it "includes ALTER TABLE for all high-churn tables" do
-      expect(sql).to include("ALTER TABLE pgbus_semaphores SET")
-      expect(sql).to include("ALTER TABLE pgbus_uniqueness_keys SET")
-      expect(sql).to include("ALTER TABLE pgbus_processed_events SET")
+    it "includes ALTER TABLE IF EXISTS for all high-churn tables" do
+      expect(sql).to include("ALTER TABLE IF EXISTS pgbus_semaphores SET")
+      expect(sql).to include("ALTER TABLE IF EXISTS pgbus_uniqueness_keys SET")
+      expect(sql).to include("ALTER TABLE IF EXISTS pgbus_processed_events SET")
     end
 
     it "applies the high-churn settings" do

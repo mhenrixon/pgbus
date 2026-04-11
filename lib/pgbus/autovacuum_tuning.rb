@@ -75,13 +75,14 @@ module Pgbus
 
       # Generate ALTER TABLE SQL for pgbus-owned high-churn tables.
       def sql_for_high_churn_tables
-        HIGH_CHURN_TABLES.map { |table| alter_table_sql(table, HIGH_CHURN_SETTINGS) }.join("\n")
+        HIGH_CHURN_TABLES.map { |table| alter_table_sql(table, HIGH_CHURN_SETTINGS, if_exists: true) }.join("\n")
       end
 
       private
 
-      def alter_table_sql(table, settings)
-        "ALTER TABLE #{table} SET (#{settings_clause(settings)});"
+      def alter_table_sql(table, settings, if_exists: false)
+        prefix = if_exists ? "ALTER TABLE IF EXISTS" : "ALTER TABLE"
+        "#{prefix} #{table} SET (#{settings_clause(settings)});"
       end
 
       def settings_clause(settings)
