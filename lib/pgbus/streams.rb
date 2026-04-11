@@ -6,6 +6,15 @@ module Pgbus
   # which returns a `Pgbus::Streams::Stream` providing `#broadcast`,
   # `#current_msg_id`, and `#read_after`.
   module Streams
+    # Raised when a composed stream name would overflow PGMQ's queue-name
+    # budget (derived from PostgreSQL's NAMEDATALEN=64, minus PGMQ's `q_`
+    # table prefix, minus the configured queue_prefix + separator).
+    #
+    # Inherits from ArgumentError so existing rescues of the underlying
+    # QueueNameValidator error keep working; callers that want to handle
+    # this specifically can rescue Pgbus::Streams::StreamNameTooLong.
+    class StreamNameTooLong < ArgumentError; end
+
     # Process-wide registry of server-side audience filter predicates.
     # Register filters at boot time via:
     #   Pgbus::Streams.filters.register(:admin_only) { |user| user.admin? }
@@ -30,6 +39,7 @@ module Pgbus
 
       def initialize(streamables, client: Pgbus.client)
         @name = self.class.name_from(streamables)
+        self.class.validate_name_length!(@name, streamables)
         @client = client
         @ensured = false
         @ensure_mutex = Mutex.new
@@ -106,6 +116,33 @@ module Pgbus
         else
           streamables.to_s
         end
+      end
+
+      # Enforces the pgbus queue-name budget at the Stream-construction
+      # boundary so a forgotten call site fails with an actionable error
+      # (pointing at the offending streamables and suggesting
+      # `Pgbus.stream_key`) instead of an opaque QueueNameValidator
+      # failure three frames deep in Client#ensure_stream_queue.
+      #
+      # The budget is computed from `config.queue_prefix` at call time
+      # so apps that override the prefix get the correct limit. Does not
+      # mutate the name — silent truncation is a footgun for
+      # multi-tenant apps where collisions would mix broadcasts across
+      # records. Callers who need a short, safe identifier should use
+      # `Pgbus.stream_key(...)` or include `Pgbus::Streams::Streamable`
+      # on their ActiveRecord models.
+      def self.validate_name_length!(name, streamables)
+        budget = Key.queue_name_budget
+        return if name.length <= budget
+
+        raise StreamNameTooLong,
+              "Stream name #{name.inspect} is #{name.length} chars, " \
+              "exceeds pgbus budget of #{budget} " \
+              "(queue_prefix=#{Pgbus.configuration.queue_prefix.inspect}, " \
+              "NAMEDATALEN=#{QueueNameValidator::MAX_QUEUE_NAME_LENGTH}). " \
+              "Streamables: #{streamables.inspect}. " \
+              "Use Pgbus.stream_key(*streamables) to produce a safe short name, " \
+              "or include Pgbus::Streams::Streamable on the model."
       end
 
       private
