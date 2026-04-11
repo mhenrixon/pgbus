@@ -59,6 +59,20 @@ RSpec.describe Pgbus::QueueNameValidator do
       expect(described_class.normalize("my.queue.name")).to eq("my_queue_name")
     end
 
+    it "replaces colons with underscores" do
+      # Colons are the turbo-rails stream-name separator
+      # (e.g. "user_1:notifications"). Stripping them entirely would
+      # collapse "user_1:notifications" and "user_1notifications"
+      # onto the same queue, so they must map to a safe character.
+      expect(described_class.normalize("user_1:notifications")).to eq("user_1_notifications")
+    end
+
+    it "does not collide colon-joined names with their stripped form" do
+      with_colon = described_class.normalize("a:b:c")
+      without_colon = described_class.normalize("abc")
+      expect(with_colon).not_to eq(without_colon)
+    end
+
     it "collapses consecutive underscores after replacement" do
       expect(described_class.normalize("my--queue")).to eq("my_queue")
     end
@@ -68,7 +82,7 @@ RSpec.describe Pgbus::QueueNameValidator do
       expect(described_class.normalize("trailing-")).to eq("trailing")
     end
 
-    it "strips characters that are not alphanumeric, hyphens, dots, or underscores" do
+    it "strips characters that are not alphanumeric, hyphens, dots, colons, or underscores" do
       expect(described_class.normalize("queue!@#name")).to eq("queuename")
     end
 

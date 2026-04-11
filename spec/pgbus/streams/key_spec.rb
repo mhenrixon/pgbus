@@ -162,6 +162,44 @@ RSpec.describe Pgbus::Streams::Key do
     ensure
       Pgbus.configuration.queue_prefix = original_prefix
     end
+
+    it "labels the ceiling in the error as pgbus_max_queue_name_length (not NAMEDATALEN)" do
+      # The ceiling is pgbus's effective limit (derived from
+      # pgmq-ruby's < 48 runtime check), not PostgreSQL's
+      # NAMEDATALEN=63. Pointing callers at "NAMEDATALEN" during
+      # debugging would send them chasing the wrong number.
+      oversized = "x" * (described_class.queue_name_budget + 1)
+      expect { described_class.stream_key(oversized) }
+        .to raise_error(ArgumentError) do |err|
+          expect(err.message).to include("pgbus_max_queue_name_length=#{Pgbus::QueueNameValidator::MAX_QUEUE_NAME_LENGTH}")
+          expect(err.message).not_to include("NAMEDATALEN")
+        end
+    end
+
+    it "rejects a string fragment containing ':' (the join separator)" do
+      # Without this guard, stream_key("a:b", :c) and stream_key("a", "b:c")
+      # would both produce "a:b:c" and collapse onto the same queue.
+      expect { described_class.stream_key("a:b", :c) }
+        .to raise_error(ArgumentError, /contains ':'/)
+    end
+
+    it "rejects a symbol fragment containing ':'" do
+      expect { described_class.stream_key(:"a:b") }
+        .to raise_error(ArgumentError, /contains ':'/)
+    end
+
+    it "rejects a fragment whose to_stream_key/to_gid_param contains ':'" do
+      hostile = Class.new do
+        def to_stream_key = "weird:value"
+      end.new
+      expect { described_class.stream_key(hostile) }
+        .to raise_error(ArgumentError, /contains ':'/)
+    end
+
+    it "explains the ambiguous-collision failure mode in the error" do
+      expect { described_class.stream_key("a:b") }
+        .to raise_error(ArgumentError, /collapse to the same key/)
+    end
   end
 
   describe ".queue_name_budget" do
@@ -176,7 +214,7 @@ RSpec.describe Pgbus::Streams::Key do
       Pgbus.configuration.queue_prefix = original_prefix
     end
 
-    it "reserves NAMEDATALEN minus queue_prefix minus separator" do
+    it "reserves MAX_QUEUE_NAME_LENGTH minus queue_prefix minus separator" do
       max = Pgbus::QueueNameValidator::MAX_QUEUE_NAME_LENGTH
       expected = max - Pgbus.configuration.queue_prefix.length - 1
       expect(described_class.queue_name_budget).to eq(expected)

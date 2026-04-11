@@ -139,7 +139,7 @@ module Pgbus
               "Stream name #{name.inspect} is #{name.length} chars, " \
               "exceeds pgbus budget of #{budget} " \
               "(queue_prefix=#{Pgbus.configuration.queue_prefix.inspect}, " \
-              "NAMEDATALEN=#{QueueNameValidator::MAX_QUEUE_NAME_LENGTH}). " \
+              "pgbus_max_queue_name_length=#{QueueNameValidator::MAX_QUEUE_NAME_LENGTH}). " \
               "Streamables: #{streamables.inspect}. " \
               "Use Pgbus.stream_key(*streamables) to produce a safe short name, " \
               "or include Pgbus::Streams::Streamable on the model."

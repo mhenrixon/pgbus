@@ -55,8 +55,17 @@ module Pgbus
       # Compose a short pgbus-safe stream name from any mix of records,
       # strings, symbols, and arrays. Returns the joined key when it fits
       # the pgbus queue-name budget; raises ArgumentError otherwise.
+      #
+      # Fragments must not contain `:` — it's the join separator, so
+      # `stream_key("a:b", :c)` and `stream_key("a", "b:c")` would both
+      # produce `"a:b:c"` and collapse two logically distinct streams
+      # onto one queue. Colons inside fragments (typically from a
+      # `to_stream_key`/`to_gid_param` implementation that forgot to
+      # sanitize) raise an ArgumentError at the call site.
       def stream_key(*parts, digest_bits: DEFAULT_DIGEST_BITS)
-        key = Array(parts).flatten.map { |part| normalize(part, digest_bits: digest_bits) }.join(":")
+        fragments = Array(parts).flatten.map { |part| normalize(part, digest_bits: digest_bits) }
+        fragments.each { |fragment| reject_colons!(fragment) }
+        key = fragments.join(":")
         budget = queue_name_budget
         return key if key.length <= budget
 
@@ -64,7 +73,7 @@ module Pgbus
               "stream_key #{key.inspect} is #{key.length} chars, " \
               "exceeds pgbus budget of #{budget} " \
               "(queue_prefix=#{Pgbus.configuration.queue_prefix.inspect}, " \
-              "NAMEDATALEN=#{QueueNameValidator::MAX_QUEUE_NAME_LENGTH}). " \
+              "pgbus_max_queue_name_length=#{QueueNameValidator::MAX_QUEUE_NAME_LENGTH}). " \
               "Shorten the streamables or use Pgbus::Streams::Streamable on the model."
       end
 
@@ -135,13 +144,30 @@ module Pgbus
         end
       end
 
-      # Budget = NAMEDATALEN ceiling - "<queue_prefix>_" length.
-      # Computed at call time (not a constant) so apps that override
-      # `config.queue_prefix` get the correct budget automatically.
+      # Budget = effective pgbus queue-name limit - "<queue_prefix>_"
+      # length. Computed at call time (not a constant) so apps that
+      # override `config.queue_prefix` get the correct budget
+      # automatically.
       def queue_name_budget
         QueueNameValidator::MAX_QUEUE_NAME_LENGTH -
           Pgbus.configuration.queue_prefix.length - 1
       end
+
+      # Raises if a normalized fragment contains the `:` separator.
+      # Kept private-ish via module_function so the guard is shared
+      # between stream_key and any future composer without becoming
+      # part of the public surface.
+      def reject_colons!(fragment)
+        return unless fragment.include?(":")
+
+        raise ArgumentError,
+              "stream_key fragment #{fragment.inspect} contains ':' which is the " \
+              "join separator — two calls with different colon placements would " \
+              "collapse to the same key (e.g. stream_key('a:b', :c) vs " \
+              "stream_key('a', 'b:c') both produce 'a:b:c'). Strip or replace " \
+              "colons in the offending streamable before calling stream_key."
+      end
+      private_class_method :reject_colons!
     end
   end
 end
