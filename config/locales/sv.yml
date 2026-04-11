@@ -19,11 +19,14 @@ sv:
           last_vacuum: Senaste Vacuum
           live: Levande
           table: Tabell
+        kinds:
+          archive: Arkiv
+          queue: Kö
         last_vacuum: Senaste Vacuum
-        live: levande
+        live: Levande
         mvcc_horizon: MVCC-horisont
-        oldest_open_txn: äldsta öppna transaktion
-        oldest_vacuum_ago: äldsta tabell-vacuum
+        oldest_open_txn: Äldsta öppna transaktion
+        oldest_vacuum_ago: Äldsta tabell-vacuum
         tables_need_vacuum:
           one: "%{count} tabell behöver vacuum"
           other: "%{count} tabeller behöver vacuum"
