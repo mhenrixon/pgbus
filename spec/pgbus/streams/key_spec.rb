@@ -59,6 +59,19 @@ RSpec.describe Pgbus::Streams::Key do
         .to raise_error(ArgumentError, /positive/)
     end
 
+    it "accepts digest_bits at the SHA-256 maximum (256)" do
+      expected = Digest::SHA256.hexdigest(record.id.to_s)
+      expect(described_class.short_id(record, digest_bits: 256)).to eq(expected)
+    end
+
+    it "rejects digest_bits above the SHA-256 maximum" do
+      # SHA-256 produces 64 hex chars total; asking for 512 bits would
+      # silently truncate to 256 with no indication to the caller.
+      # Refuse the request instead of lying about the collision horizon.
+      expect { described_class.short_id(record, digest_bits: 512) }
+        .to raise_error(ArgumentError, /256/)
+    end
+
     it "handles numeric ids by coercing to string" do
       numeric = double("record", id: 42)
       expected = Digest::SHA256.hexdigest("42")[0, 16]

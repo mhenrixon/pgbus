@@ -73,9 +73,21 @@ module Pgbus
       # intentionally not used here: its ~77k-row birthday bound is too
       # tight for a multi-tenant stream identifier where a collision would
       # route two records' broadcasts to the same queue.
+      # Full output size of the backing digest, in bits. Capping
+      # digest_bits here matters because `SHA256.hexdigest` only
+      # produces 64 hex chars (256 bits) no matter what — slicing
+      # `[0, 128]` just returns all 64 chars — so a caller asking for
+      # `digest_bits: 512` would silently get the same output as
+      # `digest_bits: 256` and walk away believing they'd widened the
+      # collision horizon. Raise instead.
+      MAX_DIGEST_BITS = ::Digest::SHA256.new.digest_length * 8 # => 256
+
       def short_id(record, digest_bits: DEFAULT_DIGEST_BITS)
-        unless digest_bits.is_a?(Integer) && digest_bits.positive? && (digest_bits % 4).zero?
-          raise ArgumentError, "digest_bits must be a positive multiple of 4"
+        unless digest_bits.is_a?(Integer) && digest_bits.positive? &&
+               (digest_bits % 4).zero? && digest_bits <= MAX_DIGEST_BITS
+          raise ArgumentError,
+                "digest_bits must be a positive multiple of 4 and <= #{MAX_DIGEST_BITS} " \
+                "(SHA-256 produces #{MAX_DIGEST_BITS} bits; asking for more would silently truncate)"
         end
 
         # Unpersisted records all share id=nil, which hashes to a single
