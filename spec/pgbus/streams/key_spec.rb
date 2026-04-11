@@ -31,7 +31,8 @@ RSpec.describe Pgbus::Streams::Key do
     let(:record) { double("record", id: "9c14e8b2-94c3-4c6f-8ca1-f50d2f5e22ca") }
 
     it "returns a 16-char (64-bit) hex prefix of SHA-256(id) by default" do
-      expect(described_class.short_id(record)).to match(/\A[0-9a-f]{16}\z/)
+      expected = Digest::SHA256.hexdigest(record.id.to_s)[0, 16]
+      expect(described_class.short_id(record)).to eq(expected)
     end
 
     it "is deterministic for the same id" do
@@ -44,7 +45,8 @@ RSpec.describe Pgbus::Streams::Key do
     end
 
     it "respects digest_bits override (128 bits -> 32 hex chars)" do
-      expect(described_class.short_id(record, digest_bits: 128)).to match(/\A[0-9a-f]{32}\z/)
+      expected = Digest::SHA256.hexdigest(record.id.to_s)[0, 32]
+      expect(described_class.short_id(record, digest_bits: 128)).to eq(expected)
     end
 
     it "rejects non-multiple-of-4 digest_bits" do
@@ -59,7 +61,18 @@ RSpec.describe Pgbus::Streams::Key do
 
     it "handles numeric ids by coercing to string" do
       numeric = double("record", id: 42)
-      expect(described_class.short_id(numeric)).to match(/\A[0-9a-f]{16}\z/)
+      expected = Digest::SHA256.hexdigest("42")[0, 16]
+      expect(described_class.short_id(numeric)).to eq(expected)
+    end
+
+    it "raises when the record has not been persisted (id is nil)" do
+      # Unpersisted AR records all share id=nil; hashing the empty
+      # string would collapse every unsaved record of the same class
+      # onto one stream key. The guard is what makes the digest's
+      # collision argument hold.
+      unsaved = double("unsaved_record", id: nil, class: double("Chat", name: "Chat"))
+      expect { described_class.short_id(unsaved) }
+        .to raise_error(ArgumentError, /must be persisted/)
     end
   end
 

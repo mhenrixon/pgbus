@@ -39,6 +39,14 @@ RSpec.describe "Streams: name length safety net (integration)", :integration do
 
   let(:fake_chat) { fake_model_class.new("9c14e8b2-94c3-4c6f-8ca1-f50d2f5e22ca") }
 
+  # Snapshots the set of PGMQ queue names via Pgbus::Client (the library
+  # boundary) rather than reaching into pgmq.meta directly. This keeps
+  # the spec aligned with the project rule that all PGMQ interactions
+  # go through Client — see .claude/rules/coding-style.md.
+  def queue_names_snapshot
+    Pgbus.client.list_queues.map { |q| q.respond_to?(:queue_name) ? q.queue_name : q.to_s }.sort
+  end
+
   describe "Pgbus.stream_key produces a broadcast-able short name" do
     it "round-trips a broadcast + read_after through real PGMQ" do
       name = Pgbus.stream_key(fake_chat, :messages)
@@ -71,13 +79,12 @@ RSpec.describe "Streams: name length safety net (integration)", :integration do
       # from Pgbus::Streams::Stream, not from deep inside PGMQ, and
       # must NOT have side effects on the queue catalog.
       long = "leak_check_#{"z" * budget}"
-      conn = ActiveRecord::Base.connection
-      queues_before = conn.select_values("SELECT queue_name FROM pgmq.meta").sort
+      queues_before = queue_names_snapshot
 
       expect { Pgbus.stream(long) }
         .to raise_error(Pgbus::Streams::StreamNameTooLong, /exceeds pgbus budget/)
 
-      queues_after = conn.select_values("SELECT queue_name FROM pgmq.meta").sort
+      queues_after = queue_names_snapshot
       expect(queues_after).to eq(queues_before)
     end
 
@@ -117,8 +124,11 @@ RSpec.describe "Streams: name length safety net (integration)", :integration do
       original_prefix = Pgbus.configuration.queue_prefix
       name = "z" * (budget - 2) # fits under the default prefix
 
-      # Switch to a much longer prefix so the name no longer fits.
-      Pgbus.configuration.queue_prefix = "pgbus_integration_long_prefix"
+      # Grow the prefix relative to whatever the suite booted with so
+      # the test deterministically triggers overflow even if the
+      # baseline prefix ever changes. Appending any non-empty suffix
+      # shrinks the budget and pushes `name` past it.
+      Pgbus.configuration.queue_prefix = "#{original_prefix}_overflow"
       Pgbus.instance_variable_set(:@stream_cache, nil)
 
       expect { Pgbus.stream(name) }

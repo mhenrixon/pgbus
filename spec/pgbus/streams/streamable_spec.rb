@@ -51,6 +51,37 @@ RSpec.describe Pgbus::Streams::Streamable do
       other = model_class.new("ffffffff-ffff-ffff-ffff-ffffffffffff")
       expect(record.to_stream_key).not_to eq(other.to_stream_key)
     end
+
+    it "bypasses a host-class #short_id override (method dispatch would silently win)" do
+      # Ruby does NOT warn when a class defines an instance method and
+      # then includes a module with the same name — the class method
+      # wins method lookup. If `to_stream_key` went through the
+      # unqualified `short_id` call, a host class defining its own
+      # `#short_id` (e.g. a display helper) would silently hijack the
+      # wire format. Streamable calls Key.short_id(self) explicitly to
+      # defeat this, and this spec pins the behavior.
+      hostile_class = Class.new do
+        include Pgbus::Streams::Streamable
+
+        attr_reader :id
+
+        def initialize(id)
+          @id = id
+        end
+
+        def self.model_name
+          Struct.new(:param_key).new("ai_chat")
+        end
+
+        def short_id(*)
+          "HOSTILE" # would break the wire format if dispatched to
+        end
+      end
+
+      record = hostile_class.new("9c14e8b2-94c3-4c6f-8ca1-f50d2f5e22ca")
+      expect(record.to_stream_key).to match(/\Aai_chat_[0-9a-f]{16}\z/)
+      expect(record.to_stream_key).not_to include("HOSTILE")
+    end
   end
 
   describe "integration with Pgbus.stream_key" do

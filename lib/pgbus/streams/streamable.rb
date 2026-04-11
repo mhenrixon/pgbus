@@ -25,9 +25,19 @@ module Pgbus
     #     # => "ai_chat_3a4f9c21b7d20e18:messages"
     #
     # The mixin is intentionally thin: it delegates to `Pgbus::Streams::Key`
-    # so the digest policy lives in one place. Host apps that already
-    # define `#short_id` will collide at include time — that's loud by
-    # design; silent override would hide a real conflict.
+    # so the digest policy lives in one place.
+    #
+    # `#to_stream_key` calls `Key.short_id(self)` directly rather than
+    # dispatching through `#short_id`. Ruby does NOT warn when a class
+    # defines an instance method and a later `include` adds a module
+    # with the same name — the class method silently wins. A host app
+    # that already defines its own `#short_id` (returning, say, a
+    # display-friendly abbreviation) would therefore hijack
+    # `to_stream_key` without any indication, producing stream keys
+    # the wire format never promised. Calling `Key.short_id(self)`
+    # explicitly bypasses instance-method lookup and guarantees the
+    # advertised digest regardless of what the host class does with
+    # the unqualified name.
     module Streamable
       # Returns a short SHA-256 prefix (64 bits / 16 hex chars by default)
       # of this record's primary key. See `Pgbus::Streams::Key.short_id`
@@ -40,7 +50,7 @@ module Pgbus
       # `<model_key>_<short_id>` suitable for passing directly to
       # `Pgbus.stream(...)` or composing with `Pgbus.stream_key`.
       def to_stream_key
-        "#{self.class.model_name.param_key}_#{short_id}"
+        "#{self.class.model_name.param_key}_#{Key.short_id(self)}"
       end
     end
   end

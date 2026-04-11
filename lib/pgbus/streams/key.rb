@@ -76,6 +76,18 @@ module Pgbus
           raise ArgumentError, "digest_bits must be a positive multiple of 4"
         end
 
+        # Unpersisted records all share id=nil, which hashes to a single
+        # constant digest and would collapse every new instance of the
+        # same class into one stream. Fail loud at the first unsaved
+        # call site — the whole point of the 64-bit digest is to
+        # eliminate collisions, so silently producing a shared key here
+        # would reintroduce exactly what it was chosen to prevent.
+        if record.id.nil?
+          raise ArgumentError,
+                "#{record.class.name} must be persisted before generating a stream key " \
+                "(record.id is nil — all unsaved records would collide on one stream)"
+        end
+
         hex_chars = digest_bits / 4
         ::Digest::SHA256.hexdigest(record.id.to_s)[0, hex_chars]
       end
