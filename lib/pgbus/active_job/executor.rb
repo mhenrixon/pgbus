@@ -13,6 +13,10 @@ module Pgbus
         @stat_buffer = stat_buffer
       end
 
+      # Exceptions we never want to swallow — let the process die/signal propagate.
+      FATAL_EXCEPTIONS = [SystemExit, Interrupt, SignalException, NoMemoryError, SystemStackError].freeze
+      private_constant :FATAL_EXCEPTIONS
+
       def execute(message, queue_name, source_queue: nil)
         execution_start = monotonic_now
         payload = JSON.parse(message.message)
@@ -51,18 +55,36 @@ module Pgbus
 
         job_succeeded = false
 
+        # Debug-level phase markers. Silent at INFO+, but invaluable when a
+        # fiber interrupt or connection issue loses control flow between phases
+        # (issue #126). Each line identifies msg_id + phase so the gap is
+        # visible in logs: "deserialized" without "archived" means the job
+        # ran but its message was never archived.
+        msg_id = message.msg_id.to_i
         Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
+          Pgbus.logger.debug { "[Pgbus] Executor phase=deserialize msg_id=#{msg_id} job=#{job_class}" }
           job = ::ActiveJob::Base.deserialize(payload)
+          Pgbus.logger.debug { "[Pgbus] Executor phase=perform msg_id=#{msg_id} job=#{job_class}" }
           execute_job(job)
-          archive_from(queue_name, message.msg_id.to_i, source_queue: source_queue)
-          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: message.msg_id.to_i)
+          Pgbus.logger.debug { "[Pgbus] Executor phase=archive msg_id=#{msg_id} job=#{job_class}" }
+          archive_from(queue_name, msg_id, source_queue: source_queue)
+          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: msg_id)
           job_succeeded = true
+          Pgbus.logger.debug { "[Pgbus] Executor phase=succeeded msg_id=#{msg_id} job=#{job_class}" }
         end
 
         instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
         record_stat(payload, queue_name, "success", execution_start, message: message)
         :success
-      rescue StandardError => e
+      rescue *FATAL_EXCEPTIONS
+        # Process-fatal: propagate so the supervisor/OS can react.
+        raise
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        # Widened from StandardError to catch Async::Stop / Async::Cancel
+        # (both inherit from Exception, not StandardError) under execution_mode: :async.
+        # Before this, a fiber interruption between perform_now and archive_from
+        # silently lost control flow — no failed event row, no job_failed
+        # notification, uniqueness lock held until VT expired. See issue #126.
         handle_failure(message, queue_name, e, payload: payload)
         instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
         record_stat(payload, queue_name, "failed", execution_start, message: message)
