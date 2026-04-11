@@ -12,6 +12,9 @@ RSpec.describe Pgbus::Client do
     c.instance_variable_set(:@schema_ensured, true)
     # Stub autovacuum tuning — runs raw SQL which needs a real PG connection.
     allow(c).to receive(:tune_autovacuum)
+    # Stub notify trigger check — runs raw SQL which needs a real PG connection.
+    # Tests that exercise this method explicitly override this stub.
+    allow(c).to receive(:notify_trigger_current?).and_return(false)
     c
   end
 
@@ -114,6 +117,7 @@ RSpec.describe Pgbus::Client do
 
     it "enables LISTEN/NOTIFY when listen_notify is true" do
       config.listen_notify = true
+      allow(client).to receive(:notify_trigger_current?).and_return(false)
       client.ensure_queue("jobs")
 
       expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: Pgbus::Client::NOTIFY_THROTTLE_MS)
@@ -124,6 +128,22 @@ RSpec.describe Pgbus::Client do
       client.ensure_queue("jobs")
 
       expect(mock_pgmq).not_to have_received(:enable_notify_insert)
+    end
+
+    it "skips enable_notify_insert when trigger already exists with correct throttle" do
+      config.listen_notify = true
+      allow(client).to receive(:notify_trigger_current?).with("pgbus_test_jobs", Pgbus::Client::NOTIFY_THROTTLE_MS).and_return(true)
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).not_to have_received(:enable_notify_insert)
+    end
+
+    it "calls enable_notify_insert when trigger exists but throttle differs" do
+      config.listen_notify = true
+      allow(client).to receive(:notify_trigger_current?).with("pgbus_test_jobs", Pgbus::Client::NOTIFY_THROTTLE_MS).and_return(false)
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: Pgbus::Client::NOTIFY_THROTTLE_MS)
     end
 
     it "is idempotent — only creates the queue once" do

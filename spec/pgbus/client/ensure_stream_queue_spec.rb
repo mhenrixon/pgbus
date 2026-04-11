@@ -17,6 +17,8 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
     end)
     allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
     allow(client).to receive(:ensure_queue)
+    # Stub notify trigger check — runs raw SQL which needs a real PG connection.
+    allow(client).to receive(:notify_trigger_current?).and_return(false)
   end
 
   let(:config) do

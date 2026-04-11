@@ -27,7 +27,9 @@ module Pgbus
         # sensitive and need every broadcast to fire a NOTIFY, even
         # when several are batched within a single millisecond.
         # Override the throttle to 0 specifically for stream queues.
-        synchronized { @pgmq.enable_notify_insert(full_name, throttle_interval_ms: 0) } if config.listen_notify
+        # Use the idempotent path to avoid deadlocks when multiple
+        # processes race to set up the same stream queue.
+        synchronized { enable_notify_if_needed(full_name, 0) }
 
         # CREATE INDEX IF NOT EXISTS is idempotent in Postgres but still
         # requires a roundtrip and a brief ACCESS SHARE lock on the archive

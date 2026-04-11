@@ -21,6 +21,14 @@ module Pgbus
 
         Pgbus.logger.info { "[Pgbus] Supervisor starting pid=#{::Process.pid}" }
 
+        # Bootstrap queues once in the parent process before forking children.
+        # This avoids the deadlock that occurs when multiple forked children
+        # race to call enable_notify_insert (DROP TRIGGER + CREATE TRIGGER)
+        # concurrently on the same queue tables. Children still call
+        # bootstrap_queues post-fork but the idempotent check in
+        # notify_trigger_current? makes those calls cheap no-ops.
+        bootstrap_queues
+
         boot_processes
         monitor_loop
       ensure

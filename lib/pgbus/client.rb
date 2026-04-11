@@ -457,10 +457,46 @@ module Pgbus
         synchronized do
           @pgmq.create(full_name)
           tune_autovacuum(full_name)
-          @pgmq.enable_notify_insert(full_name, throttle_interval_ms: NOTIFY_THROTTLE_MS) if config.listen_notify
+          enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
         end
         true
       end
+    end
+
+    def enable_notify_if_needed(full_name, throttle_ms)
+      return unless config.listen_notify
+      return if notify_trigger_current?(full_name, throttle_ms)
+
+      @pgmq.enable_notify_insert(full_name, throttle_interval_ms: throttle_ms)
+    end
+
+    # Check whether the NOTIFY trigger already exists on this queue with the
+    # expected throttle interval. When it does, we can skip the destructive
+    # DROP TRIGGER + CREATE TRIGGER cycle that causes deadlocks when multiple
+    # forked processes race during bootstrap.
+    def notify_trigger_current?(full_name, throttle_ms)
+      with_raw_connection do |conn|
+        result = conn.exec_params(<<~SQL, [full_name, throttle_ms])
+          SELECT 1
+          FROM pg_trigger t
+          JOIN pg_class c ON t.tgrelid = c.oid
+          JOIN pg_namespace n ON c.relnamespace = n.oid
+          WHERE n.nspname = 'pgmq'
+            AND c.relname = pgmq.format_table_name($1, 'q')
+            AND t.tgname = 'trigger_notify_queue_insert_listeners'
+            AND EXISTS (
+              SELECT 1 FROM pgmq.notify_insert_throttle
+              WHERE queue_name = $1
+                AND throttle_interval_ms = $2
+            )
+          LIMIT 1
+        SQL
+        result.ntuples.positive?
+      end
+    rescue StandardError
+      # If we can't check (e.g. pgmq schema not fully ready), fall back to
+      # the unconditional path — same behavior as before this fix.
+      false
     end
 
     def tune_autovacuum(queue_name)

@@ -150,6 +150,43 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  describe "pre-fork bootstrap" do
+    let(:supervisor) { described_class.new }
+    let(:mock_client) { build_mock_client }
+
+    before do
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive(:ensure_all_queues)
+    end
+
+    it "calls bootstrap_queues before boot_processes" do
+      call_order = []
+      allow(supervisor).to receive(:bootstrap_queues) { call_order << :bootstrap }
+      allow(supervisor).to receive(:boot_processes) { call_order << :boot }
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+
+      supervisor.run
+
+      expect(call_order).to eq(%i[bootstrap boot])
+    end
+
+    it "rescues bootstrap errors in the parent without aborting" do
+      allow(supervisor).to receive(:bootstrap_queues).and_call_original
+      allow(mock_client).to receive(:ensure_all_queues).and_raise(StandardError, "pg down")
+      allow(supervisor).to receive(:boot_processes)
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+      allow(Pgbus.logger).to receive(:error)
+
+      expect { supervisor.run }.not_to raise_error
+    end
+  end
+
   describe "recurring_tasks_configured? (private)" do
     let(:supervisor) { described_class.new }
 
