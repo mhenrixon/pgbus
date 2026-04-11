@@ -23,6 +23,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus::Executor] start #{tag}" }
 
         payload = JSON.parse(message.message)
+        job_class = payload["job_class"]
         read_count = message.read_ct.to_i
 
         if read_count > config.max_retries
@@ -32,11 +33,9 @@ module Pgbus
           signal_batch_discarded(payload)
           Uniqueness.release_lock(Uniqueness.extract_key(payload))
           record_stat(payload, queue_name, "dead_lettered", execution_start, message: message)
-          Pgbus.logger.debug { "[Pgbus::Executor] dead_lettered #{tag}" }
+          Pgbus.logger.debug { "[Pgbus::Executor] dead_lettered #{tag} job_class=#{job_class}" }
           return :dead_lettered
         end
-
-        job_class = payload["job_class"]
         uniqueness_key = Uniqueness.extract_key(payload)
         uniqueness_strategy = Uniqueness.extract_strategy(payload)
 

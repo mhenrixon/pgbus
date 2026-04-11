@@ -524,6 +524,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         output = log_output.string
         expect(output).to include("[Pgbus::Executor] start msg_id=81")
         expect(output).to include("[Pgbus::Executor] dead_lettered msg_id=81")
+        expect(output).to include("job_class=TestJob")
       end
 
       it "emits debug log on failure" do
