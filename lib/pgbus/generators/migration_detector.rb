@@ -73,7 +73,8 @@ module Pgbus
         add_queue_states: "pgbus:add_queue_states",
         add_outbox: "pgbus:add_outbox",
         add_recurring: "pgbus:add_recurring",
-        add_failed_events_index: "pgbus:add_failed_events_index"
+        add_failed_events_index: "pgbus:add_failed_events_index",
+        tune_autovacuum: "pgbus:tune_autovacuum"
       }.freeze
 
       # Human-friendly description of each migration for the generator
@@ -88,7 +89,8 @@ module Pgbus
         add_queue_states: "queue states table (pause/resume)",
         add_outbox: "outbox entries table (transactional outbox)",
         add_recurring: "recurring tasks + executions tables",
-        add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)"
+        add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)",
+        tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables"
       }.freeze
 
       def initialize(connection)
@@ -110,7 +112,8 @@ module Pgbus
           *queue_states_migrations,
           *outbox_migrations,
           *recurring_migrations,
-          *failed_events_index_migrations
+          *failed_events_index_migrations,
+          *autovacuum_migrations
         ]
       end
 
@@ -193,6 +196,15 @@ module Pgbus
         [:add_failed_events_index]
       end
 
+      # Autovacuum tuning: check if any PGMQ queue table already has
+      # custom autovacuum settings applied. If not, queue the migration.
+      def autovacuum_migrations
+        return [] unless pgmq_schema_exists?
+        return [] if autovacuum_already_tuned?
+
+        [:tune_autovacuum]
+      end
+
       # --- schema probes -------------------------------------------------
 
       def table_exists?(name)
@@ -211,6 +223,29 @@ module Pgbus
         connection.indexes(table).any? { |idx| idx.name == index_name }
       rescue StandardError
         false
+      end
+
+      def pgmq_schema_exists?
+        result = connection.select_value("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+        result.present?
+      rescue StandardError
+        false
+      end
+
+      def autovacuum_already_tuned?
+        queue_name = connection.select_value("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+        return true unless queue_name # no queues = nothing to tune, skip
+
+        result = connection.select_value(<<~SQL)
+          SELECT reloptions::text LIKE '%autovacuum_vacuum_scale_factor%'
+          FROM pg_class
+          WHERE relname = 'q_#{queue_name}'
+            AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'pgmq')
+        SQL
+
+        [true, "t"].include?(result)
+      rescue StandardError
+        true # if we can't tell, assume already tuned (safe default)
       end
     end
   end

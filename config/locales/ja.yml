@@ -10,6 +10,28 @@ ja:
           pid: PID
           status: ステータス
         title: アクティブなプロセス
+      queue_health:
+        dead_tuples: デッドタプル
+        headers:
+          bloat: Bloat
+          dead: デッド
+          kind: 種類
+          last_vacuum: 最終Vacuum
+          live: ライブ
+          table: テーブル
+        kinds:
+          archive: アーカイブ
+          queue: キュー
+        last_vacuum: 最終Vacuum
+        live: ライブ
+        mvcc_horizon: MVCCホライズン
+        oldest_open_txn: 最も古い未完了トランザクション
+        oldest_vacuum_ago: 最も古いテーブルvacuum
+        tables_need_vacuum:
+          one: "%{count} テーブルがvacuumを必要としています"
+          other: "%{count} テーブルがvacuumを必要としています"
+        title: キューの健全性
+        worst_bloat: 最悪のBloat
       queues_table:
         empty: キューが見つかりません
         headers:
@@ -337,6 +359,15 @@ ja:
         resume: 再開
         retry: リトライ
         retry_confirm: 可視性タイムアウトをリセットしてリトライしますか？
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: デッド
+            last_vacuum: 最終Vacuum
+            live: ライブ
+            table: テーブル
+          oldest_txn: '最も古い未完了トランザクション:'
+          title: テーブルの健全性
         total: 合計：
         visible: 表示中：
     recurring_tasks:
@@ -345,10 +376,6 @@ ja:
           one: "%{count} タスクが設定されています"
           other: "%{count} タスクが設定されています"
         title: 定期タスク
-      toggle:
-        disabled: タスクが無効になりました
-        enabled: タスクが有効になりました
-        failed: タスクの切り替えに失敗しました
       show:
         back: 戻る
         configuration: 設定
@@ -392,3 +419,7 @@ ja:
           task: タスク
         never: なし
         run_now: 今すぐ実行
+      toggle:
+        disabled: タスクが無効になりました
+        enabled: タスクが有効になりました
+        failed: タスクの切り替えに失敗しました

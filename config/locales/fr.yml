@@ -10,6 +10,28 @@ fr:
           pid: PID
           status: Statut
         title: Processus actifs
+      queue_health:
+        dead_tuples: Tuples mortes
+        headers:
+          bloat: Bloat
+          dead: Mortes
+          kind: Type
+          last_vacuum: Dernier Vacuum
+          live: Actives
+          table: Table
+        kinds:
+          archive: Archive
+          queue: File d'attente
+        last_vacuum: Dernier Vacuum
+        live: Actives
+        mvcc_horizon: Horizon MVCC
+        oldest_open_txn: Plus ancienne transaction ouverte
+        oldest_vacuum_ago: Plus ancien vacuum de table
+        tables_need_vacuum:
+          one: "%{count} table nécessite un vacuum"
+          other: "%{count} tables nécessitent un vacuum"
+        title: Santé des files d'attente
+        worst_bloat: Pire Bloat
       queues_table:
         empty: Aucune file d'attente trouvée
         headers:
@@ -337,6 +359,15 @@ fr:
         resume: Reprendre
         retry: Réessayer
         retry_confirm: Réinitialiser le délai de visibilité et réessayer ?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Mortes
+            last_vacuum: Dernier Vacuum
+            live: Actives
+            table: Table
+          oldest_txn: 'Plus ancienne transaction ouverte :'
+          title: Santé des tables
         total: 'Total :'
         visible: 'Visible :'
     recurring_tasks:
@@ -345,10 +376,6 @@ fr:
           one: Tâche %{count} configurée
           other: Tâches %{count} configurées
         title: Tâches récurrentes
-      toggle:
-        disabled: Tâche désactivée
-        enabled: Tâche activée
-        failed: Impossible de basculer la tâche
       show:
         back: Retour
         configuration: Configuration
@@ -392,3 +419,7 @@ fr:
           task: Tâche
         never: Jamais
         run_now: Exécuter maintenant
+      toggle:
+        disabled: Tâche désactivée
+        enabled: Tâche activée
+        failed: Impossible de basculer la tâche

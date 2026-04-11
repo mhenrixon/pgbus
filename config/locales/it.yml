@@ -10,6 +10,28 @@ it:
           pid: PID
           status: Stato
         title: Processi attivi
+      queue_health:
+        dead_tuples: Tuple morte
+        headers:
+          bloat: Bloat
+          dead: Morte
+          kind: Tipo
+          last_vacuum: Ultimo Vacuum
+          live: Attive
+          table: Tabella
+        kinds:
+          archive: Archivio
+          queue: Coda
+        last_vacuum: Ultimo Vacuum
+        live: Attive
+        mvcc_horizon: Orizzonte MVCC
+        oldest_open_txn: Transazione aperta più vecchia
+        oldest_vacuum_ago: Vacuum tabella più vecchio
+        tables_need_vacuum:
+          one: "%{count} tabella necessita di vacuum"
+          other: "%{count} tabelle necessitano di vacuum"
+        title: Salute delle Code
+        worst_bloat: Peggior Bloat
       queues_table:
         empty: Nessuna coda trovata
         headers:
@@ -337,6 +359,15 @@ it:
         resume: Riprendi
         retry: Riprova
         retry_confirm: Reimpostare il timeout di visibilità e riprovare?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Morte
+            last_vacuum: Ultimo Vacuum
+            live: Attive
+            table: Tabella
+          oldest_txn: 'Transazione aperta più vecchia:'
+          title: Salute delle Tabelle
         total: 'Totale:'
         visible: 'Visibile:'
     recurring_tasks:
@@ -345,10 +376,6 @@ it:
           one: "%{count} attività configurata"
           other: "%{count} attività configurate"
         title: Attività ricorrenti
-      toggle:
-        disabled: Attività disabilitata
-        enabled: Attività abilitata
-        failed: Impossibile cambiare lo stato dell'attività
       show:
         back: Indietro
         configuration: Configurazione
@@ -392,3 +419,7 @@ it:
           task: Attività
         never: Mai
         run_now: Esegui ora
+      toggle:
+        disabled: Attività disabilitata
+        enabled: Attività abilitata
+        failed: Impossibile cambiare lo stato dell'attività

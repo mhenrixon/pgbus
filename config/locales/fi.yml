@@ -10,6 +10,28 @@ fi:
           pid: PID
           status: Tila
         title: Aktiiviset prosessit
+      queue_health:
+        dead_tuples: Kuolleet tuplat
+        headers:
+          bloat: Bloat
+          dead: Kuolleet
+          kind: Tyyppi
+          last_vacuum: Viimeisin Vacuum
+          live: Elävät
+          table: Taulu
+        kinds:
+          archive: Arkisto
+          queue: Jono
+        last_vacuum: Viimeisin Vacuum
+        live: Elävät
+        mvcc_horizon: MVCC-horisontti
+        oldest_open_txn: Vanhin avoin transaktio
+        oldest_vacuum_ago: Vanhin taulun vacuum
+        tables_need_vacuum:
+          one: "%{count} taulu tarvitsee vacuum-käsittelyn"
+          other: "%{count} taulua tarvitsee vacuum-käsittelyn"
+        title: Jonon kunto
+        worst_bloat: Pahin Bloat
       queues_table:
         empty: Jonot eivät löytyneet
         headers:
@@ -337,6 +359,15 @@ fi:
         resume: Jatka
         retry: Yritä uudelleen
         retry_confirm: Nollaa näkyvyysaika ja yritä uudelleen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Kuolleet
+            last_vacuum: Viimeisin Vacuum
+            live: Elävät
+            table: Taulu
+          oldest_txn: 'Vanhin avoin transaktio:'
+          title: Taulun kunto
         total: 'Yhteensä:'
         visible: 'Näkyvissä:'
     recurring_tasks:
@@ -345,10 +376,6 @@ fi:
           one: "%{count} tehtävä määritetty"
           other: "%{count} tehtävää määritetty"
         title: Toistuvat tehtävät
-      toggle:
-        disabled: Tehtävä poistettu käytöstä
-        enabled: Tehtävä otettu käyttöön
-        failed: Tehtävän vaihto epäonnistui
       show:
         back: Takaisin
         configuration: Asetukset
@@ -392,3 +419,7 @@ fi:
           task: Tehtävä
         never: Ei koskaan
         run_now: Suorita nyt
+      toggle:
+        disabled: Tehtävä poistettu käytöstä
+        enabled: Tehtävä otettu käyttöön
+        failed: Tehtävän vaihto epäonnistui

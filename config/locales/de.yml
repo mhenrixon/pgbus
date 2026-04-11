@@ -10,6 +10,28 @@ de:
           pid: PID
           status: Status
         title: Aktive Prozesse
+      queue_health:
+        dead_tuples: Tote Tupel
+        headers:
+          bloat: Bloat
+          dead: Tot
+          kind: Art
+          last_vacuum: Letztes Vacuum
+          live: Aktiv
+          table: Tabelle
+        kinds:
+          archive: Archiv
+          queue: Warteschlange
+        last_vacuum: Letztes Vacuum
+        live: Aktiv
+        mvcc_horizon: MVCC-Horizont
+        oldest_open_txn: Älteste offene Transaktion
+        oldest_vacuum_ago: Ältestes Tabellen-Vacuum
+        tables_need_vacuum:
+          one: "%{count} Tabelle benötigt Vacuum"
+          other: "%{count} Tabellen benötigen Vacuum"
+        title: Warteschlangen-Gesundheit
+        worst_bloat: Schlimmster Bloat
       queues_table:
         empty: Keine Warteschlangen gefunden
         headers:
@@ -337,6 +359,15 @@ de:
         resume: Fortsetzen
         retry: Wiederholen
         retry_confirm: Sichtbarkeits-Timeout zurücksetzen und erneut versuchen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Tot
+            last_vacuum: Letztes Vacuum
+            live: Aktiv
+            table: Tabelle
+          oldest_txn: 'Älteste offene Transaktion:'
+          title: Tabellen-Gesundheit
         total: 'Insgesamt:'
         visible: 'Sichtbar:'
     recurring_tasks:
@@ -345,10 +376,6 @@ de:
           one: "%{count} Aufgabe konfiguriert"
           other: "%{count} Aufgaben konfiguriert"
         title: Wiederkehrende Aufgaben
-      toggle:
-        disabled: Aufgabe deaktiviert
-        enabled: Aufgabe aktiviert
-        failed: Aufgabe konnte nicht umgeschaltet werden
       show:
         back: Zurück
         configuration: Konfiguration
@@ -392,3 +419,7 @@ de:
           task: Aufgabe
         never: Nie
         run_now: Jetzt ausführen
+      toggle:
+        disabled: Aufgabe deaktiviert
+        enabled: Aufgabe aktiviert
+        failed: Aufgabe konnte nicht umgeschaltet werden

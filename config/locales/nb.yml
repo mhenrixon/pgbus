@@ -10,6 +10,28 @@ nb:
           pid: PID
           status: Status
         title: Aktive prosesser
+      queue_health:
+        dead_tuples: Døde tupler
+        headers:
+          bloat: Bloat
+          dead: Døde
+          kind: Type
+          last_vacuum: Siste Vacuum
+          live: Levende
+          table: Tabell
+        kinds:
+          archive: Arkiv
+          queue: Kø
+        last_vacuum: Siste Vacuum
+        live: Levende
+        mvcc_horizon: MVCC-horisont
+        oldest_open_txn: Eldste åpne transaksjon
+        oldest_vacuum_ago: Eldste tabell-vacuum
+        tables_need_vacuum:
+          one: "%{count} tabell trenger vacuum"
+          other: "%{count} tabeller trenger vacuum"
+        title: Køhelse
+        worst_bloat: Verste Bloat
       queues_table:
         empty: Ingen køer funnet
         headers:
@@ -337,6 +359,15 @@ nb:
         resume: Gjenoppta
         retry: Prøv igjen
         retry_confirm: Tilbakestill synlighetstidsavbrudd og prøv igjen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Døde
+            last_vacuum: Siste Vacuum
+            live: Levende
+            table: Tabell
+          oldest_txn: 'Eldste åpne transaksjon:'
+          title: Tabellhelse
         total: 'Totalt:'
         visible: 'Synlig:'
     recurring_tasks:
@@ -345,10 +376,6 @@ nb:
           one: "%{count} oppgave konfigurert"
           other: "%{count} oppgaver konfigurert"
         title: Gjentakende oppgaver
-      toggle:
-        disabled: Oppgave deaktivert
-        enabled: Oppgave aktivert
-        failed: Kunne ikke endre oppgave
       show:
         back: Tilbake
         configuration: Konfigurasjon
@@ -392,3 +419,7 @@ nb:
           task: Oppgave
         never: Aldri
         run_now: Kjør nå
+      toggle:
+        disabled: Oppgave deaktivert
+        enabled: Oppgave aktivert
+        failed: Kunne ikke endre oppgave

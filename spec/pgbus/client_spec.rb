@@ -10,6 +10,8 @@ RSpec.describe Pgbus::Client do
     # Pre-mark PGMQ schema as ensured for most tests.
     # Schema installation tests override this.
     c.instance_variable_set(:@schema_ensured, true)
+    # Stub autovacuum tuning — runs raw SQL which needs a real PG connection.
+    allow(c).to receive(:tune_autovacuum)
     c
   end
 
@@ -98,6 +100,12 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#ensure_queue" do
+    it "tunes autovacuum when creating a queue" do
+      client.ensure_queue("jobs")
+
+      expect(client).to have_received(:tune_autovacuum).with("pgbus_test_jobs")
+    end
+
     it "creates the queue with the prefixed name" do
       client.ensure_queue("jobs")
 
@@ -145,6 +153,12 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#ensure_dead_letter_queue" do
+    it "tunes autovacuum when creating a DLQ" do
+      client.ensure_dead_letter_queue("jobs")
+
+      expect(client).to have_received(:tune_autovacuum).with("pgbus_test_jobs_dlq")
+    end
+
     it "creates the DLQ with correct suffix" do
       client.ensure_dead_letter_queue("jobs")
 

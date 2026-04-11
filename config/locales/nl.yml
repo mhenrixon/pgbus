@@ -10,6 +10,28 @@ nl:
           pid: PID
           status: Status
         title: Actieve processen
+      queue_health:
+        dead_tuples: Dode tupels
+        headers:
+          bloat: Bloat
+          dead: Dood
+          kind: Type
+          last_vacuum: Laatste Vacuum
+          live: Actief
+          table: Tabel
+        kinds:
+          archive: Archief
+          queue: Wachtrij
+        last_vacuum: Laatste Vacuum
+        live: Actief
+        mvcc_horizon: MVCC-horizon
+        oldest_open_txn: Oudste open transactie
+        oldest_vacuum_ago: Oudste tabel-vacuum
+        tables_need_vacuum:
+          one: "%{count} tabel heeft vacuum nodig"
+          other: "%{count} tabellen hebben vacuum nodig"
+        title: Wachtrijgezondheid
+        worst_bloat: Ergste Bloat
       queues_table:
         empty: Geen wachtrijen gevonden
         headers:
@@ -337,6 +359,15 @@ nl:
         resume: Hervatten
         retry: Opnieuw proberen
         retry_confirm: Zichtbaarheidstimeout resetten en opnieuw proberen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Dood
+            last_vacuum: Laatste Vacuum
+            live: Actief
+            table: Tabel
+          oldest_txn: 'Oudste open transactie:'
+          title: Tabelgezondheid
         total: 'Totaal:'
         visible: 'Zichtbaar:'
     recurring_tasks:
@@ -345,10 +376,6 @@ nl:
           one: "%{count} taak geconfigureerd"
           other: "%{count} taken geconfigureerd"
         title: Terugkerende taken
-      toggle:
-        disabled: Taak uitgeschakeld
-        enabled: Taak ingeschakeld
-        failed: Kon taak niet omschakelen
       show:
         back: Terug
         configuration: Configuratie
@@ -392,3 +419,7 @@ nl:
           task: Taak
         never: Nooit
         run_now: Nu uitvoeren
+      toggle:
+        disabled: Taak uitgeschakeld
+        enabled: Taak ingeschakeld
+        failed: Kon taak niet omschakelen

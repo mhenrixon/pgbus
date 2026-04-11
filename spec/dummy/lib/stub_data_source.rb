@@ -11,7 +11,9 @@ module DummyApp
     def summary_stats
       { total_queues: 4, total_depth: 127, total_visible: 98,
         active_processes: 2, failed_count: 5, dlq_depth: 3,
-        recurring_count: 14, throughput_rate: 42.7 }
+        recurring_count: 14, throughput_rate: 42.7,
+        total_dead_tuples: 1_250, tables_needing_vacuum: 1,
+        oldest_transaction_age_sec: 8 }
     end
 
     def queues_with_metrics
@@ -200,6 +202,40 @@ module DummyApp
         { stream_name: "orders:dashboard", count: 312, avg_fanout: 4.5, avg_ms: 5.8 },
         { stream_name: "notifications:admin", count: 214, avg_fanout: 2.1, avg_ms: 2.4 }
       ].first(limit)
+    end
+
+    def queue_health_stats
+      {
+        total_dead_tuples: 1_250, total_live_tuples: 65_000,
+        worst_bloat_ratio: 0.12, tables_needing_vacuum: 1,
+        oldest_vacuum_ago_sec: 1800,
+        oldest_transaction_age_sec: 8,
+        tables: [
+          { table: "pgmq.q_pgbus_default", kind: "queue",
+            live_tuples: 45_000, dead_tuples: 800, bloat_ratio: 0.0175,
+            last_vacuum_ago_sec: 120, last_vacuum: 2.minutes.ago, last_autovacuum: nil },
+          { table: "pgmq.a_pgbus_default", kind: "archive",
+            live_tuples: 12_000, dead_tuples: 350, bloat_ratio: 0.0283,
+            last_vacuum_ago_sec: 1800, last_vacuum: nil, last_autovacuum: 30.minutes.ago },
+          { table: "pgmq.q_pgbus_events", kind: "queue",
+            live_tuples: 8_000, dead_tuples: 100, bloat_ratio: 0.1235,
+            last_vacuum_ago_sec: 600, last_vacuum: 10.minutes.ago, last_autovacuum: nil }
+        ]
+      }
+    end
+
+    def queue_health_detail(_name)
+      {
+        tables: [
+          { table: "pgmq.q_pgbus_default", kind: "queue",
+            live_tuples: 45_000, dead_tuples: 800, bloat_ratio: 0.0175,
+            last_vacuum_ago_sec: 120, last_vacuum: 2.minutes.ago, last_autovacuum: nil },
+          { table: "pgmq.a_pgbus_default", kind: "archive",
+            live_tuples: 12_000, dead_tuples: 350, bloat_ratio: 0.0283,
+            last_vacuum_ago_sec: 1800, last_vacuum: nil, last_autovacuum: 30.minutes.ago }
+        ],
+        oldest_transaction_age_sec: 8
+      }
     end
 
     # Mutating actions (no-ops for QA)

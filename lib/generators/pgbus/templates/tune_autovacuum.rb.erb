@@ -1,0 +1,38 @@
+class TunePgbusAutovacuum < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Apply aggressive autovacuum settings to all existing PGMQ queue and
+    # archive tables. Queue tables have very high insert/delete churn from
+    # the read→process→archive cycle; default autovacuum settings (vacuum
+    # at 20% dead tuples) allow dead tuple accumulation that bloats indexes
+    # and degrades lock acquisition times.
+    #
+    # New queues created after this migration automatically receive these
+    # settings via Pgbus::Client at queue creation time.
+    execute Pgbus::AutovacuumTuning.sql_for_all_queues
+
+    # Also tune pgbus-owned tables with high write churn:
+    # - pgbus_semaphores: rapid upsert+increment per job, periodic expiry
+    # - pgbus_uniqueness_keys: INSERT on enqueue, DELETE on completion
+    # - pgbus_processed_events: INSERT per event, bulk DELETE on TTL expiry
+    execute Pgbus::AutovacuumTuning.sql_for_high_churn_tables
+  end
+
+  def down
+    # Reset to PostgreSQL defaults
+    execute <<~SQL
+      DO $$
+      DECLARE
+        q RECORD;
+      BEGIN
+        FOR q IN SELECT queue_name FROM pgmq.meta LOOP
+          EXECUTE format('ALTER TABLE pgmq.q_%I RESET (autovacuum_vacuum_scale_factor, autovacuum_vacuum_cost_delay, autovacuum_analyze_scale_factor)', q.queue_name);
+          EXECUTE format('ALTER TABLE pgmq.a_%I RESET (autovacuum_vacuum_scale_factor, autovacuum_vacuum_cost_delay, autovacuum_analyze_scale_factor)', q.queue_name);
+        END LOOP;
+      END $$;
+    SQL
+
+    Pgbus::AutovacuumTuning::HIGH_CHURN_TABLES.each do |table|
+      execute "ALTER TABLE #{table} RESET (autovacuum_vacuum_scale_factor, autovacuum_vacuum_cost_delay, autovacuum_analyze_scale_factor)"
+    end
+  end
+end

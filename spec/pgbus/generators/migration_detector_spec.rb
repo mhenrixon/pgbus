@@ -13,6 +13,18 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
   before do
     stub_tables(described_class::CORE_INSTALL_TABLES + %w[pgbus_uniqueness_keys pgbus_failed_events])
     allow(connection).to receive_messages(columns: [], indexes: [])
+
+    # Default: autovacuum already tuned so it doesn't pollute other tests.
+    # Tests for autovacuum detection override these stubs explicitly.
+    allow(connection).to receive(:select_value)
+      .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+      .and_return(1)
+    allow(connection).to receive(:select_value)
+      .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+      .and_return("pgbus_default")
+    allow(connection).to receive(:select_value)
+      .with(/reloptions.*autovacuum_vacuum_scale_factor/)
+      .and_return("t")
   end
 
   # Test helpers -----------------------------------------------------------
@@ -203,6 +215,54 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
     end
 
+    context "with autovacuum detection" do
+      before do
+        allow(connection).to receive(:select_value)
+          .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+          .and_return(1)
+      end
+
+      it "queues tune_autovacuum when pgmq exists but autovacuum is not tuned" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return("pgbus_default")
+
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*autovacuum_vacuum_scale_factor/)
+          .and_return(false)
+
+        expect(detector.missing_migrations).to include(:tune_autovacuum)
+      end
+
+      it "does not queue tune_autovacuum when already tuned" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return("pgbus_default")
+
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*autovacuum_vacuum_scale_factor/)
+          .and_return("t")
+
+        expect(detector.missing_migrations).not_to include(:tune_autovacuum)
+      end
+
+      it "does not queue tune_autovacuum when pgmq schema is absent" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+          .and_return(nil)
+
+        expect(detector.missing_migrations).not_to include(:tune_autovacuum)
+      end
+
+      it "does not queue tune_autovacuum when no queues exist" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return(nil)
+
+        expect(detector.missing_migrations).not_to include(:tune_autovacuum)
+      end
+    end
+
     context "with a realistic partially-upgraded database snapshot" do
       # Given a realistic "partially-upgraded" database (core install
       # migration ran, job stats base migration ran, but neither latency
@@ -224,6 +284,17 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
         stub_columns("pgbus_job_stats", %w[id job_class queue_name status duration_ms created_at])
         stub_indexes("pgbus_job_stats", %w[idx_pgbus_job_stats_time])
         stub_indexes("pgbus_failed_events", %w[idx_pgbus_failed_events_queue_msg])
+
+        # Autovacuum: pgmq exists but not yet tuned
+        allow(connection).to receive(:select_value)
+          .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+          .and_return(1)
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return("pgbus_default")
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*autovacuum_vacuum_scale_factor/)
+          .and_return(false)
       end
 
       it "queues only the specific add-on migrations that are missing" do
@@ -233,7 +304,8 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
           :add_stream_stats,
           :add_presence,
           :add_queue_states,
-          :add_outbox
+          :add_outbox,
+          :tune_autovacuum
         )
       end
     end
@@ -269,6 +341,7 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
         add_outbox
         add_recurring
         add_failed_events_index
+        tune_autovacuum
       ]
 
       keys.each do |key|

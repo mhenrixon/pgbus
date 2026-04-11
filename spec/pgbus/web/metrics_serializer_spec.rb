@@ -35,12 +35,38 @@ RSpec.describe Pgbus::Web::MetricsSerializer do
     )
   end
 
-  let(:processes) { [{ pid: 1 }, { pid: 2 }] }
+  let(:processes) do
+    [
+      { pid: 1, kind: "worker", hostname: "host1",
+        metadata: { "capacity" => 5, "busy" => 3, "mode" => "threads" } },
+      { pid: 2, kind: "worker", hostname: "host1",
+        metadata: { "capacity" => 10, "busy" => 0, "mode" => "threads" } }
+    ]
+  end
 
   let(:summary_stats) do
     { total_queues: 3, total_depth: 45, total_visible: 43,
       active_processes: 2, failed_count: 8, dlq_depth: 3,
       recurring_count: 4, throughput_rate: 10.5 }
+  end
+
+  let(:health_stats) do
+    {
+      total_dead_tuples: 500,
+      total_live_tuples: 10_000,
+      worst_bloat_ratio: 0.15,
+      tables_needing_vacuum: 1,
+      oldest_vacuum_ago_sec: 3600,
+      oldest_transaction_age_sec: 12,
+      tables: [
+        { table: "pgmq.q_pgbus_default", kind: "queue",
+          live_tuples: 8000, dead_tuples: 400, bloat_ratio: 0.0476,
+          last_vacuum_ago_sec: 120, last_vacuum: "2026-04-10", last_autovacuum: nil },
+        { table: "pgmq.a_pgbus_default", kind: "archive",
+          live_tuples: 2000, dead_tuples: 100, bloat_ratio: 0.0476,
+          last_vacuum_ago_sec: 3600, last_vacuum: nil, last_autovacuum: "2026-04-10" }
+      ]
+    }
   end
 
   before do
@@ -50,7 +76,8 @@ RSpec.describe Pgbus::Web::MetricsSerializer do
       job_stats_summary: job_summary,
       processes: processes,
       summary_stats: summary_stats,
-      stream_stats_available?: false
+      stream_stats_available?: false,
+      queue_health_stats: health_stats
     )
   end
 
@@ -169,6 +196,58 @@ RSpec.describe Pgbus::Web::MetricsSerializer do
     context "when stream stats are not available" do
       it "omits stream metrics entirely" do
         expect(output).not_to include("pgbus_stream_")
+      end
+    end
+
+    it "includes worker pool capacity gauges" do
+      expect(output).to include('pgbus_worker_pool_capacity{pid="1",hostname="host1"} 5')
+      expect(output).to include('pgbus_worker_pool_capacity{pid="2",hostname="host1"} 10')
+    end
+
+    it "includes worker pool busy gauges" do
+      expect(output).to include('pgbus_worker_pool_busy{pid="1",hostname="host1"} 3')
+      expect(output).to include('pgbus_worker_pool_busy{pid="2",hostname="host1"} 0')
+    end
+
+    it "includes worker pool utilization ratio" do
+      expect(output).to include('pgbus_worker_pool_utilization{pid="1",hostname="host1"} 0.6')
+      expect(output).to include('pgbus_worker_pool_utilization{pid="2",hostname="host1"} 0.0')
+    end
+
+    it "includes table dead tuples gauges" do
+      expect(output).to include('pgbus_table_dead_tuples{table="pgmq.q_pgbus_default",kind="queue"} 400')
+      expect(output).to include('pgbus_table_dead_tuples{table="pgmq.a_pgbus_default",kind="archive"} 100')
+    end
+
+    it "includes table live tuples gauges" do
+      expect(output).to include('pgbus_table_live_tuples{table="pgmq.q_pgbus_default",kind="queue"} 8000')
+    end
+
+    it "includes table bloat ratio gauges" do
+      expect(output).to include('pgbus_table_bloat_ratio{table="pgmq.q_pgbus_default",kind="queue"} 0.0476')
+    end
+
+    it "includes last vacuum age gauges" do
+      expect(output).to include('pgbus_table_last_vacuum_age_seconds{table="pgmq.q_pgbus_default",kind="queue"} 120')
+      expect(output).to include('pgbus_table_last_vacuum_age_seconds{table="pgmq.a_pgbus_default",kind="archive"} 3600')
+    end
+
+    it "includes oldest transaction age" do
+      expect(output).to include("pgbus_oldest_transaction_age_seconds 12")
+    end
+
+    context "when health stats have no tables and no transactions" do
+      let(:health_stats) do
+        {
+          total_dead_tuples: 0, total_live_tuples: 0, worst_bloat_ratio: 0.0,
+          tables_needing_vacuum: 0, oldest_vacuum_ago_sec: nil,
+          oldest_transaction_age_sec: nil, tables: []
+        }
+      end
+
+      it "omits health metrics entirely" do
+        expect(output).not_to include("pgbus_table_dead_tuples")
+        expect(output).not_to include("pgbus_oldest_transaction_age_seconds")
       end
     end
 

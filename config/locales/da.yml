@@ -10,6 +10,28 @@ da:
           pid: PID
           status: Status
         title: Aktive processer
+      queue_health:
+        dead_tuples: Døde tupler
+        headers:
+          bloat: Bloat
+          dead: Døde
+          kind: Type
+          last_vacuum: Sidste Vacuum
+          live: Levende
+          table: Tabel
+        kinds:
+          archive: Arkiv
+          queue: Kø
+        last_vacuum: Sidste Vacuum
+        live: Levende
+        mvcc_horizon: MVCC Horisont
+        oldest_open_txn: Ældste åbne transaktion
+        oldest_vacuum_ago: Ældste tabel-vacuum
+        tables_need_vacuum:
+          one: "%{count} tabel har brug for vacuum"
+          other: "%{count} tabeller har brug for vacuum"
+        title: Køhelbred
+        worst_bloat: Værste Bloat
       queues_table:
         empty: Ingen køer fundet
         headers:
@@ -337,6 +359,15 @@ da:
         resume: Genoptag
         retry: Prøv igen
         retry_confirm: Nulstil synlighedstimeout og prøv igen?
+        table_health:
+          headers:
+            bloat: Bloat
+            dead: Døde
+            last_vacuum: Sidste Vacuum
+            live: Levende
+            table: Tabel
+          oldest_txn: 'Ældste åbne transaktion:'
+          title: Tabelhelbred
         total: 'Total:'
         visible: 'Synlig:'
     recurring_tasks:
@@ -345,10 +376,6 @@ da:
           one: "%{count} opgave konfigureret"
           other: "%{count} opgaver konfigureret"
         title: Gentagne opgaver
-      toggle:
-        disabled: Opgave deaktiveret
-        enabled: Opgave aktiveret
-        failed: Kunne ikke ændre opgave
       show:
         back: Tilbage
         configuration: Konfiguration
@@ -392,3 +419,7 @@ da:
           task: Opgave
         never: Aldrig
         run_now: Kør nu
+      toggle:
+        disabled: Opgave deaktiveret
+        enabled: Opgave aktiveret
+        failed: Kunne ikke ændre opgave
