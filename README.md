@@ -733,7 +733,7 @@ end
 
 **Text format** (default):
 
-```
+```text
 INFO 2025-01-15T10:30:00.000Z pid=1234 tid=abc queue=default: Starting job
 ```
 
