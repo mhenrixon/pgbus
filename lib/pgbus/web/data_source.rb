@@ -751,7 +751,7 @@ module Pgbus
 
       # Fetch pg_stat_user_tables stats for a single table (used by queue_health_detail).
       def fetch_table_stats(schema, table_name, kind)
-        row = connection.select_one(<<~SQL, "Pgbus Table Health")
+        row = connection.select_one(<<~SQL, "Pgbus Table Health", [schema, table_name])
           SELECT
             n_live_tup,
             n_dead_tup,
@@ -759,7 +759,7 @@ module Pgbus
             last_vacuum,
             last_autovacuum
           FROM pg_stat_user_tables
-          WHERE schemaname = '#{schema}' AND relname = '#{table_name}'
+          WHERE schemaname = $1 AND relname = $2
         SQL
 
         return nil unless row
