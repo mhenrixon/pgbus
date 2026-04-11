@@ -1,13 +1,18 @@
 # frozen_string_literal: true
 
 module Pgbus
-  # Shared autovacuum storage parameters for PGMQ queue and archive tables.
+  # Shared autovacuum storage parameters for tables with high write churn.
   #
   # Queue tables (q_*) have high insert/delete churn: every read + archive
   # cycle deletes from q_ and inserts into a_. Default autovacuum settings
   # (vacuum at 20% dead tuples) are far too conservative — dead tuples
   # accumulate, bloat B-tree indexes, and eventually degrade lock acquisition
   # times. See: https://planetscale.com/blog/keeping-a-postgres-queue-healthy
+  #
+  # Several pgbus-owned tables share similar churn patterns:
+  # - pgbus_semaphores: rapid upsert+increment per job, periodic expiry
+  # - pgbus_uniqueness_keys: INSERT on enqueue, DELETE on completion
+  # - pgbus_processed_events: INSERT per event, bulk DELETE on TTL expiry
   #
   # Used by:
   # - Client#ensure_single_queue (runtime, on queue creation)
@@ -27,6 +32,22 @@ module Pgbus
       "autovacuum_vacuum_cost_delay" => "5",
       "autovacuum_analyze_scale_factor" => "0.05"
     }.freeze
+
+    # High-churn pgbus tables: rapid INSERT/DELETE or upsert cycles.
+    # - semaphores: upsert + increment per job acquire, decrement on release, periodic expiry
+    # - uniqueness_keys: INSERT on enqueue, DELETE on job completion (fast lifecycle)
+    # - processed_events: INSERT per event handler, bulk DELETE on idempotency TTL expiry
+    HIGH_CHURN_SETTINGS = {
+      "autovacuum_vacuum_scale_factor" => "0.02",
+      "autovacuum_vacuum_cost_delay" => "2",
+      "autovacuum_analyze_scale_factor" => "0.05"
+    }.freeze
+
+    HIGH_CHURN_TABLES = %w[
+      pgbus_semaphores
+      pgbus_uniqueness_keys
+      pgbus_processed_events
+    ].freeze
 
     class << self
       # Generate ALTER TABLE SQL for a single queue's tables.
@@ -50,6 +71,11 @@ module Pgbus
             END LOOP;
           END $$;
         SQL
+      end
+
+      # Generate ALTER TABLE SQL for pgbus-owned high-churn tables.
+      def sql_for_high_churn_tables
+        HIGH_CHURN_TABLES.map { |table| alter_table_sql(table, HIGH_CHURN_SETTINGS) }.join("\n")
       end
 
       private
