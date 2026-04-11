@@ -7,9 +7,21 @@ module Pgbus
   # (e.g., pgmq.q_<name>, pgmq.a_<name>). This module enforces strict
   # validation to prevent SQL injection via crafted queue names.
   module QueueNameValidator
-    # PostgreSQL identifier limit is 63 bytes (NAMEDATALEN - 1).
-    # PGMQ prefixes with "q_" or "a_" (2 chars), so limit the name itself.
-    MAX_QUEUE_NAME_LENGTH = 61
+    # PostgreSQL's NAMEDATALEN caps identifiers at 63 bytes, but the
+    # effective limit is tighter: pgmq-ruby (our transport gem) rejects
+    # any queue name with `length >= 48` in `PGMQ::Client#validate_queue_name!`.
+    # That leaves an actual usable ceiling of 47 characters for the
+    # fully-prefixed name (`<queue_prefix>_<logical_name>`), which is what
+    # this constant expresses. pgmq-ruby picked 48 to leave headroom for
+    # PGMQ's internal tables (`pgmq.q_`, `pgmq.a_`, sequences, indexes)
+    # which all get suffixed beyond the base name.
+    #
+    # Historically this was 61 (the raw PostgreSQL ceiling minus PGMQ's
+    # `q_`/`a_` prefix). That was wrong in practice: names in the 48-61
+    # range passed pgbus's validator but blew up deep inside pgmq-ruby
+    # with an InvalidQueueNameError — exactly the kind of opaque failure
+    # the validator was meant to catch up front.
+    MAX_QUEUE_NAME_LENGTH = 47
 
     # Only alphanumeric characters and underscores are allowed.
     VALID_QUEUE_NAME_PATTERN = /\A[a-zA-Z0-9_]+\z/
@@ -34,16 +46,23 @@ module Pgbus
       name
     end
 
-    # Normalizes a queue name by replacing common separators (hyphens, dots)
-    # with underscores, stripping remaining invalid characters, and collapsing
-    # consecutive underscores. Use this for names from external sources
-    # (e.g., Turbo stream names like "hotwire-livereload") where the intent
-    # is to derive a valid PGMQ queue name that preserves readability.
+    # Normalizes a queue name by replacing common separators (hyphens,
+    # dots, colons) with underscores, stripping remaining invalid
+    # characters, and collapsing consecutive underscores. Use this for
+    # names from external sources (e.g., Turbo stream names like
+    # "hotwire-livereload" or "gid://app/Foo/1") where the intent is
+    # to derive a valid PGMQ queue name that preserves as much of the
+    # original identifier as possible.
+    #
+    # Colons in particular are the turbo-rails stream-name separator
+    # (`Pgbus.stream([user, :notifications])` → `"user_gid:notifications"`),
+    # so they must map to a safe character rather than be stripped —
+    # otherwise `"a:b"` and `"ab"` would collide on the same queue.
     def normalize(name)
       name = name.to_s
       return validate!(name) if VALID_QUEUE_NAME_PATTERN.match?(name)
 
-      normalized = name.gsub(/[-.]/, "_")           # hyphens/dots → underscores
+      normalized = name.gsub(/[-.:]/, "_")          # hyphens/dots/colons → underscores
                        .gsub(/[^a-zA-Z0-9_]/, "")   # strip remaining invalid chars
                        .gsub(/_+/, "_")              # collapse consecutive underscores
                        .gsub(/\A_|_\z/, "")          # strip leading/trailing underscores

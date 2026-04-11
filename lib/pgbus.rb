@@ -105,6 +105,20 @@ module Pgbus
       @stream_cache.compute_if_absent(name) { Streams::Stream.new(streamables) }
     end
 
+    # Compose a short, pgbus-safe stream identifier from any mix of
+    # records, strings, symbols, and arrays. Delegates to
+    # `Pgbus::Streams::Key.stream_key`; raises `ArgumentError` if the
+    # resulting key would overflow the pgbus queue-name budget. See
+    # `lib/pgbus/streams/key.rb` for the digest policy and rationale.
+    #
+    #   Pgbus.stream_key(chat, :messages)
+    #   # => "ai_chat_3a4f9c21b7d20e18:messages"
+    #
+    #   Pgbus.stream(Pgbus.stream_key(chat, :messages)).broadcast(html)
+    def stream_key(*parts, **)
+      Streams::Key.stream_key(*parts, **)
+    end
+
     def reset!
       @client&.close
       @client = nil
