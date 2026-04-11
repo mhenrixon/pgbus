@@ -416,20 +416,25 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     context "when zombie_detection is enabled (default)" do
+      let(:warn_messages) { [] }
+
+      before do
+        allow(Pgbus.logger).to receive(:warn) do |&block|
+          warn_messages << block.call if block
+        end
+      end
+
       it "logs a warning for redelivered messages with no prior failure" do
         msg = build_message_double(msg_id: 99, message: '{"job_class":"TestJob"}', read_ct: 2)
         allow(mock_client).to receive(:read_batch).and_return([msg])
         allow(pool).to receive(:post).and_yield
         allow(executor).to receive(:execute).and_return(:success)
 
-        expect(Pgbus.logger).to receive(:warn).at_least(:once) do |&block|
-          log_msg = block.call
-          expect(log_msg).to include("Zombie message redelivered")
-          expect(log_msg).to include("msg_id=99")
-          expect(log_msg).to include("read_ct=2")
-        end
-
         worker.send(:claim_and_execute)
+
+        zombie_log = warn_messages.find { |m| m.include?("Zombie message redelivered") }
+        expect(zombie_log).to include("msg_id=99")
+        expect(zombie_log).to include("read_ct=2")
       end
 
       it "does not warn for first-time messages (read_ct=1)" do
@@ -438,9 +443,9 @@ RSpec.describe Pgbus::Process::Worker do
         allow(pool).to receive(:post).and_yield
         allow(executor).to receive(:execute).and_return(:success)
 
-        expect(Pgbus.logger).not_to receive(:warn).with(/Zombie/)
-
         worker.send(:claim_and_execute)
+
+        expect(warn_messages).not_to include(a_string_matching(/Zombie/))
       end
 
       it "does not warn when a prior failure is recorded" do
@@ -450,9 +455,9 @@ RSpec.describe Pgbus::Process::Worker do
         allow(executor).to receive(:execute).and_return(:success)
         allow(Pgbus::FailedEventRecorder).to receive(:exists?).and_return(true)
 
-        expect(Pgbus.logger).not_to receive(:warn).with(/Zombie/)
-
         worker.send(:claim_and_execute)
+
+        expect(warn_messages).not_to include(a_string_matching(/Zombie/))
       end
     end
 
