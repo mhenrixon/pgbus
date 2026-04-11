@@ -59,6 +59,7 @@ module Pgbus
 
     # Logging
     attr_accessor :logger
+    attr_reader :log_format # rubocop:disable Style/AccessorGrouping
 
     # Error reporting — array of callable objects invoked on caught exceptions.
     # Each receives (exception, context_hash) or (exception, context_hash, config).
@@ -144,6 +145,7 @@ module Pgbus
       @allowed_global_id_models = nil # nil = allow all (for backwards compat)
 
       @logger = (defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger) || Logger.new($stdout)
+      @log_format = :text
       @error_reporters = []
 
       @listen_notify = true
@@ -227,6 +229,21 @@ module Pgbus
     def execution_mode_for(worker_config)
       mode = worker_config[:execution_mode] || worker_config["execution_mode"] || execution_mode
       ExecutionPools.normalize_mode(mode)
+    end
+
+    VALID_LOG_FORMATS = %i[text json].freeze
+
+    def log_format=(format)
+      format = format.to_sym
+      unless VALID_LOG_FORMATS.include?(format)
+        raise ArgumentError, "Invalid log_format: #{format}. Must be one of: #{VALID_LOG_FORMATS.join(", ")}"
+      end
+
+      @log_format = format
+      @logger.formatter = case format
+                          when :json then LogFormatter::JSON.new
+                          when :text then LogFormatter::Text.new
+                          end
     end
 
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
