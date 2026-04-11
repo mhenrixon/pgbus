@@ -63,6 +63,35 @@ RSpec.describe Pgbus::FailedEventRecorder do
     end
   end
 
+  describe ".exists?" do
+    it "returns true when a failed event row exists" do
+      allow(mock_connection).to receive(:select_value).and_return(1)
+
+      result = described_class.exists?(queue_name: "default", msg_id: 42)
+
+      expect(result).to be true
+      expect(mock_connection).to have_received(:select_value).with(
+        a_string_matching(/SELECT 1 FROM pgbus_failed_events/),
+        "FailedEvent Exists",
+        ["default", 42]
+      )
+    end
+
+    it "returns false when no failed event row exists" do
+      allow(mock_connection).to receive(:select_value).and_return(nil)
+
+      result = described_class.exists?(queue_name: "default", msg_id: 42)
+
+      expect(result).to be false
+    end
+
+    it "returns false on database errors" do
+      allow(mock_connection).to receive(:select_value).and_raise(ActiveRecord::StatementInvalid, "table missing")
+
+      expect(described_class.exists?(queue_name: "default", msg_id: 42)).to be false
+    end
+  end
+
   describe ".clear!" do
     it "deletes the failed event for the given queue and msg_id" do
       allow(mock_connection).to receive(:exec_delete)

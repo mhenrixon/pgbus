@@ -407,6 +407,72 @@ RSpec.describe Pgbus::Process::Worker do
     end
   end
 
+  describe "zombie message detection" do
+    let(:wake_signal) { worker.instance_variable_get(:@wake_signal) }
+
+    before do
+      allow(wake_signal).to receive(:wait)
+      allow(Pgbus::FailedEventRecorder).to receive(:exists?).and_return(false)
+    end
+
+    context "when zombie_detection is enabled (default)" do
+      it "logs a warning for redelivered messages with no prior failure" do
+        msg = build_message_double(msg_id: 99, message: '{"job_class":"TestJob"}', read_ct: 2)
+        allow(mock_client).to receive(:read_batch).and_return([msg])
+        allow(pool).to receive(:post).and_yield
+        allow(executor).to receive(:execute).and_return(:success)
+
+        expect(Pgbus.logger).to receive(:warn).at_least(:once) do |&block|
+          log_msg = block.call
+          expect(log_msg).to include("Zombie message redelivered")
+          expect(log_msg).to include("msg_id=99")
+          expect(log_msg).to include("read_ct=2")
+        end
+
+        worker.send(:claim_and_execute)
+      end
+
+      it "does not warn for first-time messages (read_ct=1)" do
+        msg = build_message_double(msg_id: 100, message: '{"job_class":"TestJob"}', read_ct: 1)
+        allow(mock_client).to receive(:read_batch).and_return([msg])
+        allow(pool).to receive(:post).and_yield
+        allow(executor).to receive(:execute).and_return(:success)
+
+        expect(Pgbus.logger).not_to receive(:warn).with(/Zombie/)
+
+        worker.send(:claim_and_execute)
+      end
+
+      it "does not warn when a prior failure is recorded" do
+        msg = build_message_double(msg_id: 101, message: '{"job_class":"TestJob"}', read_ct: 2)
+        allow(mock_client).to receive(:read_batch).and_return([msg])
+        allow(pool).to receive(:post).and_yield
+        allow(executor).to receive(:execute).and_return(:success)
+        allow(Pgbus::FailedEventRecorder).to receive(:exists?).and_return(true)
+
+        expect(Pgbus.logger).not_to receive(:warn).with(/Zombie/)
+
+        worker.send(:claim_and_execute)
+      end
+    end
+
+    context "when zombie_detection is disabled" do
+      before { worker.config.zombie_detection = false }
+      after { worker.config.zombie_detection = true }
+
+      it "does not check for zombie messages" do
+        msg = build_message_double(msg_id: 102, message: '{"job_class":"TestJob"}', read_ct: 3)
+        allow(mock_client).to receive(:read_batch).and_return([msg])
+        allow(pool).to receive(:post).and_yield
+        allow(executor).to receive(:execute).and_return(:success)
+
+        worker.send(:claim_and_execute)
+
+        expect(Pgbus::FailedEventRecorder).not_to have_received(:exists?)
+      end
+    end
+  end
+
   describe "consumer priority" do
     it "defaults to 0" do
       expect(worker.stats[:consumer_priority]).to eq(0)
