@@ -105,6 +105,54 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    # Regression: issue #126. Under `execution_mode: :async` the reactor or a
+    # nested Async/Sync block can raise Async::Stop / Async::Cancel, both of
+    # which inherit from Exception (NOT StandardError). A `rescue StandardError`
+    # misses them entirely — control flow is lost between perform_now and
+    # archive_from, the pgbus_failed_events row is never written, and the
+    # uniqueness lock stays held until VT expiry finally allows a clean retry.
+    # The executor must treat any Exception as a visible failure: record it,
+    # instrument it, and return :failed so telemetry exists.
+    context "when job.perform_now raises a non-StandardError (fiber interrupt)" do
+      let(:message) { build_message_double(msg_id: 126, message: message_json, read_ct: 1) }
+      let(:fiber_stop_class) { Class.new(Exception) } # rubocop:disable Lint/InheritException
+      let(:fiber_stop) { fiber_stop_class.new("task stopped") }
+
+      before do
+        stub_const("FakeAsyncStop", fiber_stop_class)
+        allow(job_double).to receive(:perform_now).and_raise(fiber_stop)
+      end
+
+      it "records the failure in pgbus_failed_events instead of swallowing silently" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::FailedEventRecorder).to have_received(:record!).with(
+          queue_name: queue_name,
+          msg_id: 126,
+          payload: job_payload,
+          headers: nil,
+          error: fiber_stop,
+          retry_count: 0
+        )
+      end
+
+      it "instruments pgbus.job_failed and returns :failed" do
+        result = executor.execute(message, queue_name)
+
+        expect(ActiveSupport::Notifications).to have_received(:instrument).with(
+          "pgbus.job_failed",
+          hash_including(queue: queue_name, job_class: "TestJob", error: "FakeAsyncStop")
+        )
+        expect(result).to eq(:failed)
+      end
+
+      it "re-raises truly fatal signals (SystemExit, Interrupt) instead of swallowing them" do
+        allow(job_double).to receive(:perform_now).and_raise(SystemExit)
+
+        expect { executor.execute(message, queue_name) }.to raise_error(SystemExit)
+      end
+    end
+
     context "when message payload is nil (JSON parse fails)" do
       let(:message) { build_message_double(msg_id: 9, message: nil, read_ct: 1) }
 

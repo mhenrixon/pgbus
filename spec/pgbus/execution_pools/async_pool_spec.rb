@@ -145,5 +145,31 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
       pool.post { result.set(:ok) }
       expect(result.value(5)).to eq(:ok)
     end
+
+    # Regression: issue #126. The async gem raises Async::Stop and
+    # Async::Cancel, both of which inherit from Exception (NOT StandardError).
+    # A `rescue StandardError` misses them entirely and they propagate past
+    # perform's ensure-less code path, leaving capacity unrestored and zero
+    # telemetry. The pool must catch any Exception raised from user blocks
+    # so capacity recovers and the error is logged.
+    it "catches non-StandardError exceptions from fiber blocks and restores capacity" do
+      fake_stop_class = Class.new(Exception) # rubocop:disable Lint/InheritException
+      stub_const("FakeAsyncStop", fake_stop_class)
+
+      allow(Pgbus.logger).to receive(:error)
+
+      pool.post { raise fake_stop_class, "task cancelled" }
+      sleep 0.1
+
+      expect(pool.available_capacity).to eq(capacity)
+      expect(Pgbus.logger).to have_received(:error).with(no_args) do |&block|
+        expect(block.call).to include("FakeAsyncStop", "task cancelled")
+      end
+
+      # Pool still accepts new work
+      result = Concurrent::IVar.new
+      pool.post { result.set(:ok) }
+      expect(result.value(5)).to eq(:ok)
+    end
   end
 end

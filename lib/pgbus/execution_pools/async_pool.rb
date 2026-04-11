@@ -128,9 +128,20 @@ module Pgbus
         nil
       end
 
+      # Supervisor-level rescue: catch any Exception raised from the user
+      # block so capacity is always restored and the failure is logged.
+      # The `async` gem uses Async::Stop / Async::Cancel (Exception subclasses,
+      # NOT StandardError) to cancel tasks, and prior to issue #126 those
+      # would leak past `rescue StandardError` and silently vanish.
+      # Process-fatal signals still propagate so the supervisor can react.
+      FATAL_EXCEPTIONS = [SystemExit, Interrupt, SignalException, NoMemoryError, SystemStackError].freeze
+      private_constant :FATAL_EXCEPTIONS
+
       def perform(block)
         block.call
-      rescue StandardError => e
+      rescue *FATAL_EXCEPTIONS
+        raise
+      rescue Exception => e # rubocop:disable Lint/RescueException
         Pgbus.logger.error { "[Pgbus] Async pool fiber error: #{e.class}: #{e.message}" }
       ensure
         restore_capacity
