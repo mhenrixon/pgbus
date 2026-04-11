@@ -194,8 +194,13 @@ module Pgbus
       # Use pgmq-ruby's read_multi to read from all queues in a single
       # SQL query (UNION ALL). Each returned message carries a queue_name
       # field so we can map it back to the logical queue.
+      #
+      # `qty` is the total pool capacity. pgmq-ruby treats `qty:` as per-queue,
+      # so we also pass `limit: qty` to cap the total across all queues —
+      # otherwise we get `queue_count * qty` messages and overflow the
+      # execution pool, crashing the worker fork (issue #123).
       def fetch_multi(active_queues, qty)
-        messages = Pgbus.client.read_multi(active_queues, qty: qty) || []
+        messages = Pgbus.client.read_multi(active_queues, qty: qty, limit: qty) || []
         prefix = "#{config.queue_prefix}_"
 
         messages.map do |m|

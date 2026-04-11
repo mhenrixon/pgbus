@@ -279,7 +279,8 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:read_multi).with(
         %w[pgbus_test_default pgbus_test_urgent],
         vt: config.visibility_timeout,
-        qty: 10
+        qty: 10,
+        limit: nil
       )
     end
 
@@ -289,7 +290,19 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:read_multi).with(
         %w[pgbus_test_default],
         vt: 60,
-        qty: 5
+        qty: 5,
+        limit: nil
+      )
+    end
+
+    it "forwards the limit: argument so callers can cap the total across queues" do
+      client.read_multi(%w[default urgent statistics], qty: 5, limit: 5)
+
+      expect(mock_pgmq).to have_received(:read_multi).with(
+        %w[pgbus_test_default pgbus_test_urgent pgbus_test_statistics],
+        vt: config.visibility_timeout,
+        qty: 5,
+        limit: 5
       )
     end
   end

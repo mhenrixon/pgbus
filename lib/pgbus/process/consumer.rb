@@ -98,8 +98,12 @@ module Pgbus
         # the next read will route to DLQ above.
       end
 
+      # `qty` is the total pool capacity. pgmq-ruby treats `qty:` as per-queue,
+      # so we also pass `limit: qty` to cap the total across all queues —
+      # otherwise we get `queue_count * qty` messages and overflow the
+      # execution pool, crashing the consumer fork (issue #123).
       def fetch_multi_consumer(qty)
-        messages = Pgbus.client.read_multi(@queue_names, qty: qty) || []
+        messages = Pgbus.client.read_multi(@queue_names, qty: qty, limit: qty) || []
         prefix = "#{config.queue_prefix}_"
 
         messages.map do |m|

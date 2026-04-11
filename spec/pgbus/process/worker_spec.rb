@@ -135,10 +135,10 @@ RSpec.describe Pgbus::Process::Worker do
     context "with multiple queues" do
       let(:worker) { described_class.new(queues: %w[default priority], threads: 4) }
 
-      it "uses read_multi to fetch from all queues in a single call" do
+      it "uses read_multi to fetch from all queues in a single call, capping the total with limit:" do
         allow(mock_client).to receive(:read_multi).and_return([])
         worker.send(:fetch_messages, 4)
-        expect(mock_client).to have_received(:read_multi).with(%w[default priority], qty: 4)
+        expect(mock_client).to have_received(:read_multi).with(%w[default priority], qty: 4, limit: 4)
       end
 
       it "tags each message with its source queue from the queue_name field" do
@@ -152,6 +152,17 @@ RSpec.describe Pgbus::Process::Worker do
 
         results = worker.send(:fetch_messages, 4)
         expect(results).to eq([["default", msg1], ["priority", msg2]])
+      end
+    end
+
+    context "with three or more queues under backpressure (regression: issue #123)" do
+      let(:worker) { described_class.new(queues: %w[default low statistics], threads: 5) }
+
+      it "caps the total across queues at qty so the execution pool cannot overflow" do
+        allow(mock_client).to receive(:read_multi).and_return([])
+        worker.send(:fetch_messages, 5)
+        expect(mock_client).to have_received(:read_multi)
+          .with(%w[default low statistics], qty: 5, limit: 5)
       end
     end
 
@@ -321,7 +332,7 @@ RSpec.describe Pgbus::Process::Worker do
         allow(mock_client).to receive(:read_multi).and_return([])
 
         worker.send(:claim_and_execute)
-        expect(mock_client).to have_received(:read_multi).with(%w[default events], qty: 5)
+        expect(mock_client).to have_received(:read_multi).with(%w[default events], qty: 5, limit: 5)
       end
     end
   end
