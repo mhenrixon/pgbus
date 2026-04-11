@@ -106,6 +106,21 @@ RSpec.describe Pgbus::Process::Consumer do
     end
   end
 
+  describe "fetch_multi_consumer (private)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"]) }
+
+    before do
+      consumer.instance_variable_set(:@queue_names, %w[q_orders q_payments q_shipping])
+    end
+
+    it "caps the total across queues at qty so the execution pool cannot overflow (issue #123)" do
+      allow(mock_client).to receive(:read_multi).and_return([])
+      consumer.send(:fetch_multi_consumer, 3)
+      expect(mock_client).to have_received(:read_multi)
+        .with(%w[q_orders q_payments q_shipping], qty: 3, limit: 3)
+    end
+  end
+
   describe "pattern_overlaps? (private)" do
     let(:consumer) { described_class.new(topics: ["orders.#"]) }
 
