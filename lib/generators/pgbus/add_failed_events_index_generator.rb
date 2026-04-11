@@ -2,11 +2,13 @@
 
 require "rails/generators"
 require "rails/generators/active_record"
+require_relative "migration_path"
 
 module Pgbus
   module Generators
     class AddFailedEventsIndexGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
+      include MigrationPath
 
       source_root File.expand_path("templates", __dir__)
 
@@ -18,13 +20,8 @@ module Pgbus
                    desc: "Use a separate database for pgbus tables (e.g. --database=pgbus)"
 
       def create_migration_file
-        if separate_database?
-          migration_template "add_failed_events_unique_index.rb.erb",
-                             "db/pgbus_migrate/add_pgbus_failed_events_unique_index.rb"
-        else
-          migration_template "add_failed_events_unique_index.rb.erb",
-                             "db/migrate/add_pgbus_failed_events_unique_index.rb"
-        end
+        migration_template "add_failed_events_unique_index.rb.erb",
+                           File.join(pgbus_migrate_path, "add_pgbus_failed_events_unique_index.rb")
       end
 
       def display_post_install
@@ -41,10 +38,6 @@ module Pgbus
 
       def migration_version
         "[#{ActiveRecord::Migration.current_version}]"
-      end
-
-      def separate_database?
-        options[:database].present?
       end
     end
   end

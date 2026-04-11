@@ -2,11 +2,13 @@
 
 require "rails/generators"
 require "rails/generators/active_record"
+require_relative "migration_path"
 
 module Pgbus
   module Generators
     class InstallGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
+      include MigrationPath
 
       source_root File.expand_path("templates", __dir__)
 
@@ -25,13 +27,8 @@ module Pgbus
                          "Migrations go to db/pgbus_migrate/ and schema to db/pgbus_schema.rb"
 
       def create_migration_file
-        if separate_database?
-          migration_template "migration.rb.erb",
-                             "db/pgbus_migrate/create_pgbus_tables.rb"
-        else
-          migration_template "migration.rb.erb",
-                             "db/migrate/create_pgbus_tables.rb"
-        end
+        migration_template "migration.rb.erb",
+                           File.join(pgbus_migrate_path, "create_pgbus_tables.rb")
       end
 
       def create_config_file
@@ -120,10 +117,6 @@ module Pgbus
 
       def database_name
         options[:database]
-      end
-
-      def separate_database?
-        database_name.present?
       end
     end
   end

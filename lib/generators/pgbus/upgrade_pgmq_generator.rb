@@ -2,11 +2,13 @@
 
 require "rails/generators"
 require "rails/generators/active_record"
+require_relative "migration_path"
 
 module Pgbus
   module Generators
     class UpgradePgmqGenerator < Rails::Generators::Base
       include ActiveRecord::Generators::Migration
+      include MigrationPath
 
       source_root File.expand_path("templates", __dir__)
 
@@ -18,13 +20,8 @@ module Pgbus
                    desc: "Use a separate database for pgbus tables (e.g. --database=pgbus)"
 
       def create_migration_file
-        if separate_database?
-          migration_template "upgrade_pgmq.rb.erb",
-                             "db/pgbus_migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
-        else
-          migration_template "upgrade_pgmq.rb.erb",
-                             "db/migrate/upgrade_pgmq_to_v#{target_version_slug}.rb"
-        end
+        migration_template "upgrade_pgmq.rb.erb",
+                           File.join(pgbus_migrate_path, "upgrade_pgmq_to_v#{target_version_slug}.rb")
       end
 
       def display_post_upgrade
@@ -50,10 +47,6 @@ module Pgbus
 
       def target_version_slug
         target_version.tr(".", "_")
-      end
-
-      def separate_database?
-        options[:database].present?
       end
     end
   end
