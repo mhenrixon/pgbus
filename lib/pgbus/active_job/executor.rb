@@ -146,7 +146,7 @@ module Pgbus
       end
 
       def handle_failure(message, queue_name, error, payload: nil)
-        ctx = { queue: queue_name, job_class: payload&.dig("job_class"),
+        ctx = { action: "execute_job", queue: queue_name, job_class: payload&.dig("job_class"),
                 msg_id: message.msg_id.to_i, read_ct: message.read_ct.to_i }
         ErrorReporter.report(error, ctx)
         Pgbus.logger.debug { error.backtrace&.join("\n") }
