@@ -22,6 +22,10 @@ module Pgbus
       rescue Exception => e # rubocop:disable Lint/RescueException
         config.logger.error { "[Pgbus] Error reporter raised: #{e.class}: #{e.message}" }
       end
+    rescue Exception # rubocop:disable Lint/RescueException
+      # ErrorReporter must never raise — callers sit inside rescue blocks
+      # where an unexpected raise would break fault-tolerance invariants.
+      nil
     end
 
     def call_handler(handler, exception, context, config)

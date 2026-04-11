@@ -19,6 +19,10 @@ module Pgbus
   module LogFormatter
     module_function
 
+    def tid
+      Thread.current[:pgbus_tid] ||= (Thread.current.object_id ^ ::Process.pid).to_s(36)
+    end
+
     # Thread-local context for structured logging. Works like
     # Sidekiq::Context — any key/value pairs set via with_context
     # appear in the JSON output under the "ctx" key.
@@ -38,14 +42,10 @@ module Pgbus
     # Output: "INFO 2024-01-15T10:30:00.000Z pid=1234 tid=abc queue=default: message\n"
     class Text < ::Logger::Formatter
       def call(severity, time, _progname, message)
-        "#{severity} #{time.utc.iso8601(3)} pid=#{::Process.pid} tid=#{tid}#{format_context}: #{message}\n"
+        "#{severity} #{time.utc.iso8601(3)} pid=#{::Process.pid} tid=#{LogFormatter.tid}#{format_context}: #{message}\n"
       end
 
       private
-
-      def tid
-        Thread.current[:pgbus_tid] ||= (Thread.current.object_id ^ ::Process.pid).to_s(36)
-      end
 
       def format_context
         ctx = LogFormatter.current_context
@@ -75,7 +75,7 @@ module Pgbus
         hash = {
           ts: time.utc.iso8601(3),
           pid: ::Process.pid,
-          tid: tid,
+          tid: LogFormatter.tid,
           lvl: severity
         }
 
@@ -90,12 +90,6 @@ module Pgbus
         hash[:ctx] = ctx unless ctx.empty?
 
         "#{::JSON.generate(hash)}\n"
-      end
-
-      private
-
-      def tid
-        Thread.current[:pgbus_tid] ||= (Thread.current.object_id ^ ::Process.pid).to_s(36)
       end
     end
   end

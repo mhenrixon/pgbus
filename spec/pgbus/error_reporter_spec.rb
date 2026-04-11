@@ -59,6 +59,16 @@ RSpec.describe Pgbus::ErrorReporter do
       end
     end
 
+    context "when the logger itself raises" do
+      it "does not propagate — report must never raise" do
+        broken_logger = Logger.new(IO::NULL)
+        allow(broken_logger).to receive(:error).and_raise(RuntimeError, "logger broken")
+        config.logger = broken_logger
+
+        expect { described_class.report(error, context, config: config) }.not_to raise_error
+      end
+    end
+
     context "when reporter accepts 3 arguments (with config)" do
       it "passes config as the third argument" do
         received_config = nil
