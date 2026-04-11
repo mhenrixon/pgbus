@@ -60,6 +60,10 @@ module Pgbus
     # Logging
     attr_accessor :logger
 
+    # Error reporting — array of callable objects invoked on caught exceptions.
+    # Each receives (exception, context_hash) or (exception, context_hash, config).
+    attr_accessor :error_reporters
+
     # LISTEN/NOTIFY. Only the on/off switch is user-facing — the throttle
     # interval is a Postgres-side tuning knob that lives as a constant on
     # Pgbus::Client (NOTIFY_THROTTLE_MS).
@@ -140,6 +144,7 @@ module Pgbus
       @allowed_global_id_models = nil # nil = allow all (for backwards compat)
 
       @logger = (defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger) || Logger.new($stdout)
+      @error_reporters = []
 
       @listen_notify = true
 

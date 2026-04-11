@@ -32,14 +32,7 @@ module Pgbus
           ]
         )
       rescue StandardError => e
-        # ERROR-level: silent loss of failure-tracking data defeats the
-        # purpose of the dashboard's "Failed Jobs" section. If recording
-        # fails, surface it loudly so the broken state can be diagnosed
-        # rather than silently masked.
-        Pgbus.logger.error do
-          "[Pgbus] Failed to record failed event for queue=#{queue_name} msg_id=#{msg_id}: " \
-            "#{e.class}: #{e.message}"
-        end
+        ErrorReporter.report(e, { action: "record_failed_event", queue: queue_name, msg_id: msg_id })
       end
 
       def clear!(queue_name:, msg_id:)

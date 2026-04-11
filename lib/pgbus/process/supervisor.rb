@@ -83,7 +83,7 @@ module Pgbus
         @forks[pid] = { type: :worker, config: worker_config }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
-        Pgbus.logger.error { "[Pgbus] Fork failed for worker: #{e.message}" }
+        ErrorReporter.report(e, { action: "fork_worker", queues: queues })
       end
 
       def fork_dispatcher
@@ -103,7 +103,7 @@ module Pgbus
         @forks[pid] = { type: :dispatcher }
         Pgbus.logger.info { "[Pgbus] Forked dispatcher pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
-        Pgbus.logger.error { "[Pgbus] Fork failed for dispatcher: #{e.message}" }
+        ErrorReporter.report(e, { action: "fork_dispatcher" })
       end
 
       def boot_scheduler
@@ -132,7 +132,7 @@ module Pgbus
         @forks[pid] = { type: :scheduler }
         Pgbus.logger.info { "[Pgbus] Forked scheduler pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
-        Pgbus.logger.error { "[Pgbus] Fork failed for scheduler: #{e.message}" }
+        ErrorReporter.report(e, { action: "fork_scheduler" })
       end
 
       def recurring_tasks_configured?
@@ -186,7 +186,7 @@ module Pgbus
         @forks[pid] = { type: :consumer, config: consumer_config }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
-        Pgbus.logger.error { "[Pgbus] Fork failed for consumer: #{e.message}" }
+        ErrorReporter.report(e, { action: "fork_consumer", topics: topics })
       end
 
       def boot_outbox_poller
@@ -212,7 +212,7 @@ module Pgbus
         @forks[pid] = { type: :outbox_poller }
         Pgbus.logger.info { "[Pgbus] Forked outbox poller pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
-        Pgbus.logger.error { "[Pgbus] Fork failed for outbox poller: #{e.message}" }
+        ErrorReporter.report(e, { action: "fork_outbox_poller" })
       end
 
       def monitor_loop
@@ -282,7 +282,7 @@ module Pgbus
       def bootstrap_queues
         Pgbus.client.ensure_all_queues
       rescue StandardError => e
-        Pgbus.logger.error { "[Pgbus] Failed to bootstrap queues: #{e.message}" }
+        ErrorReporter.report(e, { action: "bootstrap_queues" })
       end
 
       def load_rails_app
