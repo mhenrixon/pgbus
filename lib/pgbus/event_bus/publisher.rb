@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "time"
+
 module Pgbus
   module EventBus
     module Publisher
@@ -7,6 +9,27 @@ module Pgbus
 
       def publish(routing_key, payload, headers: nil, delay: 0)
         event_data = build_event_data(payload)
+
+        if defined?(Pgbus::Testing) && !Pgbus::Testing.disabled?
+          event = Pgbus::Event.new(
+            event_id: event_data["event_id"],
+            payload: event_data["payload"],
+            published_at: event_data["published_at"] ? Time.parse(event_data["published_at"]) : nil,
+            routing_key: routing_key,
+            headers: headers
+          )
+
+          Pgbus::Testing.store.push_event(event)
+
+          if Pgbus::Testing.inline? && delay.to_i <= 0
+            Pgbus::EventBus::Registry.instance.handlers_for(routing_key).each do |subscriber|
+              subscriber.handler_class.new.handle(event)
+            end
+          end
+
+          return event_data
+        end
+
         Pgbus.client.publish_to_topic(routing_key, event_data, headers: headers, delay: delay)
       end
 
