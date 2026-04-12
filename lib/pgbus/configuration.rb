@@ -103,7 +103,7 @@ module Pgbus
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
-                  :streams_stats_enabled
+                  :streams_stats_enabled, :streams_test_mode
 
     def initialize
       @database_url = nil
@@ -209,6 +209,7 @@ module Pgbus
       # gates pgbus_job_stats recording) on purpose — operators
       # usually want job stats on and stream stats off, or vice versa.
       @streams_stats_enabled = false
+      @streams_test_mode = false
     end
 
     def queue_name(name)

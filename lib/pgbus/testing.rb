@@ -69,6 +69,8 @@ module Pgbus
       def mode!(mode, &block)
         raise ArgumentError, "Unknown mode: #{mode}. Valid modes: #{MODES.join(", ")}" unless MODES.include?(mode)
 
+        sync_streams_test_mode!(mode)
+
         unless block
           Thread.main[MODE_KEY] = mode
           return
@@ -94,6 +96,23 @@ module Pgbus
       def disabled? = mode == :disabled
 
       attr_reader :store
+
+      private
+
+      # When entering fake/inline mode, enable streams_test_mode to prevent
+      # rack.hijack from spawning background threads that acquire DB
+      # connections outside the test transaction (see issue #133). When
+      # returning to :disabled mode, restore the previous setting.
+      def sync_streams_test_mode!(mode)
+        return unless defined?(Pgbus.configuration)
+
+        if mode == :disabled
+          Pgbus.configuration.streams_test_mode = false
+          Pgbus::Web::Streamer.reset! if defined?(Pgbus::Web::Streamer)
+        else
+          Pgbus.configuration.streams_test_mode = true
+        end
+      end
     end
   end
 end

@@ -210,6 +210,80 @@ RSpec.describe Pgbus::Web::StreamApp do
     end
   end
 
+  describe "test mode (streams_test_mode)" do
+    before { Pgbus.configuration.streams_test_mode = true }
+    after { Pgbus.configuration.streams_test_mode = false }
+
+    it "returns 200 with SSE headers" do
+      env = get_env("/pgbus/streams/#{signed("chat")}")
+      status, headers, = app.call(env)
+      expect(status).to eq(200)
+      expect(headers["content-type"]).to eq("text/event-stream")
+      expect(headers["cache-control"]).to eq("no-cache, no-transform")
+      expect(headers["x-accel-buffering"]).to eq("no")
+    end
+
+    it "does not invoke rack.hijack" do
+      hijack_called = false
+      env = get_env(
+        "/pgbus/streams/#{signed("chat")}",
+        "rack.hijack?" => true,
+        "rack.hijack" => lambda {
+          hijack_called = true
+          StringIO.new
+        }
+      )
+      app.call(env)
+      expect(hijack_called).to be false
+    end
+
+    it "does not register any connection with the streamer" do
+      env = get_env("/pgbus/streams/#{signed("chat")}", "rack.hijack?" => true)
+      app.call(env)
+      expect(streamer.registered).to be_empty
+    end
+
+    it "returns a body containing a stub SSE comment" do
+      env = get_env("/pgbus/streams/#{signed("chat")}")
+      _, _, body = app.call(env)
+      joined = body.join
+      expect(joined).to include(": pgbus test mode")
+    end
+
+    it "still validates the signed stream name" do
+      env = get_env("/pgbus/streams/not-a-valid-token")
+      status, = app.call(env)
+      expect(status).to eq(404)
+    end
+
+    it "still runs the authorize hook" do
+      restricted = described_class.new(
+        streamer: streamer,
+        config: Pgbus.configuration,
+        logger: Logger.new(IO::NULL),
+        authorize: ->(_env, _name) { false }
+      )
+      env = get_env("/pgbus/streams/#{signed("chat")}")
+      status, = restricted.call(env)
+      expect(status).to eq(403)
+    end
+
+    it "takes priority over both hijack and Falcon streaming body" do
+      Pgbus.configuration.streams_falcon_streaming_body = true
+      env = get_env(
+        "/pgbus/streams/#{signed("chat")}",
+        "rack.hijack?" => true
+      )
+      status, _, body = app.call(env)
+      expect(status).to eq(200)
+      # Body should be a plain Array, not a Writable
+      expect(body).to be_a(Array)
+      expect(body.first).to include(": pgbus test mode")
+    ensure
+      Pgbus.configuration.streams_falcon_streaming_body = false
+    end
+  end
+
   describe "Falcon streaming body path" do
     before { Pgbus.configuration.streams_falcon_streaming_body = true }
     after { Pgbus.configuration.streams_falcon_streaming_body = false }

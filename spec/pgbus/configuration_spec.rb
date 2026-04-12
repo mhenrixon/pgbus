@@ -1042,6 +1042,10 @@ RSpec.describe Pgbus::Configuration do
     it "does not opt into the Falcon streaming body code path by default" do
       expect(config.streams_falcon_streaming_body).to be false
     end
+
+    it "has streams_test_mode disabled by default" do
+      expect(config.streams_test_mode).to be false
+    end
   end
 
   describe "#validate! with streams settings" do
