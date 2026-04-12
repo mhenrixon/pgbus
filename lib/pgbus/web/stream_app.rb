@@ -62,6 +62,8 @@ module Pgbus
         cursor = parse_cursor(env, request)
         return bad_request("invalid cursor: #{cursor}") if cursor.is_a?(String)
 
+        return test_mode_stub if config.streams_test_mode
+
         return over_capacity if streamer.registry.size >= config.streams_max_connections
 
         if config.streams_falcon_streaming_body
@@ -209,6 +211,11 @@ module Pgbus
 
       def server_error
         [500, { "content-type" => "text/plain" }, ["pgbus: internal error"]]
+      end
+
+      def test_mode_stub
+        body = ": pgbus test mode — connection accepted, no polling\n\n"
+        [200, sse_headers, [body]]
       end
     end
   end

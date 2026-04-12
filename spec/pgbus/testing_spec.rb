@@ -78,6 +78,33 @@ RSpec.describe Pgbus::Testing do
     end
   end
 
+  describe "streams_test_mode sync" do
+    after { Pgbus.configuration.streams_test_mode = false }
+
+    it "enables streams_test_mode when entering fake mode" do
+      described_class.fake!
+      expect(Pgbus.configuration.streams_test_mode).to be true
+    end
+
+    it "enables streams_test_mode when entering inline mode" do
+      described_class.inline!
+      expect(Pgbus.configuration.streams_test_mode).to be true
+    end
+
+    it "disables streams_test_mode when entering disabled mode" do
+      Pgbus.configuration.streams_test_mode = true
+      described_class.disabled!
+      expect(Pgbus.configuration.streams_test_mode).to be false
+    end
+
+    it "enables streams_test_mode inside a scoped block and restores afterward" do
+      described_class.fake! do
+        expect(Pgbus.configuration.streams_test_mode).to be true
+      end
+      expect(Pgbus.configuration.streams_test_mode).to be false
+    end
+  end
+
   describe ".store" do
     it "returns a EventStore instance" do
       expect(described_class.store).to be_a(Pgbus::Testing::EventStore)
