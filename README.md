@@ -37,6 +37,13 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
   - [Structured logging](#structured-logging)
   - [Queue health monitoring](#queue-health-monitoring)
 - [Real-time broadcasts](#real-time-broadcasts-turbo-streams-replacement)
+- [Testing](#testing)
+  - [RSpec setup](#rspec-setup)
+  - [Minitest / TestUnit setup](#minitest--testunit-setup)
+  - [Event bus assertions](#event-bus-assertions)
+  - [RSpec matchers](#rspec-matchers)
+  - [Testing modes](#testing-modes)
+  - [SSE streams in tests](#sse-streams-in-tests)
 - [Operations](#operations)
   - [CLI](#cli)
   - [Dashboard](#dashboard)
@@ -1058,6 +1065,234 @@ The Insights tab gains a "Real-time Streams" section with counts of broadcasts /
 
 Overhead on a real Puma + PGMQ setup (`bundle exec rake bench:streams`): the most visible cost is an INSERT per connect/disconnect pair, which shows up under thundering-herd connect scenarios (K=50 concurrent connects: ~+20% per-connect latency). Steady-state broadcast and fanout numbers stay in the run-to-run noise band. Enable it if Insights is useful; leave it off if the write traffic worries you.
 
+## Testing
+
+Pgbus ships opt-in test helpers for both RSpec and Minitest. The testing module is **never autoloaded** by Zeitwerk -- you must `require` it explicitly, so it cannot leak into production.
+
+### RSpec setup
+
+Add one line to your `spec/rails_helper.rb` (or `spec/spec_helper.rb`):
+
+```ruby
+# spec/rails_helper.rb
+require "pgbus/testing/rspec"
+```
+
+This does three things:
+
+1. Loads `Pgbus::Testing` with the in-memory `EventStore` and mode management
+2. Registers the `have_published_event` matcher
+3. Includes `Pgbus::Testing::Assertions` into all example groups
+
+You still need to activate a testing mode and clear the store per test. Add a `before`/`after` block:
+
+```ruby
+# spec/rails_helper.rb
+require "pgbus/testing/rspec"
+
+RSpec.configure do |config|
+  config.before { Pgbus::Testing.fake! }
+  config.after do
+    Pgbus::Testing.disabled!
+    Pgbus::Testing.store.clear!
+  end
+end
+```
+
+Or scope it to specific groups:
+
+```ruby
+RSpec.configure do |config|
+  config.before(:each, :pgbus) { Pgbus::Testing.fake! }
+  config.after(:each, :pgbus) do
+    Pgbus::Testing.disabled!
+    Pgbus::Testing.store.clear!
+  end
+end
+
+# Usage:
+RSpec.describe OrderService, :pgbus do
+  it "publishes an event" do
+    expect { described_class.create!(attrs) }
+      .to have_published_event("orders.created")
+  end
+end
+```
+
+### Minitest / TestUnit setup
+
+Add the require and include to your `test/test_helper.rb`:
+
+```ruby
+# test/test_helper.rb
+require "pgbus/testing/minitest"
+
+class ActiveSupport::TestCase
+  include Pgbus::Testing::MinitestHelpers
+end
+```
+
+`MinitestHelpers` hooks into Minitest's lifecycle automatically:
+
+- **`before_setup`** -- activates `:fake` mode and clears the event store before each test
+- Includes all assertion helpers (`assert_pgbus_published`, `assert_no_pgbus_published`, `pgbus_published_events`, `perform_published_events`)
+
+No additional `setup`/`teardown` blocks are needed -- the module handles it.
+
+### Event bus assertions
+
+Both RSpec and Minitest share the same assertion helpers via `Pgbus::Testing::Assertions`:
+
+```ruby
+# Assert that a block publishes exactly N events
+assert_pgbus_published(count: 1, routing_key: "orders.created") do
+  OrderService.create!(attrs)
+end
+
+# Assert that a block publishes zero events
+assert_no_pgbus_published(routing_key: "orders.created") do
+  OrderService.preview(attrs)
+end
+
+# Inspect captured events directly
+events = pgbus_published_events(routing_key: "orders.created")
+assert_equal 1, events.size
+assert_equal({ "id" => 42 }, events.first.payload)
+
+# Capture events, then dispatch them to registered handlers
+perform_published_events do
+  OrderService.create!(attrs)
+end
+# After the block, all captured events have been dispatched to their
+# matching handlers synchronously -- useful for testing side effects
+```
+
+### RSpec matchers
+
+The `have_published_event` matcher supports chainable constraints:
+
+```ruby
+# Basic: assert any event was published with the given routing key
+expect { publish_order(order) }
+  .to have_published_event("orders.created")
+
+# With payload matching (uses RSpec's values_match?, so hash_including works)
+expect { publish_order(order) }
+  .to have_published_event("orders.created")
+  .with_payload(hash_including("id" => order.id))
+
+# With header matching
+expect { publish_order(order) }
+  .to have_published_event("orders.created")
+  .with_headers(hash_including("x-tenant" => "acme"))
+
+# Exact count
+expect { publish_order(order) }
+  .to have_published_event("orders.created")
+  .exactly(1)
+
+# Combine all constraints
+expect { publish_order(order) }
+  .to have_published_event("orders.created")
+  .with_payload(hash_including("id" => order.id))
+  .with_headers(hash_including("x-tenant" => "acme"))
+  .exactly(1)
+
+# Negated
+expect { publish_order(order) }
+  .not_to have_published_event("orders.cancelled")
+```
+
+### Testing modes
+
+Three modes control how `Pgbus::EventBus::Publisher.publish` behaves:
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| `:fake` | Captures events in-memory, no PGMQ calls, no handler dispatch | Most unit/integration tests |
+| `:inline` | Captures events AND immediately dispatches to matching handlers | Testing side effects (handler logic) |
+| `:disabled` | Pass-through to real publisher (production behavior) | Default; integration tests with real PGMQ |
+
+Switch modes globally or scoped to a block:
+
+```ruby
+# Global (persists until changed)
+Pgbus::Testing.fake!
+Pgbus::Testing.inline!
+Pgbus::Testing.disabled!
+
+# Scoped (restores previous mode after block)
+Pgbus::Testing.inline! do
+  OrderService.create!(attrs)  # handlers fire synchronously
+end
+# mode is restored to whatever it was before
+
+# Query current mode
+Pgbus::Testing.fake?     # => true/false
+Pgbus::Testing.inline?   # => true/false
+Pgbus::Testing.disabled? # => true/false
+```
+
+The `:inline` mode skips delayed publishes (`delay: > 0`) -- those are captured in the store but not dispatched. Use `Pgbus::Testing.store.drain!` to manually dispatch all captured events including delayed ones.
+
+### SSE streams in tests
+
+When using `use_transactional_fixtures = true` (the default in Rails), pgbus SSE streams are incompatible with transactional test isolation. The `rack.hijack` mechanism spawns background threads that acquire their own database connections outside the test transaction, which causes:
+
+- Connection pool exhaustion after enough system tests
+- CI hangs (tests freeze waiting for a connection)
+- `Errno::EPIPE` errors when the browser navigates away
+
+**Automatic fix with `Pgbus::Testing`:** When you activate `:fake` or `:inline` mode (as shown above), pgbus automatically enables `streams_test_mode`. The SSE endpoint returns a stub response (valid SSE headers + a comment + immediate close) without hijacking, without spawning background threads, and without acquiring any database connections. The `<pgbus-stream-source>` custom element still renders and connects, but no PGMQ polling occurs.
+
+If you're using the RSpec or Minitest setup shown above, **you don't need to do anything extra** -- streams are safe automatically.
+
+**Manual configuration** (if you don't use `Pgbus::Testing`):
+
+```ruby
+# config/initializers/pgbus.rb
+Pgbus.configure do |c|
+  c.streams_test_mode = true if Rails.env.test?
+end
+```
+
+Or toggle it per test:
+
+```ruby
+# RSpec
+before { Pgbus.configuration.streams_test_mode = true }
+after  { Pgbus.configuration.streams_test_mode = false }
+
+# Minitest
+setup    { Pgbus.configuration.streams_test_mode = true }
+teardown { Pgbus.configuration.streams_test_mode = false }
+```
+
+**What `streams_test_mode` does:** The `StreamApp` short-circuits after signature verification and authorization checks but before any hijack, streaming body, or capacity logic. It returns:
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache, no-transform
+
+: pgbus test mode — connection accepted, no polling
+```
+
+This is a valid SSE response that the browser's EventSource will accept. No `Streamer` singleton is created, no PG LISTEN connection is opened, and no dispatcher/heartbeat/listener threads are spawned.
+
+**Testing actual stream delivery:** If you need to verify end-to-end SSE message delivery in integration tests, disable `streams_test_mode` and use the `PumaTestHarness` from the pgbus test support:
+
+```ruby
+require "pgbus/testing"
+
+Pgbus::Testing.disabled! do
+  # streams_test_mode is automatically disabled
+  # Use real Puma + real PGMQ for end-to-end stream tests
+end
+```
+
+See `spec/integration/streams/` in the pgbus source for examples of integration tests that exercise the full SSE pipeline with a real Puma server.
+
 ## Operations
 
 Day-to-day running of Pgbus: starting and stopping processes, observing what is happening on the dashboard, the database tables Pgbus relies on, and how to migrate from an existing job backend.
@@ -1240,6 +1475,7 @@ PostgreSQL + PGMQ
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
 | `stats_enabled` | `true` | Record job execution stats for insights dashboard |
 | `stats_retention` | `30.days` | How long to keep job stats. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `streams_test_mode` | `false` | Return a stub SSE response without hijack or background threads. Auto-enabled by `Pgbus::Testing.fake!`/`.inline!`. See [SSE streams in tests](#sse-streams-in-tests). |
 | `streams_stats_enabled` | `false` | Record stream broadcast/connect/disconnect stats (opt-in, can be high volume) |
 | `streams_path` | `nil` | Custom URL path for the SSE endpoint (nil = auto-detected from engine mount) |
 | `execution_mode` | `:threads` | Global execution mode (`:threads` or `:async`). Per-worker override via capsule config. |
