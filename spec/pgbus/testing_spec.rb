@@ -179,6 +179,24 @@ RSpec.describe Pgbus::Testing do
         expect { store.drain! }.not_to raise_error
         expect(store.events).to be_empty
       end
+
+      it "preserves unprocessed events when a handler raises" do
+        failing_handler = Class.new(Pgbus::EventBus::Handler) do
+          def handle(_event)
+            raise "boom"
+          end
+        end
+        stub_const("TestFailingHandler", failing_handler)
+
+        Pgbus::EventBus::Registry.instance.subscribe("fail.me", failing_handler)
+        Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
+
+        store.push_event(Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "fail.me"))
+        store.push_event(Pgbus::Event.new(event_id: "e2", payload: {}, routing_key: "orders.created"))
+
+        expect { store.drain! }.to raise_error(RuntimeError, "boom")
+        expect(store.events.map(&:event_id)).to eq(%w[e1 e2])
+      end
     end
   end
 end

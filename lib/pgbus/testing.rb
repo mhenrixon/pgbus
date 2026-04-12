@@ -46,13 +46,18 @@ module Pgbus
       end
 
       # Dispatch all stored events to their matching handlers, then clear.
+      # Events are removed one at a time after successful dispatch so that
+      # a handler exception leaves unprocessed events in the store.
       def drain!
-        events_to_drain = @mutex.synchronize { @events.dup.tap { @events.clear } }
+        loop do
+          event = @mutex.synchronize { @events.first }
+          break unless event
 
-        events_to_drain.each do |event|
           Pgbus::EventBus::Registry.instance.handlers_for(event.routing_key).each do |subscriber|
             subscriber.handler_class.new.handle(event)
           end
+
+          @mutex.synchronize { @events.shift }
         end
       end
     end

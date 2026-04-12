@@ -76,6 +76,14 @@ RSpec.describe Pgbus::EventBus::Publisher do
       expect(handler_class.handled_events.size).to eq(1)
       expect(handler_class.handled_events.first.payload).to eq("id" => 42)
     end
+
+    it "captures but does not dispatch delayed events" do
+      Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
+      described_class.publish("orders.created", { "id" => 99 }, delay: 300)
+
+      expect(Pgbus::Testing.store.events.size).to eq(1)
+      expect(handler_class.handled_events).to be_empty
+    end
   end
 
   describe "disabled mode" do

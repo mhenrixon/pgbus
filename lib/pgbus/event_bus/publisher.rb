@@ -21,7 +21,7 @@ module Pgbus
 
           Pgbus::Testing.store.push_event(event)
 
-          if Pgbus::Testing.inline?
+          if Pgbus::Testing.inline? && delay.to_i <= 0
             Pgbus::EventBus::Registry.instance.handlers_for(routing_key).each do |subscriber|
               subscriber.handler_class.new.handle(event)
             end
