@@ -17,8 +17,6 @@ RSpec::Matchers.define :have_published_event do |expected_routing_key|
 
     return false if @new_events.empty?
 
-    return false if @expected_count && @new_events.size != @expected_count
-
     if @expected_payload
       @new_events = @new_events.select { |e| values_match?(@expected_payload, e.payload) }
       return false if @new_events.empty?
@@ -29,6 +27,8 @@ RSpec::Matchers.define :have_published_event do |expected_routing_key|
       return false if @new_events.empty?
     end
 
+    return false if @expected_count && @new_events.size != @expected_count
+
     true
   end
 
@@ -37,7 +37,16 @@ RSpec::Matchers.define :have_published_event do |expected_routing_key|
     block.call
     @after = Pgbus::Testing.store.events(routing_key: expected_routing_key)
     @new_events = @after - @before
-    @new_events.empty?
+
+    @new_events = @new_events.select { |e| values_match?(@expected_payload, e.payload) } if @expected_payload
+
+    @new_events = @new_events.select { |e| values_match?(@expected_headers, e.headers) } if @expected_headers
+
+    if @expected_count
+      @new_events.size != @expected_count
+    else
+      @new_events.empty?
+    end
   end
 
   failure_message do

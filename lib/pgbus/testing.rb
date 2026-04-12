@@ -18,39 +18,6 @@ module Pgbus
     MODES = %i[fake inline disabled].freeze
     MODE_KEY = :__pgbus_test_mode
 
-    class << self
-      def mode!(mode, &block)
-        raise ArgumentError, "Unknown mode: #{mode}. Valid modes: #{MODES.join(", ")}" unless MODES.include?(mode)
-
-        unless block
-          Thread.main[MODE_KEY] = mode
-          return
-        end
-
-        old = Thread.current[MODE_KEY]
-        Thread.current[MODE_KEY] = mode
-        yield
-      ensure
-        Thread.current[MODE_KEY] = old if block
-      end
-
-      def mode
-        Thread.current[MODE_KEY] || Thread.main[MODE_KEY] || :disabled
-      end
-
-      def fake!(&) = mode!(:fake, &)
-      def inline!(&) = mode!(:inline, &)
-      def disabled!(&) = mode!(:disabled, &)
-
-      def fake?     = mode == :fake
-      def inline?   = mode == :inline
-      def disabled? = mode == :disabled
-
-      def store
-        @store ||= EventStore.new
-      end
-    end
-
     # Thread-safe in-memory store for events captured in fake/inline mode.
     class EventStore
       def initialize
@@ -88,6 +55,40 @@ module Pgbus
           end
         end
       end
+    end
+
+    # Eagerly initialize the store so concurrent access never races on creation.
+    @store = EventStore.new
+
+    class << self
+      def mode!(mode, &block)
+        raise ArgumentError, "Unknown mode: #{mode}. Valid modes: #{MODES.join(", ")}" unless MODES.include?(mode)
+
+        unless block
+          Thread.main[MODE_KEY] = mode
+          return
+        end
+
+        old = Thread.current[MODE_KEY]
+        Thread.current[MODE_KEY] = mode
+        yield
+      ensure
+        Thread.current[MODE_KEY] = old if block
+      end
+
+      def mode
+        Thread.current[MODE_KEY] || Thread.main[MODE_KEY] || :disabled
+      end
+
+      def fake!(&) = mode!(:fake, &)
+      def inline!(&) = mode!(:inline, &)
+      def disabled!(&) = mode!(:disabled, &)
+
+      def fake?     = mode == :fake
+      def inline?   = mode == :inline
+      def disabled? = mode == :disabled
+
+      attr_reader :store
     end
   end
 end
