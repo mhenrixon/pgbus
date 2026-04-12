@@ -97,10 +97,11 @@ RSpec.describe Pgbus::Testing do
       expect(Pgbus.configuration.streams_test_mode).to be false
     end
 
-    it "enables streams_test_mode inside a scoped block" do
+    it "enables streams_test_mode inside a scoped block and restores afterward" do
       described_class.fake! do
         expect(Pgbus.configuration.streams_test_mode).to be true
       end
+      expect(Pgbus.configuration.streams_test_mode).to be false
     end
   end
 

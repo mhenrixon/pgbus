@@ -80,7 +80,10 @@ module Pgbus
         Thread.current[MODE_KEY] = mode
         yield
       ensure
-        Thread.current[MODE_KEY] = old if block
+        if block
+          Thread.current[MODE_KEY] = old
+          sync_streams_test_mode!(old || :disabled)
+        end
       end
 
       def mode
