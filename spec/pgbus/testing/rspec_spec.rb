@@ -3,16 +3,16 @@
 require "spec_helper"
 require "pgbus/testing/rspec"
 
-RSpec.describe "RSpec matchers" do
+RSpec.describe Pgbus::Testing do
   before do
-    Pgbus::Testing.fake!
-    Pgbus::Testing.store.clear!
+    described_class.fake!
+    described_class.store.clear!
     allow(Pgbus).to receive(:client).and_return(double("Pgbus::Client", publish_to_topic: nil))
   end
 
   after do
-    Pgbus::Testing.disabled!
-    Pgbus::Testing.store.clear!
+    described_class.disabled!
+    described_class.store.clear!
   end
 
   describe "have_published_event" do

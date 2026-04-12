@@ -37,51 +37,51 @@ RSpec.describe Pgbus::Testing::Assertions do
 
   describe "#assert_pgbus_published" do
     it "passes when expected events are published" do
-      expect {
+      expect do
         assert_pgbus_published(count: 1, routing_key: "orders.created") do
           Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
         end
-      }.not_to raise_error
+      end.not_to raise_error
     end
 
     it "fails when count doesn't match" do
-      expect {
+      expect do
         assert_pgbus_published(count: 2, routing_key: "orders.created") do
           Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
         end
-      }.to raise_error(/Expected 2 event\(s\) published.*got 1/)
+      end.to raise_error(/Expected 2 event\(s\) published.*got 1/)
     end
 
     it "only counts events published within the block" do
       Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 0 })
 
-      expect {
+      expect do
         assert_pgbus_published(count: 1) do
           Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
         end
-      }.not_to raise_error
+      end.not_to raise_error
     end
   end
 
   describe "#assert_no_pgbus_published" do
     it "passes when no events are published" do
-      expect {
+      expect do
         assert_no_pgbus_published { "no-op" }
-      }.not_to raise_error
+      end.not_to raise_error
     end
 
     it "fails when events are published" do
-      expect {
+      expect do
         assert_no_pgbus_published do
           Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
         end
-      }.to raise_error(/Expected no events published.*got 1/)
+      end.to raise_error(/Expected no events published.*got 1/)
     end
   end
 
   describe "#perform_published_events" do
     let(:handler_class) do
-      Class.new(Pgbus::EventBus::Handler) do
+      klass = Class.new(Pgbus::EventBus::Handler) do
         class << self
           attr_accessor :handled_events
         end
@@ -90,7 +90,9 @@ RSpec.describe Pgbus::Testing::Assertions do
         def handle(event)
           self.class.handled_events << event
         end
-      end.tap { |klass| stub_const("TestPerformHandler", klass) }
+      end
+      stub_const("TestPerformHandler", klass)
+      klass
     end
 
     before do

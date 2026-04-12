@@ -3,7 +3,7 @@
 require "spec_helper"
 require "pgbus/testing"
 
-RSpec.describe "Publisher test mode hook" do
+RSpec.describe Pgbus::EventBus::Publisher do
   include PgmqDoubles
 
   let(:mock_client) { build_mock_client }
@@ -22,7 +22,7 @@ RSpec.describe "Publisher test mode hook" do
     before { Pgbus::Testing.fake! }
 
     it "captures the event without calling PGMQ" do
-      Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
+      described_class.publish("orders.created", { "id" => 1 })
 
       expect(mock_client).not_to have_received(:publish_to_topic)
       expect(Pgbus::Testing.store.events.size).to eq(1)
@@ -34,7 +34,7 @@ RSpec.describe "Publisher test mode hook" do
     end
 
     it "captures headers" do
-      Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 }, headers: { "x-trace" => "abc" })
+      described_class.publish("orders.created", { "id" => 1 }, headers: { "x-trace" => "abc" })
 
       event = Pgbus::Testing.store.events.first
       expect(event.headers).to eq("x-trace" => "abc")
@@ -43,7 +43,7 @@ RSpec.describe "Publisher test mode hook" do
 
   describe "inline mode" do
     let(:handler_class) do
-      Class.new(Pgbus::EventBus::Handler) do
+      klass = Class.new(Pgbus::EventBus::Handler) do
         class << self
           attr_accessor :handled_events
         end
@@ -52,7 +52,9 @@ RSpec.describe "Publisher test mode hook" do
         def handle(event)
           self.class.handled_events << event
         end
-      end.tap { |klass| stub_const("TestInlineHandler", klass) }
+      end
+      stub_const("TestInlineHandler", klass)
+      klass
     end
 
     before do
@@ -67,7 +69,7 @@ RSpec.describe "Publisher test mode hook" do
 
     it "captures the event AND dispatches to handlers" do
       Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
-      Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 42 })
+      described_class.publish("orders.created", { "id" => 42 })
 
       expect(mock_client).not_to have_received(:publish_to_topic)
       expect(Pgbus::Testing.store.events.size).to eq(1)
@@ -80,7 +82,7 @@ RSpec.describe "Publisher test mode hook" do
     before { Pgbus::Testing.disabled! }
 
     it "passes through to the real publisher" do
-      Pgbus::EventBus::Publisher.publish("orders.created", { "id" => 1 })
+      described_class.publish("orders.created", { "id" => 1 })
 
       expect(mock_client).to have_received(:publish_to_topic)
       expect(Pgbus::Testing.store.events).to be_empty

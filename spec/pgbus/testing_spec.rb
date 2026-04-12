@@ -5,8 +5,8 @@ require "pgbus/testing"
 
 RSpec.describe Pgbus::Testing do
   after do
-    described_class.disabled!
-    described_class.store.clear!
+    Pgbus::Testing.disabled! # rubocop:disable RSpec/DescribedClass
+    Pgbus::Testing.store.clear! # rubocop:disable RSpec/DescribedClass
   end
 
   describe ".mode!" do
@@ -87,96 +87,98 @@ RSpec.describe Pgbus::Testing do
       expect(described_class.store).to equal(described_class.store)
     end
   end
-end
 
-RSpec.describe Pgbus::Testing::EventStore do
-  subject(:store) { described_class.new }
+  describe Pgbus::Testing::EventStore do
+    subject(:store) { described_class.new }
 
-  describe "#push_event" do
-    it "stores an event" do
-      event = Pgbus::Event.new(event_id: "e1", payload: { "a" => 1 }, routing_key: "orders.created")
-      store.push_event(event)
+    describe "#push_event" do
+      it "stores an event" do
+        event = Pgbus::Event.new(event_id: "e1", payload: { "a" => 1 }, routing_key: "orders.created")
+        store.push_event(event)
 
-      expect(store.events).to contain_exactly(event)
-    end
-  end
-
-  describe "#events" do
-    it "returns events filtered by routing_key" do
-      e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "orders.created")
-      e2 = Pgbus::Event.new(event_id: "e2", payload: {}, routing_key: "orders.shipped")
-      store.push_event(e1)
-      store.push_event(e2)
-
-      expect(store.events(routing_key: "orders.created")).to contain_exactly(e1)
+        expect(store.events).to contain_exactly(event)
+      end
     end
 
-    it "returns all events when no filter" do
-      e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "orders.created")
-      e2 = Pgbus::Event.new(event_id: "e2", payload: {}, routing_key: "orders.shipped")
-      store.push_event(e1)
-      store.push_event(e2)
+    describe "#events" do
+      it "returns events filtered by routing_key" do
+        e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "orders.created")
+        e2 = Pgbus::Event.new(event_id: "e2", payload: {}, routing_key: "orders.shipped")
+        store.push_event(e1)
+        store.push_event(e2)
 
-      expect(store.events).to contain_exactly(e1, e2)
+        expect(store.events(routing_key: "orders.created")).to contain_exactly(e1)
+      end
+
+      it "returns all events when no filter" do
+        e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "orders.created")
+        e2 = Pgbus::Event.new(event_id: "e2", payload: {}, routing_key: "orders.shipped")
+        store.push_event(e1)
+        store.push_event(e2)
+
+        expect(store.events).to contain_exactly(e1, e2)
+      end
+
+      it "returns a copy so mutations don't affect the store" do
+        e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "x")
+        store.push_event(e1)
+
+        store.events.clear
+        expect(store.events).to contain_exactly(e1)
+      end
     end
 
-    it "returns a copy so mutations don't affect the store" do
-      e1 = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "x")
-      store.push_event(e1)
-
-      store.events.clear
-      expect(store.events).to contain_exactly(e1)
+    describe "#clear!" do
+      it "empties all events" do
+        store.push_event(Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "x"))
+        store.clear!
+        expect(store.events).to be_empty
+      end
     end
-  end
 
-  describe "#clear!" do
-    it "empties all events" do
-      store.push_event(Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "x"))
-      store.clear!
-      expect(store.events).to be_empty
-    end
-  end
+    describe "#drain!" do
+      let(:handler_class) do
+        klass = Class.new(Pgbus::EventBus::Handler) do
+          class << self
+            attr_accessor :handled_events
+          end
+          self.handled_events = []
 
-  describe "#drain!" do
-    let(:handler_class) do
-      Class.new(Pgbus::EventBus::Handler) do
-        class << self
-          attr_accessor :handled_events
+          def handle(event)
+            self.class.handled_events << event
+          end
         end
-        self.handled_events = []
+        stub_const("TestDrainHandler", klass)
+        klass
+      end
 
-        def handle(event)
-          self.class.handled_events << event
-        end
-      end.tap { |klass| stub_const("TestDrainHandler", klass) }
-    end
+      before do
+        Pgbus::EventBus::Registry.instance.clear!
+      end
 
-    before do
-      Pgbus::EventBus::Registry.instance.clear!
-    end
+      after do
+        Pgbus::EventBus::Registry.instance.clear!
+      end
 
-    after do
-      Pgbus::EventBus::Registry.instance.clear!
-    end
+      it "dispatches stored events to matching handlers and clears the store" do
+        Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
 
-    it "dispatches stored events to matching handlers and clears the store" do
-      Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
+        event = Pgbus::Event.new(event_id: "e1", payload: { "id" => 1 }, routing_key: "orders.created")
+        store.push_event(event)
+        store.drain!
 
-      event = Pgbus::Event.new(event_id: "e1", payload: { "id" => 1 }, routing_key: "orders.created")
-      store.push_event(event)
-      store.drain!
+        expect(handler_class.handled_events.size).to eq(1)
+        expect(handler_class.handled_events.first.event_id).to eq("e1")
+        expect(store.events).to be_empty
+      end
 
-      expect(handler_class.handled_events.size).to eq(1)
-      expect(handler_class.handled_events.first.event_id).to eq("e1")
-      expect(store.events).to be_empty
-    end
+      it "skips events with no matching handlers" do
+        event = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "no.match")
+        store.push_event(event)
 
-    it "skips events with no matching handlers" do
-      event = Pgbus::Event.new(event_id: "e1", payload: {}, routing_key: "no.match")
-      store.push_event(event)
-
-      expect { store.drain! }.not_to raise_error
-      expect(store.events).to be_empty
+        expect { store.drain! }.not_to raise_error
+        expect(store.events).to be_empty
+      end
     end
   end
 end
