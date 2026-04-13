@@ -18,7 +18,8 @@ RSpec.describe Pgbus::EventBus::Publisher do
 
       expect(mock_client).to have_received(:publish_to_topic).with(
         "orders.created",
-        hash_including("event_id" => a_kind_of(String), "payload" => { "order_id" => 1 }),
+        hash_including("event_id" => a_kind_of(String), "payload" => { "order_id" => 1 },
+                       "routing_key" => "orders.created"),
         headers: nil,
         delay: 0
       )
@@ -78,6 +79,18 @@ RSpec.describe Pgbus::EventBus::Publisher do
 
       expect(result).to include("event_id" => a_kind_of(String), "published_at" => a_kind_of(String))
       expect(result["payload"]).to eq("foo" => "bar")
+    end
+
+    it "includes routing_key when provided" do
+      result = described_class.build_event_data({ "foo" => "bar" }, routing_key: "orders.created")
+
+      expect(result["routing_key"]).to eq("orders.created")
+    end
+
+    it "omits routing_key when not provided" do
+      result = described_class.build_event_data({ "foo" => "bar" })
+
+      expect(result).not_to have_key("routing_key")
     end
 
     it "wraps GlobalID-capable payloads with _global_id key" do

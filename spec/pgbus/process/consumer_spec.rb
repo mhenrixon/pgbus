@@ -104,6 +104,23 @@ RSpec.describe Pgbus::Process::Consumer do
 
       expect { consumer.send(:handle_message, message, "q_orders") }.not_to raise_error
     end
+
+    context "when routing_key is in the message body (not headers)" do
+      let(:message_body) { JSON.generate("routing_key" => "orders.shipped", "payload" => { "id" => 99 }) }
+      let(:message) { build_message_double(msg_id: 8, message: message_body) }
+
+      before do
+        allow(registry).to receive(:handlers_for).with("orders.shipped").and_return([matching_subscriber])
+      end
+
+      it "extracts routing_key from the top-level body field" do
+        consumer.send(:handle_message, message, "q_orders")
+
+        expect(registry).to have_received(:handlers_for).with("orders.shipped")
+        expect(handler_instance).to have_received(:process).with(message)
+        expect(mock_client).to have_received(:archive_message).with("q_orders", 8)
+      end
+    end
   end
 
   describe "fetch_multi_consumer (private)" do
