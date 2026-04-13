@@ -119,7 +119,34 @@ en:
       delete_title: Delete
       ok: OK
     events:
+      flash:
+        discard_failed: Could not discard event.
+        discarded: Event discarded.
+        discarded_selected:
+          one: Discarded 1 event.
+          other: Discarded %{count} events.
+        mark_handled_failed: Could not mark event as handled.
+        marked_handled: Event marked as handled.
+        none_selected: No events selected.
+        payload_update_failed: Could not update payload. Check that the JSON is valid.
+        payload_updated: Payload updated and event re-enqueued.
+        replay_failed: Event not found or could not be replayed.
+        replayed: Event replayed.
+        reroute_failed: Could not reroute event.
+        rerouted: Event rerouted to target handler.
       index:
+        discard_all: Discard All
+        discard_all_confirm: Discard all pending events? This cannot be undone.
+        discard_selected: Discard Selected
+        discard_selected_confirm: Discard selected events?
+        pending_empty: No pending events
+        pending_headers:
+          enqueued: Enqueued
+          handler_queue: Handler Queue
+          id: ID
+          reads: Reads
+          routing_key: Routing Key
+        pending_title: Pending Events
         processed_empty: No events processed yet
         processed_headers:
           event_id: Event ID
@@ -133,6 +160,26 @@ en:
           queue: Queue
         subscribers_title: Registered Subscribers
         title: Events
+      pending_table:
+        arguments: Payload
+        discard: Discard
+        discard_confirm: Discard this event? It will be archived.
+        edit_payload: Edit & Retry
+        edit_payload_confirm: Update payload and re-enqueue this event?
+        edit_payload_label: 'JSON Payload:'
+        event_id: 'Event ID:'
+        full_json_payload: Full JSON Payload
+        headers_section: Headers
+        mark_handled: Mark Handled
+        mark_handled_confirm: Mark this event as handled? It will be archived and skipped on replay.
+        metadata: Metadata
+        metadata_labels:
+          last_read: Last Read
+          read_count: Read Count
+          visible_at: Visible At
+        reroute: Reroute
+        reroute_confirm: Reroute this event to a different handler?
+        reroute_label: 'Target handler:'
       show:
         back: Back to Events
         labels:

@@ -1,0 +1,136 @@
+<turbo-frame id="pending-events">
+  <%# Bulk form outside table to avoid nested form issues %>
+  <form id="bulk-discard-events-form" action="<%= pgbus.discard_selected_events_path %>" method="post" data-turbo-frame="_top" class="hidden">
+    <%= hidden_field_tag :authenticity_token, form_authenticity_token %>
+  </form>
+  <div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700" data-bulk-scope="events">
+    <table class="pgbus-table min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+      <thead class="bg-gray-50 dark:bg-gray-900">
+        <tr>
+          <% if @pending.any? %>
+            <th class="w-10 px-4 py-3">
+              <input type="checkbox" data-bulk-select-all
+                     aria-label="<%= t("pgbus.helpers.bulk_select_all") %>"
+                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600">
+            </th>
+          <% end %>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.events.index.pending_headers.id") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.events.index.pending_headers.routing_key") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.events.index.pending_headers.handler_queue") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.events.index.pending_headers.enqueued") %></th>
+          <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.events.index.pending_headers.reads") %></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
+        <% @pending.each do |m| %>
+          <% payload = pgbus_parse_message(m[:message]) %>
+          <tr>
+            <td class="w-10 px-4 py-3 align-top">
+              <input type="checkbox" data-bulk-item data-pgbus-action="bulk-row-toggle"
+                     aria-label="<%= t("pgbus.helpers.bulk_select_row", id: m[:msg_id]) %>"
+                     data-queue-name="<%= m[:queue_name] %>" data-msg-id="<%= m[:msg_id] %>"
+                     class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600 mt-1">
+              <input type="hidden" name="messages[][queue_name]" value="<%= m[:queue_name] %>" form="bulk-discard-events-form" disabled>
+              <input type="hidden" name="messages[][msg_id]" value="<%= m[:msg_id] %>" form="bulk-discard-events-form" disabled>
+            </td>
+            <td colspan="5" class="p-0">
+              <details class="group">
+                <summary class="flex cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 dark:bg-gray-900 list-none">
+                  <span class="w-16 shrink-0 px-4 py-3 text-sm font-mono text-gray-900 dark:text-white"><%= m[:msg_id] %></span>
+                  <span class="flex-1 px-4 py-3 text-sm font-mono text-indigo-600 truncate"><%= payload["routing_key"] || payload["event_id"] || "—" %></span>
+                  <span class="w-40 shrink-0 px-4 py-3 text-sm text-gray-700"><%= m[:queue_name] %></span>
+                  <span class="w-28 shrink-0 px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(m[:enqueued_at]) %></span>
+                  <span class="w-16 shrink-0 px-4 py-3 text-sm text-gray-500"><%= m[:read_ct] %></span>
+                </summary>
+                <div class="px-4 pb-4 bg-gray-50 dark:bg-gray-900 border-t border-gray-100">
+                  <div class="flex items-center justify-between mt-3 mb-3">
+                    <span class="text-xs font-mono text-gray-400"><%= t("pgbus.events.pending_table.event_id") %> <%= payload["event_id"] %></span>
+                    <div class="flex space-x-2">
+                      <%# Mark Handled %>
+                      <%= button_to t("pgbus.events.pending_table.mark_handled"),
+                            pgbus.mark_handled_event_path(m[:msg_id], queue_name: m[:queue_name], handler_class: handler_for_queue(m[:queue_name])),
+                            method: :post,
+                            class: "rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-500",
+                            data: { turbo_confirm: t("pgbus.events.pending_table.mark_handled_confirm"), turbo_frame: "_top" } %>
+                      <%# Reroute — dropdown with available handlers %>
+                      <details class="relative inline-block">
+                        <summary class="rounded-md bg-yellow-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-yellow-500 cursor-pointer list-none">
+                          <%= t("pgbus.events.pending_table.reroute") %>
+                        </summary>
+                        <div class="absolute right-0 z-10 mt-1 w-64 rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-gray-200 dark:ring-gray-700 p-2">
+                          <p class="text-xs text-gray-500 mb-2"><%= t("pgbus.events.pending_table.reroute_label") %></p>
+                          <% @subscribers.each do |s| %>
+                            <% next if s[:queue_name] == m[:queue_name] %>
+                            <%= button_to s[:handler_class],
+                                  pgbus.reroute_event_path(m[:msg_id], queue_name: m[:queue_name], target_queue: s[:queue_name]),
+                                  method: :post,
+                                  class: "block w-full text-left rounded px-2 py-1 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700",
+                                  data: { turbo_confirm: t("pgbus.events.pending_table.reroute_confirm"), turbo_frame: "_top" } %>
+                          <% end %>
+                        </div>
+                      </details>
+                      <%# Discard %>
+                      <%= button_to t("pgbus.events.pending_table.discard"),
+                            pgbus.discard_event_path(m[:msg_id], queue_name: m[:queue_name]),
+                            method: :post,
+                            class: "rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500",
+                            data: { turbo_confirm: t("pgbus.events.pending_table.discard_confirm"), turbo_frame: "_top" } %>
+                    </div>
+                  </div>
+                  <%# Payload display %>
+                  <div class="grid grid-cols-2 gap-4 mb-3">
+                    <div>
+                      <span class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.arguments") %></span>
+                      <pre class="text-xs text-gray-700 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-40"><%= JSON.pretty_generate(payload["payload"] || payload) rescue "—" %></pre>
+                    </div>
+                    <div>
+                      <span class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.metadata") %></span>
+                      <div class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 space-y-1">
+                        <% if m[:read_ct] %><p><strong><%= t("pgbus.events.pending_table.metadata_labels.read_count") %></strong> <%= m[:read_ct] %></p><% end %>
+                        <% if m[:vt] %><p><strong><%= t("pgbus.events.pending_table.metadata_labels.visible_at") %></strong> <%= m[:vt] %></p><% end %>
+                        <% if m[:last_read_at] %><p><strong><%= t("pgbus.events.pending_table.metadata_labels.last_read") %></strong> <%= m[:last_read_at] %></p><% end %>
+                      </div>
+                    </div>
+                  </div>
+                  <%# Edit Payload form %>
+                  <details class="mt-2">
+                    <summary class="text-xs font-medium text-indigo-600 cursor-pointer hover:text-indigo-500"><%= t("pgbus.events.pending_table.edit_payload") %></summary>
+                    <div class="mt-2 p-3 bg-white dark:bg-gray-800 rounded ring-1 ring-gray-200 dark:ring-gray-700">
+                      <%= form_with url: pgbus.edit_payload_event_path(m[:msg_id]), method: :post, local: true, data: { turbo_frame: "_top" } do |f| %>
+                        <%= hidden_field_tag :queue_name, m[:queue_name] %>
+                        <label class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.edit_payload_label") %></label>
+                        <textarea name="payload" rows="6"
+                                  class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white text-xs font-mono shadow-sm focus:border-indigo-500 focus:ring-indigo-500"><%= JSON.pretty_generate(payload) rescue m[:message] %></textarea>
+                        <div class="mt-2 flex justify-end">
+                          <button type="submit"
+                                  class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
+                                  data-turbo-confirm="<%= t("pgbus.events.pending_table.edit_payload_confirm") %>">
+                            <%= t("pgbus.events.pending_table.edit_payload") %>
+                          </button>
+                        </div>
+                      <% end %>
+                    </div>
+                  </details>
+                  <%# Full JSON %>
+                  <details class="mt-2">
+                    <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700"><%= t("pgbus.events.pending_table.full_json_payload") %></summary>
+                    <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-96"><%= JSON.pretty_generate(payload) rescue m[:message] %></pre>
+                  </details>
+                  <% if m[:headers] %>
+                    <details class="mt-2">
+                      <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700"><%= t("pgbus.events.pending_table.headers_section") %></summary>
+                      <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(m[:headers])) rescue m[:headers] %></pre>
+                    </details>
+                  <% end %>
+                </div>
+              </details>
+            </td>
+          </tr>
+        <% end %>
+        <% if @pending.empty? %>
+          <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.events.index.pending_empty") %></td></tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</turbo-frame>
