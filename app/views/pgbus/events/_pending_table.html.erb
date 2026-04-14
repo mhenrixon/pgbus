@@ -23,7 +23,12 @@
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-gray-700">
         <% @pending.each do |m| %>
+          <%# Preserve the raw message so corrupt payloads stay visible in the
+              edit textarea and full-JSON panel. pgbus_parse_message swallows
+              JSON::ParserError and returns {}, which would otherwise hide
+              exactly the data the operator is trying to inspect/repair. %>
           <% payload = pgbus_parse_message(m[:message]) %>
+          <% parse_ok = m[:message].blank? || payload != {} || m[:message].to_s.strip == "{}" %>
           <tr>
             <td class="w-10 px-4 py-3 align-top">
               <input type="checkbox" data-bulk-item data-pgbus-action="bulk-row-toggle"
@@ -82,7 +87,7 @@
                   <div class="grid grid-cols-2 gap-4 mb-3">
                     <div>
                       <span class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.arguments") %></span>
-                      <pre class="text-xs text-gray-700 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-40"><%= JSON.pretty_generate(payload["payload"] || payload) rescue "—" %></pre>
+                      <pre class="text-xs text-gray-700 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-40"><%= parse_ok ? (JSON.pretty_generate(payload["payload"] || payload) rescue "—") : m[:message] %></pre>
                     </div>
                     <div>
                       <span class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.metadata") %></span>
@@ -101,7 +106,7 @@
                         <%= hidden_field_tag :queue_name, m[:queue_name] %>
                         <label class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.edit_payload_label") %></label>
                         <textarea name="payload" rows="6"
-                                  class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white text-xs font-mono shadow-sm focus:border-indigo-500 focus:ring-indigo-500"><%= JSON.pretty_generate(payload) rescue m[:message] %></textarea>
+                                  class="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white text-xs font-mono shadow-sm focus:border-indigo-500 focus:ring-indigo-500"><%= parse_ok ? (JSON.pretty_generate(payload) rescue m[:message]) : m[:message] %></textarea>
                         <div class="mt-2 flex justify-end">
                           <button type="submit"
                                   class="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
@@ -115,7 +120,7 @@
                   <%# Full JSON %>
                   <details class="mt-2">
                     <summary class="text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700"><%= t("pgbus.events.pending_table.full_json_payload") %></summary>
-                    <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-96"><%= JSON.pretty_generate(payload) rescue m[:message] %></pre>
+                    <pre class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 overflow-x-auto max-h-96"><%= parse_ok ? (JSON.pretty_generate(payload) rescue m[:message]) : m[:message] %></pre>
                   </details>
                   <% if m[:headers] %>
                     <details class="mt-2">
