@@ -66,6 +66,12 @@ pt:
       index:
         discard_all: Descartar Tudo
         discard_all_confirm: Descartar permanentemente todas as mensagens DLQ?
+        discard_selected: Descartar Selecionados
+        discard_selected_confirm: Descartar mensagens DLQ selecionadas?
+        discarded_selected:
+          one: 1 mensagem DLQ descartada.
+          other: "%{count} mensagens DLQ descartadas."
+        none_selected: Nenhuma mensagem selecionada.
         retry_all: Tentar Novamente Tudo
         retry_all_confirm: Tentar novamente todas as mensagens DLQ?
         title: Fila de Mensagens Mortas
@@ -113,7 +119,34 @@ pt:
       delete_title: Excluir
       ok: OK
     events:
+      flash:
+        discard_failed: Não foi possível descartar o evento.
+        discarded: Evento descartado.
+        discarded_selected:
+          one: 1 evento descartado.
+          other: "%{count} eventos descartados."
+        mark_handled_failed: Não foi possível marcar o evento como tratado.
+        marked_handled: Evento marcado como tratado.
+        none_selected: Nenhum evento selecionado.
+        payload_update_failed: Não foi possível atualizar o payload. Verifique se o JSON é válido.
+        payload_updated: Payload atualizado e evento reenfileirado.
+        replay_failed: Evento não encontrado ou não pôde ser reproduzido.
+        replayed: Evento reproduzido.
+        reroute_failed: Não foi possível redirecionar o evento.
+        rerouted: Evento redirecionado para o manipulador alvo.
       index:
+        discard_all: Descartar Todos
+        discard_all_confirm: Descartar todos os eventos pendentes? Esta ação não pode ser desfeita.
+        discard_selected: Descartar Selecionados
+        discard_selected_confirm: Descartar eventos selecionados?
+        pending_empty: Nenhum evento pendente
+        pending_headers:
+          enqueued: Enfileirado
+          handler_queue: Fila do Manipulador
+          id: ID
+          reads: Leituras
+          routing_key: Chave de Roteamento
+        pending_title: Eventos Pendentes
         processed_empty: Nenhum evento processado ainda
         processed_headers:
           event_id: ID do evento
@@ -127,6 +160,26 @@ pt:
           queue: Fila
         subscribers_title: Assinantes registrados
         title: Eventos
+      pending_table:
+        arguments: Payload
+        discard: Descartar
+        discard_confirm: Descartar este evento? Ele será arquivado.
+        edit_payload: Editar e Tentar Novamente
+        edit_payload_confirm: Atualizar payload e reenfileirar este evento?
+        edit_payload_label: 'Payload JSON:'
+        event_id: 'ID do Evento:'
+        full_json_payload: Payload JSON Completo
+        headers_section: Cabeçalhos
+        mark_handled: Marcar como Tratado
+        mark_handled_confirm: Marcar este evento como tratado? Ele será arquivado e ignorado na reprodução.
+        metadata: Metadados
+        metadata_labels:
+          last_read: Última Leitura
+          read_count: Contagem de Leituras
+          visible_at: Visível em
+        reroute: Redirecionar
+        reroute_confirm: Redirecionar este evento para um manipulador diferente?
+        reroute_label: 'Manipulador alvo:'
       show:
         back: Voltar para eventos
         labels:
@@ -136,6 +189,9 @@ pt:
         not_found: Evento não encontrado
         title: Evento %{event_id}
     helpers:
+      bulk_select_all: Selecionar todos
+      bulk_select_row: Selecionar %{id}
+      bulk_selected: selecionado
       paused_badge: Pausado
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ pt:
       show:
         charts:
           failed_to_load: Falha ao carregar dados do gráfico
+          latency: Latência da Fila (ms)
+          latency_avg: Média
+          latency_p95: P95
           no_data: Sem dados ainda
           series_name: Tarefas/min
           status_distribution: Distribuição de status
           throughput: Taxa de transferência (tarefas/min)
         description_html: Métricas de desempenho de trabalho para os últimos %{range}
+        latency_by_queue:
+          empty: Ainda não há dados de latência
+          headers:
+            avg: Média (ms)
+            count: Contagem
+            p95: P95 (ms)
+            queue: Fila
+          title: Latência por Fila
         slowest:
           empty: Nenhuma estatística de tarefa ainda
           headers:
@@ -163,11 +230,32 @@ pt:
             job_class: Classe da tarefa
             max: Máximo
           title: Classes de Trabalho Mais Lentas (duração média)
+        streams:
+          summary:
+            active: Ativo
+            avg_fanout: Média de Ramificações
+            broadcasts: Transmissões
+            connects: Conexões
+            disconnects: Desconexões
+          title: Streams em Tempo Real
+          top:
+            empty: Nenhuma atividade de stream registrada na janela selecionada
+            headers:
+              avg_fanout: Média de Ramificações
+              avg_ms: Média de Despacho
+              broadcasts: Transmissões
+              stream: Stream
+            title: Principais Streams por Volume de Transmissão
         summary:
           avg_duration: Duração Média
+          avg_latency: Latência Média
+          avg_retries: Média de Tentativas
           dead_lettered: Cartas Mortas
           failed: Falhou
           max_duration: Duração Máxima
+          p50_latency: Latência P50
+          p95_latency: Latência P95
+          p99_latency: Latência P99
           succeeded: Bem-sucedido
           total_jobs: Total de Trabalhos
         time_ranges:
@@ -222,6 +310,12 @@ pt:
         discard_all: Descartar Todos
         discard_all_confirm: Descartar todos os trabalhos falhados?
         discard_all_enqueued_notice: Descartados %{count} trabalhos na fila e bloqueios liberados.
+        discard_selected: Descartar Selecionados
+        discard_selected_confirm: Descartar itens selecionados?
+        discarded_selected:
+          one: 1 item selecionado descartado.
+          other: "%{%{count}} itens selecionados descartados."
+        none_selected: Nenhum item selecionado.
         retry_all: Tentar Novamente Todos
         retry_all_confirm: Tentar novamente todos os trabalhos falhados?
         title: Trabalhos
@@ -259,13 +353,28 @@ pt:
       toggle_menu: Alternar menu
     locks:
       index:
+        all_locks_discarded:
+          one: 1 bloqueio descartado.
+          other: "%{%{count}} bloqueios descartados."
         description: Bloqueios de exclusividade ativos impedindo a execução duplicada do trabalho
+        discard: Descartar
+        discard_all: Descartar Todos
+        discard_all_confirm: Descartar permanentemente todos os bloqueios? Isso pode permitir a execução duplicada de trabalhos.
+        discard_confirm: Descartar este bloqueio? O trabalho associado pode ser enfileirado novamente.
+        discard_selected: Descartar Selecionados
+        discard_selected_confirm: Descartar bloqueios selecionados?
         empty: Nenhum bloqueio ativo
         headers:
           age: Idade
           lock_key: Chave de Bloqueio
           msg_id: ID da mensagem
           queue_name: Fila
+        lock_discard_failed: Não foi possível descartar o bloqueio.
+        lock_discarded: Bloqueio descartado.
+        locks_discarded:
+          one: 1 bloqueio descartado.
+          other: "%{%{count}} bloqueios descartados."
+        none_selected: Nenhum bloqueio selecionado.
         title: Chaves de unicidade
     outbox:
       index:

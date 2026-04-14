@@ -66,6 +66,12 @@ fr:
       index:
         discard_all: Tout rejeter
         discard_all_confirm: Rejeter définitivement tous les messages DLQ ?
+        discard_selected: Jeter la sélection
+        discard_selected_confirm: Jeter les messages DLQ sélectionnés ?
+        discarded_selected:
+          one: 1 message DLQ jeté.
+          other: "%{count} messages DLQ jetés."
+        none_selected: Aucun message sélectionné.
         retry_all: Tout réessayer
         retry_all_confirm: Réessayer tous les messages DLQ ?
         title: File d'attente des messages morts
@@ -113,7 +119,34 @@ fr:
       delete_title: Supprimer
       ok: OK
     events:
+      flash:
+        discard_failed: Impossible de jeter l'événement.
+        discarded: Événement jeté.
+        discarded_selected:
+          one: 1 événement jeté.
+          other: "%{count} événements jetés."
+        mark_handled_failed: Impossible de marquer l'événement comme traité.
+        marked_handled: Événement marqué comme traité.
+        none_selected: Aucun événement sélectionné.
+        payload_update_failed: Impossible de mettre à jour la charge utile. Vérifiez que le JSON est valide.
+        payload_updated: Charge utile mise à jour et événement réenregistré.
+        replay_failed: Événement non trouvé ou impossible à rejouer.
+        replayed: Événement rejoué.
+        reroute_failed: Impossible de rediriger l'événement.
+        rerouted: Événement redirigé vers le gestionnaire cible.
       index:
+        discard_all: Tout jeter
+        discard_all_confirm: Jeter tous les événements en attente ? Cette action est irréversible.
+        discard_selected: Jeter la sélection
+        discard_selected_confirm: Jeter les événements sélectionnés ?
+        pending_empty: Aucun événement en attente
+        pending_headers:
+          enqueued: Enregistré
+          handler_queue: File du gestionnaire
+          id: ID
+          reads: Lectures
+          routing_key: Clé de routage
+        pending_title: Événements en attente
         processed_empty: Aucun événement traité pour le moment
         processed_headers:
           event_id: ID de l'événement
@@ -127,6 +160,26 @@ fr:
           queue: File d'attente
         subscribers_title: Abonnés enregistrés
         title: Événements
+      pending_table:
+        arguments: Charge utile
+        discard: Jeter
+        discard_confirm: Jeter cet événement ? Il sera archivé.
+        edit_payload: Modifier & Réessayer
+        edit_payload_confirm: Mettre à jour la charge utile et réenregistrer cet événement ?
+        edit_payload_label: 'Charge utile JSON :'
+        event_id: 'ID de l''événement :'
+        full_json_payload: Charge utile JSON complète
+        headers_section: En-têtes
+        mark_handled: Marquer comme traité
+        mark_handled_confirm: Marquer cet événement comme traité ? Il sera archivé et ignoré lors du relecture.
+        metadata: Métadonnées
+        metadata_labels:
+          last_read: Dernière lecture
+          read_count: Nombre de lectures
+          visible_at: Visible à
+        reroute: Rediriger
+        reroute_confirm: Rediriger cet événement vers un autre gestionnaire ?
+        reroute_label: 'Gestionnaire cible :'
       show:
         back: Retour aux événements
         labels:
@@ -136,6 +189,9 @@ fr:
         not_found: Événement non trouvé
         title: Événement %{event_id}
     helpers:
+      bulk_select_all: Tout sélectionner
+      bulk_select_row: Sélectionner %{id}
+      bulk_selected: sélectionné
       paused_badge: En pause
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ fr:
       show:
         charts:
           failed_to_load: Échec du chargement des données du graphique
+          latency: Latence de la file d'attente (ms)
+          latency_avg: Moyenne
+          latency_p95: P95
           no_data: Pas encore de données
           series_name: Tâches/min
           status_distribution: Répartition du statut
           throughput: Débit (tâches/min)
         description_html: Indicateurs de performance professionnelle pour les derniers %{range}
+        latency_by_queue:
+          empty: Pas encore de données de latence
+          headers:
+            avg: Moyenne (ms)
+            count: Nombre
+            p95: P95 (ms)
+            queue: File d'attente
+          title: Latence par file d'attente
         slowest:
           empty: Pas encore de statistiques de tâches
           headers:
@@ -163,11 +230,32 @@ fr:
             job_class: Classe de tâche
             max: Max
           title: Classes de travail les plus lentes (durée moyenne)
+        streams:
+          summary:
+            active: Actif
+            avg_fanout: Moyenne de diffusion
+            broadcasts: Diffusions
+            connects: Connexions
+            disconnects: Déconnexions
+          title: Flux en temps réel
+          top:
+            empty: Aucune activité de flux enregistrée dans la fenêtre sélectionnée
+            headers:
+              avg_fanout: Moyenne de diffusion
+              avg_ms: Moyenne d'envoi
+              broadcasts: Diffusions
+              stream: Flux
+            title: Principaux flux par volume de diffusion
         summary:
           avg_duration: Durée moyenne
+          avg_latency: Latence moyenne
+          avg_retries: Nombre moyen de tentatives
           dead_lettered: Lettré mort
           failed: Échoué
           max_duration: Durée maximale
+          p50_latency: Latence P50
+          p95_latency: Latence P95
+          p99_latency: Latence P99
           succeeded: Réussi
           total_jobs: Total des travaux
         time_ranges:
@@ -222,6 +310,12 @@ fr:
         discard_all: Tout ignorer
         discard_all_confirm: Ignorer tous les travaux échoués ?
         discard_all_enqueued_notice: "%{count} travaux en file d'attente supprimés et verrous libérés."
+        discard_selected: Supprimer la sélection
+        discard_selected_confirm: Supprimer les éléments sélectionnés ?
+        discarded_selected:
+          one: 1 élément sélectionné supprimé.
+          other: "%{count} éléments sélectionnés supprimés."
+        none_selected: Aucun élément sélectionné.
         retry_all: Tout réessayer
         retry_all_confirm: Réessayer tous les travaux échoués ?
         title: Travaux
@@ -259,13 +353,28 @@ fr:
       toggle_menu: Basculer le menu
     locks:
       index:
+        all_locks_discarded:
+          one: 1 verrou supprimé.
+          other: "%{count} verrous supprimés."
         description: Verrous d'unicité actifs empêchant l'exécution de travaux en double
+        discard: Supprimer
+        discard_all: Tout supprimer
+        discard_all_confirm: Supprimer définitivement tous les verrous ? Cela peut permettre l'exécution en double des tâches.
+        discard_confirm: Supprimer ce verrou ? La tâche associée peut être remise en file d'attente.
+        discard_selected: Supprimer la sélection
+        discard_selected_confirm: Supprimer les verrous sélectionnés ?
         empty: Aucun verrou actif
         headers:
           age: Âge
           lock_key: Clé de verrou
           msg_id: ID du message
           queue_name: File
+        lock_discard_failed: Impossible de supprimer le verrou.
+        lock_discarded: Verrou supprimé.
+        locks_discarded:
+          one: 1 verrou supprimé.
+          other: "%{count} verrous supprimés."
+        none_selected: Aucun verrou sélectionné.
         title: Clés d'unicité
     outbox:
       index:

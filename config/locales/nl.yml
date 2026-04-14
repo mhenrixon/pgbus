@@ -66,6 +66,12 @@ nl:
       index:
         discard_all: Alles weggooien
         discard_all_confirm: Alle DLQ-berichten permanent verwijderen?
+        discard_selected: Verwijder Geselecteerde
+        discard_selected_confirm: Geselecteerde DLQ-berichten verwijderen?
+        discarded_selected:
+          one: 1 DLQ-bericht verwijderd.
+          other: "%{count} DLQ-berichten verwijderd."
+        none_selected: Geen berichten geselecteerd.
         retry_all: Alles opnieuw proberen
         retry_all_confirm: Alle DLQ-berichten opnieuw proberen?
         title: Dead Letter Queue
@@ -113,7 +119,34 @@ nl:
       delete_title: Verwijderen
       ok: OK
     events:
+      flash:
+        discard_failed: Kon gebeurtenis niet verwijderen.
+        discarded: Gebeurtenis verwijderd.
+        discarded_selected:
+          one: 1 gebeurtenis verwijderd.
+          other: "%{count} gebeurtenissen verwijderd."
+        mark_handled_failed: Kon gebeurtenis niet als afgehandeld markeren.
+        marked_handled: Gebeurtenis als afgehandeld gemarkeerd.
+        none_selected: Geen gebeurtenissen geselecteerd.
+        payload_update_failed: Kon payload niet bijwerken. Controleer of de JSON geldig is.
+        payload_updated: Payload bijgewerkt en gebeurtenis opnieuw in de wachtrij geplaatst.
+        replay_failed: Gebeurtenis niet gevonden of kon niet worden afgespeeld.
+        replayed: Gebeurtenis afgespeeld.
+        reroute_failed: Kon gebeurtenis niet omleiden.
+        rerouted: Gebeurtenis omgeleid naar doelhandler.
       index:
+        discard_all: Alles Verwijderen
+        discard_all_confirm: Alle openstaande gebeurtenissen verwijderen? Dit kan niet ongedaan worden gemaakt.
+        discard_selected: Geselecteerde Verwijderen
+        discard_selected_confirm: Geselecteerde gebeurtenissen verwijderen?
+        pending_empty: Geen openstaande gebeurtenissen
+        pending_headers:
+          enqueued: In de wachtrij geplaatst
+          handler_queue: Handler Wachtrij
+          id: ID
+          reads: Lezingen
+          routing_key: Routing Key
+        pending_title: Openstaande Gebeurtenissen
         processed_empty: Nog geen gebeurtenissen verwerkt
         processed_headers:
           event_id: Gebeurtenis ID
@@ -127,6 +160,26 @@ nl:
           queue: Wachtrij
         subscribers_title: Geregistreerde abonnees
         title: Gebeurtenissen
+      pending_table:
+        arguments: Payload
+        discard: Verwijderen
+        discard_confirm: Deze gebeurtenis verwijderen? Deze wordt gearchiveerd.
+        edit_payload: Bewerken & Opnieuw Proberen
+        edit_payload_confirm: Payload bijwerken en deze gebeurtenis opnieuw in de wachtrij plaatsen?
+        edit_payload_label: 'JSON Payload:'
+        event_id: 'Gebeurtenis ID:'
+        full_json_payload: Volledige JSON Payload
+        headers_section: Headers
+        mark_handled: Markeren als Afgehandeld
+        mark_handled_confirm: Deze gebeurtenis als afgehandeld markeren? Deze wordt gearchiveerd en overgeslagen bij het afspelen.
+        metadata: Metadata
+        metadata_labels:
+          last_read: Laatst Gelezen
+          read_count: Aantal Lezingen
+          visible_at: Zichtbaar Op
+        reroute: Omleiden
+        reroute_confirm: Deze gebeurtenis omleiden naar een andere handler?
+        reroute_label: 'Doelhandler:'
       show:
         back: Terug naar gebeurtenissen
         labels:
@@ -136,6 +189,9 @@ nl:
         not_found: Gebeurtenis niet gevonden
         title: Gebeurtenis %{event_id}
     helpers:
+      bulk_select_all: Alles selecteren
+      bulk_select_row: Selecteer %{id}
+      bulk_selected: geselecteerd
       paused_badge: Gepauzeerd
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ nl:
       show:
         charts:
           failed_to_load: Fout bij laden grafiekgegevens
+          latency: Wachtrijvertraging (ms)
+          latency_avg: Gemiddeld
+          latency_p95: P95
           no_data: Nog geen gegevens
           series_name: Taken/min
           status_distribution: Statusverdeling
           throughput: Doorvoer (taken/min)
         description_html: Prestatie-indicatoren voor de laatste %{range}
+        latency_by_queue:
+          empty: Nog geen vertraginggegevens
+          headers:
+            avg: Gemiddeld (ms)
+            count: Aantal
+            p95: P95 (ms)
+            queue: Wachtrij
+          title: Vertraging per wachtrij
         slowest:
           empty: Nog geen taakstatistieken
           headers:
@@ -163,11 +230,32 @@ nl:
             job_class: Taakklasse
             max: Maximaal
           title: Langzaamste Taakklassen (gem. duur)
+        streams:
+          summary:
+            active: Actief
+            avg_fanout: Gemiddelde verspreiding
+            broadcasts: Uitzendingen
+            connects: Verbindingen
+            disconnects: Verbrekingen
+          title: Realtime streams
+          top:
+            empty: Geen streamactiviteit geregistreerd in het geselecteerde venster
+            headers:
+              avg_fanout: Gemiddelde verspreiding
+              avg_ms: Gemiddelde verzending
+              broadcasts: Uitzendingen
+              stream: Stream
+            title: Topstreams op basis van uitzendsvolume
         summary:
           avg_duration: Gem. Duur
+          avg_latency: Gemiddelde vertraging
+          avg_retries: Gemiddeld aantal pogingen
           dead_lettered: Dead Lettered
           failed: Mislukt
           max_duration: Maximale Duur
+          p50_latency: P50 vertraging
+          p95_latency: P95 vertraging
+          p99_latency: P99 vertraging
           succeeded: Geslaagd
           total_jobs: Totaal Taken
         time_ranges:
@@ -222,6 +310,12 @@ nl:
         discard_all: Alles Verwijderen
         discard_all_confirm: Alle mislukte taken verwijderen?
         discard_all_enqueued_notice: "%{count} taken in de wachtrij verwijderd en vergrendelingen vrijgegeven."
+        discard_selected: Geselecteerd verwijderen
+        discard_selected_confirm: Geselecteerde items verwijderen?
+        discarded_selected:
+          one: 1 geselecteerd item verwijderd.
+          other: "%{count} geselecteerde items verwijderd."
+        none_selected: Geen items geselecteerd.
         retry_all: Alles Opnieuw Proberen
         retry_all_confirm: Alle mislukte taken opnieuw proberen?
         title: Taken
@@ -259,13 +353,28 @@ nl:
       toggle_menu: Menu wisselen
     locks:
       index:
+        all_locks_discarded:
+          one: 1 slot verwijderd.
+          other: "%{count} sloten verwijderd."
         description: Actieve uniekheidsvergrendelingen voorkomen dubbele taakuitvoering
+        discard: Verwijderen
+        discard_all: Alles verwijderen
+        discard_all_confirm: Alle sloten permanent verwijderen? Dit kan dubbele taakuitvoering toestaan.
+        discard_confirm: Dit slot verwijderen? De bijbehorende taak kan opnieuw in de wachtrij worden geplaatst.
+        discard_selected: Geselecteerd verwijderen
+        discard_selected_confirm: Geselecteerde sloten verwijderen?
         empty: Geen actieve vergrendelingen
         headers:
           age: Leeftijd
           lock_key: Vergrendelingssleutel
           msg_id: Bericht-ID
           queue_name: Wachtrij
+        lock_discard_failed: Kon slot niet verwijderen.
+        lock_discarded: Slot verwijderd.
+        locks_discarded:
+          one: 1 slot verwijderd.
+          other: "%{count} sloten verwijderd."
+        none_selected: Geen sloten geselecteerd.
         title: Uniciteitsleutels
     outbox:
       index:

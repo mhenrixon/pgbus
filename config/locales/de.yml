@@ -66,6 +66,12 @@ de:
       index:
         discard_all: Alle verwerfen
         discard_all_confirm: Alle DLQ-Nachrichten dauerhaft verwerfen?
+        discard_selected: Ausgewählte verwerfen
+        discard_selected_confirm: Ausgewählte DLQ-Nachrichten verwerfen?
+        discarded_selected:
+          one: 1 DLQ-Nachricht verworfen.
+          other: "%{count} DLQ-Nachrichten verworfen."
+        none_selected: Keine Nachrichten ausgewählt.
         retry_all: Alle erneut versuchen
         retry_all_confirm: Alle DLQ-Nachrichten erneut versuchen?
         title: Dead Letter Queue
@@ -113,7 +119,34 @@ de:
       delete_title: Löschen
       ok: OK
     events:
+      flash:
+        discard_failed: Ereignis konnte nicht verworfen werden.
+        discarded: Ereignis verworfen.
+        discarded_selected:
+          one: 1 Ereignis verworfen.
+          other: "%{count} Ereignisse verworfen."
+        mark_handled_failed: Ereignis konnte nicht als bearbeitet markiert werden.
+        marked_handled: Ereignis als bearbeitet markiert.
+        none_selected: Keine Ereignisse ausgewählt.
+        payload_update_failed: Nutzlast konnte nicht aktualisiert werden. Überprüfen Sie, ob das JSON gültig ist.
+        payload_updated: Nutzlast aktualisiert und Ereignis erneut in die Warteschlange gestellt.
+        replay_failed: Ereignis nicht gefunden oder konnte nicht erneut abgespielt werden.
+        replayed: Ereignis erneut abgespielt.
+        reroute_failed: Ereignis konnte nicht umgeleitet werden.
+        rerouted: Ereignis an Ziel-Handler umgeleitet.
       index:
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle ausstehenden Ereignisse verwerfen? Dies kann nicht rückgängig gemacht werden.
+        discard_selected: Ausgewählte verwerfen
+        discard_selected_confirm: Ausgewählte Ereignisse verwerfen?
+        pending_empty: Keine ausstehenden Ereignisse
+        pending_headers:
+          enqueued: In die Warteschlange gestellt
+          handler_queue: Handler-Warteschlange
+          id: ID
+          reads: Lesevorgänge
+          routing_key: Routing-Schlüssel
+        pending_title: Ausstehende Ereignisse
         processed_empty: Noch keine Ereignisse verarbeitet
         processed_headers:
           event_id: Ereignis-ID
@@ -127,6 +160,26 @@ de:
           queue: Warteschlange
         subscribers_title: Registrierte Abonnenten
         title: Ereignisse
+      pending_table:
+        arguments: Nutzlast
+        discard: Verwerfen
+        discard_confirm: Dieses Ereignis verwerfen? Es wird archiviert.
+        edit_payload: Bearbeiten & erneut versuchen
+        edit_payload_confirm: Nutzlast aktualisieren und dieses Ereignis erneut in die Warteschlange stellen?
+        edit_payload_label: 'JSON-Nutzlast:'
+        event_id: 'Ereignis-ID:'
+        full_json_payload: Vollständige JSON-Nutzlast
+        headers_section: Header
+        mark_handled: Als bearbeitet markieren
+        mark_handled_confirm: Dieses Ereignis als bearbeitet markieren? Es wird archiviert und bei der Wiedergabe übersprungen.
+        metadata: Metadaten
+        metadata_labels:
+          last_read: Zuletzt gelesen
+          read_count: Leseanzahl
+          visible_at: Sichtbar ab
+        reroute: Umleiten
+        reroute_confirm: Dieses Ereignis an einen anderen Handler umleiten?
+        reroute_label: 'Ziel-Handler:'
       show:
         back: Zurück zu Ereignissen
         labels:
@@ -136,6 +189,9 @@ de:
         not_found: Ereignis nicht gefunden
         title: Ereignis %{event_id}
     helpers:
+      bulk_select_all: Alle auswählen
+      bulk_select_row: "%{id} auswählen"
+      bulk_selected: ausgewählt
       paused_badge: Pausiert
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ de:
       show:
         charts:
           failed_to_load: Fehler beim Laden der Diagrammdaten
+          latency: Warteschlangenlatenz (ms)
+          latency_avg: Durchschnitt
+          latency_p95: P95
           no_data: Noch keine Daten
           series_name: Aufträge/Min
           status_distribution: Statusverteilung
           throughput: Durchsatz (Aufträge/Min)
         description_html: Leistungskennzahlen für die letzten %{range}
+        latency_by_queue:
+          empty: Noch keine Latenzdaten vorhanden
+          headers:
+            avg: Durchschnitt (ms)
+            count: Anzahl
+            p95: P95 (ms)
+            queue: Warteschlange
+          title: Latenz nach Warteschlange
         slowest:
           empty: Noch keine Auftragsstatistiken
           headers:
@@ -163,11 +230,32 @@ de:
             job_class: Job-Klasse
             max: Max
           title: Langsamste Job-Klassen (durchschnittliche Dauer)
+        streams:
+          summary:
+            active: Aktiv
+            avg_fanout: Durchschnittliche Verteilung
+            broadcasts: Übertragungen
+            connects: Verbindungen
+            disconnects: Trennungen
+          title: Echtzeit-Streams
+          top:
+            empty: Keine Stream-Aktivität im ausgewählten Zeitraum aufgezeichnet
+            headers:
+              avg_fanout: Durchschnittliche Verteilung
+              avg_ms: Durchschnittliche Zustellung
+              broadcasts: Übertragungen
+              stream: Stream
+            title: Top-Streams nach Übertragungsvolumen
         summary:
           avg_duration: Durchschnittliche Dauer
+          avg_latency: Durchschnittliche Latenz
+          avg_retries: Durchschnittliche Wiederholungen
           dead_lettered: In Dead Letter verschoben
           failed: Fehlgeschlagen
           max_duration: Maximale Dauer
+          p50_latency: P50 Latenz
+          p95_latency: P95 Latenz
+          p99_latency: P99 Latenz
           succeeded: Erfolgreich
           total_jobs: Gesamtanzahl der Jobs
         time_ranges:
@@ -222,6 +310,12 @@ de:
         discard_all: Alle verwerfen
         discard_all_confirm: Alle fehlgeschlagenen Jobs verwerfen?
         discard_all_enqueued_notice: "%{count} eingereihte Jobs verworfen und Sperren freigegeben."
+        discard_selected: Ausgewählte verwerfen
+        discard_selected_confirm: Ausgewählte Elemente verwerfen?
+        discarded_selected:
+          one: 1 ausgewähltes Element verworfen.
+          other: "%{count} ausgewählte Elemente verworfen."
+        none_selected: Keine Elemente ausgewählt.
         retry_all: Alle wiederholen
         retry_all_confirm: Alle fehlgeschlagenen Jobs wiederholen?
         title: Jobs
@@ -259,13 +353,28 @@ de:
       toggle_menu: Menü umschalten
     locks:
       index:
+        all_locks_discarded:
+          one: 1 Sperre verworfen.
+          other: "%{count} Sperren verworfen."
         description: Aktive Einzigartigkeitssperren verhindern doppelte Auftragserstellung
+        discard: Verwerfen
+        discard_all: Alle verwerfen
+        discard_all_confirm: Alle Sperren dauerhaft verwerfen? Dies kann eine doppelte Ausführung von Jobs ermöglichen.
+        discard_confirm: Diese Sperre verwerfen? Der zugehörige Job kann erneut in die Warteschlange gestellt werden.
+        discard_selected: Ausgewählte verwerfen
+        discard_selected_confirm: Ausgewählte Sperren verwerfen?
         empty: Keine aktiven Sperren
         headers:
           age: Alter
           lock_key: Sperrschlüssel
           msg_id: Nachrichten-ID
           queue_name: Warteschlange
+        lock_discard_failed: Sperre konnte nicht verworfen werden.
+        lock_discarded: Sperre verworfen.
+        locks_discarded:
+          one: 1 Sperre verworfen.
+          other: "%{count} Sperren verworfen."
+        none_selected: Keine Sperren ausgewählt.
         title: Eindeutigkeitsschlüssel
     outbox:
       index:

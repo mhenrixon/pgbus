@@ -66,6 +66,12 @@ es:
       index:
         discard_all: Descartar todo
         discard_all_confirm: "¿Descartar permanentemente todos los mensajes DLQ?"
+        discard_selected: Descartar seleccionados
+        discard_selected_confirm: "¿Descartar mensajes DLQ seleccionados?"
+        discarded_selected:
+          one: 1 mensaje DLQ descartado.
+          other: "%{count} mensajes DLQ descartados."
+        none_selected: No hay mensajes seleccionados.
         retry_all: Reintentar todo
         retry_all_confirm: "¿Reintentar todos los mensajes DLQ?"
         title: Cola de mensajes muertos
@@ -113,7 +119,34 @@ es:
       delete_title: Eliminar
       ok: Aceptar
     events:
+      flash:
+        discard_failed: No se pudo descartar el evento.
+        discarded: Evento descartado.
+        discarded_selected:
+          one: 1 evento descartado.
+          other: "%{count} eventos descartados."
+        mark_handled_failed: No se pudo marcar el evento como manejado.
+        marked_handled: Evento marcado como manejado.
+        none_selected: No hay eventos seleccionados.
+        payload_update_failed: No se pudo actualizar la carga útil. Verifique que el JSON sea válido.
+        payload_updated: Carga útil actualizada y evento reenviado a la cola.
+        replay_failed: Evento no encontrado o no se pudo reproducir.
+        replayed: Evento reproducido.
+        reroute_failed: No se pudo redirigir el evento.
+        rerouted: Evento redirigido al manejador objetivo.
       index:
+        discard_all: Descartar todo
+        discard_all_confirm: "¿Descartar todos los eventos pendientes? Esto no se puede deshacer."
+        discard_selected: Descartar seleccionados
+        discard_selected_confirm: "¿Descartar eventos seleccionados?"
+        pending_empty: No hay eventos pendientes
+        pending_headers:
+          enqueued: En cola
+          handler_queue: Cola del manejador
+          id: ID
+          reads: Lecturas
+          routing_key: Clave de enrutamiento
+        pending_title: Eventos pendientes
         processed_empty: No se han procesado eventos aún
         processed_headers:
           event_id: ID del evento
@@ -127,6 +160,26 @@ es:
           queue: Cola
         subscribers_title: Suscriptores registrados
         title: Eventos
+      pending_table:
+        arguments: Carga útil
+        discard: Descartar
+        discard_confirm: "¿Descartar este evento? Será archivado."
+        edit_payload: Editar y reintentar
+        edit_payload_confirm: "¿Actualizar la carga útil y reenviar este evento a la cola?"
+        edit_payload_label: 'Carga útil JSON:'
+        event_id: 'ID del evento:'
+        full_json_payload: Carga útil JSON completa
+        headers_section: Encabezados
+        mark_handled: Marcar como manejado
+        mark_handled_confirm: "¿Marcar este evento como manejado? Será archivado y omitido en la reproducción."
+        metadata: Metadatos
+        metadata_labels:
+          last_read: Última lectura
+          read_count: Cantidad de lecturas
+          visible_at: Visible en
+        reroute: Redirigir
+        reroute_confirm: "¿Redirigir este evento a un manejador diferente?"
+        reroute_label: 'Manejador objetivo:'
       show:
         back: Volver a eventos
         labels:
@@ -136,6 +189,9 @@ es:
         not_found: Evento no encontrado
         title: Evento %{event_id}
     helpers:
+      bulk_select_all: Seleccionar todo
+      bulk_select_row: Seleccionar %{id}
+      bulk_selected: seleccionado
       paused_badge: Pausado
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ es:
       show:
         charts:
           failed_to_load: Error al cargar datos del gráfico
+          latency: Latencia de Cola (ms)
+          latency_avg: Promedio
+          latency_p95: P95
           no_data: Aún no hay datos
           series_name: Trabajos/min
           status_distribution: Distribución de estado
           throughput: Rendimiento (trabajos/min)
         description_html: Métricas de desempeño laboral para los últimos %{range}
+        latency_by_queue:
+          empty: Aún no hay datos de latencia
+          headers:
+            avg: Promedio (ms)
+            count: Cantidad
+            p95: P95 (ms)
+            queue: Cola
+          title: Latencia por Cola
         slowest:
           empty: Aún no hay estadísticas de trabajos
           headers:
@@ -163,11 +230,32 @@ es:
             job_class: Clase de trabajo
             max: Máximo
           title: Clases de Trabajo Más Lentas (duración promedio)
+        streams:
+          summary:
+            active: Activo
+            avg_fanout: Promedio de Difusión
+            broadcasts: Transmisiones
+            connects: Conexiones
+            disconnects: Desconexiones
+          title: Transmisiones en Tiempo Real
+          top:
+            empty: No se registró actividad de transmisión en la ventana seleccionada
+            headers:
+              avg_fanout: Promedio de Difusión
+              avg_ms: Promedio de Despacho
+              broadcasts: Transmisiones
+              stream: Transmisión
+            title: Principales Transmisiones por Volumen de Transmisión
         summary:
           avg_duration: Duración Promedio
+          avg_latency: Latencia Promedio
+          avg_retries: Reintentos Promedio
           dead_lettered: Enviado a Dead Letter
           failed: Fallado
           max_duration: Duración Máxima
+          p50_latency: Latencia P50
+          p95_latency: Latencia P95
+          p99_latency: Latencia P99
           succeeded: Exitoso
           total_jobs: Total de Trabajos
         time_ranges:
@@ -222,6 +310,12 @@ es:
         discard_all: Descartar Todo
         discard_all_confirm: "¿Descartar todos los trabajos fallidos?"
         discard_all_enqueued_notice: Se descartaron %{count} trabajos en cola y se liberaron sus bloqueos.
+        discard_selected: Descartar Seleccionados
+        discard_selected_confirm: "¿Descartar los elementos seleccionados?"
+        discarded_selected:
+          one: Se descartó 1 elemento seleccionado.
+          other: Se descartaron %{count} elementos seleccionados.
+        none_selected: No hay elementos seleccionados.
         retry_all: Reintentar Todo
         retry_all_confirm: "¿Reintentar todos los trabajos fallidos?"
         title: Trabajos
@@ -259,13 +353,28 @@ es:
       toggle_menu: Alternar menú
     locks:
       index:
+        all_locks_discarded:
+          one: Se descartó 1 bloqueo.
+          other: Se descartaron %{count} bloqueos.
         description: Bloqueos de unicidad activos que impiden la ejecución duplicada del trabajo
+        discard: Descartar
+        discard_all: Descartar Todo
+        discard_all_confirm: "¿Descartar permanentemente todos los bloqueos? Esto puede permitir la ejecución duplicada de trabajos."
+        discard_confirm: "¿Descartar este bloqueo? El trabajo asociado puede ser encolado nuevamente."
+        discard_selected: Descartar Seleccionados
+        discard_selected_confirm: "¿Descartar los bloqueos seleccionados?"
         empty: No hay bloqueos activos
         headers:
           age: Antigüedad
           lock_key: Clave de bloqueo
           msg_id: ID de mensaje
           queue_name: Cola
+        lock_discard_failed: No se pudo descartar el bloqueo.
+        lock_discarded: Bloqueo descartado.
+        locks_discarded:
+          one: Se descartó 1 bloqueo.
+          other: Se descartaron %{count} bloqueos.
+        none_selected: No hay bloqueos seleccionados.
         title: Claves de unicidad
     outbox:
       index:

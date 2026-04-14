@@ -66,6 +66,12 @@ sv:
       index:
         discard_all: Kassera alla
         discard_all_confirm: Kassera permanent alla DLQ-meddelanden?
+        discard_selected: Kassera valda
+        discard_selected_confirm: Kassera valda DLQ-meddelanden?
+        discarded_selected:
+          one: Kasserade 1 DLQ-meddelande.
+          other: Kasserade %{count} DLQ-meddelanden.
+        none_selected: Inga meddelanden valda.
         retry_all: Försök igen alla
         retry_all_confirm: Försök igen alla DLQ-meddelanden?
         title: Dead Letter-kö
@@ -113,7 +119,34 @@ sv:
       delete_title: Ta bort
       ok: OK
     events:
+      flash:
+        discard_failed: Kunde inte kassera händelsen.
+        discarded: Händelse kasserad.
+        discarded_selected:
+          one: Kasserade 1 händelse.
+          other: Kasserade %{count} händelser.
+        mark_handled_failed: Kunde inte markera händelsen som hanterad.
+        marked_handled: Händelse markerad som hanterad.
+        none_selected: Inga händelser valda.
+        payload_update_failed: Kunde inte uppdatera payload. Kontrollera att JSON är giltig.
+        payload_updated: Payload uppdaterad och händelsen återköad.
+        replay_failed: Händelsen hittades inte eller kunde inte spelas upp.
+        replayed: Händelsen spelades upp.
+        reroute_failed: Kunde inte omdirigera händelsen.
+        rerouted: Händelsen omdirigerades till målhanteraren.
       index:
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera alla väntande händelser? Detta kan inte ångras.
+        discard_selected: Kassera valda
+        discard_selected_confirm: Kassera valda händelser?
+        pending_empty: Inga väntande händelser
+        pending_headers:
+          enqueued: Köad
+          handler_queue: Handler-kö
+          id: ID
+          reads: Läsningar
+          routing_key: Routing-nyckel
+        pending_title: Väntande händelser
         processed_empty: Inga händelser behandlade än
         processed_headers:
           event_id: Händelse-ID
@@ -127,6 +160,26 @@ sv:
           queue: Kö
         subscribers_title: Registrerade prenumeranter
         title: Händelser
+      pending_table:
+        arguments: Payload
+        discard: Kassera
+        discard_confirm: Kassera denna händelse? Den kommer att arkiveras.
+        edit_payload: Redigera & Försök igen
+        edit_payload_confirm: Uppdatera payload och återköa denna händelse?
+        edit_payload_label: 'JSON Payload:'
+        event_id: 'Händelse-ID:'
+        full_json_payload: Fullständig JSON Payload
+        headers_section: Headers
+        mark_handled: Markera som hanterad
+        mark_handled_confirm: Markera denna händelse som hanterad? Den kommer att arkiveras och hoppas över vid uppspelning.
+        metadata: Metadata
+        metadata_labels:
+          last_read: Senast läst
+          read_count: Läsantal
+          visible_at: Synlig vid
+        reroute: Omdirigera
+        reroute_confirm: Omdirigera denna händelse till en annan hanterare?
+        reroute_label: 'Målhanterare:'
       show:
         back: Tillbaka till händelser
         labels:
@@ -136,6 +189,9 @@ sv:
         not_found: Händelse hittades inte
         title: Händelse %{event_id}
     helpers:
+      bulk_select_all: Markera alla
+      bulk_select_row: Markera %{id}
+      bulk_selected: valda
       paused_badge: Pausad
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ sv:
       show:
         charts:
           failed_to_load: Misslyckades att ladda diagramdata
+          latency: Köfördröjning (ms)
+          latency_avg: Genomsnitt
+          latency_p95: P95
           no_data: Inga data än
           series_name: Jobb/min
           status_distribution: Statusfördelning
           throughput: Genomströmning (jobb/min)
         description_html: Jobbprestandamått för de senaste %{range}
+        latency_by_queue:
+          empty: Ingen fördröjningsdata än
+          headers:
+            avg: Genomsnitt (ms)
+            count: Antal
+            p95: P95 (ms)
+            queue: Kö
+          title: Fördröjning per kö
         slowest:
           empty: Inga jobbstatistik än
           headers:
@@ -163,11 +230,32 @@ sv:
             job_class: Jobbklass
             max: Max
           title: Långsammaste jobbklasser (genomsnittlig varaktighet)
+        streams:
+          summary:
+            active: Aktiv
+            avg_fanout: Genomsnittlig spridning
+            broadcasts: Sändningar
+            connects: Anslutningar
+            disconnects: Frånkopplingar
+          title: Strömmar i realtid
+          top:
+            empty: Ingen strömaktivitet registrerad i det valda fönstret
+            headers:
+              avg_fanout: Genomsnittlig spridning
+              avg_ms: Genomsnittlig utsändning
+              broadcasts: Sändningar
+              stream: Ström
+            title: Toppströmmar efter sändningsvolym
         summary:
           avg_duration: Genomsnittlig varaktighet
+          avg_latency: Genomsnittlig fördröjning
+          avg_retries: Genomsnittliga omförsök
           dead_lettered: Dead Lettered
           failed: Misslyckades
           max_duration: Maximal varaktighet
+          p50_latency: P50-fördröjning
+          p95_latency: P95-fördröjning
+          p99_latency: P99-fördröjning
           succeeded: Lyckades
           total_jobs: Totalt antal jobb
         time_ranges:
@@ -222,6 +310,12 @@ sv:
         discard_all: Kassera alla
         discard_all_confirm: Kassera alla misslyckade jobb?
         discard_all_enqueued_notice: Kasserade %{count} köade jobb och frigjorde deras lås.
+        discard_selected: Kassera valda
+        discard_selected_confirm: Kassera valda objekt?
+        discarded_selected:
+          one: Kasserade 1 valt objekt.
+          other: Kasserade %{count} valda objekt.
+        none_selected: Inga objekt valda.
         retry_all: Försök igen alla
         retry_all_confirm: Försök igen alla misslyckade jobb?
         title: Jobb
@@ -259,13 +353,28 @@ sv:
       toggle_menu: Växla meny
     locks:
       index:
+        all_locks_discarded:
+          one: Kasserade 1 lås.
+          other: Kasserade %{count} lås.
         description: Aktiva unika lås som förhindrar duplicerad jobbexekvering
+        discard: Kassera
+        discard_all: Kassera alla
+        discard_all_confirm: Kassera alla lås permanent? Detta kan tillåta duplicerad jobbexekvering.
+        discard_confirm: Kassera detta lås? Det associerade jobbet kan köas igen.
+        discard_selected: Kassera valda
+        discard_selected_confirm: Kassera valda lås?
         empty: Inga aktiva lås
         headers:
           age: Ålder
           lock_key: Låsningsnyckel
           msg_id: Meddelande-ID
           queue_name: Kö
+        lock_discard_failed: Kunde inte kassera lås.
+        lock_discarded: Lås kasserat.
+        locks_discarded:
+          one: Kasserade 1 lås.
+          other: Kasserade %{count} lås.
+        none_selected: Inga lås valda.
         title: Unikhetsnycklar
     outbox:
       index:
