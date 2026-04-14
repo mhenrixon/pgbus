@@ -72,15 +72,24 @@ module Pgbus
     end
 
     def discard_selected
-      selections = Array(params[:messages]).reject { |s| s[:queue_name].blank? || s[:msg_id].blank? }
+      # Guard against non-hash entries in params[:messages] — a crafted POST
+      # can otherwise raise NoMethodError on [:queue_name]. Mirrors the
+      # hardening already used in jobs_controller#discard_selected_enqueued.
+      selections = Array(params[:messages]).filter_map do |s|
+        next unless s.respond_to?(:[])
+
+        queue_name = s[:queue_name]
+        msg_id = s[:msg_id]
+        next if queue_name.blank? || msg_id.blank?
+
+        { queue_name: queue_name.to_s, msg_id: msg_id }
+      end
       if selections.empty?
         redirect_to events_path, alert: t("pgbus.events.flash.none_selected")
         return
       end
 
-      count = data_source.discard_selected_events(
-        selections.map { |s| { queue_name: s[:queue_name].to_s, msg_id: s[:msg_id] } }
-      )
+      count = data_source.discard_selected_events(selections)
       redirect_to events_path, notice: t("pgbus.events.flash.discarded_selected", count: count)
     end
   end

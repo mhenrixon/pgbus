@@ -776,6 +776,11 @@ module Pgbus
           { event_id: event_id, handler_class: handler_class, processed_at: Time.now.utc },
           unique_by: %i[event_id handler_class]
         )
+        # Release the uniqueness lock while we still hold the payload in
+        # memory — otherwise the message is archived but the lock row stays
+        # behind, blocking later publishes with the same key. Mirrors
+        # discard_event.
+        release_lock_for_payload(detail[:message])
         @client.archive_message(queue_name, msg_id.to_i, prefixed: false)
         true
       rescue StandardError => e

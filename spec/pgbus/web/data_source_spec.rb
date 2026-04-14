@@ -703,6 +703,24 @@ RSpec.describe Pgbus::Web::DataSource do
 
       expect(result).to be false
     end
+
+    it "releases the uniqueness lock for the event payload" do
+      allow(mock_client).to receive(:archive_message)
+      allow(Pgbus::ProcessedEvent).to receive(:insert)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"event_id":"evt-1","pgbus_uniqueness_key":"uk-42"}',
+                      "headers" => nil, "last_read_at" => nil
+                    })
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
+
+      data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
+
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("uk-42")
+    end
   end
 
   describe "#edit_event_payload" do
