@@ -92,6 +92,18 @@ module Pgbus
       def edit_event_payload(queue_name, msg_id, payload) = record(:edit_event_payload, queue_name, msg_id, payload)
       def reroute_event(source_queue, msg_id, target_queue) = record(:reroute_event, source_queue, msg_id, target_queue)
       def discard_selected_events(selections) = record(:discard_selected_events, selections) && selections.size
+
+      def handler_queue_physical_names
+        @subscribers_list.map { |s| s[:physical_queue_name] || s[:queue_name] }.uniq
+      end
+
+      def handler_class_for_queue(queue_name)
+        sub = @subscribers_list.find do |s|
+          s[:physical_queue_name] == queue_name || s[:queue_name] == queue_name
+        end
+        sub && sub[:handler_class]
+      end
+
       def discard_lock(key)          = record(:discard_lock, key) && 1
       def discard_locks(keys)        = record(:discard_locks, keys) && keys.size
       def discard_all_locks          = record(:discard_all_locks) && @locks_list.size

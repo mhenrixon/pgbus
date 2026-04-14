@@ -32,8 +32,12 @@ module Pgbus
 
     def mark_handled
       queue_name = params[:queue_name].to_s
-      handler_class = params[:handler_class].to_s
-      if data_source.mark_event_handled(queue_name, params[:id], handler_class)
+      # Resolve the handler class server-side from the subscriber registry
+      # instead of trusting params[:handler_class] — otherwise a crafted POST
+      # could create ProcessedEvent markers for arbitrary class names and
+      # corrupt replay/idempotency state.
+      handler_class = data_source.handler_class_for_queue(queue_name)
+      if handler_class && data_source.mark_event_handled(queue_name, params[:id], handler_class)
         redirect_to events_path, notice: t("pgbus.events.flash.marked_handled")
       else
         redirect_to events_path, alert: t("pgbus.events.flash.mark_handled_failed")
@@ -53,6 +57,13 @@ module Pgbus
     def reroute
       source_queue = params[:queue_name].to_s
       target_queue = params[:target_queue].to_s
+      # Reject rerouting to any queue that isn't a registered handler —
+      # the UI dropdown is not a real server-side constraint, so a crafted
+      # POST could otherwise move messages into arbitrary queues.
+      unless data_source.handler_queue_physical_names.include?(target_queue)
+        return redirect_to events_path, alert: t("pgbus.events.flash.reroute_failed")
+      end
+
       if data_source.reroute_event(source_queue, params[:id], target_queue)
         redirect_to events_path, notice: t("pgbus.events.flash.rerouted")
       else

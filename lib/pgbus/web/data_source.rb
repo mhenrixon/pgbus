@@ -709,9 +709,12 @@ module Pgbus
 
       # Pending events — messages sitting in handler queues that haven't been processed.
       # Identifies handler queues via the subscriber registry and queries them
-      # for unprocessed messages.
+      # for unprocessed messages. Subscriber queue names are logical
+      # (e.g. "task_completion_handler"), while `pgmq.meta.queue_name` stores
+      # physical names (e.g. "pgbus_task_completion_handler"), so we normalize
+      # through `config.queue_name` before intersecting.
       def pending_events(page: 1, per_page: 25)
-        handler_queues = registered_subscribers.map { |s| s[:queue_name] }.uniq
+        handler_queues = handler_queue_physical_names
         return [] if handler_queues.empty?
 
         existing = connection.select_values(
@@ -727,6 +730,21 @@ module Pgbus
         []
       end
 
+      # Physical queue names for all registered subscribers. Used for both
+      # pending_events lookup and server-side validation of target queues
+      # in reroute_event.
+      def handler_queue_physical_names
+        registered_subscribers.map { |s| s[:physical_queue_name] }.uniq
+      end
+
+      # Find the handler class registered for a given physical queue name.
+      # Returns nil if no subscriber matches — used to reject forged handler
+      # values in mark_event_handled / reroute_event.
+      def handler_class_for_queue(physical_queue_name)
+        sub = registered_subscribers.find { |s| s[:physical_queue_name] == physical_queue_name }
+        sub && sub[:handler_class]
+      end
+
       # Discard (archive) an event message from a handler queue.
       def discard_event(queue_name, msg_id)
         release_lock_for_message(queue_name, msg_id)
@@ -739,6 +757,13 @@ module Pgbus
 
       # Mark an event as handled: archive the queue message and insert a
       # ProcessedEvent record so it won't be reprocessed on replay.
+      #
+      # The insert is performed BEFORE archive. If the archive step fails
+      # afterwards the operator can retry — replay protection is already in
+      # place and the idempotency dedup will cause the handler to skip the
+      # event even if it is eventually re-read from the queue. Doing it the
+      # other way around would risk losing the message without recording the
+      # marker.
       def mark_event_handled(queue_name, msg_id, handler_class)
         detail = job_detail(queue_name, msg_id)
         return false unless detail
@@ -747,11 +772,11 @@ module Pgbus
         event_id = raw["event_id"]
         return false unless event_id
 
-        @client.archive_message(queue_name, msg_id.to_i, prefixed: false)
         ProcessedEvent.insert(
           { event_id: event_id, handler_class: handler_class, processed_at: Time.now.utc },
           unique_by: %i[event_id handler_class]
         )
+        @client.archive_message(queue_name, msg_id.to_i, prefixed: false)
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error marking event #{msg_id} handled: #{e.message}" }
@@ -759,7 +784,9 @@ module Pgbus
       end
 
       # Edit the payload of a stuck event: delete old message and re-enqueue
-      # with the corrected payload in the same queue.
+      # with the corrected payload in the same queue. The produce + delete
+      # are wrapped in a PGMQ transaction so the message can't be lost if
+      # either half fails (same pattern as retry_dlq_message).
       def edit_event_payload(queue_name, msg_id, new_payload_json)
         begin
           parsed = JSON.parse(new_payload_json)
@@ -770,27 +797,27 @@ module Pgbus
         detail = job_detail(queue_name, msg_id)
         return false unless detail
 
-        @client.delete_message(queue_name, msg_id.to_i, prefixed: false)
-        connection.execute(
-          "SELECT pgmq.send('#{sanitize_name(queue_name)}', '#{connection.quote_string(parsed.to_json)}'::jsonb)"
-        )
+        @client.transaction do |txn|
+          txn.produce(queue_name, parsed.to_json, headers: detail[:headers])
+          txn.delete(queue_name, msg_id.to_i)
+        end
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error editing event #{msg_id}: #{e.message}" }
         false
       end
 
-      # Reroute an event from one handler queue to another.
+      # Reroute an event from one handler queue to another. Wrapped in a
+      # PGMQ transaction so produce on the target and delete on the source
+      # are atomic.
       def reroute_event(source_queue, msg_id, target_queue)
         detail = job_detail(source_queue, msg_id)
         return false unless detail
 
-        payload = detail[:message]
-
-        @client.delete_message(source_queue, msg_id.to_i, prefixed: false)
-        connection.execute(
-          "SELECT pgmq.send('#{sanitize_name(target_queue)}', '#{connection.quote_string(payload)}'::jsonb)"
-        )
+        @client.transaction do |txn|
+          txn.produce(target_queue, detail[:message], headers: detail[:headers])
+          txn.delete(source_queue, msg_id.to_i)
+        end
         true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error rerouting event #{msg_id}: #{e.message}" }
@@ -811,10 +838,19 @@ module Pgbus
         count
       end
 
-      # Subscriber registry
+      # Subscriber registry. `queue_name` is the logical name the subscriber
+      # registered with; `physical_queue_name` is what the queue is actually
+      # called in `pgmq.meta` (e.g. logical "task_completion_handler" ->
+      # physical "pgbus_task_completion_handler"). The dashboard needs the
+      # physical name to match against pending messages / target queues.
       def registered_subscribers
         EventBus::Registry.instance.subscribers.map do |s|
-          { pattern: s.pattern, handler_class: s.handler_class.name, queue_name: s.queue_name }
+          {
+            pattern: s.pattern,
+            handler_class: s.handler_class.name,
+            queue_name: s.queue_name,
+            physical_queue_name: @client.config.queue_name(s.queue_name)
+          }
         end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error fetching subscribers: #{e.message}" }

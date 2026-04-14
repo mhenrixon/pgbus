@@ -96,13 +96,6 @@ module Pgbus
       {}
     end
 
-    def handler_for_queue(queue_name)
-      return "" unless defined?(@subscribers) && @subscribers
-
-      sub = @subscribers.find { |s| s[:queue_name] == queue_name }
-      sub ? sub[:handler_class] : ""
-    end
-
     def pgbus_json_preview(json_string, max_length: 120)
       return "—" unless json_string
 

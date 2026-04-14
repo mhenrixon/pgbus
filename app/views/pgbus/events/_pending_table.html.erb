@@ -46,9 +46,10 @@
                   <div class="flex items-center justify-between mt-3 mb-3">
                     <span class="text-xs font-mono text-gray-400"><%= t("pgbus.events.pending_table.event_id") %> <%= payload["event_id"] %></span>
                     <div class="flex space-x-2">
-                      <%# Mark Handled %>
+                      <%# Mark Handled — handler_class is resolved server-side
+                          from the subscriber registry, so we only send queue_name. %>
                       <%= button_to t("pgbus.events.pending_table.mark_handled"),
-                            pgbus.mark_handled_event_path(m[:msg_id], queue_name: m[:queue_name], handler_class: handler_for_queue(m[:queue_name])),
+                            pgbus.mark_handled_event_path(m[:msg_id], queue_name: m[:queue_name]),
                             method: :post,
                             class: "rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-500",
                             data: { turbo_confirm: t("pgbus.events.pending_table.mark_handled_confirm"), turbo_frame: "_top" } %>
@@ -60,9 +61,9 @@
                         <div class="absolute right-0 z-10 mt-1 w-64 rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-gray-200 dark:ring-gray-700 p-2">
                           <p class="text-xs text-gray-500 mb-2"><%= t("pgbus.events.pending_table.reroute_label") %></p>
                           <% @subscribers.each do |s| %>
-                            <% next if s[:queue_name] == m[:queue_name] %>
+                            <% next if s[:physical_queue_name] == m[:queue_name] %>
                             <%= button_to s[:handler_class],
-                                  pgbus.reroute_event_path(m[:msg_id], queue_name: m[:queue_name], target_queue: s[:queue_name]),
+                                  pgbus.reroute_event_path(m[:msg_id], queue_name: m[:queue_name], target_queue: s[:physical_queue_name]),
                                   method: :post,
                                   class: "block w-full text-left rounded px-2 py-1 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700",
                                   data: { turbo_confirm: t("pgbus.events.pending_table.reroute_confirm"), turbo_frame: "_top" } %>
@@ -128,7 +129,9 @@
           </tr>
         <% end %>
         <% if @pending.empty? %>
-          <tr><td colspan="6" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.events.index.pending_empty") %></td></tr>
+          <%# Header only renders the bulk-select column when rows are present,
+              so the empty-state colspan must match (5 without, 6 with). %>
+          <tr><td colspan="5" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.events.index.pending_empty") %></td></tr>
         <% end %>
       </tbody>
     </table>
