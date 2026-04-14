@@ -50,6 +50,13 @@ Pgbus::Engine.routes.draw do
   resources :events, only: %i[index show] do
     member do
       post :replay
+      post :discard
+      post :mark_handled
+      post :edit_payload
+      post :reroute
+    end
+    collection do
+      post :discard_selected
     end
   end
 

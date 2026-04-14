@@ -66,6 +66,12 @@ fi:
       index:
         discard_all: Hylkää kaikki
         discard_all_confirm: Hylätäänkö kaikki DLQ-viestit pysyvästi?
+        discard_selected: Hylkää valitut
+        discard_selected_confirm: Hylätäänkö valitut DLQ-viestit?
+        discarded_selected:
+          one: 1 DLQ-viesti hylätty.
+          other: "%{count} DLQ-viestiä hylätty."
+        none_selected: Ei viestejä valittuna.
         retry_all: Yritä uudelleen kaikki
         retry_all_confirm: Yritetäänkö uudelleen kaikkia DLQ-viestejä?
         title: Dead Letter -jono
@@ -113,7 +119,34 @@ fi:
       delete_title: Poista
       ok: OK
     events:
+      flash:
+        discard_failed: Tapahtumaa ei voitu hylätä.
+        discarded: Tapahtuma hylätty.
+        discarded_selected:
+          one: 1 tapahtuma hylätty.
+          other: "%{count} tapahtumaa hylätty."
+        mark_handled_failed: Tapahtumaa ei voitu merkitä käsitellyksi.
+        marked_handled: Tapahtuma merkitty käsitellyksi.
+        none_selected: Ei tapahtumia valittuna.
+        payload_update_failed: Kuormaa ei voitu päivittää. Tarkista, että JSON on kelvollinen.
+        payload_updated: Kuorma päivitetty ja tapahtuma uudelleen jonotettu.
+        replay_failed: Tapahtumaa ei löytynyt tai sitä ei voitu toistaa.
+        replayed: Tapahtuma toistettu.
+        reroute_failed: Tapahtumaa ei voitu uudelleenreitittää.
+        rerouted: Tapahtuma uudelleenreititetty kohdekäsittelijälle.
       index:
+        discard_all: Hylkää kaikki
+        discard_all_confirm: Hylätäänkö kaikki odottavat tapahtumat? Tätä ei voi peruuttaa.
+        discard_selected: Hylkää valitut
+        discard_selected_confirm: Hylätäänkö valitut tapahtumat?
+        pending_empty: Ei odottavia tapahtumia
+        pending_headers:
+          enqueued: Jonotettu
+          handler_queue: Käsittelijäjono
+          id: ID
+          reads: Lukukerrat
+          routing_key: Reitityksen avain
+        pending_title: Odotettavat tapahtumat
         processed_empty: Ei vielä käsiteltyjä tapahtumia
         processed_headers:
           event_id: Tapahtuman tunnus
@@ -127,6 +160,26 @@ fi:
           queue: Jono
         subscribers_title: Rekisteröidyt tilaajat
         title: Tapahtumat
+      pending_table:
+        arguments: Kuorma
+        discard: Hylkää
+        discard_confirm: Hylätäänkö tämä tapahtuma? Se arkistoidaan.
+        edit_payload: Muokkaa ja yritä uudelleen
+        edit_payload_confirm: Päivitetäänkö kuorma ja uudelleen jonotetaanko tämä tapahtuma?
+        edit_payload_label: 'JSON-kuorma:'
+        event_id: 'Tapahtuman ID:'
+        full_json_payload: Täysi JSON-kuorma
+        headers_section: Otsikot
+        mark_handled: Merkitse käsitellyksi
+        mark_handled_confirm: Merkitäänkö tämä tapahtuma käsitellyksi? Se arkistoidaan ja ohitetaan toistossa.
+        metadata: Metatiedot
+        metadata_labels:
+          last_read: 'Viimeksi luettu:'
+          read_count: 'Lukukerrat:'
+          visible_at: 'Näkyvissä:'
+        reroute: Uudelleenreititys
+        reroute_confirm: Uudelleenreititetäänkö tämä tapahtuma toiselle käsittelijälle?
+        reroute_label: 'Kohdekäsittelijä:'
       show:
         back: Takaisin tapahtumiin
         labels:
@@ -136,6 +189,9 @@ fi:
         not_found: Tapahtumaa ei löytynyt
         title: Tapahtuma %{event_id}
     helpers:
+      bulk_select_all: Valitse kaikki
+      bulk_select_row: Valitse %{id}
+      bulk_selected: valittu
       paused_badge: Tauolla
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ fi:
       show:
         charts:
           failed_to_load: Latauksen kaavioaineisto epäonnistui
+          latency: Jon viive (ms)
+          latency_avg: Keskim.
+          latency_p95: P95
           no_data: Ei vielä tietoja
           series_name: Tehtäviä/min
           status_distribution: Tilajakauma
           throughput: Kapasiteetti (tehtäviä/min)
         description_html: Työsuorituksen mittarit viimeiseltä %{range}
+        latency_by_queue:
+          empty: Ei viivetietoja vielä
+          headers:
+            avg: Keskim. (ms)
+            count: Määrä
+            p95: P95 (ms)
+            queue: Jono
+          title: Viive jonon mukaan
         slowest:
           empty: Ei vielä tehtävätilastoja
           headers:
@@ -163,11 +230,32 @@ fi:
             job_class: Tehtäväluokka
             max: Maksimi
           title: Hitaimmat työn luokat (keskimääräinen kesto)
+        streams:
+          summary:
+            active: Aktiivinen
+            avg_fanout: Keskim. haarautuminen
+            broadcasts: Lähetykset
+            connects: Yhdistämiset
+            disconnects: Katkaisut
+          title: Reaaliaikaiset striimit
+          top:
+            empty: Valitulla aikavälillä ei striimitoimintaa
+            headers:
+              avg_fanout: Keskim. haarautuminen
+              avg_ms: Keskim. lähetys
+              broadcasts: Lähetykset
+              stream: Striimi
+            title: Suosituimmat striimit lähetysmäärän mukaan
         summary:
           avg_duration: Keskimääräinen kesto
+          avg_latency: Keskim. viive
+          avg_retries: Keskim. uudelleenyritykset
           dead_lettered: Kuolleet kirjeet
           failed: Epäonnistuneet
           max_duration: Maksimikesto
+          p50_latency: P50-viive
+          p95_latency: P95-viive
+          p99_latency: P99-viive
           succeeded: Onnistuneet
           total_jobs: Yhteensä töitä
         time_ranges:
@@ -222,6 +310,12 @@ fi:
         discard_all: Hylkää kaikki
         discard_all_confirm: Hylätäänkö kaikki epäonnistuneet työt?
         discard_all_enqueued_notice: Hylättiin %{count} jonossa olevaa tehtävää ja vapautettiin lukot.
+        discard_selected: Hylkää valitut
+        discard_selected_confirm: Hylätäänkö valitut kohteet?
+        discarded_selected:
+          one: Hylättiin 1 valittu kohde.
+          other: Hylättiin %{count} valittua kohdetta.
+        none_selected: Ei valittuja kohteita.
         retry_all: Yritä uudelleen kaikki
         retry_all_confirm: Yritetäänkö uudelleen kaikki epäonnistuneet työt?
         title: Työt
@@ -259,13 +353,28 @@ fi:
       toggle_menu: Vaihda valikko
     locks:
       index:
+        all_locks_discarded:
+          one: Hylättiin 1 lukko.
+          other: Hylättiin %{count} lukkoa.
         description: Aktiiviset ainutlaatuisuuden lukot estävät päällekkäisen työn suorittamisen
+        discard: Hylkää
+        discard_all: Hylkää kaikki
+        discard_all_confirm: Hylätäänkö kaikki lukot pysyvästi? Tämä saattaa sallia tehtävien toistuvan suorituksen.
+        discard_confirm: Hylätäänkö tämä lukko? Liittyvä tehtävä voidaan laittaa jonoon uudelleen.
+        discard_selected: Hylkää valitut
+        discard_selected_confirm: Hylätäänkö valitut lukot?
         empty: Ei aktiivisia lukkoja
         headers:
           age: Ikä
           lock_key: Lukon avain
           msg_id: Viestin tunnus
           queue_name: Jono
+        lock_discard_failed: Lukkoa ei voitu hylätä.
+        lock_discarded: Lukko hylätty.
+        locks_discarded:
+          one: Hylättiin 1 lukko.
+          other: Hylättiin %{count} lukkoa.
+        none_selected: Ei valittuja lukkoja.
         title: Yksikäsitteisyysavaimet
     outbox:
       index:

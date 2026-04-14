@@ -66,6 +66,12 @@ it:
       index:
         discard_all: Scarta tutto
         discard_all_confirm: Scartare definitivamente tutti i messaggi DLQ?
+        discard_selected: Scarta selezionati
+        discard_selected_confirm: Scartare i messaggi DLQ selezionati?
+        discarded_selected:
+          one: 1 messaggio DLQ scartato.
+          other: "%{count} messaggi DLQ scartati."
+        none_selected: Nessun messaggio selezionato.
         retry_all: Riprova tutto
         retry_all_confirm: Riprova tutti i messaggi DLQ?
         title: Coda di lettere morte
@@ -113,7 +119,34 @@ it:
       delete_title: Elimina
       ok: OK
     events:
+      flash:
+        discard_failed: Impossibile scartare l'evento.
+        discarded: Evento scartato.
+        discarded_selected:
+          one: 1 evento scartato.
+          other: "%{count} eventi scartati."
+        mark_handled_failed: Impossibile contrassegnare l'evento come gestito.
+        marked_handled: Evento contrassegnato come gestito.
+        none_selected: Nessun evento selezionato.
+        payload_update_failed: Impossibile aggiornare il payload. Verifica che il JSON sia valido.
+        payload_updated: Payload aggiornato ed evento reinserito in coda.
+        replay_failed: Evento non trovato o non riproducibile.
+        replayed: Evento riprodotto.
+        reroute_failed: Impossibile reindirizzare l'evento.
+        rerouted: Evento reindirizzato al gestore di destinazione.
       index:
+        discard_all: Scarta tutto
+        discard_all_confirm: Scartare tutti gli eventi in sospeso? Questa operazione non può essere annullata.
+        discard_selected: Scarta selezionati
+        discard_selected_confirm: Scartare gli eventi selezionati?
+        pending_empty: Nessun evento in sospeso
+        pending_headers:
+          enqueued: In coda
+          handler_queue: Coda del gestore
+          id: ID
+          reads: Letture
+          routing_key: Chiave di routing
+        pending_title: Eventi in sospeso
         processed_empty: Nessun evento elaborato ancora
         processed_headers:
           event_id: ID evento
@@ -127,6 +160,26 @@ it:
           queue: Coda
         subscribers_title: Iscritti registrati
         title: Eventi
+      pending_table:
+        arguments: Payload
+        discard: Scarta
+        discard_confirm: Scartare questo evento? Verrà archiviato.
+        edit_payload: Modifica e riprova
+        edit_payload_confirm: Aggiornare il payload e reinserire questo evento in coda?
+        edit_payload_label: 'Payload JSON:'
+        event_id: 'ID evento:'
+        full_json_payload: Payload JSON completo
+        headers_section: Intestazioni
+        mark_handled: Contrassegna come gestito
+        mark_handled_confirm: Contrassegnare questo evento come gestito? Verrà archiviato e saltato durante la riproduzione.
+        metadata: Metadati
+        metadata_labels:
+          last_read: 'Ultima lettura:'
+          read_count: 'Conteggio letture:'
+          visible_at: 'Visibile il:'
+        reroute: Reindirizza
+        reroute_confirm: Reindirizzare questo evento a un gestore diverso?
+        reroute_label: 'Gestore di destinazione:'
       show:
         back: Torna agli eventi
         labels:
@@ -136,6 +189,9 @@ it:
         not_found: Evento non trovato
         title: Evento %{event_id}
     helpers:
+      bulk_select_all: Seleziona tutto
+      bulk_select_row: Seleziona %{id}
+      bulk_selected: selezionato
       paused_badge: In pausa
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ it:
       show:
         charts:
           failed_to_load: Impossibile caricare i dati del grafico
+          latency: Latenza in coda (ms)
+          latency_avg: Media
+          latency_p95: P95
           no_data: Nessun dato ancora
           series_name: Lavori/min
           status_distribution: Distribuzione stato
           throughput: Throughput (lavori/min)
         description_html: Metriche di rendimento lavorativo per gli ultimi %{range}
+        latency_by_queue:
+          empty: Nessun dato di latenza disponibile
+          headers:
+            avg: Media (ms)
+            count: Conteggio
+            p95: P95 (ms)
+            queue: Coda
+          title: Latenza per coda
         slowest:
           empty: Nessuna statistica lavori ancora
           headers:
@@ -163,11 +230,32 @@ it:
             job_class: Classe lavoro
             max: Massimo
           title: Classi di Lavoro Più Lente (durata media)
+        streams:
+          summary:
+            active: Attivo
+            avg_fanout: Media Fanout
+            broadcasts: Trasmissioni
+            connects: Connessioni
+            disconnects: Disconnessioni
+          title: Stream in tempo reale
+          top:
+            empty: Nessuna attività di stream registrata nella finestra selezionata
+            headers:
+              avg_fanout: Media Fanout
+              avg_ms: Media Invii
+              broadcasts: Trasmissioni
+              stream: Stream
+            title: Stream principali per volume di trasmissione
         summary:
           avg_duration: Durata Media
+          avg_latency: Latenza media
+          avg_retries: Media tentativi
           dead_lettered: Messaggi in Dead Letter
           failed: Falliti
           max_duration: Durata Massima
+          p50_latency: Latenza P50
+          p95_latency: Latenza P95
+          p99_latency: Latenza P99
           succeeded: Riusciti
           total_jobs: Totale Lavori
         time_ranges:
@@ -222,6 +310,12 @@ it:
         discard_all: Scarta Tutto
         discard_all_confirm: Scartare tutti i lavori falliti?
         discard_all_enqueued_notice: Scartati %{count} lavori in coda e rilasciati i relativi blocchi.
+        discard_selected: Scarta selezionati
+        discard_selected_confirm: Scartare gli elementi selezionati?
+        discarded_selected:
+          one: 1 elemento selezionato scartato.
+          other: "%{count} elementi selezionati scartati."
+        none_selected: Nessun elemento selezionato.
         retry_all: Riprova Tutto
         retry_all_confirm: Riprova tutti i lavori falliti?
         title: Lavori
@@ -259,13 +353,28 @@ it:
       toggle_menu: Attiva/disattiva menu
     locks:
       index:
+        all_locks_discarded:
+          one: 1 blocco scartato.
+          other: "%{count} blocchi scartati."
         description: Blocchi di unicità attivi che impediscono l'esecuzione duplicata del lavoro
+        discard: Scarta
+        discard_all: Scarta tutto
+        discard_all_confirm: Scartare definitivamente tutti i blocchi? Questo potrebbe consentire l'esecuzione duplicata dei lavori.
+        discard_confirm: Scartare questo blocco? Il lavoro associato potrebbe essere nuovamente messo in coda.
+        discard_selected: Scarta selezionati
+        discard_selected_confirm: Scartare i blocchi selezionati?
         empty: Nessun blocco attivo
         headers:
           age: Età
           lock_key: Chiave di blocco
           msg_id: ID messaggio
           queue_name: Coda
+        lock_discard_failed: Impossibile scartare il blocco.
+        lock_discarded: Blocco scartato.
+        locks_discarded:
+          one: 1 blocco scartato.
+          other: "%{count} blocchi scartati."
+        none_selected: Nessun blocco selezionato.
         title: Chiavi di unicità
     outbox:
       index:

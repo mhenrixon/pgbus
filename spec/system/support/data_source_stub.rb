@@ -8,7 +8,8 @@ module Pgbus
                     :paused_queues, :locks_list, :recurring_tasks_list,
                     :insights_summary, :insights_slowest, :insights_latency_by_queue,
                     :insights_latency_trend, :insights_throughput, :insights_status_counts,
-                    :stream_stats_available, :stream_summary, :top_streams_list
+                    :stream_stats_available, :stream_summary, :top_streams_list,
+                    :pending_events_list
       attr_reader :calls
 
       def initialize
@@ -32,6 +33,7 @@ module Pgbus
         @stream_stats_available = false
         @stream_summary = default_stream_summary
         @top_streams_list = []
+        @pending_events_list = []
         @calls = Hash.new { |h, k| h[k] = [] }
       end
 
@@ -83,7 +85,25 @@ module Pgbus
       def discard_dlq_message(queue_name, msg_id) = record(:discard_dlq_message, queue_name, msg_id)
       def retry_all_dlq              = record(:retry_all_dlq) && @dlq_messages_list.size
       def discard_all_dlq            = record(:discard_all_dlq) && @dlq_messages_list.size
-      def replay_event(event)        = record(:replay_event, event)
+      def pending_events(page: 1, per_page: 25) = @pending_events_list
+      def replay_event(event) = record(:replay_event, event)
+      def discard_event(queue_name, msg_id) = record(:discard_event, queue_name, msg_id)
+      def mark_event_handled(queue_name, msg_id, handler_class) = record(:mark_event_handled, queue_name, msg_id, handler_class)
+      def edit_event_payload(queue_name, msg_id, payload) = record(:edit_event_payload, queue_name, msg_id, payload)
+      def reroute_event(source_queue, msg_id, target_queue) = record(:reroute_event, source_queue, msg_id, target_queue)
+      def discard_selected_events(selections) = record(:discard_selected_events, selections) && selections.size
+
+      def handler_queue_physical_names
+        @subscribers_list.map { |s| s[:physical_queue_name] || s[:queue_name] }.uniq
+      end
+
+      def handler_class_for_queue(queue_name)
+        sub = @subscribers_list.find do |s|
+          s[:physical_queue_name] == queue_name || s[:queue_name] == queue_name
+        end
+        sub && sub[:handler_class]
+      end
+
       def discard_lock(key)          = record(:discard_lock, key) && 1
       def discard_locks(keys)        = record(:discard_locks, keys) && keys.size
       def discard_all_locks          = record(:discard_all_locks) && @locks_list.size

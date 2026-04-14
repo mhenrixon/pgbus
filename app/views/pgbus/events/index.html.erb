@@ -1,4 +1,18 @@
-<h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6"><%= t("pgbus.events.index.title") %></h1>
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white"><%= t("pgbus.events.index.title") %></h1>
+  <% if @pending.any? %>
+    <div class="flex items-center space-x-2">
+      <div data-bulk-actions class="hidden flex items-center space-x-2">
+        <span class="text-sm text-gray-500 dark:text-gray-400"><span data-bulk-count>0</span> <%= t("pgbus.helpers.bulk_selected") %></span>
+        <button type="submit" form="bulk-discard-events-form"
+                class="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
+                data-turbo-confirm="<%= t("pgbus.events.index.discard_selected_confirm") %>">
+          <%= t("pgbus.events.index.discard_selected") %>
+        </button>
+      </div>
+    </div>
+  <% end %>
+</div>
 
 <!-- Registered Subscribers -->
 <div class="mb-8">
@@ -26,6 +40,12 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- Pending Events (Unprocessed messages in handler queues) -->
+<div class="mb-8">
+  <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-3"><%= t("pgbus.events.index.pending_title") %></h2>
+  <%= render "pgbus/events/pending_table" %>
 </div>
 
 <!-- Processed Events (Audit Trail) -->

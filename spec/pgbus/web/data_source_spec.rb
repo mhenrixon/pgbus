@@ -119,7 +119,15 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#registered_subscribers" do
-    it "returns subscriber info from registry" do
+    before do
+      mock_config = double("Pgbus::Configuration")
+      allow(mock_config).to receive(:queue_name) { |n| "pgbus_#{n}" }
+      allow(mock_client).to receive(:config).and_return(mock_config)
+    end
+
+    after { Pgbus::EventBus::Registry.instance.clear! }
+
+    it "returns subscriber info from registry with physical queue name" do
       handler_class = Class.new(Pgbus::EventBus::Handler)
       stub_const("MyHandler", handler_class)
 
@@ -131,6 +139,8 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result.size).to eq(1)
       expect(result.first[:pattern]).to eq("orders.#")
       expect(result.first[:handler_class]).to eq("MyHandler")
+      expect(result.first[:queue_name]).to eq("my_handler")
+      expect(result.first[:physical_queue_name]).to eq("pgbus_my_handler")
     end
   end
 
@@ -524,6 +534,306 @@ RSpec.describe Pgbus::Web::DataSource do
 
       expect(result[:tables]).to eq([])
       expect(result[:oldest_transaction_age_sec]).to be_nil
+    end
+  end
+
+  describe "#pending_events" do
+    let(:handler_class) { Class.new(Pgbus::EventBus::Handler) }
+    let(:mock_config) { double("Pgbus::Configuration") }
+
+    before do
+      stub_const("TaskCompletionHandler", handler_class)
+      registry = Pgbus::EventBus::Registry.instance
+      registry.clear!
+      registry.subscribe("task.completed", handler_class, queue_name: "task_completion_handler")
+      allow(mock_config).to receive(:queue_name) { |n| "pgbus_#{n}" }
+      allow(mock_client).to receive(:config).and_return(mock_config)
+    end
+
+    after { Pgbus::EventBus::Registry.instance.clear! }
+
+    it "normalizes subscriber queue names to physical before intersecting with pgmq.meta" do
+      allow(mock_connection).to receive(:select_values)
+        .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name", "Pgbus Queue Names")
+        .and_return(["pgbus_task_completion_handler"])
+
+      event_msg = '{"event_id":"evt-123","payload":{"foo":"bar"},' \
+                  '"published_at":"2026-04-09T00:00:00Z"}'
+      allow(mock_connection).to receive(:select_all).and_return([
+                                                                  {
+                                                                    "msg_id" => 1, "read_ct" => 3,
+                                                                    "enqueued_at" => "2026-04-09T00:00:00Z",
+                                                                    "last_read_at" => "2026-04-09T00:01:00Z",
+                                                                    "vt" => "2026-04-09T00:02:00Z",
+                                                                    "message" => event_msg,
+                                                                    "headers" => nil,
+                                                                    "queue_name" => "pgbus_task_completion_handler"
+                                                                  }
+                                                                ])
+
+      result = data_source.pending_events(page: 1, per_page: 25)
+
+      expect(result.size).to eq(1)
+      expect(result.first[:msg_id]).to eq(1)
+      expect(result.first[:queue_name]).to eq("pgbus_task_completion_handler")
+    end
+
+    it "returns empty when subscriber queues have not been created in pgmq.meta" do
+      # Logical name "task_completion_handler" becomes physical
+      # "pgbus_task_completion_handler"; but pgmq.meta returns an unrelated queue
+      # so the intersection is empty.
+      allow(mock_connection).to receive(:select_values).and_return(["pgbus_other"])
+
+      expect(data_source.pending_events).to eq([])
+    end
+
+    it "returns empty array when no handler queues exist" do
+      allow(mock_connection).to receive(:select_values).and_return([])
+
+      expect(data_source.pending_events).to eq([])
+    end
+
+    it "returns empty array on error" do
+      allow(mock_connection).to receive(:select_values).and_raise(StandardError, "boom")
+
+      expect(data_source.pending_events).to eq([])
+    end
+  end
+
+  describe "#handler_queue_physical_names" do
+    let(:handler_class) { Class.new(Pgbus::EventBus::Handler) }
+    let(:mock_config) { double("Pgbus::Configuration") }
+
+    before do
+      stub_const("TaskCompletionHandler", handler_class)
+      registry = Pgbus::EventBus::Registry.instance
+      registry.clear!
+      registry.subscribe("task.completed", handler_class, queue_name: "task_completion_handler")
+      allow(mock_config).to receive(:queue_name) { |n| "pgbus_#{n}" }
+      allow(mock_client).to receive(:config).and_return(mock_config)
+    end
+
+    after { Pgbus::EventBus::Registry.instance.clear! }
+
+    it "returns subscriber queue names prefixed with config.queue_prefix" do
+      expect(data_source.handler_queue_physical_names).to eq(["pgbus_task_completion_handler"])
+    end
+  end
+
+  describe "#handler_class_for_queue" do
+    let(:handler_class) { Class.new(Pgbus::EventBus::Handler) }
+    let(:mock_config) { double("Pgbus::Configuration") }
+
+    before do
+      stub_const("TaskCompletionHandler", handler_class)
+      registry = Pgbus::EventBus::Registry.instance
+      registry.clear!
+      registry.subscribe("task.completed", handler_class, queue_name: "task_completion_handler")
+      allow(mock_config).to receive(:queue_name) { |n| "pgbus_#{n}" }
+      allow(mock_client).to receive(:config).and_return(mock_config)
+    end
+
+    after { Pgbus::EventBus::Registry.instance.clear! }
+
+    it "returns the handler class for a registered physical queue" do
+      expect(data_source.handler_class_for_queue("pgbus_task_completion_handler"))
+        .to eq("TaskCompletionHandler")
+    end
+
+    it "returns nil for an unregistered queue" do
+      expect(data_source.handler_class_for_queue("pgbus_unknown")).to be_nil
+    end
+  end
+
+  describe "#discard_event" do
+    it "archives the message from the handler queue" do
+      allow(mock_client).to receive(:archive_message)
+      allow(mock_connection).to receive(:select_one).and_return(nil)
+
+      data_source.discard_event("task_completion_handler", 42)
+
+      expect(mock_client).to have_received(:archive_message).with("task_completion_handler", 42, prefixed: false)
+    end
+
+    it "releases uniqueness lock when present" do
+      allow(mock_client).to receive(:archive_message)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"event_id":"evt-1","pgbus_uniqueness_key":"uk-42"}',
+                      "headers" => nil, "last_read_at" => nil
+                    })
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
+
+      data_source.discard_event("task_completion_handler", 42)
+
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("uk-42")
+    end
+  end
+
+  describe "#mark_event_handled" do
+    let(:event_detail) do
+      {
+        "msg_id" => 42, "read_ct" => 3,
+        "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+        "message" => '{"event_id":"evt-123","pgbus_uniqueness_key":"uk-42","payload":{"foo":"bar"}}',
+        "headers" => nil, "last_read_at" => nil
+      }
+    end
+
+    it "performs insert -> release -> archive in strict order" do
+      call_order = []
+      allow(Pgbus::ProcessedEvent).to receive(:insert) { call_order << :insert }
+      allow(Pgbus::UniquenessKey).to receive(:release!) { call_order << :release }
+      allow(mock_client).to receive(:archive_message) { call_order << :archive }
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42]).and_return(event_detail)
+
+      data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
+
+      expect(call_order).to eq(%i[insert release archive])
+    end
+
+    it "inserts the ProcessedEvent row for the event" do
+      allow(Pgbus::ProcessedEvent).to receive(:insert)
+      allow(Pgbus::UniquenessKey).to receive(:release!)
+      allow(mock_client).to receive(:archive_message)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42]).and_return(event_detail)
+
+      result = data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
+
+      expect(result).to be true
+      expect(Pgbus::ProcessedEvent).to have_received(:insert).with(
+        hash_including(event_id: "evt-123", handler_class: "TaskCompletionHandler"),
+        unique_by: %i[event_id handler_class]
+      )
+    end
+
+    it "returns false when message not found" do
+      allow(mock_connection).to receive(:select_one).and_return(nil)
+
+      result = data_source.mark_event_handled("task_completion_handler", 99, "TaskCompletionHandler")
+
+      expect(result).to be false
+    end
+
+    it "releases the uniqueness lock for the event payload" do
+      allow(mock_client).to receive(:archive_message)
+      allow(Pgbus::ProcessedEvent).to receive(:insert)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"event_id":"evt-1","pgbus_uniqueness_key":"uk-42"}',
+                      "headers" => nil, "last_read_at" => nil
+                    })
+      allow(Pgbus::UniquenessKey).to receive(:release!).and_return(1)
+
+      data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
+
+      expect(Pgbus::UniquenessKey).to have_received(:release!).with("uk-42")
+    end
+  end
+
+  describe "#edit_event_payload" do
+    let(:txn) { double("txn") }
+
+    it "uses a PGMQ transaction to produce new message and delete the old atomically" do
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"event_id":"evt-1","payload":{"old":"data"}}',
+                      "headers" => '{"x-routing":"task.completed"}',
+                      "last_read_at" => nil
+                    })
+      allow(txn).to receive(:produce)
+      allow(txn).to receive(:delete)
+      allow(mock_client).to receive(:transaction).and_yield(txn)
+
+      new_payload = '{"event_id":"evt-1","payload":{"corrected":"data"}}'
+      result = data_source.edit_event_payload("task_completion_handler", 42, new_payload)
+
+      expect(result).to be true
+      expect(txn).to have_received(:produce)
+        .with("task_completion_handler", new_payload, headers: '{"x-routing":"task.completed"}')
+      expect(txn).to have_received(:delete).with("task_completion_handler", 42)
+    end
+
+    it "returns false when message not found" do
+      allow(mock_connection).to receive(:select_one).and_return(nil)
+
+      result = data_source.edit_event_payload("task_completion_handler", 99, "{}")
+
+      expect(result).to be false
+    end
+
+    it "returns false for invalid JSON payload" do
+      result = data_source.edit_event_payload("task_completion_handler", 42, "not json")
+
+      expect(result).to be false
+    end
+  end
+
+  describe "#reroute_event" do
+    let(:txn) { double("txn") }
+
+    it "uses a PGMQ transaction to produce on target and delete on source atomically" do
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42])
+        .and_return({
+                      "msg_id" => 42, "read_ct" => 0,
+                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+                      "message" => '{"event_id":"evt-1","payload":{"foo":"bar"}}',
+                      "headers" => '{"x-routing":"task.completed"}',
+                      "last_read_at" => nil
+                    })
+      allow(txn).to receive(:produce)
+      allow(txn).to receive(:delete)
+      allow(mock_client).to receive(:transaction).and_yield(txn)
+
+      result = data_source.reroute_event("task_completion_handler", 42, "webhook_handler")
+
+      expect(result).to be true
+      expect(txn).to have_received(:produce)
+        .with("webhook_handler", '{"event_id":"evt-1","payload":{"foo":"bar"}}',
+              headers: '{"x-routing":"task.completed"}')
+      expect(txn).to have_received(:delete).with("task_completion_handler", 42)
+    end
+
+    it "returns false when message not found" do
+      allow(mock_connection).to receive(:select_one).and_return(nil)
+
+      result = data_source.reroute_event("task_completion_handler", 99, "webhook_handler")
+
+      expect(result).to be false
+    end
+  end
+
+  describe "#discard_selected_events" do
+    it "archives multiple messages and returns count" do
+      allow(mock_client).to receive(:archive_message)
+      allow(mock_connection).to receive(:select_one).and_return(nil)
+
+      selections = [
+        { queue_name: "task_completion_handler", msg_id: 1 },
+        { queue_name: "task_completion_handler", msg_id: 2 },
+        { queue_name: "webhook_handler", msg_id: 3 }
+      ]
+
+      result = data_source.discard_selected_events(selections)
+
+      expect(result).to eq(3)
+      expect(mock_client).to have_received(:archive_message).exactly(3).times
+    end
+
+    it "returns 0 for empty selections" do
+      expect(data_source.discard_selected_events([])).to eq(0)
     end
   end
 

@@ -66,6 +66,12 @@ nb:
       index:
         discard_all: Forkast alle
         discard_all_confirm: Slett alle DLQ-meldinger permanent?
+        discard_selected: Forkast valgte
+        discard_selected_confirm: Forkast valgte DLQ-meldinger?
+        discarded_selected:
+          one: 1 DLQ-melding forkastet.
+          other: "%{count} DLQ-meldinger forkastet."
+        none_selected: Ingen meldinger valgt.
         retry_all: Prøv alle på nytt
         retry_all_confirm: Prøv alle DLQ-meldinger på nytt?
         title: Dead Letter Queue
@@ -113,7 +119,34 @@ nb:
       delete_title: Slett
       ok: OK
     events:
+      flash:
+        discard_failed: Kunne ikke forkaste hendelse.
+        discarded: Hendelse forkastet.
+        discarded_selected:
+          one: 1 hendelse forkastet.
+          other: "%{count} hendelser forkastet."
+        mark_handled_failed: Kunne ikke merke hendelse som håndtert.
+        marked_handled: Hendelse merket som håndtert.
+        none_selected: Ingen hendelser valgt.
+        payload_update_failed: Kunne ikke oppdatere nyttelast. Sjekk at JSON er gyldig.
+        payload_updated: Nyttelast oppdatert og hendelse lagt i kø på nytt.
+        replay_failed: Hendelse ikke funnet eller kunne ikke spilles av på nytt.
+        replayed: Hendelse spilt av på nytt.
+        reroute_failed: Kunne ikke omdirigere hendelse.
+        rerouted: Hendelse omdirigert til målbehandler.
       index:
+        discard_all: Forkast alle
+        discard_all_confirm: Forkast alle ventende hendelser? Dette kan ikke angres.
+        discard_selected: Forkast valgte
+        discard_selected_confirm: Forkast valgte hendelser?
+        pending_empty: Ingen ventende hendelser
+        pending_headers:
+          enqueued: I kø
+          handler_queue: Behandlerkø
+          id: ID
+          reads: Lesninger
+          routing_key: Rutingsnøkkel
+        pending_title: Ventende hendelser
         processed_empty: Ingen hendelser behandlet ennå
         processed_headers:
           event_id: Hendelses-ID
@@ -127,6 +160,26 @@ nb:
           queue: Kø
         subscribers_title: Registrerte abonnenter
         title: Hendelser
+      pending_table:
+        arguments: Nyttelast
+        discard: Forkast
+        discard_confirm: Forkast denne hendelsen? Den vil bli arkivert.
+        edit_payload: Rediger & prøv på nytt
+        edit_payload_confirm: Oppdater nyttelast og legg denne hendelsen i kø på nytt?
+        edit_payload_label: 'JSON-nyttelast:'
+        event_id: 'Hendelses-ID:'
+        full_json_payload: Full JSON-nyttelast
+        headers_section: Overskrifter
+        mark_handled: Merk som håndtert
+        mark_handled_confirm: Merk denne hendelsen som håndtert? Den vil bli arkivert og hoppes over ved avspilling.
+        metadata: Metadata
+        metadata_labels:
+          last_read: 'Sist lest:'
+          read_count: 'Antall lesninger:'
+          visible_at: 'Synlig fra:'
+        reroute: Omdiriger
+        reroute_confirm: Omdiriger denne hendelsen til en annen behandler?
+        reroute_label: 'Målbehandler:'
       show:
         back: Tilbake til hendelser
         labels:
@@ -136,6 +189,9 @@ nb:
         not_found: Hendelse ikke funnet
         title: Hendelse %{event_id}
     helpers:
+      bulk_select_all: Velg alle
+      bulk_select_row: Velg %{id}
+      bulk_selected: valgt
       paused_badge: Pause
       queue_badge:
         dlq: DLQ
@@ -150,11 +206,22 @@ nb:
       show:
         charts:
           failed_to_load: Kunne ikke laste diagramdata
+          latency: Køforsinkelse (ms)
+          latency_avg: Gj.snitt
+          latency_p95: P95
           no_data: Ingen data ennå
           series_name: Jobber/min
           status_distribution: Statusfordeling
           throughput: Gjennomstrømning (jobber/min)
         description_html: Jobbprestasjonsmålinger for de siste %{range}
+        latency_by_queue:
+          empty: Ingen forsinkelsesdata ennå
+          headers:
+            avg: Gj.snitt (ms)
+            count: Antall
+            p95: P95 (ms)
+            queue: Kø
+          title: Forsinkelse per kø
         slowest:
           empty: Ingen jobbstatistikk ennå
           headers:
@@ -163,11 +230,32 @@ nb:
             job_class: Jobbklasse
             max: Maks
           title: Sakte jobber (gj.snitt varighet)
+        streams:
+          summary:
+            active: Aktiv
+            avg_fanout: Gj.snitt Fanout
+            broadcasts: Sendinger
+            connects: Tilkoblinger
+            disconnects: Frakoblinger
+          title: Sanntidsstrømmer
+          top:
+            empty: Ingen strømaktivitet registrert i det valgte tidsvinduet
+            headers:
+              avg_fanout: Gj.snitt Fanout
+              avg_ms: Gj.snitt Distribusjon
+              broadcasts: Sendinger
+              stream: Strøm
+            title: Toppstrømmer etter sendingsvolum
         summary:
           avg_duration: Gj.snitt varighet
+          avg_latency: Gj.snitt Forsinkelse
+          avg_retries: Gj.snitt Forsøk på nytt
           dead_lettered: Døde brev
           failed: Mislyktes
           max_duration: Maks varighet
+          p50_latency: P50 Forsinkelse
+          p95_latency: P95 Forsinkelse
+          p99_latency: P99 Forsinkelse
           succeeded: Lyktes
           total_jobs: Totalt antall jobber
         time_ranges:
@@ -222,6 +310,12 @@ nb:
         discard_all: Forkast alle
         discard_all_confirm: Forkast alle mislykkede jobber?
         discard_all_enqueued_notice: Forkastet %{count} køede jobber og frigitt låsene.
+        discard_selected: Forkast valgte
+        discard_selected_confirm: Forkast valgte elementer?
+        discarded_selected:
+          one: Forkastet 1 valgt element.
+          other: Forkastet %{count} valgte elementer.
+        none_selected: Ingen elementer valgt.
         retry_all: Prøv alle på nytt
         retry_all_confirm: Prøv alle mislykkede jobber på nytt?
         title: Jobber
@@ -259,13 +353,28 @@ nb:
       toggle_menu: Veksle meny
     locks:
       index:
+        all_locks_discarded:
+          one: Forkastet 1 lås.
+          other: Forkastet %{count} låser.
         description: Aktive unike låser som forhindrer duplisert jobbkjøring
+        discard: Forkast
+        discard_all: Forkast alle
+        discard_all_confirm: Vil du permanent forkaste alle låser? Dette kan tillate duplisert jobbutførelse.
+        discard_confirm: Vil du forkaste denne låsen? Den tilknyttede jobben kan bli satt i kø igjen.
+        discard_selected: Forkast valgte
+        discard_selected_confirm: Vil du forkaste valgte låser?
         empty: Ingen aktive låser
         headers:
           age: Alder
           lock_key: Låsenøkkel
           msg_id: Meldings-ID
           queue_name: Kø
+        lock_discard_failed: Kunne ikke forkaste lås.
+        lock_discarded: Lås forkastet.
+        locks_discarded:
+          one: Forkastet 1 lås.
+          other: Forkastet %{count} låser.
+        none_selected: Ingen låser valgt.
         title: Unikhetsnøkler
     outbox:
       index:
