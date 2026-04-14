@@ -174,9 +174,9 @@ nb:
         mark_handled_confirm: Merk denne hendelsen som håndtert? Den vil bli arkivert og hoppes over ved avspilling.
         metadata: Metadata
         metadata_labels:
-          last_read: Sist lest
-          read_count: Antall lesninger
-          visible_at: Synlig fra
+          last_read: 'Sist lest:'
+          read_count: 'Antall lesninger:'
+          visible_at: 'Synlig fra:'
         reroute: Omdiriger
         reroute_confirm: Omdiriger denne hendelsen til en annen behandler?
         reroute_label: 'Målbehandler:'

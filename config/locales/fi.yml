@@ -174,9 +174,9 @@ fi:
         mark_handled_confirm: Merkitäänkö tämä tapahtuma käsitellyksi? Se arkistoidaan ja ohitetaan toistossa.
         metadata: Metatiedot
         metadata_labels:
-          last_read: Viimeksi luettu
-          read_count: Lukukerrat
-          visible_at: Näkyvissä
+          last_read: 'Viimeksi luettu:'
+          read_count: 'Lukukerrat:'
+          visible_at: 'Näkyvissä:'
         reroute: Uudelleenreititys
         reroute_confirm: Uudelleenreititetäänkö tämä tapahtuma toiselle käsittelijälle?
         reroute_label: 'Kohdekäsittelijä:'

@@ -174,9 +174,9 @@ es:
         mark_handled_confirm: "¿Marcar este evento como manejado? Será archivado y omitido en la reproducción."
         metadata: Metadatos
         metadata_labels:
-          last_read: Última lectura
-          read_count: Cantidad de lecturas
-          visible_at: Visible en
+          last_read: 'Última lectura:'
+          read_count: 'Cantidad de lecturas:'
+          visible_at: 'Visible en:'
         reroute: Redirigir
         reroute_confirm: "¿Redirigir este evento a un manejador diferente?"
         reroute_label: 'Manejador objetivo:'

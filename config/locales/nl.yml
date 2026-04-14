@@ -174,9 +174,9 @@ nl:
         mark_handled_confirm: Deze gebeurtenis als afgehandeld markeren? Deze wordt gearchiveerd en overgeslagen bij het afspelen.
         metadata: Metadata
         metadata_labels:
-          last_read: Laatst Gelezen
-          read_count: Aantal Lezingen
-          visible_at: Zichtbaar Op
+          last_read: 'Laatst gelezen:'
+          read_count: 'Aantal lezingen:'
+          visible_at: 'Zichtbaar op:'
         reroute: Omleiden
         reroute_confirm: Deze gebeurtenis omleiden naar een andere handler?
         reroute_label: 'Doelhandler:'

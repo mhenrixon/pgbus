@@ -174,9 +174,9 @@ fr:
         mark_handled_confirm: Marquer cet événement comme traité ? Il sera archivé et ignoré lors du relecture.
         metadata: Métadonnées
         metadata_labels:
-          last_read: Dernière lecture
-          read_count: Nombre de lectures
-          visible_at: Visible à
+          last_read: 'Dernière lecture :'
+          read_count: 'Nombre de lectures :'
+          visible_at: 'Visible à :'
         reroute: Rediriger
         reroute_confirm: Rediriger cet événement vers un autre gestionnaire ?
         reroute_label: 'Gestionnaire cible :'

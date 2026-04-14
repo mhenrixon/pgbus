@@ -174,9 +174,9 @@ en:
         mark_handled_confirm: Mark this event as handled? It will be archived and skipped on replay.
         metadata: Metadata
         metadata_labels:
-          last_read: Last Read
-          read_count: Read Count
-          visible_at: Visible At
+          last_read: 'Last read:'
+          read_count: 'Read count:'
+          visible_at: 'Visible at:'
         reroute: Reroute
         reroute_confirm: Reroute this event to a different handler?
         reroute_label: 'Target handler:'

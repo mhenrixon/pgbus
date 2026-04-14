@@ -174,9 +174,9 @@ it:
         mark_handled_confirm: Contrassegnare questo evento come gestito? Verrà archiviato e saltato durante la riproduzione.
         metadata: Metadati
         metadata_labels:
-          last_read: Ultima lettura
-          read_count: Conteggio letture
-          visible_at: Visibile il
+          last_read: 'Ultima lettura:'
+          read_count: 'Conteggio letture:'
+          visible_at: 'Visibile il:'
         reroute: Reindirizza
         reroute_confirm: Reindirizzare questo evento a un gestore diverso?
         reroute_label: 'Gestore di destinazione:'

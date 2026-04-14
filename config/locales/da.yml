@@ -174,9 +174,9 @@ da:
         mark_handled_confirm: Marker denne begivenhed som håndteret? Den vil blive arkiveret og sprunget over ved afspilning.
         metadata: Metadata
         metadata_labels:
-          last_read: Sidst læst
-          read_count: Antal læsninger
-          visible_at: Synlig fra
+          last_read: 'Sist læst:'
+          read_count: 'Læseantal:'
+          visible_at: 'Synlig fra:'
         reroute: Omdiriger
         reroute_confirm: Omdiriger denne begivenhed til en anden handler?
         reroute_label: 'Målhandler:'

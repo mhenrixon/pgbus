@@ -174,9 +174,9 @@ de:
         mark_handled_confirm: Dieses Ereignis als bearbeitet markieren? Es wird archiviert und bei der Wiedergabe übersprungen.
         metadata: Metadaten
         metadata_labels:
-          last_read: Zuletzt gelesen
-          read_count: Leseanzahl
-          visible_at: Sichtbar ab
+          last_read: 'Zuletzt gelesen:'
+          read_count: 'Leseanzahl:'
+          visible_at: 'Sichtbar ab:'
         reroute: Umleiten
         reroute_confirm: Dieses Ereignis an einen anderen Handler umleiten?
         reroute_label: 'Ziel-Handler:'

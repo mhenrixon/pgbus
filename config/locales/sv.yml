@@ -174,9 +174,9 @@ sv:
         mark_handled_confirm: Markera denna händelse som hanterad? Den kommer att arkiveras och hoppas över vid uppspelning.
         metadata: Metadata
         metadata_labels:
-          last_read: Senast läst
-          read_count: Läsantal
-          visible_at: Synlig vid
+          last_read: 'Senast läst:'
+          read_count: 'Läsantal:'
+          visible_at: 'Synlig vid:'
         reroute: Omdirigera
         reroute_confirm: Omdirigera denna händelse till en annan hanterare?
         reroute_label: 'Målhanterare:'

@@ -70,7 +70,7 @@ ja:
         discard_selected_confirm: 選択したDLQメッセージを破棄しますか？
         discarded_selected:
           one: 1件のDLQメッセージを破棄しました。
-          other: "%{%{count}}件のDLQメッセージを破棄しました。"
+          other: "%{count}件のDLQメッセージを破棄しました。"
         none_selected: メッセージが選択されていません。
         retry_all: すべて再試行
         retry_all_confirm: すべてのDLQメッセージを再試行しますか？
@@ -124,7 +124,7 @@ ja:
         discarded: イベントが破棄されました。
         discarded_selected:
           one: 1件のイベントを破棄しました。
-          other: "%{%{count}}件のイベントを破棄しました。"
+          other: "%{count}件のイベントを破棄しました。"
         mark_handled_failed: イベントを処理済みとしてマークできませんでした。
         marked_handled: イベントが処理済みとしてマークされました。
         none_selected: イベントが選択されていません。
@@ -174,9 +174,9 @@ ja:
         mark_handled_confirm: このイベントを処理済みとしてマークしますか？アーカイブされ、再生時にスキップされます。
         metadata: メタデータ
         metadata_labels:
-          last_read: 最終読み取り
-          read_count: 読み取り回数
-          visible_at: 表示日時
+          last_read: 最終読み取り：
+          read_count: 読み取り回数：
+          visible_at: 表示日時：
         reroute: ルーティング変更
         reroute_confirm: このイベントを別のハンドラーにルーティングしますか？
         reroute_label: 'ターゲットハンドラー:'
@@ -190,7 +190,7 @@ ja:
         title: イベント %{event_id}
     helpers:
       bulk_select_all: すべて選択
-      bulk_select_row: "%{%{id}}を選択"
+      bulk_select_row: "%{id}を選択"
       bulk_selected: 選択済み
       paused_badge: 一時停止中
       queue_badge:
@@ -314,7 +314,7 @@ ja:
         discard_selected_confirm: 選択した項目を破棄しますか？
         discarded_selected:
           one: 1件の選択項目を破棄しました。
-          other: "%{%{count}}件の選択項目を破棄しました。"
+          other: "%{count}件の選択項目を破棄しました。"
         none_selected: 項目が選択されていません。
         retry_all: すべてリトライ
         retry_all_confirm: すべての失敗したジョブをリトライしますか？
@@ -355,7 +355,7 @@ ja:
       index:
         all_locks_discarded:
           one: 1件のロックを破棄しました。
-          other: "%{%{count}}件のロックを破棄しました。"
+          other: "%{count}件のロックを破棄しました。"
         description: 重複ジョブ実行を防ぐアクティブなユニークロック
         discard: 破棄
         discard_all: すべて破棄
@@ -373,7 +373,7 @@ ja:
         lock_discarded: ロックを破棄しました。
         locks_discarded:
           one: 1件のロックを破棄しました。
-          other: "%{%{count}}件のロックを破棄しました。"
+          other: "%{count}件のロックを破棄しました。"
         none_selected: ロックが選択されていません。
         title: 一意性キー
     outbox:

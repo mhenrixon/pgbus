@@ -174,9 +174,9 @@ pt:
         mark_handled_confirm: Marcar este evento como tratado? Ele será arquivado e ignorado na reprodução.
         metadata: Metadados
         metadata_labels:
-          last_read: Última Leitura
-          read_count: Contagem de Leituras
-          visible_at: Visível em
+          last_read: 'Última leitura:'
+          read_count: 'Contagem de leituras:'
+          visible_at: 'Visível em:'
         reroute: Redirecionar
         reroute_confirm: Redirecionar este evento para um manipulador diferente?
         reroute_label: 'Manipulador alvo:'
@@ -314,7 +314,7 @@ pt:
         discard_selected_confirm: Descartar itens selecionados?
         discarded_selected:
           one: 1 item selecionado descartado.
-          other: "%{%{count}} itens selecionados descartados."
+          other: "%{count} itens selecionados descartados."
         none_selected: Nenhum item selecionado.
         retry_all: Tentar Novamente Todos
         retry_all_confirm: Tentar novamente todos os trabalhos falhados?
@@ -355,7 +355,7 @@ pt:
       index:
         all_locks_discarded:
           one: 1 bloqueio descartado.
-          other: "%{%{count}} bloqueios descartados."
+          other: "%{count} bloqueios descartados."
         description: Bloqueios de exclusividade ativos impedindo a execução duplicada do trabalho
         discard: Descartar
         discard_all: Descartar Todos
@@ -373,7 +373,7 @@ pt:
         lock_discarded: Bloqueio descartado.
         locks_discarded:
           one: 1 bloqueio descartado.
-          other: "%{%{count}} bloqueios descartados."
+          other: "%{count} bloqueios descartados."
         none_selected: Nenhum bloqueio selecionado.
         title: Chaves de unicidade
     outbox:
