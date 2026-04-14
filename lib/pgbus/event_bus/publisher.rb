@@ -8,7 +8,7 @@ module Pgbus
       module_function
 
       def publish(routing_key, payload, headers: nil, delay: 0)
-        event_data = build_event_data(payload)
+        event_data = build_event_data(payload, routing_key: routing_key)
 
         if defined?(Pgbus::Testing) && !Pgbus::Testing.disabled?
           event = Pgbus::Event.new(
@@ -37,7 +37,7 @@ module Pgbus
         publish(routing_key, payload, headers: headers, delay: delay)
       end
 
-      def build_event_data(payload)
+      def build_event_data(payload, routing_key: nil)
         event_id = SecureRandom.uuid
 
         serialized_payload = if payload.respond_to?(:to_global_id)
@@ -48,11 +48,13 @@ module Pgbus
                                { "value" => payload }
                              end
 
-        {
+        data = {
           "event_id" => event_id,
           "payload" => serialized_payload,
           "published_at" => Time.now.utc.iso8601(6)
         }
+        data["routing_key"] = routing_key if routing_key
+        data
       end
     end
   end
