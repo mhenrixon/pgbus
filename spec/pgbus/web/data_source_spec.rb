@@ -125,6 +125,8 @@ RSpec.describe Pgbus::Web::DataSource do
       allow(mock_client).to receive(:config).and_return(mock_config)
     end
 
+    after { Pgbus::EventBus::Registry.instance.clear! }
+
     it "returns subscriber info from registry with physical queue name" do
       handler_class = Class.new(Pgbus::EventBus::Handler)
       stub_const("MyHandler", handler_class)
