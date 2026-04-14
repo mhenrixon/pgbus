@@ -672,24 +672,38 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#mark_event_handled" do
-    it "inserts the ProcessedEvent record before archiving the message" do
+    let(:event_detail) do
+      {
+        "msg_id" => 42, "read_ct" => 3,
+        "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
+        "message" => '{"event_id":"evt-123","pgbus_uniqueness_key":"uk-42","payload":{"foo":"bar"}}',
+        "headers" => nil, "last_read_at" => nil
+      }
+    end
+
+    it "performs insert -> release -> archive in strict order" do
       call_order = []
       allow(Pgbus::ProcessedEvent).to receive(:insert) { call_order << :insert }
+      allow(Pgbus::UniquenessKey).to receive(:release!) { call_order << :release }
       allow(mock_client).to receive(:archive_message) { call_order << :archive }
       allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Job Detail", [42])
-        .and_return({
-                      "msg_id" => 42, "read_ct" => 3,
-                      "enqueued_at" => Time.now.to_s, "vt" => Time.now.to_s,
-                      "message" => '{"event_id":"evt-123","payload":{"foo":"bar"}}',
-                      "headers" => nil, "last_read_at" => nil
-                    })
+        .with(anything, "Pgbus Job Detail", [42]).and_return(event_detail)
+
+      data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
+
+      expect(call_order).to eq(%i[insert release archive])
+    end
+
+    it "inserts the ProcessedEvent row for the event" do
+      allow(Pgbus::ProcessedEvent).to receive(:insert)
+      allow(Pgbus::UniquenessKey).to receive(:release!)
+      allow(mock_client).to receive(:archive_message)
+      allow(mock_connection).to receive(:select_one)
+        .with(anything, "Pgbus Job Detail", [42]).and_return(event_detail)
 
       result = data_source.mark_event_handled("task_completion_handler", 42, "TaskCompletionHandler")
 
       expect(result).to be true
-      expect(call_order).to eq(%i[insert archive])
-      expect(mock_client).to have_received(:archive_message).with("task_completion_handler", 42, prefixed: false)
       expect(Pgbus::ProcessedEvent).to have_received(:insert).with(
         hash_including(event_id: "evt-123", handler_class: "TaskCompletionHandler"),
         unique_by: %i[event_id handler_class]
