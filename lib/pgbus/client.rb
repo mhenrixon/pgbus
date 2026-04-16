@@ -87,7 +87,9 @@ module Pgbus
       target = @queue_strategy.target_queue(queue_name, priority)
       ensure_queue(queue_name)
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
-        synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
+        with_stale_connection_retry do
+          synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
+        end
       end
     end
 
@@ -96,7 +98,9 @@ module Pgbus
       ensure_queue(queue_name)
       serialized, serialized_headers = serialize_batch(payloads, headers)
       Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
-        synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
+        with_stale_connection_retry do
+          synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
+        end
       end
     end
 
@@ -318,13 +322,15 @@ module Pgbus
     end
 
     def publish_to_topic(routing_key, payload, headers: nil, delay: 0)
-      synchronized do
-        @pgmq.produce_topic(
-          routing_key,
-          serialize(payload),
-          headers: headers && serialize(headers),
-          delay: delay
-        )
+      with_stale_connection_retry do
+        synchronized do
+          @pgmq.produce_topic(
+            routing_key,
+            serialize(payload),
+            headers: headers && serialize(headers),
+            delay: delay
+          )
+        end
       end
     end
 
@@ -516,6 +522,51 @@ module Pgbus
       else
         yield
       end
+    end
+
+    # Substrings that indicate the pooled PG::Connection was closed beneath
+    # pgmq-ruby — typically by a connection pooler such as PgBouncer hitting
+    # server_idle_timeout / client_idle_timeout, an admin disconnect, or a
+    # TCP RST. pgmq-ruby 0.6.0 does not retry on all of these (notably the
+    # pg-gem "PQsocket() can't get socket descriptor" message), so first
+    # enqueue after the reset surfaces the failure to callers unless we
+    # rescue + retry one level up. See mensfeld/pgmq-ruby#94.
+    STALE_CONNECTION_PATTERNS = [
+      "pqsocket() can't get socket descriptor",
+      "connection is closed",
+      "connection has been closed",
+      "server closed the connection",
+      "connection not open",
+      "no connection to the server",
+      "terminating connection",
+      "connection to server was lost",
+      "could not receive data from server"
+    ].freeze
+    private_constant :STALE_CONNECTION_PATTERNS
+
+    # Enqueue path guard: rescue PGMQ::Errors::ConnectionError once if its
+    # message matches a known stale-socket pattern. pgmq-ruby's
+    # auto_reconnect + verify_connection! already recovers on the *next*
+    # checkout, so a single retry is sufficient. Other connection errors
+    # (pool timeout, misconfiguration, truly unreachable DB) propagate.
+    def with_stale_connection_retry
+      attempts = 0
+      begin
+        yield
+      rescue PGMQ::Errors::ConnectionError => e
+        attempts += 1
+        raise unless attempts == 1 && stale_connection_error?(e)
+
+        Pgbus.logger.warn do
+          "[Pgbus::Client] Retrying produce after stale pgmq connection: #{e.message}"
+        end
+        retry
+      end
+    end
+
+    def stale_connection_error?(error)
+      message = error.message.to_s.downcase
+      STALE_CONNECTION_PATTERNS.any? { |pattern| message.include?(pattern) }
     end
 
     def serialize(data)

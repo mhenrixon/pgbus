@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- **Defensive retry on stale pooled pgmq connections in the enqueue path.** `Pgbus::Client#send_message`, `#send_batch`, and `#publish_to_topic` now retry once when `@pgmq.produce*` raises `PGMQ::Errors::ConnectionError` with a message indicating the pooled `PG::Connection` was killed beneath pgmq-ruby — typically by PgBouncer hitting `server_idle_timeout` / `client_idle_timeout`, an admin disconnect, or a TCP RST. Observed in production as `PQsocket() can't get socket descriptor` on the first produce following an idle window. pgmq-ruby's `auto_reconnect` recovers on the *next* pool checkout, so a single retry is sufficient; non-stale errors (pool timeout, misconfiguration, unreachable database) still propagate unchanged. Upstream pgmq-ruby fix for the underlying misclassification is in-flight at mensfeld/pgmq-ruby#94.
+
 ## [0.5.1] - 2026-04-08
 
 ### Fixed
