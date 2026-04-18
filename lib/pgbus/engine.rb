@@ -26,7 +26,7 @@ module Pgbus
 
       if files
         tasks = Pgbus::Recurring::ConfigLoader.load_all(files)
-        if tasks.empty? && default_path.exist? && files.none? { |f| File.expand_path(f) == File.expand_path(default_path) }
+        if tasks.empty? && default_path.exist? && files.none? { |f| File.expand_path(f.to_s) == File.expand_path(default_path.to_s) }
           tasks = Pgbus::Recurring::ConfigLoader.load(default_path)
           config.recurring_tasks_file ||= default_path.to_s
         end

@@ -24,11 +24,12 @@ module Pgbus
       end
 
       def load_all(paths, env: nil)
-        return {} if paths.nil? || paths.empty?
+        normalized = Array(paths).compact.map { |p| p.respond_to?(:to_path) ? p.to_path : p.to_s }.reject(&:empty?)
+        return {} if normalized.empty?
 
         env ||= detect_env
 
-        paths.each_with_object({}) do |path, acc|
+        normalized.each_with_object({}) do |path, acc|
           unless File.exist?(path.to_s)
             Pgbus.logger.warn { "[Pgbus] Recurring file not found, skipping: #{path}" }
             next

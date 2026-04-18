@@ -68,11 +68,12 @@ RSpec.describe Pgbus::Recurring::ConfigLoader, ".load_all" do
           schedule: "*/5 * * * *"
       YAML
 
-      allow(Pgbus.logger).to receive(:debug)
+      debug_messages = []
+      allow(Pgbus.logger).to receive(:debug) { |&blk| debug_messages << blk.call }
 
       described_class.load_all([base, override])
 
-      expect(Pgbus.logger).to have_received(:debug)
+      expect(debug_messages).to include(a_string_matching(/Recurring task 'sync' overridden by .*override\.yml/))
     end
   end
 
