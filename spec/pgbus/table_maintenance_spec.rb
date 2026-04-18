@@ -126,6 +126,40 @@ RSpec.describe Pgbus::TableMaintenance do
       maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: false)
       expect(maintained).to eq(1)
     end
+
+    it "executes REINDEX TABLE CONCURRENTLY when reindex is true" do
+      rows = [
+        { "schemaname" => "pgmq", "relname" => "q_pgbus_default",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 }
+      ]
+      reindexed = false
+      allow(conn).to receive(:exec) do |sql|
+        next rows if sql.include?("pg_stat_user_tables")
+
+        reindexed = true if sql.include?("REINDEX TABLE CONCURRENTLY")
+      end
+
+      described_class.run_maintenance(conn, threshold: 0.1, reindex: true)
+      expect(reindexed).to be true
+    end
+
+    it "continues with other tables when reindex fails on one" do
+      rows = [
+        { "schemaname" => "pgmq", "relname" => "q_first",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 },
+        { "schemaname" => "pgmq", "relname" => "q_second",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 }
+      ]
+      allow(conn).to receive(:exec) do |sql|
+        next rows if sql.include?("pg_stat_user_tables")
+        next if sql.include?("VACUUM")
+
+        raise StandardError, "reindex failed" if sql.include?("q_first")
+      end
+
+      maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: true)
+      expect(maintained).to eq(1)
+    end
   end
 
   describe "FILLFACTOR" do

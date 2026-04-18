@@ -48,6 +48,7 @@ module Pgbus
           SELECT schemaname, relname, n_dead_tup, n_live_tup
           FROM pg_stat_user_tables
           WHERE schemaname = 'pgmq'
+            AND relname LIKE 'q_%'
           ORDER BY n_dead_tup DESC
         SQL
 
