@@ -754,18 +754,11 @@ RSpec.describe Pgbus::Client do
         expect(call_count).to eq(2)
       end
 
-      it "retries once on the pre-existing server-close message" do
-        call_count = 0
-        allow(mock_pgmq).to receive(:produce) do
-          call_count += 1
-          raise(PGMQ::Errors::ConnectionError, "Database connection error: server closed the connection unexpectedly") if call_count == 1
+      it "does not retry on mid-flight server-close errors (potential duplicate risk)" do
+        allow(mock_pgmq).to receive(:produce)
+          .and_raise(PGMQ::Errors::ConnectionError, "Database connection error: server closed the connection unexpectedly")
 
-          1
-        end
-
-        client.send_message("default", { "k" => "v" })
-
-        expect(call_count).to eq(2)
+        expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError, /server closed/)
       end
 
       it "does not retry on non-stale ConnectionError (e.g. pool timeout)" do

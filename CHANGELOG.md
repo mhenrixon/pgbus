@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **Queue names must be alphanumeric and underscores only.** Queue names containing dashes (e.g., `my-app-queue`) will now raise `ArgumentError`. Rename to underscored form (e.g., `my_app_queue`) before upgrading. This restriction prevents SQL injection via PGMQ queue identifiers, which are interpolated into table names and cannot be parameterized.
+
+### Security
+
+- Add `bundler-audit` to CI for dependency vulnerability scanning
+- Add `QueueNameValidator` to enforce strict queue name validation (alphanumeric + underscores, 61 char max)
+- Add `config.allowed_global_id_models` to restrict which models can be deserialized from event payloads
+- Add security headers to dashboard (X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
+- Warn when dashboard `web_auth` is unconfigured
+- Add `globalid` as an explicit runtime dependency (was used but only transitively available via activejob)
+
 ### Fixed
 
 - **Defensive retry on stale pooled pgmq connections in the enqueue path.** `Pgbus::Client#send_message`, `#send_batch`, and `#publish_to_topic` now retry once when `@pgmq.produce*` raises `PGMQ::Errors::ConnectionError` with a message indicating the pooled `PG::Connection` was killed beneath pgmq-ruby — typically by PgBouncer hitting `server_idle_timeout` / `client_idle_timeout`, an admin disconnect, or a TCP RST. Observed in production as `PQsocket() can't get socket descriptor` on the first produce following an idle window. pgmq-ruby's `auto_reconnect` recovers on the *next* pool checkout, so a single retry is sufficient; non-stale errors (pool timeout, misconfiguration, unreachable database) still propagate unchanged. Upstream pgmq-ruby fix for the underlying misclassification is in-flight at mensfeld/pgmq-ruby#94.
@@ -18,21 +31,6 @@
   - Net result: `"*: 3; *: 3; *: 3"` produces 3 anonymous capsules (3 forks), `"critical: 5; default: 10"` produces 2 named capsules (CLI `--capsule critical` still works), and named-vs-named overlap is still rejected as before.
 
   No changes required to user configuration — legacy YAML patterns and the modern DSL both work as documented.
-
-## [Unreleased]
-
-### Breaking Changes
-
-- **Queue names must be alphanumeric and underscores only.** Queue names containing dashes (e.g., `my-app-queue`) will now raise `ArgumentError`. Rename to underscored form (e.g., `my_app_queue`) before upgrading. This restriction prevents SQL injection via PGMQ queue identifiers, which are interpolated into table names and cannot be parameterized.
-
-### Security
-
-- Add `bundler-audit` to CI for dependency vulnerability scanning
-- Add `QueueNameValidator` to enforce strict queue name validation (alphanumeric + underscores, 61 char max)
-- Add `config.allowed_global_id_models` to restrict which models can be deserialized from event payloads
-- Add security headers to dashboard (X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
-- Warn when dashboard `web_auth` is unconfigured
-- Add `globalid` as an explicit runtime dependency (was used but only transitively available via activejob)
 
 ## [0.1.0] - 2026-03-30
 

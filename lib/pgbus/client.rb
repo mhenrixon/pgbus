@@ -524,23 +524,23 @@ module Pgbus
       end
     end
 
-    # Substrings that indicate the pooled PG::Connection was closed beneath
-    # pgmq-ruby — typically by a connection pooler such as PgBouncer hitting
-    # server_idle_timeout / client_idle_timeout, an admin disconnect, or a
-    # TCP RST. pgmq-ruby 0.6.0 does not retry on all of these (notably the
-    # pg-gem "PQsocket() can't get socket descriptor" message), so first
-    # enqueue after the reset surfaces the failure to callers unless we
-    # rescue + retry one level up. See mensfeld/pgmq-ruby#94.
+    # Substrings that indicate the pooled PG::Connection was already dead
+    # *before* pgmq-ruby tried to use it — typically killed by a connection
+    # pooler (PgBouncer server_idle_timeout / client_idle_timeout), an admin
+    # disconnect, or a TCP RST while the slot was idle.
+    #
+    # Only pre-checkout / pre-flight errors belong here. Mid-flight errors
+    # like "server closed the connection" or "connection to server was lost"
+    # are excluded because PG may have already committed the INSERT before
+    # the socket died, and retrying would duplicate the message.
+    #
+    # See mensfeld/pgmq-ruby#94.
     STALE_CONNECTION_PATTERNS = [
       "pqsocket() can't get socket descriptor",
       "connection is closed",
       "connection has been closed",
-      "server closed the connection",
       "connection not open",
-      "no connection to the server",
-      "terminating connection",
-      "connection to server was lost",
-      "could not receive data from server"
+      "no connection to the server"
     ].freeze
     private_constant :STALE_CONNECTION_PATTERNS
 
