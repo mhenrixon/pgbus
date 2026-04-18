@@ -75,16 +75,56 @@ RSpec.describe Pgbus::TableMaintenance do
   end
 
   describe ".vacuum_sql" do
-    it "generates VACUUM for the given table" do
+    it "generates VACUUM with quoted identifiers" do
       sql = described_class.vacuum_sql("pgmq.q_pgbus_default")
-      expect(sql).to eq("VACUUM pgmq.q_pgbus_default")
+      expect(sql).to eq('VACUUM "pgmq"."q_pgbus_default"')
     end
   end
 
   describe ".reindex_sql" do
-    it "generates REINDEX TABLE CONCURRENTLY" do
+    it "generates REINDEX TABLE CONCURRENTLY with quoted identifiers" do
       sql = described_class.reindex_sql("pgmq.q_pgbus_default")
-      expect(sql).to eq("REINDEX TABLE CONCURRENTLY pgmq.q_pgbus_default")
+      expect(sql).to eq('REINDEX TABLE CONCURRENTLY "pgmq"."q_pgbus_default"')
+    end
+  end
+
+  describe ".run_maintenance" do
+    let(:conn) { double("connection") }
+
+    it "continues processing when one table fails" do
+      rows = [
+        { "schemaname" => "pgmq", "relname" => "q_first",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 },
+        { "schemaname" => "pgmq", "relname" => "q_second",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 }
+      ]
+      allow(conn).to receive(:exec).with(/pg_stat_user_tables/).and_return(rows)
+
+      call_count = 0
+      allow(conn).to receive(:exec) do |sql|
+        next rows if sql.include?("pg_stat_user_tables")
+
+        if sql.include?("q_first")
+          call_count += 1
+          raise StandardError, "permission denied"
+        end
+        call_count += 1
+      end
+
+      maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: false)
+      expect(maintained).to eq(1)
+      expect(call_count).to be >= 2
+    end
+
+    it "returns count of successfully maintained tables" do
+      rows = [
+        { "schemaname" => "pgmq", "relname" => "q_ok",
+          "n_dead_tup" => 500, "n_live_tup" => 1000 }
+      ]
+      allow(conn).to receive(:exec).and_return(rows)
+
+      maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: false)
+      expect(maintained).to eq(1)
     end
   end
 

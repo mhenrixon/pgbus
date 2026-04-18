@@ -70,17 +70,20 @@ module Pgbus
       end
 
       def vacuum_sql(table)
-        "VACUUM #{table}"
+        schema, relname = table.split(".", 2)
+        "VACUUM \"#{schema}\".\"#{relname}\""
       end
 
       def reindex_sql(table)
-        "REINDEX TABLE CONCURRENTLY #{table}"
+        schema, relname = table.split(".", 2)
+        "REINDEX TABLE CONCURRENTLY \"#{schema}\".\"#{relname}\""
       end
 
       def run_maintenance(conn, threshold: BLOAT_THRESHOLD, reindex: true)
         candidates = vacuum_candidates(conn, threshold: threshold)
         return 0 if candidates.empty?
 
+        maintained = 0
         candidates.each do |candidate|
           table = candidate[:table]
           Pgbus.logger.info do
@@ -89,13 +92,17 @@ module Pgbus
           end
           conn.exec(vacuum_sql(table))
 
-          next unless reindex
+          if reindex
+            Pgbus.logger.info { "[Pgbus::TableMaintenance] Reindexing #{table}" }
+            conn.exec(reindex_sql(table))
+          end
 
-          Pgbus.logger.info { "[Pgbus::TableMaintenance] Reindexing #{table}" }
-          conn.exec(reindex_sql(table))
+          maintained += 1
+        rescue StandardError => e
+          Pgbus.logger.error { "[Pgbus::TableMaintenance] Failed to maintain #{table}: #{e.message}" }
         end
 
-        candidates.size
+        maintained
       end
     end
   end
