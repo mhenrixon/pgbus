@@ -23,6 +23,25 @@ module Pgbus
         {}
       end
 
+      def load_all(paths, env: nil)
+        return {} if paths.nil? || paths.empty?
+
+        env ||= detect_env
+
+        paths.each_with_object({}) do |path, acc|
+          unless File.exist?(path.to_s)
+            Pgbus.logger.warn { "[Pgbus] Recurring file not found, skipping: #{path}" }
+            next
+          end
+
+          parsed = load(path, env: env)
+          parsed.each_key do |key|
+            Pgbus.logger.debug { "[Pgbus] Recurring task '#{key}' overridden by #{path}" } if acc.key?(key)
+          end
+          acc.merge!(parsed)
+        end
+      end
+
       def detect_env
         if defined?(Rails) && Rails.respond_to?(:env) && Rails.env
           Rails.env.to_s

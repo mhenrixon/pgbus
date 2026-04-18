@@ -998,6 +998,28 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#recurring_tasks_files" do
+    it "returns array wrapping recurring_tasks_file when set" do
+      config.recurring_tasks_file = "/app/config/recurring.yml"
+      expect(config.recurring_tasks_files).to eq(["/app/config/recurring.yml"])
+    end
+
+    it "returns the explicitly set files when recurring_tasks_files is set" do
+      config.recurring_tasks_files = ["/app/config/recurring.yml", "/app/config/recurring/bills.yml"]
+      expect(config.recurring_tasks_files).to eq(["/app/config/recurring.yml", "/app/config/recurring/bills.yml"])
+    end
+
+    it "prefers recurring_tasks_files over recurring_tasks_file" do
+      config.recurring_tasks_file = "/app/config/old.yml"
+      config.recurring_tasks_files = ["/app/config/new.yml"]
+      expect(config.recurring_tasks_files).to eq(["/app/config/new.yml"])
+    end
+
+    it "returns nil when neither is set" do
+      expect(config.recurring_tasks_files).to be_nil
+    end
+  end
+
   describe "streams settings" do
     it "is enabled by default" do
       expect(config.streams_enabled).to be true
