@@ -735,6 +735,109 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "stale pgmq connection recovery" do
+    before do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+    end
+
+    describe "#send_message" do
+      it "retries once when the pooled pgmq connection was killed (PQsocket)" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count == 1
+
+          1
+        end
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(call_count).to eq(2)
+      end
+
+      it "does not retry on mid-flight server-close errors (potential duplicate risk)" do
+        allow(mock_pgmq).to receive(:produce)
+          .and_raise(PGMQ::Errors::ConnectionError, "Database connection error: server closed the connection unexpectedly")
+
+        expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError, /server closed/)
+      end
+
+      it "does not retry on non-stale ConnectionError (e.g. pool timeout)" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+        end
+
+        expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
+        expect(call_count).to eq(1)
+      end
+
+      it "gives up after one retry and re-raises" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor")
+        end
+
+        expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError)
+        expect(call_count).to eq(2)
+      end
+    end
+
+    describe "#send_batch" do
+      it "retries once when the pooled pgmq connection was killed" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce_batch) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count == 1
+
+          [1]
+        end
+
+        expect(client.send_batch("default", [{ "k" => "v" }])).to eq([1])
+        expect(call_count).to eq(2)
+      end
+
+      it "does not retry on non-stale ConnectionError" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce_batch) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+        end
+
+        expect { client.send_batch("default", [{ "k" => "v" }]) }.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
+        expect(call_count).to eq(1)
+      end
+    end
+
+    describe "#publish_to_topic" do
+      it "retries once when the pooled pgmq connection was killed" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce_topic) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count == 1
+
+          nil
+        end
+
+        client.publish_to_topic("orders.created", { "id" => 1 })
+
+        expect(call_count).to eq(2)
+      end
+
+      it "does not retry on non-stale ConnectionError" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce_topic) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+        end
+
+        expect { client.publish_to_topic("orders.created", { "id" => 1 }) }.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
+        expect(call_count).to eq(1)
+      end
+    end
+  end
+
   describe "#ensure_all_queues" do
     it "creates the default queue" do
       client.ensure_all_queues
