@@ -25,6 +25,10 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
     allow(connection).to receive(:select_value)
       .with(/reloptions.*autovacuum_vacuum_scale_factor/)
       .and_return("t")
+    # Default: fillfactor already applied so it doesn't pollute other tests.
+    allow(connection).to receive(:select_value)
+      .with(/reloptions.*fillfactor/)
+      .and_return("t")
   end
 
   # Test helpers -----------------------------------------------------------
@@ -263,6 +267,54 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
     end
 
+    context "with fillfactor detection" do
+      before do
+        allow(connection).to receive(:select_value)
+          .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+          .and_return(1)
+      end
+
+      it "queues tune_fillfactor when pgmq exists but fillfactor is not tuned" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return("pgbus_default")
+
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*fillfactor/)
+          .and_return(false)
+
+        expect(detector.missing_migrations).to include(:tune_fillfactor)
+      end
+
+      it "does not queue tune_fillfactor when already tuned" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return("pgbus_default")
+
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*fillfactor/)
+          .and_return("t")
+
+        expect(detector.missing_migrations).not_to include(:tune_fillfactor)
+      end
+
+      it "does not queue tune_fillfactor when pgmq schema is absent" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'")
+          .and_return(nil)
+
+        expect(detector.missing_migrations).not_to include(:tune_fillfactor)
+      end
+
+      it "does not queue tune_fillfactor when no queues exist" do
+        allow(connection).to receive(:select_value)
+          .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+          .and_return(nil)
+
+        expect(detector.missing_migrations).not_to include(:tune_fillfactor)
+      end
+    end
+
     context "with a realistic partially-upgraded database snapshot" do
       # Given a realistic "partially-upgraded" database (core install
       # migration ran, job stats base migration ran, but neither latency
@@ -295,6 +347,10 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
         allow(connection).to receive(:select_value)
           .with(/reloptions.*autovacuum_vacuum_scale_factor/)
           .and_return(false)
+        # Fillfactor: not yet tuned either
+        allow(connection).to receive(:select_value)
+          .with(/reloptions.*fillfactor/)
+          .and_return(false)
       end
 
       it "queues only the specific add-on migrations that are missing" do
@@ -305,7 +361,8 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
           :add_presence,
           :add_queue_states,
           :add_outbox,
-          :tune_autovacuum
+          :tune_autovacuum,
+          :tune_fillfactor
         )
       end
     end
@@ -342,6 +399,7 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
         add_recurring
         add_failed_events_index
         tune_autovacuum
+        tune_fillfactor
       ]
 
       keys.each do |key|
