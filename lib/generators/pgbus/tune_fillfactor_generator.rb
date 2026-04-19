@@ -29,9 +29,8 @@ module Pgbus
         say "Pgbus fillfactor tuning migration created!", :green
         say ""
         say "This migration sets fillfactor=#{Pgbus::TableMaintenance::FILLFACTOR} on all existing"
-        say "PGMQ queue tables. This reserves #{100 - Pgbus::TableMaintenance::FILLFACTOR}% of each page for HOT"
-        say "(Heap-Only Tuple) updates, reducing index bloat from PGMQ's"
-        say "read UPDATE operations."
+        say "PGMQ queue tables. This reserves #{100 - Pgbus::TableMaintenance::FILLFACTOR}% of each page to"
+        say "reduce page density during PGMQ's heavy read UPDATE churn."
         say ""
         say "New queues created at runtime will automatically receive"
         say "this setting."
