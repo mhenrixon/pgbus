@@ -18,10 +18,22 @@ module Pgbus
     end
 
     initializer "pgbus.recurring" do |app|
-      recurring_path = app.root.join("config", "recurring.yml")
-      if recurring_path.exist? && !Pgbus.configuration.recurring_tasks
-        Pgbus.configuration.recurring_tasks = Pgbus::Recurring::ConfigLoader.load(recurring_path)
-        Pgbus.configuration.recurring_tasks_file ||= recurring_path.to_s
+      next if Pgbus.configuration.recurring_tasks
+
+      config = Pgbus.configuration
+      files = config.recurring_tasks_files
+      default_path = app.root.join("config", "recurring.yml")
+
+      if files
+        tasks = Pgbus::Recurring::ConfigLoader.load_all(files)
+        if tasks.empty? && default_path.exist? && files.none? { |f| File.expand_path(f.to_s) == File.expand_path(default_path.to_s) }
+          tasks = Pgbus::Recurring::ConfigLoader.load(default_path)
+          config.recurring_tasks_file ||= default_path.to_s
+        end
+        config.recurring_tasks = tasks unless tasks.empty?
+      elsif default_path.exist?
+        config.recurring_tasks = Pgbus::Recurring::ConfigLoader.load(default_path)
+        config.recurring_tasks_file ||= default_path.to_s
       end
     end
 

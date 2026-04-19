@@ -78,6 +78,7 @@ module Pgbus
 
     # Recurring jobs
     attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
+    attr_writer :recurring_tasks_files
     attr_reader :recurring_execution_retention # rubocop:disable Style/AccessorGrouping
 
     # Multi-database support (optional separate database for pgbus tables)
@@ -161,6 +162,7 @@ module Pgbus
       @recurring_tasks = nil
       @recurring_schedule_interval = 1.0
       @recurring_tasks_file = nil
+      @recurring_tasks_files = nil
       @skip_recurring = false
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
@@ -490,6 +492,12 @@ module Pgbus
 
     def recurring_execution_retention=(value)
       @recurring_execution_retention = coerce_duration!(value, :recurring_execution_retention)
+    end
+
+    def recurring_tasks_files
+      return @recurring_tasks_files if @recurring_tasks_files
+
+      recurring_tasks_file ? [recurring_tasks_file] : nil
     end
 
     # Returns the connection pool size to use for the PGMQ client.
