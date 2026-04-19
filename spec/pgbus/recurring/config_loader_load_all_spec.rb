@@ -120,6 +120,26 @@ RSpec.describe Pgbus::Recurring::ConfigLoader, ".load_all" do
       expect(Pgbus.logger).to have_received(:error)
     end
 
+    it "logs error and skips when env subtree is not a Hash" do
+      good = write_yaml("good.yml", <<~YAML)
+        cleanup:
+          class: CleanupJob
+          schedule: "0 2 * * *"
+      YAML
+
+      bad_structure = write_yaml("bad_structure.yml", <<~YAML)
+        production: []
+      YAML
+
+      error_messages = []
+      allow(Pgbus.logger).to receive(:error) { |&blk| error_messages << blk.call }
+
+      tasks = described_class.load_all([bad_structure, good], env: "production")
+
+      expect(tasks.keys).to eq(["cleanup"])
+      expect(error_messages).to include(a_string_matching(/Invalid recurring config/))
+    end
+
     it "logs error and continues when ERB raises" do
       good = write_yaml("good.yml", <<~YAML)
         cleanup:

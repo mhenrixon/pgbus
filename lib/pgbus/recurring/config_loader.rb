@@ -36,6 +36,10 @@ module Pgbus
           end
 
           parsed = load(path, env: env)
+          unless parsed.is_a?(Hash)
+            Pgbus.logger.error { "[Pgbus] Invalid recurring config in #{path}: expected Hash, got #{parsed.class}" }
+            next
+          end
           parsed.each_key do |key|
             Pgbus.logger.debug { "[Pgbus] Recurring task '#{key}' overridden by #{path}" } if acc.key?(key)
           end
