@@ -508,6 +508,7 @@ module Pgbus
     def tune_autovacuum(queue_name)
       with_raw_connection do |conn|
         conn.exec(AutovacuumTuning.sql_for_queue(queue_name))
+        conn.exec(TableMaintenance.fillfactor_sql_for_queue(queue_name))
       end
     rescue StandardError => e
       Pgbus.logger.debug { "[Pgbus::Client] Autovacuum tuning failed for #{queue_name}: #{e.message}" }

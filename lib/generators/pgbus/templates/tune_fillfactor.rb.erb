@@ -1,0 +1,30 @@
+class TunePgbusFillfactor < ActiveRecord::Migration<%= migration_version %>
+  def up
+    # Set fillfactor on queue tables to reduce bloat from PGMQ's read
+    # UPDATE operations. PGMQ updates vt, read_ct, and last_read_at on
+    # every read — with fillfactor=100 (default), pages fill completely
+    # between vacuum passes. Lowering fillfactor reserves page space,
+    # reducing page density during heavy update churn. Note: because vt
+    # is indexed, these updates are not HOT-eligible.
+    #
+    # Archive tables are append-only (INSERT from queue, DELETE on
+    # retention) and don't benefit from fillfactor tuning.
+    #
+    # New queues created after this migration automatically receive
+    # this setting via Pgbus::Client at queue creation time.
+    execute Pgbus::TableMaintenance.fillfactor_sql_for_all_queues
+  end
+
+  def down
+    execute <<~SQL
+      DO $$
+      DECLARE
+        q RECORD;
+      BEGIN
+        FOR q IN SELECT queue_name FROM pgmq.meta LOOP
+          EXECUTE format('ALTER TABLE pgmq.q_%I RESET (fillfactor)', q.queue_name);
+        END LOOP;
+      END $$;
+    SQL
+  end
+end

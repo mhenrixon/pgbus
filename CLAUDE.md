@@ -93,6 +93,7 @@ Pgbus supports running in the primary database or a dedicated database (like Sol
 - `rails generate pgbus:install --database=pgbus` — migrations go to `db/pgbus_migrate/`
 - `rails generate pgbus:add_recurring --database=pgbus` — recurring migrations also go to `db/pgbus_migrate/`
 - `rails generate pgbus:upgrade_pgmq --database=pgbus` — upgrade migrations also go to `db/pgbus_migrate/`
+- `rails generate pgbus:tune_fillfactor --database=pgbus` — fillfactor tuning for existing installations
 - Without `--database` — migrations go to `db/migrate/` (default)
 
 **database.yml example**:
@@ -115,6 +116,8 @@ production:
 - Idempotent events: `pgbus_processed_events` table with (event_id, handler_class) unique index
 - Dashboard via Tailwind CDN + Turbo CDN — zero npm dependency
 - PGMQ schema install: extension-first with embedded SQL fallback (`pgmq_schema_mode: :auto | :extension | :embedded`)
+- Fillfactor=70 on queue tables: reserves 30% page space to reduce page density during PGMQ's heavy read UPDATE churn
+- Proactive table maintenance: dispatcher periodically checks pg_stat_user_tables for bloated tables and vacuums them (inspired by pgque)
 
 ## PGMQ Schema Management
 

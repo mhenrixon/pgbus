@@ -74,7 +74,8 @@ module Pgbus
         add_outbox: "pgbus:add_outbox",
         add_recurring: "pgbus:add_recurring",
         add_failed_events_index: "pgbus:add_failed_events_index",
-        tune_autovacuum: "pgbus:tune_autovacuum"
+        tune_autovacuum: "pgbus:tune_autovacuum",
+        tune_fillfactor: "pgbus:tune_fillfactor"
       }.freeze
 
       # Human-friendly description of each migration for the generator
@@ -90,7 +91,8 @@ module Pgbus
         add_outbox: "outbox entries table (transactional outbox)",
         add_recurring: "recurring tasks + executions tables",
         add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)",
-        tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables"
+        tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables",
+        tune_fillfactor: "fillfactor=70 on PGMQ queue tables (reduces page density during update churn)"
       }.freeze
 
       def initialize(connection)
@@ -113,7 +115,8 @@ module Pgbus
           *outbox_migrations,
           *recurring_migrations,
           *failed_events_index_migrations,
-          *autovacuum_migrations
+          *autovacuum_migrations,
+          *fillfactor_migrations
         ]
       end
 
@@ -205,6 +208,15 @@ module Pgbus
         [:tune_autovacuum]
       end
 
+      # Fillfactor tuning: check if any PGMQ queue table already has
+      # fillfactor applied. If not, queue the migration.
+      def fillfactor_migrations
+        return [] unless pgmq_schema_exists?
+        return [] if fillfactor_already_tuned?
+
+        [:tune_fillfactor]
+      end
+
       # --- schema probes -------------------------------------------------
 
       def table_exists?(name)
@@ -238,6 +250,22 @@ module Pgbus
 
         result = connection.select_value(<<~SQL)
           SELECT reloptions::text LIKE '%autovacuum_vacuum_scale_factor%'
+          FROM pg_class
+          WHERE relname = 'q_#{queue_name}'
+            AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'pgmq')
+        SQL
+
+        [true, "t"].include?(result)
+      rescue StandardError
+        true # if we can't tell, assume already tuned (safe default)
+      end
+
+      def fillfactor_already_tuned?
+        queue_name = connection.select_value("SELECT queue_name FROM pgmq.meta ORDER BY queue_name LIMIT 1")
+        return true unless queue_name # no queues = nothing to tune, skip
+
+        result = connection.select_value(<<~SQL)
+          SELECT reloptions::text LIKE '%fillfactor%'
           FROM pg_class
           WHERE relname = 'q_#{queue_name}'
             AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'pgmq')

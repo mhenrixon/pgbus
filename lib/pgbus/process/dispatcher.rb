@@ -15,6 +15,7 @@ module Pgbus
       OUTBOX_CLEANUP_INTERVAL = 3600 # Run outbox cleanup every hour
       JOB_LOCK_CLEANUP_INTERVAL = 300 # Run job lock cleanup every 5 minutes
       STATS_CLEANUP_INTERVAL = 3600 # Run stats cleanup every hour
+      TABLE_MAINTENANCE_INTERVAL = Pgbus::TableMaintenance::MAINTENANCE_INTERVAL
 
       # Page size for archive compaction. Each cycle deletes up to this
       # many archived rows per queue. Tuned via constant rather than
@@ -37,6 +38,7 @@ module Pgbus
         @last_outbox_cleanup_at = monotonic_now
         @last_job_lock_cleanup_at = monotonic_now
         @last_stats_cleanup_at = monotonic_now
+        @last_table_maintenance_at = monotonic_now
       end
 
       def run
@@ -84,6 +86,7 @@ module Pgbus
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
+        run_if_due(now, :@last_table_maintenance_at, TABLE_MAINTENANCE_INTERVAL) { run_table_maintenance }
       end
 
       # Only update the timestamp when the block succeeds.
@@ -156,6 +159,19 @@ module Pgbus
 
         deleted = StreamStat.cleanup!(older_than: cutoff)
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old stream stats" } if deleted.positive?
+      end
+
+      def run_table_maintenance
+        conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
+        raw_conn = conn.raw_connection
+        maintained = TableMaintenance.run_maintenance(
+          raw_conn,
+          threshold: TableMaintenance::BLOAT_THRESHOLD,
+          reindex: true
+        )
+        Pgbus.logger.info { "[Pgbus] Table maintenance completed: #{maintained} table(s) vacuumed" } if maintained.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Table maintenance failed: #{e.message}" }
       end
 
       def cleanup_job_locks

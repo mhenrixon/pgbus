@@ -310,6 +310,53 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
   end
 
+  describe "#run_table_maintenance (private)" do
+    let(:raw_conn) { double("raw_connection") }
+    let(:connection) { double("connection", raw_connection: raw_conn) }
+
+    before do
+      allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
+    end
+
+    it "runs table maintenance via TableMaintenance module" do
+      allow(Pgbus::TableMaintenance).to receive(:run_maintenance).and_return(2)
+
+      dispatcher.send(:run_table_maintenance)
+
+      expect(Pgbus::TableMaintenance).to have_received(:run_maintenance).with(
+        raw_conn,
+        threshold: Pgbus::TableMaintenance::BLOAT_THRESHOLD,
+        reindex: true
+      )
+    end
+
+    it "rescues errors gracefully" do
+      allow(ActiveRecord::Base).to receive(:connection).and_raise(StandardError, "db error")
+      expect { dispatcher.send(:run_table_maintenance) }.not_to raise_error
+    end
+  end
+
+  describe "#run_maintenance includes table maintenance" do
+    it "runs table maintenance when interval has elapsed" do
+      allow(dispatcher).to receive(:run_table_maintenance)
+
+      interval = Pgbus::Process::Dispatcher::TABLE_MAINTENANCE_INTERVAL
+      dispatcher.instance_variable_set(:@last_table_maintenance_at, past_monotonic(interval + 1))
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:run_table_maintenance)
+    end
+
+    it "skips table maintenance when interval has not elapsed" do
+      allow(dispatcher).to receive(:run_table_maintenance)
+
+      dispatcher.instance_variable_set(:@last_table_maintenance_at, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).not_to have_received(:run_table_maintenance)
+    end
+  end
+
   describe "#start_heartbeat (private)" do
     it "creates and starts a heartbeat" do
       dispatcher.send(:start_heartbeat)
