@@ -10,10 +10,10 @@ module Pgbus
   # can't keep up and B-tree indexes bloat.
   #
   # Setting fillfactor=70 on queue tables reserves 30% of each page for
-  # HOT (Heap-Only Tuple) updates. When the UPDATE doesn't change any indexed
-  # column (vt_idx is on `vt`, which DOES change), HOT can't help with the
-  # primary index — but the identity column's index benefits, and the reduced
-  # page density means VACUUM has less work per page.
+  # update churn. Because `vt` is indexed and changes on every read, these
+  # writes are not HOT updates, but leaving headroom on heap pages still
+  # reduces page density for a table that is updated heavily between vacuum
+  # passes.
   #
   # More importantly, this module provides targeted VACUUM: instead of
   # relying solely on autovacuum's global heuristics, the dispatcher

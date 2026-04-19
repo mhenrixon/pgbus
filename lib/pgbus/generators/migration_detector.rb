@@ -92,7 +92,7 @@ module Pgbus
         add_recurring: "recurring tasks + executions tables",
         add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)",
         tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables",
-        tune_fillfactor: "fillfactor=70 on PGMQ queue tables (reduces HOT update bloat)"
+        tune_fillfactor: "fillfactor=70 on PGMQ queue tables (reduces page density during update churn)"
       }.freeze
 
       def initialize(connection)

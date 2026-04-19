@@ -116,7 +116,7 @@ production:
 - Idempotent events: `pgbus_processed_events` table with (event_id, handler_class) unique index
 - Dashboard via Tailwind CDN + Turbo CDN — zero npm dependency
 - PGMQ schema install: extension-first with embedded SQL fallback (`pgmq_schema_mode: :auto | :extension | :embedded`)
-- Fillfactor=70 on queue tables: reserves 30% page space for HOT updates from PGMQ's read UPDATE, reducing index bloat
+- Fillfactor=70 on queue tables: reserves 30% page space to reduce page density during PGMQ's heavy read UPDATE churn
 - Proactive table maintenance: dispatcher periodically checks pg_stat_user_tables for bloated tables and vacuums them (inspired by pgque)
 
 ## PGMQ Schema Management

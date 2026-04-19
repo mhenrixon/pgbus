@@ -2,10 +2,10 @@ class TunePgbusFillfactor < ActiveRecord::Migration<%= migration_version %>
   def up
     # Set fillfactor on queue tables to reduce bloat from PGMQ's read
     # UPDATE operations. PGMQ updates vt, read_ct, and last_read_at on
-    # every read — with fillfactor=100 (default), each UPDATE creates a
-    # new heap tuple and index entry. Lowering fillfactor reserves page
-    # space so PostgreSQL can perform HOT (Heap-Only Tuple) updates,
-    # avoiding new index entries for dead tuples.
+    # every read — with fillfactor=100 (default), pages fill completely
+    # between vacuum passes. Lowering fillfactor reserves page space,
+    # reducing page density during heavy update churn. Note: because vt
+    # is indexed, these updates are not HOT-eligible.
     #
     # Archive tables are append-only (INSERT from queue, DELETE on
     # retention) and don't benefit from fillfactor tuning.

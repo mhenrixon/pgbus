@@ -159,7 +159,7 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
 
     # Set fillfactor on queue tables to reduce bloat from PGMQ's read
     # UPDATE operations (vt, read_ct, last_read_at). Lower fillfactor
-    # reserves page space for HOT updates, avoiding new index entries.
+    # reserves page space, reducing page density during heavy update churn.
     execute Pgbus::TableMaintenance.fillfactor_sql_for_all_queues
   end
 

@@ -167,7 +167,7 @@ RSpec.describe Pgbus::TableMaintenance do
       expect(described_class::FILLFACTOR).to eq(70)
     end
 
-    it "leaves room for HOT updates (must be < 100)" do
+    it "leaves room for update churn (must be < 100)" do
       expect(described_class::FILLFACTOR).to be < 100
       expect(described_class::FILLFACTOR).to be >= 50
     end

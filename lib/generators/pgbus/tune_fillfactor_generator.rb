@@ -12,7 +12,7 @@ module Pgbus
 
       source_root File.expand_path("templates", __dir__)
 
-      desc "Set fillfactor on PGMQ queue tables to enable HOT updates and reduce bloat"
+      desc "Set fillfactor on PGMQ queue tables to reduce page density and bloat"
 
       class_option :database,
                    type: :string,
