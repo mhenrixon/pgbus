@@ -949,6 +949,223 @@ RSpec.describe Pgbus::Client do
         expect(mock_pgmq).to have_received(:bind_topic)
       end
     end
+
+    describe "read operations" do
+      # Every read call site goes through with_stale_connection_retry.
+      # Using a stale-socket message ensures pgmq-ruby's pre-flight error
+      # is recoverable via one retry.
+      let(:stale_msg) { "Database connection error: PQsocket() can't get socket descriptor" }
+
+      it "retries read_message" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:read) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          nil
+        end
+
+        client.read_message("default")
+        expect(call_count).to eq(2)
+      end
+
+      it "retries read_batch" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:read_batch) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          []
+        end
+
+        client.read_batch("default", qty: 5)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries read_with_poll" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:read_with_poll) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          []
+        end
+
+        client.read_with_poll("default", qty: 5)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries read_multi" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:read_multi) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          []
+        end
+
+        client.read_multi(["default"], qty: 5)
+        expect(call_count).to eq(2)
+      end
+    end
+
+    describe "modification operations" do
+      let(:stale_msg) { "Database connection error: PQsocket() can't get socket descriptor" }
+
+      it "retries delete_message" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:delete) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          true
+        end
+
+        client.delete_message("default", 1)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries archive_message" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:archive) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          true
+        end
+
+        client.archive_message("default", 1)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries delete_batch" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:delete_batch) do |_q, ids|
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          ids.map(&:to_s)
+        end
+
+        client.delete_batch("default", [1, 2])
+        expect(call_count).to eq(2)
+      end
+
+      it "retries archive_batch" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:archive_batch) do |_q, ids|
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          ids.map(&:to_s)
+        end
+
+        client.archive_batch("default", [1, 2])
+        expect(call_count).to eq(2)
+      end
+
+      it "retries set_visibility_timeout" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:set_vt) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          nil
+        end
+
+        client.set_visibility_timeout("default", 1, vt: 30)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries transaction (caller block re-runs on pre-flight error)" do
+        call_count = 0
+        block_count = 0
+        # @pgmq.transaction raises before yielding on first attempt,
+        # then yields on second — matches pre-flight semantics.
+        allow(mock_pgmq).to receive(:transaction) do |&blk|
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          blk.call(mock_pgmq)
+        end
+
+        client.transaction { |_txn| block_count += 1 }
+
+        expect(call_count).to eq(2)
+        expect(block_count).to eq(1)
+      end
+    end
+
+    describe "admin operations" do
+      let(:stale_msg) { "Database connection error: PQsocket() can't get socket descriptor" }
+
+      it "retries metrics for single queue" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:metrics) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          nil
+        end
+
+        client.metrics("default")
+        expect(call_count).to eq(2)
+      end
+
+      it "retries metrics_all when no queue given" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:metrics_all) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          []
+        end
+
+        client.metrics
+        expect(call_count).to eq(2)
+      end
+
+      it "retries list_queues" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:list_queues) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          []
+        end
+
+        client.list_queues
+        expect(call_count).to eq(2)
+      end
+
+      it "retries purge_queue" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:purge_queue) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          nil
+        end
+
+        client.purge_queue("default")
+        expect(call_count).to eq(2)
+      end
+
+      it "retries drop_queue and clears the memo after success" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:drop_queue) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, stale_msg) if call_count == 1
+
+          true
+        end
+        client.instance_variable_get(:@queues_created)["pgbus_test_default"] = true
+
+        expect(client.drop_queue("default")).to be(true)
+        expect(call_count).to eq(2)
+        expect(client.instance_variable_get(:@queues_created)["pgbus_test_default"]).to be_nil
+      end
+    end
   end
 
   describe "#ensure_all_queues" do
