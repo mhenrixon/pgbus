@@ -19,17 +19,20 @@ module Pgbus
     # stream and from the streamer on first subscription per stream.
     module EnsureStreamQueue
       def ensure_stream_queue(stream_name)
-        ensure_queue(stream_name)
         full_name = config.queue_name(stream_name)
 
-        # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
-        # high-frequency worker queue inserts. Streams are latency-
-        # sensitive and need every broadcast to fire a NOTIFY, even
-        # when several are batched within a single millisecond.
-        # Override the throttle to 0 specifically for stream queues.
-        # Use the idempotent path to avoid deadlocks when multiple
-        # processes race to set up the same stream queue.
-        synchronized { enable_notify_if_needed(full_name, 0) }
+        with_stale_connection_retry do
+          ensure_queue(stream_name)
+
+          # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
+          # high-frequency worker queue inserts. Streams are latency-
+          # sensitive and need every broadcast to fire a NOTIFY, even
+          # when several are batched within a single millisecond.
+          # Override the throttle to 0 specifically for stream queues.
+          # Use the idempotent path to avoid deadlocks when multiple
+          # processes race to set up the same stream queue.
+          synchronized { enable_notify_if_needed(full_name, 0) }
+        end
 
         # CREATE INDEX IF NOT EXISTS is idempotent in Postgres but still
         # requires a roundtrip and a brief ACCESS SHARE lock on the archive

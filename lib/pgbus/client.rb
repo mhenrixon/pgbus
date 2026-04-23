@@ -85,9 +85,9 @@ module Pgbus
 
     def send_message(queue_name, payload, headers: nil, delay: 0, priority: nil)
       target = @queue_strategy.target_queue(queue_name, priority)
-      ensure_queue(queue_name)
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         with_stale_connection_retry do
+          ensure_queue(queue_name)
           synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
         end
       end
@@ -95,10 +95,10 @@ module Pgbus
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
-      ensure_queue(queue_name)
       serialized, serialized_headers = serialize_batch(payloads, headers)
       Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
         with_stale_connection_retry do
+          ensure_queue(queue_name)
           synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
         end
       end
@@ -107,14 +107,18 @@ module Pgbus
     def read_message(queue_name, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
-        synchronized { @pgmq.read(full_name, vt: vt || config.visibility_timeout) }
+        with_stale_connection_retry do
+          synchronized { @pgmq.read(full_name, vt: vt || config.visibility_timeout) }
+        end
       end
     end
 
     def read_batch(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
-        synchronized { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        with_stale_connection_retry do
+          synchronized { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        end
       end
     end
 
@@ -134,7 +138,9 @@ module Pgbus
         break if remaining <= 0
 
         msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
-          synchronized { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) }
+          with_stale_connection_retry do
+            synchronized { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) }
+          end
         end || []
 
         msgs.each { |m| results << [pq_name, m] }
@@ -146,14 +152,16 @@ module Pgbus
 
     def read_with_poll(queue_name, qty:, vt: nil, max_poll_seconds: 5, poll_interval_ms: 100)
       full_name = config.queue_name(queue_name)
-      synchronized do
-        @pgmq.read_with_poll(
-          full_name,
-          vt: vt || config.visibility_timeout,
-          qty: qty,
-          max_poll_seconds: max_poll_seconds,
-          poll_interval_ms: poll_interval_ms
-        )
+      with_stale_connection_retry do
+        synchronized do
+          @pgmq.read_with_poll(
+            full_name,
+            vt: vt || config.visibility_timeout,
+            qty: qty,
+            max_poll_seconds: max_poll_seconds,
+            poll_interval_ms: poll_interval_ms
+          )
+        end
       end
     end
 
@@ -168,8 +176,10 @@ module Pgbus
     def read_multi(queue_names, qty:, vt: nil, limit: nil)
       full_names = queue_names.map { |q| config.queue_name(q) }
       Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty, limit: limit) do
-        synchronized do
-          @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+        with_stale_connection_retry do
+          synchronized do
+            @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+          end
         end
       end
     end
@@ -178,74 +188,99 @@ module Pgbus
     # the full PGMQ queue name (e.g. from priority sub-queues or dashboard).
     def delete_message(queue_name, msg_id, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.delete(name, msg_id) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.delete(name, msg_id) }
+      end
     end
 
     # Archive a message. Pass prefixed: false when queue_name is already
     # the full PGMQ queue name.
     def archive_message(queue_name, msg_id, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.archive(name, msg_id) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.archive(name, msg_id) }
+      end
     end
 
     # Batch archive — moves multiple messages to the archive table in one call.
     def archive_batch(queue_name, msg_ids, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.archive_batch(name, msg_ids) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.archive_batch(name, msg_ids) }
+      end
     end
 
     # Batch delete — permanently removes multiple messages in one call.
     def delete_batch(queue_name, msg_ids, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.delete_batch(name, msg_ids) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.delete_batch(name, msg_ids) }
+      end
     end
 
     # Set visibility timeout. Pass prefixed: false when queue_name is already
     # the full PGMQ queue name.
     def set_visibility_timeout(queue_name, msg_id, vt:, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.set_vt(name, msg_id, vt: vt) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.set_vt(name, msg_id, vt: vt) }
+      end
     end
 
+    # Open a PGMQ transaction. The caller block may run twice if the first
+    # attempt hits a pre-flight stale-connection error — safe because no SQL
+    # was sent on the first attempt (the connection was dead before the BEGIN).
     def transaction(&block)
-      synchronized { @pgmq.transaction(&block) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.transaction(&block) }
+      end
     end
 
     def move_to_dead_letter(queue_name, message)
-      ensure_dead_letter_queue(queue_name)
       dlq_name = config.dead_letter_queue_name(queue_name)
       full_queue = config.queue_name(queue_name)
 
-      synchronized do
-        @pgmq.transaction do |txn|
-          txn.produce(dlq_name, message.message, headers: message.headers)
-          txn.delete(full_queue, message.msg_id.to_i)
+      with_stale_connection_retry do
+        ensure_dead_letter_queue(queue_name)
+        synchronized do
+          @pgmq.transaction do |txn|
+            txn.produce(dlq_name, message.message, headers: message.headers)
+            txn.delete(full_queue, message.msg_id.to_i)
+          end
         end
       end
     end
 
     def metrics(queue_name = nil)
-      synchronized do
-        if queue_name
-          @pgmq.metrics(config.queue_name(queue_name))
-        else
-          @pgmq.metrics_all
+      with_stale_connection_retry do
+        synchronized do
+          if queue_name
+            @pgmq.metrics(config.queue_name(queue_name))
+          else
+            @pgmq.metrics_all
+          end
         end
       end
     end
 
     def list_queues
-      synchronized { @pgmq.list_queues }
+      with_stale_connection_retry do
+        synchronized { @pgmq.list_queues }
+      end
     end
 
     def purge_queue(queue_name, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      synchronized { @pgmq.purge_queue(name) }
+      with_stale_connection_retry do
+        synchronized { @pgmq.purge_queue(name) }
+      end
     end
 
     def drop_queue(queue_name, prefixed: true)
       name = prefixed ? config.queue_name(queue_name) : queue_name
-      result = synchronized { @pgmq.drop_queue(name) }
+      result = with_stale_connection_retry do
+        synchronized { @pgmq.drop_queue(name) }
+      end
       @queues_created.delete(name)
       result
     end
@@ -317,8 +352,10 @@ module Pgbus
     # Topic routing
     def bind_topic(pattern, queue_name)
       full_name = config.queue_name(queue_name)
-      ensure_queue(queue_name)
-      synchronized { @pgmq.bind_topic(pattern, full_name) }
+      with_stale_connection_retry do
+        ensure_queue(queue_name)
+        synchronized { @pgmq.bind_topic(pattern, full_name) }
+      end
     end
 
     def publish_to_topic(routing_key, payload, headers: nil, delay: 0)
@@ -541,15 +578,24 @@ module Pgbus
       "connection is closed",
       "connection has been closed",
       "connection not open",
-      "no connection to the server"
+      "no connection to the server",
+      "ssl error: unexpected eof",
+      "ssl syscall error"
     ].freeze
     private_constant :STALE_CONNECTION_PATTERNS
 
-    # Enqueue path guard: rescue PGMQ::Errors::ConnectionError once if its
-    # message matches a known stale-socket pattern. pgmq-ruby's
-    # auto_reconnect + verify_connection! already recovers on the *next*
-    # checkout, so a single retry is sufficient. Other connection errors
-    # (pool timeout, misconfiguration, truly unreachable DB) propagate.
+    # Rescue PGMQ::Errors::ConnectionError once if its message matches a
+    # known stale-socket pattern. pgmq-ruby's auto_reconnect + verify_connection!
+    # already recovers on the *next* checkout, so a single retry is sufficient.
+    # Other connection errors (pool timeout, misconfiguration, truly unreachable
+    # DB) propagate.
+    #
+    # Wraps every @pgmq.* call site. Pattern matching is intentionally narrow
+    # (pre-flight / idle-socket signals only), so retry is safe even for
+    # non-idempotent ops like delete/archive — a matched error means the
+    # connection was dead *before* pgmq-ruby tried to use it, so no SQL was
+    # ever sent. Mid-flight errors like "server closed the connection" are
+    # excluded from the pattern list for this reason.
     def with_stale_connection_retry
       attempts = 0
       begin
@@ -559,7 +605,7 @@ module Pgbus
         raise unless attempts == 1 && stale_connection_error?(e)
 
         Pgbus.logger.warn do
-          "[Pgbus::Client] Retrying produce after stale pgmq connection: #{e.message}"
+          "[Pgbus::Client] Retrying after stale pgmq connection: #{e.message}"
         end
         retry
       end
