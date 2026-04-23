@@ -836,6 +836,119 @@ RSpec.describe Pgbus::Client do
         expect(call_count).to eq(1)
       end
     end
+
+    describe "SSL connection patterns" do
+      let(:ssl_eof_msg) { "Database connection error: PQconsumeInput() SSL error: unexpected eof while reading" }
+      let(:ssl_syscall_msg) { "Database connection error: SSL SYSCALL error: Connection reset by peer" }
+
+      it "retries on SSL EOF error" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, ssl_eof_msg) if call_count == 1
+
+          1
+        end
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(call_count).to eq(2)
+      end
+
+      it "retries on SSL SYSCALL error" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, ssl_syscall_msg) if call_count == 1
+
+          1
+        end
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(call_count).to eq(2)
+      end
+    end
+
+    describe "ensure_queue inside retry scope" do
+      it "retries send_message when ensure_queue raises stale connection error" do
+        create_count = 0
+        allow(mock_pgmq).to receive(:create) do
+          create_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if create_count == 1
+
+          nil
+        end
+        # Reset the queues_created memo so ensure_queue actually calls @pgmq.create
+        client.instance_variable_get(:@queues_created).clear
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(create_count).to eq(2)
+      end
+
+      it "retries send_batch when ensure_queue raises stale connection error" do
+        create_count = 0
+        allow(mock_pgmq).to receive(:create) do
+          create_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: connection is closed") if create_count == 1
+
+          nil
+        end
+        client.instance_variable_get(:@queues_created).clear
+
+        expect(client.send_batch("default", [{ "k" => "v" }])).to eq([1, 2])
+        expect(create_count).to eq(2)
+      end
+
+      it "retries send_message when ensure_queue raises SSL EOF error" do
+        ssl_eof = "Database connection error: PQconsumeInput() SSL error: unexpected eof while reading"
+        create_count = 0
+        allow(mock_pgmq).to receive(:create) do
+          create_count += 1
+          raise(PGMQ::Errors::ConnectionError, ssl_eof) if create_count == 1
+
+          nil
+        end
+        client.instance_variable_get(:@queues_created).clear
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(create_count).to eq(2)
+      end
+    end
+
+    describe "ensure_dead_letter_queue inside retry scope" do
+      it "retries move_to_dead_letter when ensure_dead_letter_queue raises stale connection error" do
+        create_count = 0
+        allow(mock_pgmq).to receive(:create) do |name|
+          if name.end_with?("_dlq")
+            create_count += 1
+            raise(PGMQ::Errors::ConnectionError, "Database connection error: connection is closed") if create_count == 1
+          end
+          nil
+        end
+
+        message = build_message_double(msg_id: 42, message: '{"job":"test"}', read_ct: 5)
+        client.move_to_dead_letter("default", message)
+
+        expect(create_count).to eq(2)
+      end
+    end
+
+    describe "bind_topic inside retry scope" do
+      it "retries bind_topic when ensure_queue raises stale connection error" do
+        create_count = 0
+        allow(mock_pgmq).to receive(:create) do
+          create_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: connection not open") if create_count == 1
+
+          nil
+        end
+        client.instance_variable_get(:@queues_created).clear
+
+        client.bind_topic("orders.*", "default")
+
+        expect(create_count).to eq(2)
+        expect(mock_pgmq).to have_received(:bind_topic)
+      end
+    end
   end
 
   describe "#ensure_all_queues" do

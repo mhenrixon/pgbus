@@ -85,9 +85,9 @@ module Pgbus
 
     def send_message(queue_name, payload, headers: nil, delay: 0, priority: nil)
       target = @queue_strategy.target_queue(queue_name, priority)
-      ensure_queue(queue_name)
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         with_stale_connection_retry do
+          ensure_queue(queue_name)
           synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
         end
       end
@@ -95,10 +95,10 @@ module Pgbus
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
-      ensure_queue(queue_name)
       serialized, serialized_headers = serialize_batch(payloads, headers)
       Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
         with_stale_connection_retry do
+          ensure_queue(queue_name)
           synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
         end
       end
@@ -212,14 +212,16 @@ module Pgbus
     end
 
     def move_to_dead_letter(queue_name, message)
-      ensure_dead_letter_queue(queue_name)
       dlq_name = config.dead_letter_queue_name(queue_name)
       full_queue = config.queue_name(queue_name)
 
-      synchronized do
-        @pgmq.transaction do |txn|
-          txn.produce(dlq_name, message.message, headers: message.headers)
-          txn.delete(full_queue, message.msg_id.to_i)
+      with_stale_connection_retry do
+        ensure_dead_letter_queue(queue_name)
+        synchronized do
+          @pgmq.transaction do |txn|
+            txn.produce(dlq_name, message.message, headers: message.headers)
+            txn.delete(full_queue, message.msg_id.to_i)
+          end
         end
       end
     end
@@ -317,8 +319,10 @@ module Pgbus
     # Topic routing
     def bind_topic(pattern, queue_name)
       full_name = config.queue_name(queue_name)
-      ensure_queue(queue_name)
-      synchronized { @pgmq.bind_topic(pattern, full_name) }
+      with_stale_connection_retry do
+        ensure_queue(queue_name)
+        synchronized { @pgmq.bind_topic(pattern, full_name) }
+      end
     end
 
     def publish_to_topic(routing_key, payload, headers: nil, delay: 0)
@@ -541,7 +545,9 @@ module Pgbus
       "connection is closed",
       "connection has been closed",
       "connection not open",
-      "no connection to the server"
+      "no connection to the server",
+      "ssl error: unexpected eof",
+      "ssl syscall error"
     ].freeze
     private_constant :STALE_CONNECTION_PATTERNS
 
