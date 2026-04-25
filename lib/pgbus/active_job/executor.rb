@@ -107,9 +107,19 @@ module Pgbus
 
       def execute_job(job)
         if defined?(Rails) && Rails.respond_to?(:application) && Rails.application
-          Rails.application.executor.wrap { job.perform_now }
+          wrapper = reloading? ? Rails.application.reloader : Rails.application.executor
+          wrapper.wrap { job.perform_now }
         else
           job.perform_now
+        end
+      end
+
+      def reloading?
+        app_config = Rails.application.config
+        if app_config.respond_to?(:enable_reloading)
+          app_config.enable_reloading
+        else
+          !app_config.cache_classes
         end
       end
 

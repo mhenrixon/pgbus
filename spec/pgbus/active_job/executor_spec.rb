@@ -591,5 +591,101 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         expect { executor.execute(message, queue_name) }.not_to raise_error
       end
     end
+
+    describe "#execute_job (reloader vs executor wrapping)" do
+      let(:message) { build_message_double(msg_id: 90, message: message_json, read_ct: 1) }
+      let(:mock_executor_wrapper) { double("executor") }
+      let(:mock_reloader_wrapper) { double("reloader") }
+      let(:mock_app_config) { double("config") }
+      let(:mock_app) do
+        double("Rails.application",
+               executor: mock_executor_wrapper,
+               reloader: mock_reloader_wrapper,
+               config: mock_app_config)
+      end
+
+      before do
+        allow(mock_executor_wrapper).to receive(:wrap).and_yield
+        allow(mock_reloader_wrapper).to receive(:wrap).and_yield
+      end
+
+      def stub_rails!
+        rails = double("Rails", application: mock_app)
+        allow(rails).to receive(:respond_to?) { |name, *| name == :application }
+        stub_const("Rails", rails)
+      end
+
+      context "when Rails.application.config.enable_reloading is true (development)" do
+        before do
+          allow(mock_app_config).to receive(:respond_to?).with(:enable_reloading).and_return(true)
+          allow(mock_app_config).to receive(:enable_reloading).and_return(true)
+          stub_rails!
+        end
+
+        it "wraps job execution in reloader.wrap" do
+          executor.execute(message, queue_name)
+
+          expect(mock_reloader_wrapper).to have_received(:wrap)
+          expect(mock_executor_wrapper).not_to have_received(:wrap)
+          expect(job_double).to have_received(:perform_now)
+        end
+      end
+
+      context "when Rails.application.config.enable_reloading is false (production)" do
+        before do
+          allow(mock_app_config).to receive(:respond_to?).with(:enable_reloading).and_return(true)
+          allow(mock_app_config).to receive(:enable_reloading).and_return(false)
+          stub_rails!
+        end
+
+        it "wraps job execution in executor.wrap" do
+          executor.execute(message, queue_name)
+
+          expect(mock_executor_wrapper).to have_received(:wrap)
+          expect(mock_reloader_wrapper).not_to have_received(:wrap)
+          expect(job_double).to have_received(:perform_now)
+        end
+      end
+
+      context "when Rails.application.config does not respond to enable_reloading (Rails < 7.1)" do
+        before do
+          allow(mock_app_config).to receive(:respond_to?).with(:enable_reloading).and_return(false)
+          allow(mock_app_config).to receive(:cache_classes).and_return(false)
+          stub_rails!
+        end
+
+        it "falls back to checking cache_classes and uses reloader.wrap when cache_classes is false" do
+          executor.execute(message, queue_name)
+
+          expect(mock_reloader_wrapper).to have_received(:wrap)
+          expect(mock_executor_wrapper).not_to have_received(:wrap)
+        end
+      end
+
+      context "when Rails.application.config.cache_classes is true (Rails < 7.1 production)" do
+        before do
+          allow(mock_app_config).to receive(:respond_to?).with(:enable_reloading).and_return(false)
+          allow(mock_app_config).to receive(:cache_classes).and_return(true)
+          stub_rails!
+        end
+
+        it "uses executor.wrap" do
+          executor.execute(message, queue_name)
+
+          expect(mock_executor_wrapper).to have_received(:wrap)
+          expect(mock_reloader_wrapper).not_to have_received(:wrap)
+        end
+      end
+
+      context "when Rails is not defined" do
+        it "calls perform_now directly without any wrapper" do
+          hide_const("Rails") if defined?(Rails)
+
+          executor.execute(message, queue_name)
+
+          expect(job_double).to have_received(:perform_now)
+        end
+      end
+    end
   end
 end
