@@ -18,6 +18,16 @@ module Pgbus
       end
 
       def process(message)
+        with_rails_executor { process!(message) }
+      end
+
+      def handle(event)
+        raise NotImplementedError, "#{self.class.name} must implement #handle(event)"
+      end
+
+      private
+
+      def process!(message)
         raw = JSON.parse(message.message)
         event = build_event(raw)
 
@@ -28,11 +38,30 @@ module Pgbus
         :handled
       end
 
-      def handle(event)
-        raise NotImplementedError, "#{self.class.name} must implement #handle(event)"
+      # Mirrors Pgbus::ActiveJob::Executor#execute_job: wrap the handler
+      # invocation in Rails.application.executor (or the reloader in dev)
+      # so AR connections leased by `claim_idempotency?` and `handle` are
+      # released back to the pool when this method returns. Without the
+      # wrap, every consumed event leaks one AR connection on the consumer
+      # thread — in dev that wedges `clear_reloadable_connections!`,
+      # producing a confusing Rack::Timeout in `MonitorMixin#wait_for_cond`.
+      #
+      # No-op when Rails isn't loaded (test harnesses, gem-only consumers).
+      def with_rails_executor(&)
+        return yield unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
+
+        wrapper = reloading? ? Rails.application.reloader : Rails.application.executor
+        wrapper.wrap(&)
       end
 
-      private
+      def reloading?
+        app_config = Rails.application.config
+        if app_config.respond_to?(:enable_reloading)
+          app_config.enable_reloading
+        else
+          !app_config.cache_classes
+        end
+      end
 
       def build_event(raw)
         payload = raw["payload"]
