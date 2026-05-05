@@ -1,0 +1,87 @@
+{
+  "title": "Pgbus — Health",
+  "description": "Backlog, dead-letter activity, dead-tuple growth, and MVCC horizon. The 'should I page someone?' dashboard.",
+  "graphs": [
+    {
+      "title": "Queue depth (visible vs total)",
+      "description": "Visible depth excludes messages whose VT hasn't expired. A divergence between the two means workers are slow but the queue isn't growing.",
+      "line_label": "%queue",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_queue_depth", "fields": ["GAUGE"], "tags": [] },
+        { "name": "pgbus_queue_visible_depth", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Oldest message age (seconds)",
+      "description": "Per-queue head-of-line waiting time. If this climbs while queue depth stays flat, a single poison message is stuck in the VT loop.",
+      "line_label": "%queue",
+      "format": "duration",
+      "format_input": "second",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_queue_oldest_message_age_seconds", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "DLQ depth + failed events",
+      "description": "Messages that exceeded max_retries plus the failed-events table. Spikes after a deploy point at a regression.",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_dlq_depth", "fields": ["GAUGE"], "tags": [] },
+        { "name": "pgbus_failed_events_total", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Dead-lettered jobs per minute",
+      "line_label": "%queue %job_class",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_queue_job_count", "fields": ["COUNTER"], "tags": [{ "key": "status", "value": "dead_lettered" }] }
+      ]
+    },
+    {
+      "title": "Active processes",
+      "description": "Workers + dispatcher + scheduler currently heartbeating into pgbus_processes.",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_active_processes", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Dead tuples in queue/archive tables",
+      "description": "If autovacuum can't keep up the index gets bloated and lock acquisition slows. Tune autovacuum_vacuum_scale_factor on the offending tables when this climbs.",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_total_dead_tuples", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Oldest open transaction (seconds)",
+      "description": "MVCC horizon pin. Long-running transactions prevent VACUUM from cleaning the dead tuples above. Anything over 60s is a smell.",
+      "format": "duration",
+      "format_input": "second",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_oldest_transaction_age_seconds", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Worker recycles per minute",
+      "description": "Recycles by reason. Steady max_jobs is healthy; spiking max_memory means you have a leak.",
+      "line_label": "%reason",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_worker_recycled", "fields": ["COUNTER"], "tags": [] }
+      ]
+    }
+  ]
+}

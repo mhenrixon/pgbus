@@ -40,6 +40,10 @@ module Pgbus
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
         loader.ignore("#{__dir__}/pgbus/testing")
+        # Vendor integrations are loaded conditionally (when the vendor gem
+        # is present) by lib/pgbus/engine.rb. Keeping them out of Zeitwerk
+        # means we don't reference vendor constants at autoload time.
+        loader.ignore("#{__dir__}/pgbus/integrations")
         # lib/puma/plugin/pgbus_streams.rb is a Puma plugin — it's required
         # explicitly by the user from config/puma.rb via `plugin :pgbus_streams`.
         # Without this ignore, Zeitwerk scans lib/puma/ under the pgbus loader
