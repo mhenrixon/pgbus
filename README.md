@@ -728,6 +728,48 @@ Reporters are wired into all critical rescue paths: job execution failures, work
 
 `ErrorReporter.report` is guaranteed to never raise — if a reporter or the logger itself throws, the error is swallowed silently. This preserves fault-tolerance invariants at every rescue site.
 
+### AppSignal integration
+
+When the `appsignal` gem is loaded in your app, Pgbus auto-installs a subscriber and a minutely probe that report into AppSignal:
+
+- **Background-job transactions** for every ActiveJob run and every event-bus handler invocation. Action names follow the AppSignal convention: `MyJob#perform`, `MyHandler#handle`. Tags include `queue`, `job_class`/`handler`, `routing_key`, `attempts`, and the `active_job_id` / `provider_job_id`. `enqueued_at` becomes the AppSignal `queue_start` timestamp so "time on queue" shows up correctly in the timeline.
+- **Custom counters and distributions** for sends, reads, broadcasts, outbox publishes, recurring scheduling, and worker recycles. All metric names are prefixed `pgbus_`.
+- **A minutely probe** that gauges queue depth (visible vs total), oldest message age per queue, DLQ depth, failed events count, dead-tuple totals, MVCC horizon age, active processes, and stream connection estimates.
+
+There is nothing to wire up — load the appsignal gem and the integration installs itself in a Rails initializer. To opt out:
+
+```ruby
+Pgbus.configure do |c|
+  c.appsignal_enabled = false        # disable subscriber + probe entirely
+  c.appsignal_probe_enabled = false  # keep transactions, drop the gauge probe
+end
+```
+
+#### Dashboards
+
+Three importable AppSignal dashboards ship with the gem:
+
+| File | Purpose |
+|------|---------|
+| `lib/pgbus/integrations/appsignal/dashboards/pgbus_throughput.json` | Jobs/sec, perform-duration percentiles, send/read counts |
+| `lib/pgbus/integrations/appsignal/dashboards/pgbus_health.json` | Queue depth, oldest message age, DLQ, dead tuples, MVCC horizon, worker recycles |
+| `lib/pgbus/integrations/appsignal/dashboards/pgbus_streams.json` | Broadcasts, fanout, active SSE connections, outbox, recurring tasks |
+
+Import via the AppSignal dashboard UI ("New dashboard" → "Import JSON") or the AppSignal API.
+
+#### Custom subscriptions
+
+The integration is built on `ActiveSupport::Notifications`. If you want to push pgbus telemetry into a different APM (Datadog, New Relic, OpenTelemetry), subscribe directly:
+
+```ruby
+ActiveSupport::Notifications.subscribe(/^pgbus\./) do |name, start, finish, _id, payload|
+  duration_ms = (finish - start) * 1_000
+  YourApm.record(name, duration_ms, payload)
+end
+```
+
+Events emitted: `pgbus.executor.execute`, `pgbus.job_completed`, `pgbus.job_failed`, `pgbus.job_dead_lettered`, `pgbus.event_processed`, `pgbus.event_failed`, `pgbus.client.send_message`, `pgbus.client.send_batch`, `pgbus.client.read_batch`, `pgbus.stream.broadcast`, `pgbus.outbox.publish`, `pgbus.recurring.enqueue`, `pgbus.worker.recycle`. Payload keys are documented in `lib/pgbus/instrumentation.rb`.
+
 ### Structured logging
 
 Pgbus ships two log formatters inspired by Sidekiq's `Logger::Formatters`:

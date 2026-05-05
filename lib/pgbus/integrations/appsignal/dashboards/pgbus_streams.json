@@ -1,0 +1,65 @@
+{
+  "title": "Pgbus — Streams",
+  "description": "Real-time SSE pub/sub. Broadcasts, fanout, active connections, and the outbox/recurring scheduler.",
+  "graphs": [
+    {
+      "title": "Stream broadcasts per minute",
+      "line_label": "%stream %deferred",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_stream_broadcast_count", "fields": ["COUNTER"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Active SSE connections",
+      "description": "Estimated from connect/disconnect events in the last 60 minutes. Use as a rough capacity gauge — exact count requires the SSE process telemetry.",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_stream_active_connections", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Average fanout per broadcast",
+      "description": "Mean number of connections that received each broadcast over the last hour.",
+      "format": "number",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_stream_avg_fanout", "fields": ["GAUGE"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Broadcast payload size (bytes)",
+      "description": "Distribution of payload bytes. Use to spot accidentally-streaming-an-entire-page bugs.",
+      "line_label": "%stream",
+      "format": "size",
+      "format_input": "byte",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_stream_broadcast_bytes", "fields": ["MEAN", "P95"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Outbox publishes per minute",
+      "line_label": "%kind",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_outbox_published", "fields": ["COUNTER"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Recurring tasks enqueued per minute",
+      "line_label": "%task",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_recurring_enqueued", "fields": ["COUNTER"], "tags": [] }
+      ]
+    }
+  ]
+}

@@ -71,6 +71,21 @@ module Pgbus
       require "pgbus/web/data_source"
     end
 
+    # AppSignal is third-party and entirely optional. We require the
+    # integration only when the host app has the appsignal gem loaded
+    # AND hasn't disabled it via config.appsignal_enabled. AppSignal
+    # itself loads early (it's typically required from config/environment.rb
+    # before Rails finishes booting), so by the time `after_initialize`
+    # fires the constant check is reliable.
+    initializer "pgbus.integrations.appsignal", after: :load_config_initializers do
+      ActiveSupport.on_load(:after_initialize) do
+        next unless defined?(::Appsignal) && Pgbus.configuration.appsignal_enabled
+
+        require "pgbus/integrations/appsignal"
+        Pgbus::Integrations::Appsignal.install!
+      end
+    end
+
     # Install the watermark cache middleware ahead of the app's own
     # middleware so the thread-local cache is cleared between every
     # Rack request. Without this, repeated page renders served by the

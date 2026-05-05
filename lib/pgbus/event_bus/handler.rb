@@ -30,12 +30,32 @@ module Pgbus
       def process!(message)
         raw = JSON.parse(message.message)
         event = build_event(raw)
+        routing_key = raw.dig("headers", "routing_key") || raw["routing_key"]
 
         return :skipped if self.class.idempotent? && !claim_idempotency?(event.event_id)
 
-        handle(event)
-        instrument("pgbus.event_processed", event_id: event.event_id, handler: self.class.name)
+        instrument_payload = {
+          event_id: event.event_id,
+          handler: self.class.name,
+          routing_key: routing_key,
+          published_at: event.published_at,
+          read_ct: message.read_ct.to_i,
+          msg_id: message.msg_id.to_i
+        }
+        Instrumentation.instrument("pgbus.event_processed", instrument_payload) do
+          handle(event)
+        end
         :handled
+      rescue StandardError => e
+        instrument(
+          "pgbus.event_failed",
+          event_id: event&.event_id,
+          handler: self.class.name,
+          routing_key: routing_key,
+          error: e.class.name,
+          exception_object: e
+        )
+        raise
       end
 
       # Mirrors Pgbus::ActiveJob::Executor#execute_job: wrap the handler

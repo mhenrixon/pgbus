@@ -73,11 +73,19 @@ module Pgbus
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
         transaction = current_open_transaction
-        if transaction
-          transaction.after_commit { @client.send_message(@name, wrapped) }
-          nil
-        else
-          @client.send_message(@name, wrapped)
+        instrument_payload = {
+          stream: @name,
+          visible_to: visible_to,
+          deferred: !transaction.nil?,
+          bytes: wrapped["html"].bytesize
+        }
+        Instrumentation.instrument("pgbus.stream.broadcast", instrument_payload) do
+          if transaction
+            transaction.after_commit { @client.send_message(@name, wrapped) }
+            nil
+          else
+            @client.send_message(@name, wrapped)
+          end
         end
       end
 

@@ -1,0 +1,70 @@
+{
+  "title": "Pgbus — Throughput & Latency",
+  "description": "Job and event throughput, perform-duration percentiles, and queue waiting time. Drives the most common 'is the worker keeping up?' question.",
+  "graphs": [
+    {
+      "title": "Jobs processed per minute",
+      "description": "Successful, failed, and dead-lettered jobs. A spike in failed without a spike in processed usually means a deploy regression.",
+      "line_label": "%queue %job_class %status",
+      "format": "number",
+      "format_input": null,
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_queue_job_count", "fields": ["COUNTER"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Job perform duration (ms)",
+      "description": "Distribution of how long perform_now takes per job class. P95 and P99 are the lines to watch.",
+      "line_label": "%job_class",
+      "format": "duration",
+      "format_input": "millisecond",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_job_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Events processed per minute",
+      "description": "Event-bus handler invocations grouped by routing key.",
+      "line_label": "%routing_key %handler %status",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_event_count", "fields": ["COUNTER"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Event handler duration (ms)",
+      "line_label": "%handler",
+      "format": "duration",
+      "format_input": "millisecond",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_event_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
+      ]
+    },
+    {
+      "title": "PGMQ messages sent (per minute)",
+      "line_label": "%queue",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_messages_sent", "fields": ["COUNTER"], "tags": [] }
+      ]
+    },
+    {
+      "title": "Send duration (ms)",
+      "line_label": "%queue",
+      "format": "duration",
+      "format_input": "millisecond",
+      "kind": "timeseries",
+      "metrics": [
+        { "name": "pgbus_send_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
+      ]
+    }
+  ]
+}
