@@ -41,8 +41,16 @@ module Pgbus
 
       def tick(now)
         schedule.due_tasks(now).each do |task, run_at|
-          schedule.enqueue_task(task, run_at: run_at)
-          @last_runs[task.key] = now
+          Pgbus::Instrumentation.instrument(
+            "pgbus.recurring.enqueue",
+            task: task.key,
+            class_name: task.class_name,
+            queue: task.queue_name,
+            run_at: run_at
+          ) do
+            schedule.enqueue_task(task, run_at: run_at)
+            @last_runs[task.key] = now
+          end
         rescue StandardError => e
           Pgbus.logger.error do
             "[Pgbus] Error scheduling recurring task #{task.key}: #{e.class}: #{e.message}"

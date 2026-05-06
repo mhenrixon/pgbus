@@ -302,15 +302,33 @@ module Pgbus
       end
 
       def check_recycle
-        return unless @lifecycle.running? && recycle_needed?
+        return unless @lifecycle.running?
+
+        reason = recycle_reason
+        return unless reason
 
         Pgbus.stopping = true
         @lifecycle.transition_to(:draining)
+        Pgbus::Instrumentation.instrument(
+          "pgbus.worker.recycle",
+          reason: reason,
+          jobs_processed: @jobs_processed.value,
+          memory_mb: current_memory_mb,
+          lifetime_seconds: monotonic_now - @started_at_monotonic
+        )
         @wake_signal.notify!
       end
 
+      def recycle_reason
+        return :max_jobs if exceeded_max_jobs?
+        return :max_memory if exceeded_max_memory?
+        return :max_lifetime if exceeded_max_lifetime?
+
+        nil
+      end
+
       def recycle_needed?
-        exceeded_max_jobs? || exceeded_max_memory? || exceeded_max_lifetime?
+        !recycle_reason.nil?
       end
 
       def exceeded_max_jobs?

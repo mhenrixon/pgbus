@@ -83,7 +83,9 @@ RSpec.describe Pgbus::EventBus::Handler do
     describe "instrumentation via ActiveSupport::Notifications" do
       before do
         stub_const("ActiveSupport::Notifications", double("AS::Notifications"))
-        allow(ActiveSupport::Notifications).to receive(:instrument)
+        allow(ActiveSupport::Notifications).to receive(:instrument) do |_name, _payload, &block|
+          block&.call
+        end
       end
 
       it "instruments pgbus.event_processed after handling" do
@@ -94,8 +96,7 @@ RSpec.describe Pgbus::EventBus::Handler do
 
         expect(ActiveSupport::Notifications).to have_received(:instrument).with(
           "pgbus.event_processed",
-          event_id: event_id,
-          handler: "TestHandler"
+          hash_including(event_id: event_id, handler: "TestHandler")
         )
       end
     end

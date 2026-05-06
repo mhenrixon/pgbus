@@ -106,6 +106,10 @@ module Pgbus
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
                   :streams_stats_enabled, :streams_test_mode
 
+    # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
+    # Set to false to opt out without uninstalling the appsignal gem.
+    attr_accessor :appsignal_enabled, :appsignal_probe_enabled
+
     def initialize
       @database_url = nil
       @connection_params = nil
@@ -212,6 +216,11 @@ module Pgbus
       # usually want job stats on and stream stats off, or vice versa.
       @streams_stats_enabled = false
       @streams_test_mode = false
+
+      # AppSignal: auto-on when the appsignal gem is loaded; probe runs in
+      # the same process, so the operator can disable it independently.
+      @appsignal_enabled = true
+      @appsignal_probe_enabled = true
     end
 
     def queue_name(name)

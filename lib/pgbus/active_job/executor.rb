@@ -33,6 +33,15 @@ module Pgbus
           signal_batch_discarded(payload)
           Uniqueness.release_lock(Uniqueness.extract_key(payload))
           record_stat(payload, queue_name, "dead_lettered", execution_start, message: message)
+          instrument(
+            "pgbus.job_dead_lettered",
+            queue: queue_name,
+            job_class: job_class,
+            job_id: payload["job_id"],
+            provider_job_id: payload["provider_job_id"],
+            read_ct: read_count,
+            msg_id: message.msg_id.to_i
+          )
           Pgbus.logger.debug { "[Pgbus::Executor] dead_lettered #{tag} job_class=#{job_class}" }
           return :dead_lettered
         end
@@ -60,7 +69,17 @@ module Pgbus
         job_succeeded = false
 
         msg_id = message.msg_id.to_i
-        Instrumentation.instrument("pgbus.executor.execute", queue: queue_name, job_class: job_class) do
+        instrument_payload = {
+          queue: queue_name,
+          job_class: job_class,
+          job_id: payload["job_id"],
+          provider_job_id: payload["provider_job_id"],
+          arguments: payload["arguments"],
+          enqueued_at: payload["enqueued_at"],
+          read_ct: read_count,
+          msg_id: msg_id
+        }
+        Instrumentation.instrument("pgbus.executor.execute", instrument_payload) do
           job = ::ActiveJob::Base.deserialize(payload)
           Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
           execute_job(job)
@@ -85,7 +104,17 @@ module Pgbus
         # silently lost control flow — no failed event row, no job_failed
         # notification, uniqueness lock held until VT expired. See issue #126.
         handle_failure(message, queue_name, e, payload: payload)
-        instrument("pgbus.job_failed", queue: queue_name, job_class: payload&.dig("job_class"), error: e.class.name)
+        instrument(
+          "pgbus.job_failed",
+          queue: queue_name,
+          job_class: payload&.dig("job_class"),
+          job_id: payload&.dig("job_id"),
+          provider_job_id: payload&.dig("provider_job_id"),
+          read_ct: message.read_ct.to_i,
+          msg_id: message.msg_id.to_i,
+          error: e.class.name,
+          exception_object: e
+        )
         record_stat(payload, queue_name, "failed", execution_start, message: message)
         Pgbus.logger.debug { "[Pgbus::Executor] failed #{tag} job_class=#{payload&.dig("job_class")} error=#{e.class}" }
         # Don't signal concurrency on transient failure — the job will be retried.
