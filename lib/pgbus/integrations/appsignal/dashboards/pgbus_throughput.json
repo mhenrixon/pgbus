@@ -65,6 +65,17 @@
       "metrics": [
         { "name": "pgbus_send_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
       ]
+    },
+    {
+      "title": "PGMQ messages read (per minute)",
+      "description": "Messages fetched from queues by workers. Compare against 'sent' to spot backlog growth.",
+      "line_label": "%queue",
+      "format": "number",
+      "kind": "timeseries",
+      "draw_null_as_zero": true,
+      "metrics": [
+        { "name": "pgbus_messages_read", "fields": ["COUNTER"], "tags": [] }
+      ]
     }
   ]
 }
