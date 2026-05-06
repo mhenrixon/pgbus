@@ -72,7 +72,7 @@ module Pgbus
           def safely
             yield
           rescue StandardError => e
-            Pgbus.logger.debug do
+            Pgbus.logger.warn do
               "[Pgbus::AppSignal] subscriber error: #{e.class}: #{e.message}"
             end
           end

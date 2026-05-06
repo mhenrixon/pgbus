@@ -1,6 +1,6 @@
 {
   "title": "Pgbus — Throughput & Latency",
-  "description": "Job and event throughput, perform-duration percentiles, and queue waiting time. Drives the most common 'is the worker keeping up?' question.",
+  "description": "Job and event throughput, perform-duration percentiles, and PGMQ send/read counts. Drives the most common 'is the worker keeping up?' question.",
   "graphs": [
     {
       "title": "Jobs processed per minute",

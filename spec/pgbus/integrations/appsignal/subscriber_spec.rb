@@ -255,12 +255,15 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Subscriber" do
   end
 
   describe "subscriber resilience" do
-    it "swallows errors so the producer thread is unaffected" do
+    it "swallows errors and logs at warn level" do
       allow(appsignal_class).to receive(:increment_counter).and_raise(StandardError, "agent down")
+      allow(Pgbus.logger).to receive(:warn).and_call_original
 
       expect do
         ActiveSupport::Notifications.instrument("pgbus.job_completed", queue: "default", job_class: "TestJob")
       end.not_to raise_error
+
+      expect(Pgbus.logger).to have_received(:warn)
     end
   end
 end
