@@ -3,35 +3,38 @@
 module Pgbus
   module Streams
     # Runtime patch for `Turbo::Broadcastable` that adds `durable:` kwarg
-    # support to all broadcast helpers. Applied at Rails engine boot time
-    # when `defined?(::Turbo::Broadcastable)` — see `Pgbus::Engine`.
+    # support to synchronous broadcast helpers. Applied at Rails engine boot
+    # time when `defined?(::Turbo::Broadcastable)` — see `Pgbus::Engine`.
     #
     # Instance methods extract `durable:` from kwargs and set a thread-local
     # (`Thread.current[:pgbus_broadcast_durable]`) that
     # `TurboBroadcastable#broadcast_stream_to` reads. The thread-local is
     # always cleaned up after the broadcast, even on error.
     #
+    # The `_later_to` variants are NOT overridden because turbo-rails
+    # enqueues them as background jobs — the thread-local cannot survive
+    # into the job execution context. For async broadcasts, use
+    # `streams_durable_patterns` or `streams_default_broadcast_mode` config.
+    #
     # Class methods (`broadcasts_to`, `broadcasts_refreshes_to`) accept
     # `durable:` and store it so the generated callbacks set the thread-local
     # before each broadcast.
     module BroadcastableOverride
       BROADCAST_METHODS = %i[
+        broadcast_after_to
+        broadcast_before_to
         broadcast_replace_to
         broadcast_append_to
         broadcast_prepend_to
         broadcast_update_to
         broadcast_remove_to
         broadcast_refresh_to
-        broadcast_replace_later_to
-        broadcast_append_later_to
-        broadcast_prepend_later_to
-        broadcast_update_later_to
-        broadcast_refresh_later_to
+        broadcast_render_to
+        broadcast_render_later_to
       ].freeze
 
       BROADCAST_ACTION_METHODS = %i[
         broadcast_action_to
-        broadcast_action_later_to
       ].freeze
 
       BROADCAST_METHODS.each do |method_name|
@@ -66,7 +69,7 @@ module Pgbus
             @pgbus_durable_streams[stream] = durable
 
             after_create_commit lambda {
-              broadcast_action_later_to(
+              broadcast_action_to(
                 stream.try(:call, self) || send(stream),
                 action: inserts_by,
                 target: target.try(:call, self) || target,
@@ -75,7 +78,7 @@ module Pgbus
               )
             }
             after_update_commit lambda {
-              broadcast_replace_later_to(stream.try(:call, self) || send(stream), durable: durable, **rendering)
+              broadcast_replace_to(stream.try(:call, self) || send(stream), durable: durable, **rendering)
             }
             after_destroy_commit lambda {
               broadcast_remove_to(stream.try(:call, self) || send(stream), durable: durable)
@@ -91,7 +94,7 @@ module Pgbus
             @pgbus_durable_streams[stream] = durable
 
             after_commit lambda {
-              broadcast_refresh_later_to(stream.try(:call, self) || send(stream), durable: durable)
+              broadcast_refresh_to(stream.try(:call, self) || send(stream), durable: durable)
             }
           end
         end
@@ -105,8 +108,16 @@ module Pgbus
         return if mod.ancestors.include?(self)
 
         mod.prepend(self)
-        mod.singleton_class.prepend(ClassMethods) if mod.is_a?(Module) && !mod.is_a?(Class)
-        mod.extend(ClassMethods) if mod.is_a?(Class)
+
+        # Turbo::Broadcastable uses ActiveSupport::Concern, which extends
+        # each including class with Turbo::Broadcastable::ClassMethods.
+        # Prepending our ClassMethods onto that nested module ensures any
+        # class that includes Turbo::Broadcastable picks up our overrides
+        # (broadcasts_to, broadcasts_refreshes_to) automatically.
+        if defined?(::Turbo::Broadcastable::ClassMethods) &&
+           !::Turbo::Broadcastable::ClassMethods.ancestors.include?(ClassMethods)
+          ::Turbo::Broadcastable::ClassMethods.prepend(ClassMethods)
+        end
       end
 
       private

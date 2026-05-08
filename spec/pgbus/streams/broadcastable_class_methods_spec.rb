@@ -36,6 +36,10 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride::ClassMethods do
           broadcast_stream_to(*streamables, content: "<turbo-stream action='#{action}'/>")
         end
 
+        def broadcast_refresh_to(*streamables, **)
+          broadcast_stream_to(*streamables, content: "<turbo-stream action='refresh'/>")
+        end
+
         def broadcast_refresh_later_to(*streamables, **)
           broadcast_stream_to(*streamables, content: "<turbo-stream action='refresh'/>")
         end
@@ -140,8 +144,16 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride::ClassMethods do
           Turbo::StreamsChannel.broadcast_remove_to(*streamables, **rendering)
         end
 
+        def broadcast_action_to(*streamables, action:, **rendering)
+          Turbo::StreamsChannel.broadcast_action_to(*streamables, action: action, **rendering)
+        end
+
         def broadcast_action_later_to(*streamables, action:, **rendering)
           Turbo::StreamsChannel.broadcast_action_later_to(*streamables, action: action, **rendering)
+        end
+
+        def broadcast_refresh_to(*streamables, **attributes)
+          Turbo::StreamsChannel.broadcast_refresh_to(*streamables, **attributes)
         end
 
         def broadcast_refresh_later_to(*streamables, **attributes)
@@ -242,6 +254,10 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride::ClassMethods do
 
         def suppressed_turbo_broadcasts?
           false
+        end
+
+        def broadcast_refresh_to(*streamables, **attributes)
+          Turbo::StreamsChannel.broadcast_refresh_to(*streamables, **attributes)
         end
 
         def broadcast_refresh_later_to(*streamables, **attributes)
