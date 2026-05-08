@@ -101,14 +101,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "is wired into the dispatcher maintenance loop" do
-      expect(described_class).to have_instance_method(:sweep_orphan_streams)
+      expect(described_class.private_method_defined?(:sweep_orphan_streams)).to be true
     end
-  end
-end
-
-# Helper to check private method existence
-RSpec::Matchers.define :have_instance_method do |method_name|
-  match do |klass|
-    klass.private_method_defined?(method_name) || klass.method_defined?(method_name)
   end
 end
