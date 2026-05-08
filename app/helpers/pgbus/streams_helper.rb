@@ -131,7 +131,9 @@ module Pgbus
       return nil if cache[:script_emitted]
 
       cache[:script_emitted] = true
-      script = '<script type="module">import "pgbus/stream_source_element"</script>'
+      nonce = content_security_policy_nonce if respond_to?(:content_security_policy_nonce)
+      nonce_attr = nonce ? %( nonce="#{CGI.escape_html(nonce)}") : ""
+      script = %(<script type="module"#{nonce_attr}>import "pgbus/stream_source_element"</script>)
       script.respond_to?(:html_safe) ? script.html_safe : script
     end
 

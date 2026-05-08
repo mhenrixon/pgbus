@@ -150,6 +150,59 @@ RSpec.describe Pgbus::StreamsHelper do
     end
   end
 
+  describe "#pgbus_stream_from CSP nonce" do
+    it "omits nonce when content_security_policy_nonce returns nil" do
+      nil_nonce_view_class = Class.new do
+        include Pgbus::StreamsHelper
+
+        def content_security_policy_nonce
+          nil
+        end
+      end
+      html = nil_nonce_view_class.new.pgbus_stream_from("chat")
+
+      expect(html).to include('<script type="module">')
+      expect(html).not_to include("nonce=")
+    end
+
+    it "adds nonce to the inline script tag when content_security_policy_nonce is available" do
+      nonce_view_class = Class.new do
+        include Pgbus::StreamsHelper
+
+        def content_security_policy_nonce
+          "test-nonce-abc123"
+        end
+      end
+      nonce_view = nonce_view_class.new
+
+      html = nonce_view.pgbus_stream_from("chat")
+
+      expect(html).to include('<script type="module" nonce="test-nonce-abc123">')
+    end
+
+    it "omits nonce when content_security_policy_nonce is not available" do
+      html = view.pgbus_stream_from("chat")
+
+      expect(html).to include('<script type="module">')
+      expect(html).not_to include("nonce=")
+    end
+
+    it "does not add nonce to the pgbus-stream-source element" do
+      nonce_view_class = Class.new do
+        include Pgbus::StreamsHelper
+
+        def content_security_policy_nonce
+          "test-nonce-abc123"
+        end
+      end
+      nonce_view = nonce_view_class.new
+
+      html = nonce_view.pgbus_stream_from("chat")
+
+      expect(html).not_to match(/<pgbus-stream-source[^>]*nonce=/)
+    end
+  end
+
   describe "#pgbus_stream_from with replay: option" do
     it "sets since-id=0 when replay: :all so the client receives the full retained backlog" do
       html = view.pgbus_stream_from("chat", replay: :all)
