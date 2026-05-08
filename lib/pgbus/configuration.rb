@@ -105,7 +105,8 @@ module Pgbus
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
                   :streams_stats_enabled, :streams_test_mode,
-                  :streams_orphan_sweep_interval, :streams_orphan_threshold
+                  :streams_orphan_sweep_interval, :streams_orphan_threshold,
+                  :streams_durable_patterns
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
@@ -221,6 +222,7 @@ module Pgbus
       @streams_default_broadcast_mode = :ephemeral
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
+      @streams_durable_patterns = []
 
       # AppSignal: auto-on when the appsignal gem is loaded; probe runs in
       # the same process, so the operator can disable it independently.
@@ -365,10 +367,22 @@ module Pgbus
         raise ArgumentError, "streams_orphan_sweep_interval must be a positive number or nil to disable"
       end
 
+      raise ArgumentError, "streams_durable_patterns must be an Array of strings/regex" unless streams_durable_patterns.is_a?(Array)
+
       return if streams_orphan_threshold.nil?
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
       raise ArgumentError, "streams_orphan_threshold must be a positive number or nil to disable"
+    end
+
+    # Returns true if the given stream name should be durable based on
+    # `streams_durable_patterns` (exact string or Regexp match) or the
+    # `streams_default_broadcast_mode` fallback.
+    def stream_durable?(name)
+      patterns = streams_durable_patterns || []
+      return true if patterns.any? { |p| p.is_a?(Regexp) ? p.match?(name) : p == name }
+
+      streams_default_broadcast_mode == :durable
     end
 
     # Set the worker capsule list. Accepts:

@@ -123,6 +123,7 @@ RSpec.configure do |config|
     c.logger = Logger.new(IO::NULL)
     c.pgmq_schema_mode = :embedded
     c.listen_notify = false
+    c.streams_default_broadcast_mode = :durable
   end
 
   # Bootstrap tables that may not exist in the CI database
