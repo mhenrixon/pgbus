@@ -1,0 +1,280 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+RSpec.describe Pgbus::Streams::BroadcastableOverride do
+  let(:fake_stream) { instance_double(Pgbus::Streams::Stream, broadcast: 1248) }
+
+  # Minimal Turbo::Broadcastable stand-in. We build a fake model class that
+  # includes the real turbo-rails concern (stubbed) and then prepend our
+  # override so the full call-chain is exercised without loading Rails.
+  let(:broadcastable_module) do
+    Module.new do
+      def self.name
+        "Turbo::Broadcastable"
+      end
+
+      def broadcast_replace_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_replace_to(*streamables, **rendering)
+      end
+
+      def broadcast_append_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_append_to(*streamables, **rendering)
+      end
+
+      def broadcast_prepend_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_prepend_to(*streamables, **rendering)
+      end
+
+      def broadcast_update_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_update_to(*streamables, **rendering)
+      end
+
+      def broadcast_remove_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_remove_to(*streamables, **rendering)
+      end
+
+      def broadcast_action_to(*streamables, action:, **rendering)
+        Turbo::StreamsChannel.broadcast_action_to(*streamables, action: action, **rendering)
+      end
+
+      def broadcast_refresh_to(*streamables, **attributes)
+        Turbo::StreamsChannel.broadcast_refresh_to(*streamables, **attributes)
+      end
+
+      def broadcast_replace_later_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_replace_later_to(*streamables, **rendering)
+      end
+
+      def broadcast_append_later_to(*streamables, **rendering)
+        Turbo::StreamsChannel.broadcast_append_later_to(*streamables, **rendering)
+      end
+
+      def broadcast_action_later_to(*streamables, action:, **rendering)
+        Turbo::StreamsChannel.broadcast_action_later_to(*streamables, action: action, **rendering)
+      end
+
+      def broadcast_refresh_later_to(*streamables, **attributes)
+        Turbo::StreamsChannel.broadcast_refresh_later_to(*streamables, **attributes)
+      end
+
+      def suppressed_turbo_broadcasts?
+        false
+      end
+    end
+  end
+
+  let(:fake_turbo_channel) do
+    Module.new do
+      def self.name
+        "Turbo::StreamsChannel"
+      end
+
+      class << self
+        attr_reader :last_call
+
+        def broadcast_replace_to(*streamables, **opts)
+          broadcast_action_to(*streamables, action: :replace, **opts)
+        end
+
+        def broadcast_append_to(*streamables, **opts)
+          broadcast_action_to(*streamables, action: :append, **opts)
+        end
+
+        def broadcast_prepend_to(*streamables, **opts)
+          broadcast_action_to(*streamables, action: :prepend, **opts)
+        end
+
+        def broadcast_update_to(*streamables, **opts)
+          broadcast_action_to(*streamables, action: :update, **opts)
+        end
+
+        def broadcast_remove_to(*streamables, **opts)
+          broadcast_action_to(*streamables, action: :remove, render: false, **opts)
+        end
+
+        def broadcast_refresh_to(*streamables, **)
+          broadcast_stream_to(*streamables, content: "<turbo-stream action='refresh'/>")
+        end
+
+        def broadcast_action_to(*streamables, action:, **)
+          broadcast_stream_to(*streamables, content: "<turbo-stream action='#{action}'/>")
+        end
+
+        def broadcast_replace_later_to(*streamables, **opts)
+          broadcast_action_later_to(*streamables, action: :replace, **opts)
+        end
+
+        def broadcast_append_later_to(*streamables, **opts)
+          broadcast_action_later_to(*streamables, action: :append, **opts)
+        end
+
+        def broadcast_action_later_to(*streamables, action:, **opts)
+          broadcast_action_to(*streamables, action: action, **opts)
+        end
+
+        def broadcast_refresh_later_to(*streamables, **)
+          broadcast_stream_to(*streamables, content: "<turbo-stream action='refresh'/>")
+        end
+
+        def broadcast_stream_to(*streamables, content:)
+          @last_call = { streamables: streamables, content: content }
+        end
+
+        def stream_name_from(streamables)
+          streamables.join(":")
+        end
+
+        def reset!
+          @last_call = nil
+        end
+      end
+    end
+  end
+
+  let(:model_class) do
+    bm = broadcastable_module
+    Class.new do
+      include bm
+
+      def self.name
+        "TestModel"
+      end
+
+      def self.model_name
+        Struct.new(:plural, :element).new("test_models", "test_model")
+      end
+    end
+  end
+
+  let(:model) { model_class.new }
+
+  before do
+    stub_const("Turbo", Module.new) unless defined?(Turbo)
+    stub_const("Turbo::StreamsChannel", fake_turbo_channel)
+    stub_const("Turbo::Broadcastable", broadcastable_module)
+    fake_turbo_channel.reset!
+
+    allow(Pgbus).to receive(:stream).and_return(fake_stream)
+
+    # Force-autoload the TurboBroadcastable module (defines
+    # install_turbo_broadcastable_patch! on Pgbus::Streams)
+    _trigger = Pgbus::Streams::TurboBroadcastable
+
+    # Install both patches (order matters: TurboBroadcastable on channel,
+    # BroadcastableOverride on the model module)
+    Pgbus::Streams.install_turbo_broadcastable_patch!
+    described_class.install!(broadcastable_module)
+  end
+
+  after do
+    Thread.current[:pgbus_broadcast_durable] = nil
+  end
+
+  describe "instance-level durable: kwarg" do
+    it "forwards durable: true to Pgbus.stream for broadcast_replace_to" do
+      model.broadcast_replace_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: false to Pgbus.stream for broadcast_replace_to" do
+      model.broadcast_replace_to("room:42", durable: false, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
+    end
+
+    it "falls back to config mode when durable: is omitted" do
+      allow(Pgbus.configuration).to receive(:streams_default_broadcast_mode).and_return(:ephemeral)
+      model.broadcast_replace_to("room:42", html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
+    end
+
+    it "forwards durable: for broadcast_append_to" do
+      model.broadcast_append_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_prepend_to" do
+      model.broadcast_prepend_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_update_to" do
+      model.broadcast_update_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_remove_to" do
+      model.broadcast_remove_to("room:42", durable: true)
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_action_to" do
+      model.broadcast_action_to("room:42", action: :replace, durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_refresh_to" do
+      model.broadcast_refresh_to("room:42", durable: true)
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_replace_later_to" do
+      model.broadcast_replace_later_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_append_later_to" do
+      model.broadcast_append_later_to("room:42", durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_action_later_to" do
+      model.broadcast_action_later_to("room:42", action: :append, durable: true, html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "forwards durable: for broadcast_refresh_later_to" do
+      model.broadcast_refresh_later_to("room:42", durable: true)
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    end
+
+    it "cleans up the thread-local after the broadcast completes" do
+      model.broadcast_replace_to("room:42", durable: true, html: "<div/>")
+
+      expect(Thread.current[:pgbus_broadcast_durable]).to be_nil
+    end
+
+    it "cleans up the thread-local even if an error occurs" do
+      allow(fake_stream).to receive(:broadcast).and_raise(RuntimeError, "boom")
+
+      expect do
+        model.broadcast_replace_to("room:42", durable: true, html: "<div/>")
+      end.to raise_error(RuntimeError, "boom")
+
+      expect(Thread.current[:pgbus_broadcast_durable]).to be_nil
+    end
+  end
+
+  describe ".install!" do
+    it "is idempotent" do
+      described_class.install!(broadcastable_module)
+      described_class.install!(broadcastable_module)
+
+      count = broadcastable_module.ancestors.count(described_class)
+      expect(count).to eq(1)
+    end
+  end
+end

@@ -107,5 +107,31 @@ RSpec.describe Pgbus::Streams::TurboBroadcastable do
 
       expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
     end
+
+    it "uses thread-local durable override when set" do
+      Thread.current[:pgbus_broadcast_durable] = true
+      Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+    ensure
+      Thread.current[:pgbus_broadcast_durable] = nil
+    end
+
+    it "thread-local false overrides durable config" do
+      allow(Pgbus.configuration).to receive(:streams_default_broadcast_mode).and_return(:durable)
+      Thread.current[:pgbus_broadcast_durable] = false
+      Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
+    ensure
+      Thread.current[:pgbus_broadcast_durable] = nil
+    end
+
+    it "falls back to config when thread-local is nil" do
+      Thread.current[:pgbus_broadcast_durable] = nil
+      Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
+    end
   end
 end
