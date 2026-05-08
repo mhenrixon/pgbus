@@ -3,11 +3,13 @@
 require "json"
 require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
+require_relative "client/notify_stream"
 
 module Pgbus
   class Client
     include ReadAfter
     include EnsureStreamQueue
+    include NotifyStream
 
     attr_reader :pgmq, :config
 

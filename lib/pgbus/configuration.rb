@@ -104,7 +104,9 @@ module Pgbus
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
-                  :streams_stats_enabled, :streams_test_mode
+                  :streams_stats_enabled, :streams_test_mode,
+                  :streams_orphan_sweep_interval, :streams_orphan_threshold
+    attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
     # Set to false to opt out without uninstalling the appsignal gem.
@@ -216,6 +218,9 @@ module Pgbus
       # usually want job stats on and stream stats off, or vice versa.
       @streams_stats_enabled = false
       @streams_test_mode = false
+      @streams_default_broadcast_mode = :ephemeral
+      @streams_orphan_sweep_interval = 3600    # 1 hour
+      @streams_orphan_threshold = 86_400       # 24 hours
 
       # AppSignal: auto-on when the appsignal gem is loaded; probe runs in
       # the same process, so the operator can disable it independently.
@@ -262,6 +267,18 @@ module Pgbus
                           when :json then LogFormatter::JSON.new
                           when :text then LogFormatter::Text.new
                           end
+    end
+
+    VALID_BROADCAST_MODES = %i[ephemeral durable].freeze
+
+    def streams_default_broadcast_mode=(mode)
+      mode = mode.to_sym
+      unless VALID_BROADCAST_MODES.include?(mode)
+        raise ArgumentError,
+              "Invalid streams_default_broadcast_mode: #{mode}. Must be one of: #{VALID_BROADCAST_MODES.join(", ")}"
+      end
+
+      @streams_default_broadcast_mode = mode
     end
 
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
@@ -343,6 +360,15 @@ module Pgbus
       end
 
       raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
+
+      if streams_orphan_sweep_interval && !(streams_orphan_sweep_interval.is_a?(Numeric) && streams_orphan_sweep_interval.positive?)
+        raise ArgumentError, "streams_orphan_sweep_interval must be a positive number or nil to disable"
+      end
+
+      return if streams_orphan_threshold.nil?
+      return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
+
+      raise ArgumentError, "streams_orphan_threshold must be a positive number or nil to disable"
     end
 
     # Set the worker capsule list. Accepts:

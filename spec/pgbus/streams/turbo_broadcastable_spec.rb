@@ -83,7 +83,7 @@ RSpec.describe Pgbus::Streams::TurboBroadcastable do
     it "routes the broadcast through Pgbus.stream(...).broadcast instead of ActionCable" do
       Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream>X</turbo-stream>")
 
-      expect(Pgbus).to have_received(:stream).with("room:42")
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
       expect(fake_turbo_module.broadcasts).to be_empty
     end
 
@@ -91,14 +91,21 @@ RSpec.describe Pgbus::Streams::TurboBroadcastable do
       account = double("Account", to_gid_param: "gid://app/Account/42")
       Turbo::StreamsChannel.broadcast_stream_to(account, content: "<turbo-stream/>")
 
-      expect(Pgbus).to have_received(:stream).with("gid://app/Account/42")
+      expect(Pgbus).to have_received(:stream).with("gid://app/Account/42", durable: false)
     end
 
     it "joins multiple streamables with colons (turbo-rails parity)" do
       account = double("Account", to_gid_param: "gid://app/Account/42")
       Turbo::StreamsChannel.broadcast_stream_to(account, :messages, content: "<turbo-stream/>")
 
-      expect(Pgbus).to have_received(:stream).with("gid://app/Account/42:messages")
+      expect(Pgbus).to have_received(:stream).with("gid://app/Account/42:messages", durable: false)
+    end
+
+    it "uses durable mode when configured" do
+      allow(Pgbus.configuration).to receive(:streams_default_broadcast_mode).and_return(:durable)
+      Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
     end
   end
 end

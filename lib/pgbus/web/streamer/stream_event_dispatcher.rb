@@ -92,6 +92,7 @@ module Pgbus
           # boolean assignment), the sentinel break would still fire.
           @running = false
           @thread = nil
+          @ephemeral_seq = 0
         end
 
         def start
@@ -136,7 +137,7 @@ module Pgbus
             # queue's current contents — once we hit a non-Wake or a
             # different stream, we stop and let the regular path handle
             # the rest.
-            if msg.is_a?(WakeMessage)
+            if msg.is_a?(WakeMessage) && msg.payload.nil?
               wakes, trailing = drain_wakes_for(msg)
               wakes.each { |w| handle(w) }
               handle(trailing) if trailing
@@ -165,7 +166,7 @@ module Pgbus
               return [coalesced, nil] # queue drained
             end
 
-            return [coalesced, peek] unless peek.is_a?(WakeMessage)
+            return [coalesced, peek] unless peek.is_a?(WakeMessage) && peek.payload.nil?
 
             next if seen.include?(peek.queue_name)
 
@@ -193,32 +194,26 @@ module Pgbus
 
         def handle_wake(msg)
           started_at = monotonic_ms
-          # msg.queue_name is the PGMQ full table name (pgbus_int_pbns_xxx),
-          # but connections are registered under the logical name (pbns_xxx).
-          # Translate before looking up.
           stream = @full_to_logical[msg.queue_name] || msg.queue_name
           registered = @registry.connections_for(stream)
           in_flight_pairs = @in_flight[stream]
           return if registered.empty? && in_flight_pairs.empty?
 
+          if msg.payload
+            handle_ephemeral_wake(msg, stream, registered, in_flight_pairs, started_at)
+          else
+            handle_durable_wake(stream, registered, in_flight_pairs, started_at)
+          end
+        end
+
+        def handle_durable_wake(stream, registered, in_flight_pairs, started_at)
           min_seen = minimum_cursor(registered, in_flight_pairs)
           raw_envelopes = @client.read_after(stream, after_id: min_seen, limit: @read_limit)
           return if raw_envelopes.empty?
 
           envelopes = raw_envelopes.map { |e| unwrap_stream_envelope(e) }
-          # The maximum msg_id in THIS batch. We advance every
-          # connection's scanned cursor past this value even if the
-          # filter drops everything — otherwise a 500-message run
-          # of invisible broadcasts would pin minimum_cursor and
-          # the dispatcher would re-read the same window forever,
-          # starving later public messages. Connection#enqueue still
-          # gates the client-facing cursor on actual successful
-          # writes, so this advance is invisible to clients.
           max_msg_id = envelopes.map(&:msg_id).max
 
-          # Each connection gets a per-connection filtered subset. We
-          # can't pre-filter once because different connections have
-          # different authorize contexts.
           registered.each do |conn|
             safe_enqueue(conn, visible_envelopes_for(envelopes, conn))
             advance_scanned_cursor(conn, max_msg_id)
@@ -230,11 +225,40 @@ module Pgbus
 
           prune_dead(registered)
 
-          # Record one stat row per wake. Fanout is the number of
-          # subscribers (registered + in-flight) that received the
-          # broadcast before any filter dropped it — the "intended"
-          # audience size, which is the useful operator number even
-          # when audience filtering is in play.
+          record_stat(
+            stream_name: stream,
+            event_type: "broadcast",
+            started_at: started_at,
+            fanout: registered.size + in_flight_pairs.size
+          )
+        end
+
+        def handle_ephemeral_wake(msg, stream, registered, in_flight_pairs, started_at)
+          parsed = JSON.parse(msg.payload)
+          html = parsed.is_a?(Hash) ? parsed["html"] : nil
+          return unless html.is_a?(String)
+
+          visible_to = parsed["visible_to"]
+          visible_to = visible_to.to_sym if visible_to.is_a?(String)
+
+          @ephemeral_seq += 1
+          envelope = StreamEnvelope.new(
+            msg_id: -@ephemeral_seq,
+            enqueued_at: Time.now.utc.iso8601(6),
+            payload: html,
+            source: "ephemeral",
+            visible_to: visible_to
+          )
+
+          registered.each do |conn|
+            safe_enqueue(conn, visible_envelopes_for([envelope], conn))
+          end
+          in_flight_pairs.each do |(conn, buffer)|
+            buffer.concat(visible_envelopes_for([envelope], conn))
+          end
+
+          prune_dead(registered)
+
           record_stat(
             stream_name: stream,
             event_type: "broadcast",

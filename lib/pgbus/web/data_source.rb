@@ -43,11 +43,10 @@ module Pgbus
       # different connection lifecycle than the worker processes).
       def queues_with_metrics
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        # paused_queue_names returns an Array; convert to Set so the
-        # per-queue membership check is O(1). With 100+ queues the
-        # Array#include? cost in the loop was O(n²) per dashboard load.
+        return [] if queue_names.empty?
+
         paused_queues = paused_queue_names.to_set
-        queue_names.map { |name| queue_metrics_via_sql(name) }.compact.map do |q|
+        batched_queue_metrics(queue_names).map do |q|
           q.merge(paused: paused_queues.include?(logical_queue_name(q[:name])))
         end
       rescue StandardError => e
@@ -1006,6 +1005,46 @@ module Pgbus
 
         rows = connection.select_all(sql, "Pgbus Paginated Queue Messages", [limit, offset])
         rows.to_a.map { |r| format_message(r, r["queue_name"]) }
+      end
+
+      def batched_queue_metrics(queue_names)
+        return [] if queue_names.empty?
+
+        unions = queue_names.filter_map do |name|
+          sanitized = sanitize_name(name)
+          qtable = "q_#{sanitized}"
+          seq_name = "#{qtable}_msg_id_seq"
+          <<~SQL
+            SELECT
+              #{connection.quote(name)} AS queue_name,
+              (SELECT count(*) FROM pgmq.#{qtable}) AS queue_length,
+              (SELECT count(*) FROM pgmq.#{qtable} WHERE vt <= NOW()) AS queue_visible_length,
+              (SELECT EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int FROM pgmq.#{qtable}) AS newest_msg_age_sec,
+              (SELECT EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int FROM pgmq.#{qtable}) AS oldest_msg_age_sec,
+              (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pgmq.#{seq_name}) AS total_messages
+          SQL
+        rescue StandardError => e
+          Pgbus.logger.debug { "[Pgbus::Web] Skipping queue metrics for #{name}: #{e.message}" }
+          nil
+        end
+
+        return [] if unions.empty?
+
+        sql = unions.join(" UNION ALL ")
+        rows = connection.select_all(sql, "Pgbus Batched Queue Metrics")
+        rows.to_a.map do |row|
+          {
+            name: row["queue_name"],
+            queue_length: row["queue_length"].to_i,
+            queue_visible_length: row["queue_visible_length"].to_i,
+            oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
+            newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
+            total_messages: row["total_messages"].to_i
+          }
+        end
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web] Error fetching batched queue metrics: #{e.class}: #{e.message}" }
+        []
       end
 
       def queue_metrics_via_sql(queue_name)
