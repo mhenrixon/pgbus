@@ -37,12 +37,17 @@ module Pgbus
     class Stream
       attr_reader :name
 
-      def initialize(streamables, client: Pgbus.client)
+      def initialize(streamables, client: Pgbus.client, durable: true)
         @name = self.class.name_from(streamables)
         self.class.validate_name_length!(@name, streamables)
         @client = client
+        @durable = durable
         @ensured = false
         @ensure_mutex = Mutex.new
+      end
+
+      def durable?
+        @durable
       end
 
       # Broadcasts a Turbo Stream HTML payload through the pgbus streamer.
@@ -69,9 +74,12 @@ module Pgbus
       # through PGMQ; the predicate itself lives in-process on the
       # subscriber side and is evaluated per-connection by the Dispatcher.
       def broadcast(payload, visible_to: nil)
-        ensure_queue!
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
+
+        return broadcast_ephemeral(wrapped) unless @durable
+
+        ensure_queue!
         transaction = current_open_transaction
         instrument_payload = {
           stream: @name,
@@ -154,6 +162,11 @@ module Pgbus
       end
 
       private
+
+      def broadcast_ephemeral(wrapped)
+        @client.notify_stream(@name, wrapped)
+        nil
+      end
 
       def ensure_queue!
         return if @ensured

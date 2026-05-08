@@ -104,10 +104,11 @@ module Pgbus
     # clears it. The cache key is the resolved name string, not the raw
     # streamables, so `Pgbus.stream(@order)` and `Pgbus.stream(@order)`
     # in the same process return the same instance.
-    def stream(streamables)
+    def stream(streamables, durable: true)
       name = Streams::Stream.name_from(streamables)
+      cache_key = "#{name}:#{durable ? "d" : "e"}"
       @stream_cache ||= Concurrent::Map.new
-      @stream_cache.compute_if_absent(name) { Streams::Stream.new(streamables) }
+      @stream_cache.compute_if_absent(cache_key) { Streams::Stream.new(streamables, durable: durable) }
     end
 
     # Compose a short, pgbus-safe stream identifier from any mix of

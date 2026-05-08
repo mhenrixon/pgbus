@@ -15,6 +15,7 @@ module Pgbus
       OUTBOX_CLEANUP_INTERVAL = 3600 # Run outbox cleanup every hour
       JOB_LOCK_CLEANUP_INTERVAL = 300 # Run job lock cleanup every 5 minutes
       STATS_CLEANUP_INTERVAL = 3600 # Run stats cleanup every hour
+      ORPHAN_STREAM_SWEEP_INTERVAL = 3600 # Run orphan stream sweep every hour
       TABLE_MAINTENANCE_INTERVAL = Pgbus::TableMaintenance::MAINTENANCE_INTERVAL
 
       # Page size for archive compaction. Each cycle deletes up to this
@@ -38,6 +39,7 @@ module Pgbus
         @last_outbox_cleanup_at = monotonic_now
         @last_job_lock_cleanup_at = monotonic_now
         @last_stats_cleanup_at = monotonic_now
+        @last_orphan_stream_sweep_at = monotonic_now
         @last_table_maintenance_at = monotonic_now
       end
 
@@ -86,6 +88,7 @@ module Pgbus
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
+        run_if_due(now, :@last_orphan_stream_sweep_at, ORPHAN_STREAM_SWEEP_INTERVAL) { sweep_orphan_streams }
         run_if_due(now, :@last_table_maintenance_at, TABLE_MAINTENANCE_INTERVAL) { run_table_maintenance }
       end
 
@@ -313,6 +316,44 @@ module Pgbus
         end
 
         config.streams_default_retention.to_f
+      end
+
+      def sweep_orphan_streams
+        prefix = config.streams_queue_prefix
+        return if prefix.nil? || prefix.empty?
+
+        threshold = config.streams_orphan_threshold
+        conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
+        queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+
+        dropped = 0
+        queue_names.each do |full_name|
+          next unless full_name.start_with?("#{prefix}_")
+
+          row = conn.select_one(<<~SQL, "Pgbus Orphan Check")
+            SELECT
+              count(*) AS queue_length,
+              EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int AS newest_msg_age_sec
+            FROM pgmq.q_#{QueueNameValidator.sanitize!(full_name)}
+          SQL
+
+          next unless row
+
+          queue_length = row["queue_length"].to_i
+          newest_age = row["newest_msg_age_sec"]&.to_i
+
+          next if queue_length.positive? && (newest_age.nil? || newest_age < threshold)
+
+          Pgbus.client.drop_queue(full_name, prefixed: false)
+          dropped += 1
+          Pgbus.logger.info { "[Pgbus] Dropped orphan stream queue: #{full_name}" }
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed for #{full_name}: #{e.message}" }
+        end
+
+        Pgbus.logger.debug { "[Pgbus] Orphan stream sweep complete: dropped #{dropped} queue(s)" } if dropped.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed: #{e.message}" }
       end
 
       def cleanup_recurring_executions

@@ -36,7 +36,8 @@ module Pgbus
     module TurboBroadcastable
       def broadcast_stream_to(*streamables, content:)
         name = stream_name_from(streamables)
-        Pgbus.stream(name).broadcast(content)
+        mode = Pgbus.configuration.streams_default_broadcast_mode
+        Pgbus.stream(name, durable: mode == :durable).broadcast(content)
       end
     end
 

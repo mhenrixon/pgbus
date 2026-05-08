@@ -15,17 +15,19 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#queues_with_metrics" do
-    it "returns formatted metrics via SQL" do
+    it "returns formatted metrics via batched SQL" do
       allow(mock_connection).to receive(:select_values).and_return(["pgbus_default"])
-      allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Queue Metrics")
-        .and_return({
-                      "queue_length" => 5,
-                      "queue_visible_length" => 3,
-                      "oldest_msg_age_sec" => 120,
-                      "newest_msg_age_sec" => 10,
-                      "total_messages" => 1000
-                    })
+      allow(mock_connection).to receive(:quote) { |v| "'#{v}'" }
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [{
+                             "queue_name" => "pgbus_default",
+                             "queue_length" => 5,
+                             "queue_visible_length" => 3,
+                             "oldest_msg_age_sec" => 120,
+                             "newest_msg_age_sec" => 10,
+                             "total_messages" => 1000
+                           }]))
 
       result = data_source.queues_with_metrics
       expect(result.size).to eq(1)
@@ -69,22 +71,23 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#summary_stats" do
-    it "computes aggregate stats" do
+    before do
       allow(mock_connection).to receive(:select_values).and_return(%w[pgbus_default pgbus_default_dlq])
-
-      allow(mock_connection).to receive(:select_one).with(anything, "Pgbus Queue Metrics").and_return(
-        { "queue_length" => 10, "queue_visible_length" => 8,
-          "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 100 },
-        { "queue_length" => 2, "queue_visible_length" => 2,
-          "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 5 }
-      )
-
-      # Stub health-related queries (called by queue_health_stats within summary_stats)
+      allow(mock_connection).to receive(:quote) { |v| "'#{v}'" }
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [
+                             { "queue_name" => "pgbus_default", "queue_length" => 10, "queue_visible_length" => 8,
+                               "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 100 },
+                             { "queue_name" => "pgbus_default_dlq", "queue_length" => 2, "queue_visible_length" => 2,
+                               "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil, "total_messages" => 5 }
+                           ]))
       allow(mock_connection).to receive(:select_all).with(anything, "Pgbus All Table Health").and_return([])
       allow(mock_connection).to receive(:select_one).with(anything, "Pgbus Oldest Transaction").and_return(nil)
-
       allow(data_source).to receive_messages(failed_events_count: 3, processes: [{ id: 1 }, { id: 2 }])
+    end
 
+    it "computes aggregate stats" do
       stats = data_source.summary_stats
       expect(stats[:total_queues]).to eq(2)
       expect(stats[:total_depth]).to eq(12)
@@ -350,13 +353,15 @@ RSpec.describe Pgbus::Web::DataSource do
   describe "#discard_all_enqueued" do
     before do
       allow(mock_connection).to receive(:select_values).and_return(["pgbus_default"])
-      allow(mock_connection).to receive(:select_one)
-        .with(anything, "Pgbus Queue Metrics")
-        .and_return({
-                      "queue_length" => 2, "queue_visible_length" => 2,
-                      "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil,
-                      "total_messages" => 10
-                    })
+      allow(mock_connection).to receive(:quote) { |v| "'#{v}'" }
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [{
+                             "queue_name" => "pgbus_default",
+                             "queue_length" => 2, "queue_visible_length" => 2,
+                             "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil,
+                             "total_messages" => 10
+                           }]))
 
       allow(mock_connection).to receive(:select_all)
         .with(anything, "Pgbus Queue Messages", anything)

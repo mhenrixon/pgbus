@@ -29,7 +29,11 @@ module Pgbus
       # For a queue named `pgbus_stream_chat` the trigger table is
       # `q_pgbus_stream_chat`, so the channel is `pgmq.q_pgbus_stream_chat.INSERT`.
       class Listener
-        WakeMessage = Data.define(:queue_name)
+        WakeMessage = Data.define(:queue_name, :payload) do
+          def initialize(queue_name:, payload: nil)
+            super
+          end
+        end
 
         CHANNEL_PREFIX = "pgmq.q_"
         CHANNEL_SUFFIX = ".INSERT"
@@ -110,8 +114,8 @@ module Pgbus
 
             timeout_s = @health_check_ms / 1000.0
             begin
-              @conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
-                handle_notify(channel)
+              @conn.wait_for_notify(timeout_s) do |channel, _pid, payload|
+                handle_notify(channel, payload)
               end || run_health_check
             rescue IOError => e
               # #stop closes the PG connection to interrupt
@@ -182,11 +186,11 @@ module Pgbus
           @listening_to.delete(channel)
         end
 
-        def handle_notify(channel)
+        def handle_notify(channel, payload = nil)
           queue_name = queue_name_from(channel)
           return unless queue_name
 
-          @dispatch_queue << WakeMessage.new(queue_name: queue_name)
+          @dispatch_queue << WakeMessage.new(queue_name: queue_name, payload: payload)
         end
 
         def run_health_check
