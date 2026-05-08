@@ -73,11 +73,15 @@ module Pgbus
       # satisfies the predicate. The label travels with the broadcast
       # through PGMQ; the predicate itself lives in-process on the
       # subscriber side and is evaluated per-connection by the Dispatcher.
-      def broadcast(payload, visible_to: nil)
+      # Per-broadcast `durable:` overrides the stream-level default for a
+      # single broadcast. `nil` (the default) defers to the stream's own
+      # `durable?` setting; `true`/`false` flip the mode for this call only.
+      def broadcast(payload, visible_to: nil, durable: nil)
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
 
-        return broadcast_ephemeral(wrapped) unless @durable
+        use_durable = durable.nil? ? @durable : durable
+        return broadcast_ephemeral(wrapped) unless use_durable
 
         ensure_queue!
         transaction = current_open_transaction
