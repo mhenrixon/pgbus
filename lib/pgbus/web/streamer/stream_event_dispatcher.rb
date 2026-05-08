@@ -137,7 +137,7 @@ module Pgbus
             # queue's current contents — once we hit a non-Wake or a
             # different stream, we stop and let the regular path handle
             # the rest.
-            if msg.is_a?(WakeMessage)
+            if msg.is_a?(WakeMessage) && msg.payload.nil?
               wakes, trailing = drain_wakes_for(msg)
               wakes.each { |w| handle(w) }
               handle(trailing) if trailing
@@ -166,7 +166,7 @@ module Pgbus
               return [coalesced, nil] # queue drained
             end
 
-            return [coalesced, peek] unless peek.is_a?(WakeMessage)
+            return [coalesced, peek] unless peek.is_a?(WakeMessage) && peek.payload.nil?
 
             next if seen.include?(peek.queue_name)
 

@@ -23,17 +23,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
   end
 
   describe "#sweep_orphan_streams" do
-    it "drops empty stream queues with messages older than threshold" do
+    it "drops empty stream queues" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))
         .and_return(%w[pgbus_test_stream_orphan])
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_orphan/), anything)
-        .and_return({
-                      "queue_length" => "0",
-                      "newest_msg_age_sec" => nil
-                    })
+        .and_return({ "queue_length" => "0" })
 
       dispatcher.send(:sweep_orphan_streams)
 
@@ -41,17 +38,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
         .with("pgbus_test_stream_orphan", prefixed: false)
     end
 
-    it "keeps stream queues that have recent messages within threshold" do
+    it "keeps stream queues that have messages" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))
         .and_return(%w[pgbus_test_stream_chat])
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_chat/), anything)
-        .and_return({
-                      "queue_length" => "5",
-                      "newest_msg_age_sec" => "10"
-                    })
+        .and_return({ "queue_length" => "5" })
 
       dispatcher.send(:sweep_orphan_streams)
 
@@ -80,22 +74,30 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect { dispatcher.send(:sweep_orphan_streams) }.not_to raise_error
     end
 
-    it "drops queues with messages that are all older than threshold (stale orphans)" do
+    it "preserves non-empty queues even when stale (durable replay contract)" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))
         .and_return(%w[pgbus_test_stream_stale])
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_stale/), anything)
-        .and_return({
-                      "queue_length" => "100",
-                      "newest_msg_age_sec" => "200000"
-                    })
+        .and_return({ "queue_length" => "100" })
 
       dispatcher.send(:sweep_orphan_streams)
 
-      expect(mock_client).to have_received(:drop_queue)
-        .with("pgbus_test_stream_stale", prefixed: false)
+      expect(mock_client).not_to have_received(:drop_queue)
+    end
+
+    it "skips sweeping when threshold is nil (disabled)" do
+      config.streams_orphan_threshold = nil
+
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_test_stream_empty])
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).not_to have_received(:drop_queue)
     end
 
     it "is wired into the dispatcher maintenance loop" do

@@ -88,7 +88,8 @@ module Pgbus
         run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
         run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
         run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
-        run_if_due(now, :@last_orphan_stream_sweep_at, ORPHAN_STREAM_SWEEP_INTERVAL) { sweep_orphan_streams }
+        sweep_interval = config.streams_orphan_sweep_interval
+        run_if_due(now, :@last_orphan_stream_sweep_at, sweep_interval) { sweep_orphan_streams } if sweep_interval
         run_if_due(now, :@last_table_maintenance_at, TABLE_MAINTENANCE_INTERVAL) { run_table_maintenance }
       end
 
@@ -323,6 +324,8 @@ module Pgbus
         return if prefix.nil? || prefix.empty?
 
         threshold = config.streams_orphan_threshold
+        return unless threshold
+
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
@@ -331,18 +334,12 @@ module Pgbus
           next unless full_name.start_with?("#{prefix}_")
 
           row = conn.select_one(<<~SQL, "Pgbus Orphan Check")
-            SELECT
-              count(*) AS queue_length,
-              EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int AS newest_msg_age_sec
+            SELECT count(*) AS queue_length
             FROM pgmq.q_#{QueueNameValidator.sanitize!(full_name)}
           SQL
 
           next unless row
-
-          queue_length = row["queue_length"].to_i
-          newest_age = row["newest_msg_age_sec"]&.to_i
-
-          next if queue_length.positive? && (newest_age.nil? || newest_age < threshold)
+          next if row["queue_length"].to_i.positive?
 
           Pgbus.client.drop_queue(full_name, prefixed: false)
           dropped += 1

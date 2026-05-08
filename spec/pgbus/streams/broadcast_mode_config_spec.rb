@@ -56,5 +56,15 @@ RSpec.describe Pgbus::Configuration do
       config.streams_orphan_threshold = -1
       expect { config.validate! }.to raise_error(ArgumentError, /streams_orphan_threshold/)
     end
+
+    it "accepts nil streams_orphan_sweep_interval (disables sweeper)" do
+      config.streams_orphan_sweep_interval = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts nil streams_orphan_threshold (disables sweeper)" do
+      config.streams_orphan_threshold = nil
+      expect { config.validate! }.not_to raise_error
+    end
   end
 end

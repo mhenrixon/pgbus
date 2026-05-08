@@ -361,13 +361,14 @@ module Pgbus
 
       raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
 
-      unless streams_orphan_sweep_interval.is_a?(Numeric) && streams_orphan_sweep_interval.positive?
-        raise ArgumentError, "streams_orphan_sweep_interval must be a positive number"
+      if streams_orphan_sweep_interval && !(streams_orphan_sweep_interval.is_a?(Numeric) && streams_orphan_sweep_interval.positive?)
+        raise ArgumentError, "streams_orphan_sweep_interval must be a positive number or nil to disable"
       end
 
+      return if streams_orphan_threshold.nil?
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
-      raise ArgumentError, "streams_orphan_threshold must be a positive number"
+      raise ArgumentError, "streams_orphan_threshold must be a positive number or nil to disable"
     end
 
     # Set the worker capsule list. Accepts:
