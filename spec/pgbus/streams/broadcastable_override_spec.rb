@@ -51,10 +51,6 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride do
         Turbo::StreamsChannel.broadcast_render_to(*streamables, **rendering)
       end
 
-      def broadcast_render_later_to(*streamables, **rendering)
-        Turbo::StreamsChannel.broadcast_render_later_to(*streamables, **rendering)
-      end
-
       def suppressed_turbo_broadcasts?
         false
       end
@@ -107,10 +103,6 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride do
         end
 
         def broadcast_render_to(*streamables, **)
-          broadcast_stream_to(*streamables, content: "<turbo-stream/>")
-        end
-
-        def broadcast_render_later_to(*streamables, **)
           broadcast_stream_to(*streamables, content: "<turbo-stream/>")
         end
 
@@ -234,12 +226,6 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride do
 
     it "forwards durable: for broadcast_render_to" do
       model.broadcast_render_to("room:42", durable: true, html: "<div/>")
-
-      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
-    end
-
-    it "forwards durable: for broadcast_render_later_to" do
-      model.broadcast_render_later_to("room:42", durable: true, html: "<div/>")
 
       expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
     end

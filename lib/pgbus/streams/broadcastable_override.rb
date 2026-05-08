@@ -30,7 +30,6 @@ module Pgbus
         broadcast_remove_to
         broadcast_refresh_to
         broadcast_render_to
-        broadcast_render_later_to
       ].freeze
 
       BROADCAST_ACTION_METHODS = %i[
