@@ -15,7 +15,7 @@ RSpec.describe Pgbus::Client::NotifyStream do
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)
-    allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
+    allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn)
   end
 
   let(:config) do

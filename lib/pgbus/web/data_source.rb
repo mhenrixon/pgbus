@@ -1023,7 +1023,8 @@ module Pgbus
               (SELECT EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int FROM pgmq.#{qtable}) AS oldest_msg_age_sec,
               (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pgmq.#{seq_name}) AS total_messages
           SQL
-        rescue StandardError
+        rescue StandardError => e
+          Pgbus.logger.debug { "[Pgbus::Web] Skipping queue metrics for #{name}: #{e.message}" }
           nil
         end
 
