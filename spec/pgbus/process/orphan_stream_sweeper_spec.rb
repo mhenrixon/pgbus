@@ -74,7 +74,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect { dispatcher.send(:sweep_orphan_streams) }.not_to raise_error
     end
 
-    it "preserves non-empty queues even when stale (durable replay contract)" do
+    it "preserves non-empty queues (durable replay contract)" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))
         .and_return(%w[pgbus_test_stream_stale])
