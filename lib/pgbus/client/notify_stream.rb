@@ -26,7 +26,7 @@ module Pgbus
 
         Instrumentation.instrument("pgbus.stream.notify", stream: stream_name, bytes: json.bytesize) do
           synchronized do
-            @pgmq.with_connection do |conn|
+            @pgmq.__send__(:with_connection) do |conn|
               conn.exec_params("SELECT pg_notify($1, $2)", [channel, json])
             end
           end
