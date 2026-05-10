@@ -136,6 +136,11 @@ module Pgbus
           _autoload_trigger = Pgbus::Streams::TurboBroadcastable
           Pgbus::Streams.install_turbo_broadcastable_patch!
 
+          if defined?(::Turbo::Broadcastable)
+            _autoload_trigger_broadcastable = Pgbus::Streams::BroadcastableOverride
+            Pgbus::Streams::BroadcastableOverride.install!(::Turbo::Broadcastable)
+          end
+
           # Subscribe-side patch: override turbo_stream_from to render
           # <pgbus-stream-source> (SSE) instead of <turbo-cable-stream-source>
           # (ActionCable). Without this, third-party gems like

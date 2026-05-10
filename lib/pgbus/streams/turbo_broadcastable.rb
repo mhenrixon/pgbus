@@ -36,8 +36,13 @@ module Pgbus
     module TurboBroadcastable
       def broadcast_stream_to(*streamables, content:)
         name = stream_name_from(streamables)
-        mode = Pgbus.configuration.streams_default_broadcast_mode
-        Pgbus.stream(name, durable: mode == :durable).broadcast(content)
+        override = Thread.current[:pgbus_broadcast_durable]
+        durable = if override.nil?
+                    Pgbus.configuration.streams_default_broadcast_mode == :durable
+                  else
+                    override
+                  end
+        Pgbus.stream(name, durable: durable).broadcast(content)
       end
     end
 
