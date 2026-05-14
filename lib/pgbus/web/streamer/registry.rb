@@ -37,16 +37,23 @@ module Pgbus
           end
         end
 
+        # Returns true if a matching connection was removed, false if it
+        # was not registered. Callers (e.g. StreamEventDispatcher) use the
+        # return value to make per-connection bookkeeping idempotent on
+        # duplicate DisconnectMessages — prune_dead can enqueue a
+        # DisconnectMessage on every wake while the first one is still
+        # waiting in the queue.
         def unregister(connection)
           @mutex.synchronize do
             existing = @by_id.delete(connection.id)
-            return unless existing
+            return false unless existing
 
             set = @by_stream[existing.stream_name]
-            next unless set
-
-            set.delete(existing)
-            @by_stream.delete(existing.stream_name) if set.empty?
+            if set
+              set.delete(existing)
+              @by_stream.delete(existing.stream_name) if set.empty?
+            end
+            true
           end
         end
 

@@ -98,6 +98,60 @@ RSpec.describe Pgbus::Web::Streamer::Connection do
       expect(conn.last_msg_id_sent).to eq(1249)
     end
 
+    describe "ephemeral envelopes (negative msg_id)" do
+      # Ephemeral broadcasts arrive via PG NOTIFY and bypass PGMQ entirely.
+      # The Dispatcher tags them with -@ephemeral_seq (-1, -2, ...) so they
+      # don't pollute the real PGMQ cursor space. Without special handling,
+      # the cursor check `msg_id <= last_msg_id_sent` would reject every
+      # negative id against any non-negative cursor, silently dropping
+      # every ephemeral broadcast on every fresh connection (since_id: 0).
+      subject(:conn) do
+        described_class.new(
+          id: "c1", stream_name: "chat", io: io, since_id: 0,
+          writer: writer, write_deadline_ms: 5_000
+        )
+      end
+
+      it "delivers ephemeral envelopes through the cursor filter (since_id: 0)" do
+        conn.enqueue([build_envelope(msg_id: -1, payload: "ephemeral-1")])
+
+        expect(writer.writes.length).to eq(1)
+        expect(writer.writes.first[:bytes]).to include("data: ephemeral-1")
+      end
+
+      it "delivers ephemeral envelopes when last_msg_id_sent is positive (post-replay)" do
+        # First a durable broadcast advances the cursor to 1248.
+        conn.enqueue([build_envelope(msg_id: 1248, payload: "durable")])
+        writer.writes.clear
+
+        # Then an ephemeral broadcast with msg_id=-1 must still go through.
+        conn.enqueue([build_envelope(msg_id: -1, payload: "ephemeral")])
+
+        expect(writer.writes.length).to eq(1)
+        expect(writer.writes.first[:bytes]).to include("data: ephemeral")
+      end
+
+      it "does not advance last_msg_id_sent for ephemeral envelopes" do
+        # Cursor must stay at 0 (or wherever it was) so that durable replay
+        # on reconnect still picks up the right starting point.
+        conn.enqueue([build_envelope(msg_id: -1, payload: "x")])
+        expect(conn.last_msg_id_sent).to eq(0)
+      end
+
+      it "delivers a mix of durable and ephemeral envelopes in one call" do
+        envelopes = [
+          build_envelope(msg_id: 1248, payload: "durable-1"),
+          build_envelope(msg_id: -1, payload: "ephemeral"),
+          build_envelope(msg_id: 1249, payload: "durable-2")
+        ]
+
+        conn.enqueue(envelopes)
+
+        expect(writer.writes.length).to eq(3)
+        expect(conn.last_msg_id_sent).to eq(1249)
+      end
+    end
+
     it "passes the configured write deadline through to the writer" do
       conn.enqueue([build_envelope(msg_id: 1248)])
       expect(writer.writes.first[:deadline_ms]).to eq(5_000)

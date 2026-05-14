@@ -90,6 +90,24 @@ RSpec.describe Pgbus::Web::Streamer::Registry do
       registry.unregister(conn)
       expect(registry.streams).to be_empty
     end
+
+    it "returns true when it actually removed a registered connection" do
+      conn = build_conn(id: "c1", stream_name: "chat")
+      registry.register(conn)
+      expect(registry.unregister(conn)).to be true
+    end
+
+    it "returns false when the connection was not registered" do
+      conn = build_conn(id: "ghost", stream_name: "chat")
+      expect(registry.unregister(conn)).to be false
+    end
+
+    it "returns false on a duplicate unregister" do
+      conn = build_conn(id: "c1", stream_name: "chat")
+      registry.register(conn)
+      registry.unregister(conn)
+      expect(registry.unregister(conn)).to be false
+    end
   end
 
   describe "#connections_for" do

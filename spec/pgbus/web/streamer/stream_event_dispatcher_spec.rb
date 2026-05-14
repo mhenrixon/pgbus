@@ -632,6 +632,28 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       expect(dispatcher.stream_counter.active_connections("chat")).to eq(0)
     end
 
+    it "is idempotent on duplicate disconnect (does not over-decrement when prune_dead races)" do
+      # prune_dead enqueues a DisconnectMessage on every wake when the
+      # connection is dead. If two wakes hit before the first
+      # DisconnectMessage drains the queue, two DisconnectMessages exist
+      # for the same connection. The second one used to keep
+      # decrementing, driving the counter negative for the next real
+      # connection.
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      c2 = build_conn(id: "b", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      registry.register(c2)
+      dispatcher.stream_counter.increment_connections("chat")
+      dispatcher.stream_counter.increment_connections("chat")
+
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c1))
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c1))
+
+      # c2 is still registered, so the active count must reflect that —
+      # not be falsely zero from the duplicate decrement.
+      expect(dispatcher.stream_counter.active_connections("chat")).to eq(1)
+    end
+
     it "increments total_connections but not active_connections when connect dies before registry" do
       c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
       c.mark_dead!

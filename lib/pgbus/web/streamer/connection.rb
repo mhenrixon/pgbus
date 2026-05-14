@@ -38,7 +38,8 @@ module Pgbus
         def enqueue(envelopes)
           written = []
           envelopes.each do |envelope|
-            next if envelope.msg_id <= @last_msg_id_sent
+            ephemeral = envelope.msg_id.negative?
+            next if !ephemeral && envelope.msg_id <= @last_msg_id_sent
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
@@ -48,7 +49,7 @@ module Pgbus
 
             result = @writer.write(self, bytes, deadline_ms: @write_deadline_ms)
             if result == :ok
-              @last_msg_id_sent = envelope.msg_id
+              @last_msg_id_sent = envelope.msg_id unless ephemeral
               @last_write_at = monotonic
               written << envelope
             else
