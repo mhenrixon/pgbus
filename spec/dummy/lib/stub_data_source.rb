@@ -182,6 +182,17 @@ module DummyApp
       { "success" => 335, "failed" => 5, "dead_lettered" => 2 }
     end
 
+    def live_stream_metrics
+      {
+        streams: {
+          "chat:lobby" => { broadcasts: 420, active_connections: 12, total_connections: 92 },
+          "orders:dashboard" => { broadcasts: 312, active_connections: 3, total_connections: 45 },
+          "notifications:admin" => { broadcasts: 214, active_connections: 1, total_connections: 18 }
+        },
+        totals: { broadcasts: 946, active_connections: 16, total_connections: 155, streams: 3 }
+      }
+    end
+
     # Stream stats — opt-in in production, always "available" in the
     # dummy app so the Insights QA surface demos the section.
     def stream_stats_available?
