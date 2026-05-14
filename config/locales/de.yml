@@ -222,6 +222,15 @@ de:
             p95: P95 (ms)
             queue: Warteschlange
           title: Latenz nach Warteschlange
+        live_streams:
+          active_connections: Aktive Verbindungen
+          broadcasts: Gesamt-Broadcasts
+          empty: Keine aktiven Streams in diesem Prozess
+          per_stream_title: Pro-Stream-Zähler
+          stream: Stream
+          streams: Streams
+          title: Live-Stream-Zähler
+          total_connections: Gesamtverbindungen
         slowest:
           empty: Noch keine Auftragsstatistiken
           headers:

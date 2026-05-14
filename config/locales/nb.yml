@@ -222,6 +222,15 @@ nb:
             p95: P95 (ms)
             queue: Kø
           title: Forsinkelse per kø
+        live_streams:
+          active_connections: Aktive tilkoblinger
+          broadcasts: Totale kringkastinger
+          empty: Ingen aktive strømmer i denne prosessen
+          per_stream_title: Per-strøm tellere
+          stream: Strøm
+          streams: Strømmer
+          title: Sanntids strømtellere
+          total_connections: Totale tilkoblinger
         slowest:
           empty: Ingen jobbstatistikk ennå
           headers:

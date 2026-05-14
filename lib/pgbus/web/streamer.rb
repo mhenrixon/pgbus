@@ -37,8 +37,10 @@ module Pgbus
           @current_mutex.synchronize { @current = instance }
         end
 
-        # Tear down the current instance and clear the slot. Called by the
-        # Puma shutdown hook (Phase 4.4) and by tests between examples.
+        def stream_counter
+          @current_mutex.synchronize { @current&.stream_counter }
+        end
+
         def reset!
           instance = nil
           @current_mutex.synchronize do

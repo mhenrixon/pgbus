@@ -681,6 +681,19 @@ module Pgbus
       # true AND the migration has been run. Controllers should gate
       # rendering on `stream_stats_available?` to avoid showing empty
       # sections.
+      def live_stream_metrics
+        counter = Pgbus::Web::Streamer.stream_counter
+        unless counter
+          empty_totals = { broadcasts: 0, active_connections: 0, total_connections: 0, streams: 0 }
+          return { streams: {}, totals: empty_totals }
+        end
+
+        { streams: counter.snapshot, totals: counter.totals }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching live stream metrics: #{e.message}" }
+        { streams: {}, totals: { broadcasts: 0, active_connections: 0, total_connections: 0, streams: 0 } }
+      end
+
       def stream_stats_available?
         Pgbus.configuration.streams_stats_enabled && StreamStat.table_exists?
       rescue StandardError => e

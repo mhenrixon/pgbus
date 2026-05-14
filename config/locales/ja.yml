@@ -222,6 +222,15 @@ ja:
             p95: P95 (ms)
             queue: キュー
           title: キュー別遅延
+        live_streams:
+          active_connections: アクティブ接続
+          broadcasts: 総ブロードキャスト
+          empty: このプロセスにアクティブなストリームはありません
+          per_stream_title: ストリーム別カウンター
+          stream: ストリーム
+          streams: ストリーム
+          title: ライブストリームカウンター
+          total_connections: 総接続数
         slowest:
           empty: まだジョブ統計がありません
           headers:

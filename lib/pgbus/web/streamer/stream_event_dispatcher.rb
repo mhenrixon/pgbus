@@ -47,9 +47,11 @@ module Pgbus
 
         DEFAULT_READ_LIMIT = 500
 
+        attr_reader :stream_counter
+
         def initialize(client:, registry:, listener:, dispatch_queue:,
                        logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
-                       filters: nil, config: nil)
+                       filters: nil, config: nil, stream_counter: nil)
           @client = client
           @registry = registry
           @listener = listener
@@ -67,6 +69,7 @@ module Pgbus
           # process-wide setting. Falls back to the global config
           # for production call sites that don't specify one.
           @config = config || Pgbus.configuration
+          @stream_counter = stream_counter || StreamCounter.new
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
           # PGMQ full table name (pgbus_<prefix>_<name>) → logical stream
@@ -224,6 +227,7 @@ module Pgbus
           end
 
           prune_dead(registered)
+          @stream_counter.increment_broadcasts(stream)
 
           record_stat(
             stream_name: stream,
@@ -258,12 +262,14 @@ module Pgbus
           end
 
           prune_dead(registered)
+          @stream_counter.increment_broadcasts(stream)
 
           record_stat(
             stream_name: stream,
             event_type: "broadcast",
             started_at: started_at,
-            fanout: registered.size + in_flight_pairs.size
+            fanout: registered.size + in_flight_pairs.size,
+            ephemeral: true
           )
         end
 
@@ -312,18 +318,15 @@ module Pgbus
           # here. Otherwise this stream's state is pinned for the
           # life of the worker.
           remove_in_flight(stream, connection)
+          @stream_counter.increment_total_connections(stream)
           if connection.dead?
             @scanned_cursor.delete(connection)
             cleanup_stream_if_unused(stream)
           else
+            @stream_counter.increment_connections(stream)
             @registry.register(connection)
           end
 
-          # Record the connect regardless of whether the connection
-          # survived the replay — a dead-before-register is still an
-          # operator-visible "connection attempt" and disconnects
-          # won't be recorded for it, so dropping it here would
-          # under-count.
           record_stat(
             stream_name: stream,
             event_type: "connect",
@@ -347,6 +350,7 @@ module Pgbus
           stream = connection.stream_name
           @registry.unregister(connection)
           @scanned_cursor.delete(connection)
+          @stream_counter.decrement_connections(stream)
           cleanup_stream_if_unused(stream)
 
           record_stat(
@@ -479,8 +483,8 @@ module Pgbus
         # if operators actually look at it. All failures are
         # swallowed by StreamStat.record! itself so a stats-table
         # outage cannot block the dispatcher.
-        def record_stat(stream_name:, event_type:, started_at:, fanout: nil)
-          return unless @config.streams_stats_enabled
+        def record_stat(stream_name:, event_type:, started_at:, fanout: nil, ephemeral: false)
+          return unless ephemeral || @config.streams_stats_enabled
 
           Pgbus::StreamStat.record!(
             stream_name: stream_name,

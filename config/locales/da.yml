@@ -222,6 +222,15 @@ da:
             p95: P95 (ms)
             queue: Kø
           title: Forsinkelse efter kø
+        live_streams:
+          active_connections: Aktive forbindelser
+          broadcasts: Samlede udsendelser
+          empty: Ingen aktive streams i denne proces
+          per_stream_title: Per-stream tællere
+          stream: Stream
+          streams: Streams
+          title: Live stream-tællere
+          total_connections: Samlede forbindelser
         slowest:
           empty: Ingen jobstatistikker endnu
           headers:

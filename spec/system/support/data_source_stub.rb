@@ -118,6 +118,11 @@ module Pgbus
       def job_throughput(minutes: 60) = @insights_throughput
       def job_status_counts(minutes: 60) = @insights_status_counts
 
+      # Live stream metrics (always-on in-memory counters)
+      def live_stream_metrics
+        { streams: {}, totals: { broadcasts: 0, active_connections: 0, total_connections: 0, streams: 0 } }
+      end
+
       # Insights (stream stats — opt-in, default unavailable)
       def stream_stats_available? = @stream_stats_available
       def stream_stats_summary(minutes: 60) = @stream_summary

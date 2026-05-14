@@ -222,6 +222,15 @@ nl:
             p95: P95 (ms)
             queue: Wachtrij
           title: Vertraging per wachtrij
+        live_streams:
+          active_connections: Actieve verbindingen
+          broadcasts: Totaal uitzendingen
+          empty: Geen actieve streams in dit proces
+          per_stream_title: Per-stream tellers
+          stream: Stream
+          streams: Streams
+          title: Live stream-tellers
+          total_connections: Totale verbindingen
         slowest:
           empty: Nog geen taakstatistieken
           headers:

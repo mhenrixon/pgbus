@@ -15,6 +15,7 @@ module Pgbus
           payload[:latency_trend] = data_source.latency_trend(minutes: minutes)
           payload[:latency_by_queue] = data_source.latency_by_queue(minutes: minutes)
         end
+        payload[:live_streams] = data_source.live_stream_metrics
         render json: payload
       end
     end

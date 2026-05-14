@@ -222,6 +222,15 @@ fi:
             p95: P95 (ms)
             queue: Jono
           title: Viive jonon mukaan
+        live_streams:
+          active_connections: Aktiiviset yhteydet
+          broadcasts: Lähetykset yhteensä
+          empty: Ei aktiivisia striimejä tässä prosessissa
+          per_stream_title: Striimikohtaiset laskurit
+          stream: Striimi
+          streams: Striimit
+          title: Reaaliaikaiset striimilaskurit
+          total_connections: Yhteydet yhteensä
         slowest:
           empty: Ei vielä tehtävätilastoja
           headers:

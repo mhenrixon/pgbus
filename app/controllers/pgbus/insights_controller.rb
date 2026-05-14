@@ -9,6 +9,8 @@ module Pgbus
       @latency_by_queue = data_source.latency_by_queue(minutes: @minutes)
       @latency_available = Pgbus::JobStat.latency_columns?
 
+      @live_stream_metrics = data_source.live_stream_metrics
+
       @stream_stats_available = data_source.stream_stats_available?
       return unless @stream_stats_available
 
