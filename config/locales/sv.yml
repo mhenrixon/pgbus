@@ -226,7 +226,9 @@ sv:
           active_connections: Aktiva anslutningar
           broadcasts: Totala sändningar
           empty: Inga aktiva strömmar i denna process
+          per_stream_title: Per-ström mätare
           stream: Ström
+          streams: Strömmar
           title: Realtids strömmätare
           total_connections: Totala anslutningar
         slowest:

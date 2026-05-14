@@ -226,7 +226,9 @@ fr:
           active_connections: Connexions actives
           broadcasts: Diffusions totales
           empty: Aucun flux actif dans ce processus
+          per_stream_title: Compteurs par flux
           stream: Flux
+          streams: Flux
           title: Compteurs de flux en direct
           total_connections: Connexions totales
         slowest:

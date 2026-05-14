@@ -632,7 +632,7 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       expect(dispatcher.stream_counter.active_connections("chat")).to eq(0)
     end
 
-    it "does not increment connection counter when connect dies before registry" do
+    it "increments total_connections but not active_connections when connect dies before registry" do
       c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
       c.mark_dead!
       allow(client).to receive(:read_after).and_return([])

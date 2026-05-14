@@ -226,7 +226,9 @@ pt:
           active_connections: Conexões ativas
           broadcasts: Transmissões totais
           empty: Nenhum stream ativo neste processo
+          per_stream_title: Contadores por stream
           stream: Stream
+          streams: Streams
           title: Contadores de stream ao vivo
           total_connections: Conexões totais
         slowest:

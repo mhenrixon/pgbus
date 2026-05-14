@@ -226,7 +226,9 @@ ja:
           active_connections: アクティブ接続
           broadcasts: 総ブロードキャスト
           empty: このプロセスにアクティブなストリームはありません
+          per_stream_title: ストリーム別カウンター
           stream: ストリーム
+          streams: ストリーム
           title: ライブストリームカウンター
           total_connections: 総接続数
         slowest:

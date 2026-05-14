@@ -226,7 +226,9 @@ en:
           active_connections: Active Connections
           broadcasts: Total Broadcasts
           empty: No streams active in this process
+          per_stream_title: Per-Stream Counters
           stream: Stream
+          streams: Streams
           title: Live Stream Counters
           total_connections: Total Connections
         slowest:
