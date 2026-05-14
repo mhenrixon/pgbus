@@ -25,9 +25,11 @@ module Pgbus
         json = payload.is_a?(String) ? payload : JSON.generate(payload)
 
         Instrumentation.instrument("pgbus.stream.notify", stream: stream_name, bytes: json.bytesize) do
-          synchronized do
-            @pgmq.__send__(:with_connection) do |conn|
-              conn.exec_params("SELECT pg_notify($1, $2)", [channel, json])
+          with_stale_connection_retry do
+            synchronized do
+              @pgmq.__send__(:with_connection) do |conn|
+                conn.exec_params("SELECT pg_notify($1, $2)", [channel, json])
+              end
             end
           end
         end

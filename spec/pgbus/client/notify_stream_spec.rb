@@ -66,5 +66,68 @@ RSpec.describe Pgbus::Client::NotifyStream do
         )
       )
     end
+
+    context "with stale pgmq connection recovery" do
+      before do
+        stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      end
+
+      let(:ssl_eof_msg) { "Database connection error: PQconsumeInput() SSL error: unexpected eof while reading" }
+
+      it "retries once on an idle-socket SSL EOF" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:with_connection) do |&block|
+          call_count += 1
+          raise PGMQ::Errors::ConnectionError, ssl_eof_msg if call_count == 1
+
+          block.call(raw_conn)
+        end
+
+        expect do
+          client.notify_stream("chat", { "html" => "<turbo-stream/>" })
+        end.not_to raise_error
+
+        expect(call_count).to eq(2)
+      end
+
+      it "does not retry on a non-matching ConnectionError" do
+        allow(mock_pgmq).to receive(:with_connection)
+          .and_raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+
+        expect do
+          client.notify_stream("chat", { "html" => "X" })
+        end.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
+      end
+
+      it "gives up after one retry (double failure) and re-raises" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:with_connection) do |&_block|
+          call_count += 1
+          raise PGMQ::Errors::ConnectionError, ssl_eof_msg
+        end
+
+        expect do
+          client.notify_stream("chat", { "html" => "X" })
+        end.to raise_error(PGMQ::Errors::ConnectionError)
+
+        expect(call_count).to eq(2)
+      end
+
+      it "logs a warning on the retry path" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:with_connection) do |&block|
+          call_count += 1
+          raise PGMQ::Errors::ConnectionError, ssl_eof_msg if call_count == 1
+
+          block.call(raw_conn)
+        end
+
+        allow(Pgbus.logger).to receive(:warn)
+
+        client.notify_stream("chat", { "html" => "X" })
+
+        expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
   end
 end
