@@ -348,9 +348,9 @@ module Pgbus
           started_at = monotonic_ms
           connection = msg.connection
           stream = connection.stream_name
-          @registry.unregister(connection)
+          removed = @registry.unregister(connection)
           @scanned_cursor.delete(connection)
-          @stream_counter.decrement_connections(stream)
+          @stream_counter.decrement_connections(stream) if removed
           cleanup_stream_if_unused(stream)
 
           record_stat(
