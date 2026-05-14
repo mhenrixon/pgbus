@@ -916,4 +916,41 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result.first[:queue_name]).to eq("pgbus_default_dlq")
     end
   end
+
+  describe "#live_stream_metrics" do
+    let(:counter) { Pgbus::Web::Streamer::StreamCounter.new }
+
+    before do
+      allow(Pgbus::Web::Streamer).to receive(:stream_counter).and_return(counter)
+    end
+
+    it "returns per-stream metrics from the in-memory counter" do
+      counter.increment_broadcasts("chat")
+      counter.increment_broadcasts("chat")
+      counter.increment_connections("chat")
+      counter.increment_total_connections("chat")
+      counter.increment_broadcasts("alerts")
+
+      result = data_source.live_stream_metrics
+
+      expect(result[:streams]).to include(
+        "chat" => hash_including(broadcasts: 2, active_connections: 1, total_connections: 1),
+        "alerts" => hash_including(broadcasts: 1, active_connections: 0, total_connections: 0)
+      )
+      expect(result[:totals]).to include(
+        broadcasts: 3,
+        active_connections: 1,
+        streams: 2
+      )
+    end
+
+    it "returns empty metrics when no streamer is running" do
+      allow(Pgbus::Web::Streamer).to receive(:stream_counter).and_return(nil)
+
+      result = data_source.live_stream_metrics
+
+      expect(result[:streams]).to eq({})
+      expect(result[:totals]).to eq(broadcasts: 0, active_connections: 0, total_connections: 0, streams: 0)
+    end
+  end
 end

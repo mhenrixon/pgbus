@@ -222,6 +222,13 @@ pt:
             p95: P95 (ms)
             queue: Fila
           title: Latência por Fila
+        live_streams:
+          active_connections: Conexões ativas
+          broadcasts: Transmissões totais
+          empty: Nenhum stream ativo neste processo
+          stream: Stream
+          title: Contadores de stream ao vivo
+          total_connections: Conexões totais
         slowest:
           empty: Nenhuma estatística de tarefa ainda
           headers:

@@ -222,6 +222,13 @@ it:
             p95: P95 (ms)
             queue: Coda
           title: Latenza per coda
+        live_streams:
+          active_connections: Connessioni attive
+          broadcasts: Trasmissioni totali
+          empty: Nessuno stream attivo in questo processo
+          stream: Stream
+          title: Contatori stream in tempo reale
+          total_connections: Connessioni totali
         slowest:
           empty: Nessuna statistica lavori ancora
           headers:

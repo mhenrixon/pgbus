@@ -222,6 +222,13 @@ en:
             p95: P95 (ms)
             queue: Queue
           title: Latency by Queue
+        live_streams:
+          active_connections: Active Connections
+          broadcasts: Total Broadcasts
+          empty: No streams active in this process
+          stream: Stream
+          title: Live Stream Counters
+          total_connections: Total Connections
         slowest:
           empty: No job stats yet
           headers:

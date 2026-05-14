@@ -488,6 +488,19 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
         expect(Pgbus::StreamStat).not_to have_received(:record!)
       end
 
+      it "records an ephemeral broadcast even when stats are disabled" do
+        c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+        registry.register(c)
+        allow(Pgbus::StreamStat).to receive(:record!)
+        payload = '{"html":"<turbo-stream>hi</turbo-stream>"}'
+
+        dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat", payload: payload))
+
+        expect(Pgbus::StreamStat).to have_received(:record!).with(
+          hash_including(stream_name: "chat", event_type: "broadcast")
+        )
+      end
+
       it "does not record a connect on handle_connect" do
         c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
         allow(client).to receive(:read_after).and_return([])
@@ -574,6 +587,60 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
           dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
         end.not_to raise_error
       end
+    end
+  end
+
+  describe "in-memory stream counters (always-on)" do
+    it "increments broadcast counter on durable wake" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c)
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(dispatcher.stream_counter.broadcasts("chat")).to eq(1)
+    end
+
+    it "increments broadcast counter on ephemeral wake" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c)
+      payload = '{"html":"<turbo-stream>hi</turbo-stream>"}'
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat", payload: payload))
+
+      expect(dispatcher.stream_counter.broadcasts("chat")).to eq(1)
+    end
+
+    it "increments connection counter on connect" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      allow(client).to receive(:read_after).and_return([])
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: c))
+
+      expect(dispatcher.stream_counter.active_connections("chat")).to eq(1)
+      expect(dispatcher.stream_counter.total_connections("chat")).to eq(1)
+    end
+
+    it "decrements connection counter on disconnect" do
+      c = build_conn(id: "a", stream_name: "chat")
+      registry.register(c)
+      allow(client).to receive(:read_after).and_return([])
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: c))
+
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c))
+
+      expect(dispatcher.stream_counter.active_connections("chat")).to eq(0)
+    end
+
+    it "does not increment connection counter when connect dies before registry" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      c.mark_dead!
+      allow(client).to receive(:read_after).and_return([])
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: c))
+
+      expect(dispatcher.stream_counter.active_connections("chat")).to eq(0)
+      expect(dispatcher.stream_counter.total_connections("chat")).to eq(1)
     end
   end
 

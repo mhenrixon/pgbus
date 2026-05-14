@@ -222,6 +222,13 @@ fr:
             p95: P95 (ms)
             queue: File d'attente
           title: Latence par file d'attente
+        live_streams:
+          active_connections: Connexions actives
+          broadcasts: Diffusions totales
+          empty: Aucun flux actif dans ce processus
+          stream: Flux
+          title: Compteurs de flux en direct
+          total_connections: Connexions totales
         slowest:
           empty: Pas encore de statistiques de tâches
           headers:

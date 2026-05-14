@@ -20,7 +20,7 @@ module Pgbus
       # production the module-level Streamer.current(...) builds all of the
       # defaults from the configuration.
       class Instance
-        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue
+        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue, :stream_counter
 
         def initialize(
           client: Pgbus.client,
@@ -36,6 +36,7 @@ module Pgbus
           @registry = registry || Registry.new
           @dispatch_queue = dispatch_queue || Queue.new
 
+          @stream_counter = StreamCounter.new
           @pg_connection = pg_connection || build_pg_connection
           @listener = Listener.new(
             pg_connection: @pg_connection,
@@ -49,7 +50,8 @@ module Pgbus
             listener: @listener,
             dispatch_queue: @dispatch_queue,
             logger: @logger,
-            config: @config
+            config: @config,
+            stream_counter: @stream_counter
           )
           @heartbeat = Heartbeat.new(
             registry: @registry,

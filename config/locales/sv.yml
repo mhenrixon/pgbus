@@ -222,6 +222,13 @@ sv:
             p95: P95 (ms)
             queue: Kö
           title: Fördröjning per kö
+        live_streams:
+          active_connections: Aktiva anslutningar
+          broadcasts: Totala sändningar
+          empty: Inga aktiva strömmar i denna process
+          stream: Ström
+          title: Realtids strömmätare
+          total_connections: Totala anslutningar
         slowest:
           empty: Inga jobbstatistik än
           headers:

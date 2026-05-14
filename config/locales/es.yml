@@ -222,6 +222,13 @@ es:
             p95: P95 (ms)
             queue: Cola
           title: Latencia por Cola
+        live_streams:
+          active_connections: Conexiones activas
+          broadcasts: Emisiones totales
+          empty: No hay streams activos en este proceso
+          stream: Stream
+          title: Contadores de streams en vivo
+          total_connections: Conexiones totales
         slowest:
           empty: Aún no hay estadísticas de trabajos
           headers:
