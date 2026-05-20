@@ -131,21 +131,16 @@ module Pgbus
             msg = @queue.pop
             break if msg == :__stop__
 
-            # Wake coalescing: if a WakeMessage arrives, opportunistically
-            # drain consecutive same-stream wakes from the queue. Without
-            # this, N broadcasts in rapid succession produce N
-            # WakeMessages, each running its own read_after roundtrip
-            # even though one read_after with the lowest cursor would
-            # have pulled all N messages. The drain is bounded by the
-            # queue's current contents — once we hit a non-Wake or a
-            # different stream, we stop and let the regular path handle
-            # the rest.
-            if msg.is_a?(WakeMessage) && msg.payload.nil?
-              wakes, trailing = drain_wakes_for(msg)
-              wakes.each { |w| handle(w) }
-              handle(trailing) if trailing
-            else
-              handle(msg)
+            begin
+              if msg.is_a?(WakeMessage) && msg.payload.nil?
+                wakes, trailing = drain_wakes_for(msg)
+                wakes.each { |w| handle(w) }
+                handle(trailing) if trailing
+              else
+                handle(msg)
+              end
+            ensure
+              release_ar_connections
             end
           end
         rescue StandardError => e
@@ -483,6 +478,19 @@ module Pgbus
         # if operators actually look at it. All failures are
         # swallowed by StreamStat.record! itself so a stats-table
         # outage cannot block the dispatcher.
+        # Release any AR connections the dispatcher fiber acquired during
+        # this iteration (typically from StreamStat.record! via BusRecord).
+        # Without this, the connection stays leased while the fiber parks
+        # on @queue.pop, blocking clear_reloadable_connections! on the
+        # next Rails code reload (10s wedge under rack-timeout).
+        def release_ar_connections
+          return unless defined?(::ActiveRecord::Base)
+
+          Pgbus::BusRecord.connection_handler.clear_active_connections!
+        rescue StandardError => e
+          @logger.debug { "[Pgbus::Streamer::StreamEventDispatcher] AR connection release failed: #{e.class}: #{e.message}" }
+        end
+
         def record_stat(stream_name:, event_type:, started_at:, fanout: nil, ephemeral: false)
           return unless ephemeral || @config.streams_stats_enabled
 
