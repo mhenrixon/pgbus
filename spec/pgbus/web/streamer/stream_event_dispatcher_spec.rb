@@ -590,6 +590,47 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     end
   end
 
+  describe "AR connection release after each run_loop iteration" do
+    it "releases ActiveRecord connections after processing a message" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c)
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      handler = double("ConnectionHandler")
+      allow(Pgbus::BusRecord).to receive(:connection_handler).and_return(handler)
+      allow(handler).to receive(:clear_active_connections!)
+
+      dispatcher.start
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+
+      deadline = Time.now + 2
+      sleep 0.01 until c.enqueued.any? || Time.now > deadline
+
+      dispatcher.stop
+
+      expect(handler).to have_received(:clear_active_connections!).at_least(:once)
+    end
+
+    it "releases connections even when handle raises" do
+      c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c)
+      allow(client).to receive(:read_after).and_raise(StandardError, "boom")
+
+      handler = double("ConnectionHandler")
+      allow(Pgbus::BusRecord).to receive(:connection_handler).and_return(handler)
+      allow(handler).to receive(:clear_active_connections!)
+
+      dispatcher.start
+      dispatch_queue << described_class::WakeMessage.new(queue_name: "chat")
+
+      sleep 0.05
+
+      dispatcher.stop
+
+      expect(handler).to have_received(:clear_active_connections!).at_least(:once)
+    end
+  end
+
   describe "in-memory stream counters (always-on)" do
     it "increments broadcast counter on durable wake" do
       c = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
