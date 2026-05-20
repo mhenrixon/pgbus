@@ -107,7 +107,8 @@ module Pgbus
                   :streams_stats_enabled, :streams_test_mode,
                   :streams_orphan_sweep_interval, :streams_orphan_threshold,
                   :streams_durable_patterns
-    attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
+    attr_reader :streams_default_broadcast_mode, # rubocop:disable Style/AccessorGrouping
+                :streams_wake_mechanism
 
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
     # Set to false to opt out without uninstalling the appsignal gem.
@@ -220,6 +221,7 @@ module Pgbus
       @streams_stats_enabled = false
       @streams_test_mode = false
       @streams_default_broadcast_mode = :ephemeral
+      @streams_wake_mechanism = :listen_notify
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
       @streams_durable_patterns = []
@@ -281,6 +283,24 @@ module Pgbus
       end
 
       @streams_default_broadcast_mode = mode
+    end
+
+    # Streamer wake-up mechanism:
+    #   :listen_notify       — default. Use LISTEN/NOTIFY (incompatible with
+    #                          PgBouncer transaction-pool mode).
+    #   :logical_replication — Use a logical replication slot to receive
+    #                          PGMQ INSERTs. Survives any pooler. Requires
+    #                          REPLICATION privilege and wal_level=logical.
+    VALID_WAKE_MECHANISMS = %i[listen_notify logical_replication].freeze
+
+    def streams_wake_mechanism=(mechanism)
+      mechanism = mechanism.to_sym
+      unless VALID_WAKE_MECHANISMS.include?(mechanism)
+        raise ArgumentError,
+              "Invalid streams_wake_mechanism: #{mechanism}. Must be one of: #{VALID_WAKE_MECHANISMS.join(", ")}"
+      end
+
+      @streams_wake_mechanism = mechanism
     end
 
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze

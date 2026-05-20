@@ -1,0 +1,119 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# End-to-end repro: drive LogicalReplicationListener against a real PG
+# (optionally through PgBouncer in transaction mode) and confirm it delivers
+# WakeMessages where LISTEN/NOTIFY would have dropped them.
+#
+# Usage:
+#   PGBUS_REPRO_PORT=6432 bin/repro-logical-listener  # via pgbouncer
+#   PGBUS_REPRO_PORT=5432 bin/repro-logical-listener  # direct
+#
+# Requires:
+#   - Local PG with wal_level = logical
+#   - PGMQ extension on the target DB (or pgbus's embedded mode)
+#   - A queue table at pgmq.q_pgbus_repro_listener (created by the script)
+#
+# Env overrides (all optional, sensible defaults for a stock local PG):
+#   PGBUS_REPRO_HOST  default 127.0.0.1
+#   PGBUS_REPRO_PORT  default 6432 (set to 5432 to test the direct path)
+#   PGBUS_REPRO_DB    default pgbus_repro
+#   PGBUS_REPRO_USER  default $USER
+
+require "pgbus"
+require "pg"
+
+HOST     = ENV.fetch("PGBUS_REPRO_HOST", "127.0.0.1")
+PORT     = ENV.fetch("PGBUS_REPRO_PORT", "6432").to_i
+DATABASE = ENV.fetch("PGBUS_REPRO_DB", "pgbus_repro")
+USER     = ENV.fetch("PGBUS_REPRO_USER", ENV.fetch("USER", "postgres"))
+QUEUE    = "repro_listener"
+SLOT     = "pgbus_streamer_repro_listener"
+
+# Set up pgbus configuration so the listener's bootstrap (ensure_publication! /
+# ensure_slot! / with_admin_connection) can build the helper connection.
+Pgbus.configure do |c|
+  c.connection_params = { host: HOST, port: PORT, dbname: DATABASE, user: USER }
+  c.streams_wake_mechanism = :logical_replication
+end
+
+# Pre-flight: ensure the queue table exists. In the real app pgbus creates
+# these on first broadcast — for this script we just make sure something is
+# there to INSERT into.
+admin = PG.connect(host: HOST, port: PORT, dbname: DATABASE, user: USER)
+table_exists = admin.exec_params(
+  "SELECT 1 FROM information_schema.tables WHERE table_schema = 'pgmq' AND table_name = $1",
+  ["q_pgbus_#{QUEUE}"]
+).any?
+
+unless table_exists
+  puts "[bootstrap] creating queue pgbus_#{QUEUE}"
+  admin.exec_params("SELECT pgmq.create($1)", ["pgbus_#{QUEUE}"])
+end
+
+# Clean state: drop any old slot from a previous run so the script is idempotent.
+admin.exec_params(
+  "SELECT pg_drop_replication_slot($1) WHERE EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)",
+  [SLOT]
+)
+admin.close
+
+# Build the replication-protocol connection. This is the dedicated connection
+# the listener owns. `replication: "database"` is the magic libpq parameter
+# that puts the connection into streaming-replication mode (passes through
+# any PgBouncer in front).
+listener_conn = PG.connect(
+  host: HOST, port: PORT, dbname: DATABASE, user: USER, replication: "database"
+)
+
+dispatch_queue = Queue.new
+listener = Pgbus::Web::Streamer::LogicalReplicationListener.new(
+  pg_connection: listener_conn,
+  dispatch_queue: dispatch_queue,
+  health_check_ms: 100,
+  slot_name: SLOT
+)
+
+puts "[listener] starting against #{HOST}:#{PORT}"
+listener.ensure_listening(QUEUE)
+listener.start
+
+# Give the replication stream a moment to spin up the START_REPLICATION
+# command before we trigger the INSERT.
+sleep 0.5
+
+# Publish: insert directly into the queue table. In a real app this is what
+# Pgbus.stream(name).broadcast(content) does.
+publisher = PG.connect(host: HOST, port: PORT, dbname: DATABASE, user: USER)
+publisher.exec(
+  "INSERT INTO pgmq.q_pgbus_#{QUEUE} (msg_id, read_ct, enqueued_at, vt, message, headers) " \
+  "VALUES (DEFAULT, 0, NOW(), NOW(), '{\"src\":\"repro\"}'::jsonb, '{}'::jsonb)"
+)
+puts "[publisher] INSERT issued via #{HOST}:#{PORT}"
+publisher.close
+
+# Wait for the WakeMessage on the dispatch queue.
+deadline = Time.now + 3.0
+wake = nil
+while Time.now < deadline
+  begin
+    wake = dispatch_queue.pop(true)
+    break
+  rescue ThreadError
+    sleep 0.05
+  end
+end
+
+if wake
+  puts ""
+  puts "RESULT: LogicalReplicationListener delivered WakeMessage(queue_name: #{wake.queue_name.inspect}) via port #{PORT}."
+  puts "        Through a transaction-mode PgBouncer, this is the path NOTIFY couldn't survive."
+  exit_code = 0
+else
+  puts ""
+  puts "RESULT: timeout — no WakeMessage received via port #{PORT}."
+  exit_code = 1
+end
+
+listener.stop
+exit exit_code

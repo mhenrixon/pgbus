@@ -38,7 +38,7 @@ module Pgbus
 
           @stream_counter = StreamCounter.new
           @pg_connection = pg_connection || build_pg_connection
-          @listener = Listener.new(
+          @listener = listener_class.new(
             pg_connection: @pg_connection,
             dispatch_queue: @dispatch_queue,
             health_check_ms: @config.streams_listen_health_check_ms,
@@ -143,9 +143,31 @@ module Pgbus
           end
         end
 
+        def listener_class
+          case @config.streams_wake_mechanism
+          when :logical_replication then LogicalReplicationListener
+          else Listener
+          end
+        end
+
+        # Hash form: just add the key. String form (URI/keyword string):
+        # append `replication=database`. The libpq parser accepts repeated
+        # key=value pairs; later wins, so this safely overrides any prior
+        # value the caller may have set.
+        def inject_replication_param(opts)
+          case opts
+          when Hash   then opts.merge(replication: "database")
+          when String then "#{opts} replication=database"
+          else opts
+          end
+        end
+
         def build_pg_connection
           require "pg" unless defined?(::PG::Connection)
           opts = @config.connection_options
+          # Logical replication needs a replication-protocol connection.
+          # Force `replication: "database"` so START_REPLICATION works.
+          opts = inject_replication_param(opts) if @config.streams_wake_mechanism == :logical_replication
           case opts
           when String then ::PG.connect(opts)
           when Hash   then ::PG.connect(**opts)
