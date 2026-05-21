@@ -145,7 +145,7 @@ module Pgbus
 
         def build_pg_connection
           require "pg" unless defined?(::PG::Connection)
-          opts = @config.connection_options
+          opts = @config.streams_connection_options
           case opts
           when String then ::PG.connect(opts)
           when Hash   then ::PG.connect(**opts)
