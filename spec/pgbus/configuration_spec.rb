@@ -1110,4 +1110,107 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.not_to raise_error
     end
   end
+
+  describe "#streams_connection_options" do
+    context "when no streams override is set" do
+      it "returns the base connection_options Hash" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app", user: "app" }
+        expect(config.streams_connection_options).to eq(config.connection_options)
+      end
+
+      it "returns the base connection_options String" do
+        config.database_url = "postgres://app@pooler.example:6432/app"
+        expect(config.streams_connection_options).to eq(config.connection_options)
+      end
+    end
+
+    context "when streams_port is set with a Hash base" do
+      it "overrides only the port, preserves everything else" do
+        config.connection_params = {
+          host: "pooler.example", port: 6432, dbname: "app",
+          user: "app", password: "secret", sslmode: "require"
+        }
+        config.streams_port = 5432
+
+        expect(config.streams_connection_options).to eq(
+          host: "pooler.example", port: 5432, dbname: "app",
+          user: "app", password: "secret", sslmode: "require"
+        )
+      end
+
+      it "does not mutate the base connection_params" do
+        original = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.connection_params = original
+        config.streams_port = 5432
+
+        config.streams_connection_options
+        expect(config.connection_params).to eq(host: "pooler.example", port: 6432, dbname: "app")
+      end
+    end
+
+    context "when streams_host is set with a Hash base" do
+      it "overrides only the host" do
+        config.connection_params = { host: "pooler.example", port: 5432, dbname: "app" }
+        config.streams_host = "direct.example"
+
+        expect(config.streams_connection_options).to eq(
+          host: "direct.example", port: 5432, dbname: "app"
+        )
+      end
+    end
+
+    context "when both streams_host and streams_port are set with a Hash base" do
+      it "overrides both" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_host = "direct.example"
+        config.streams_port = 5432
+
+        expect(config.streams_connection_options).to eq(
+          host: "direct.example", port: 5432, dbname: "app"
+        )
+      end
+    end
+
+    context "when streams_port is set with a String base" do
+      it "appends a port=... key=value override" do
+        config.database_url = "host=pooler.example port=6432 dbname=app user=app"
+        config.streams_port = 5432
+
+        expect(config.streams_connection_options).to eq(
+          "host=pooler.example port=6432 dbname=app user=app port=5432"
+        )
+      end
+
+      it "works with a postgres:// URL too" do
+        config.database_url = "postgres://app@pooler.example:6432/app"
+        config.streams_port = 5432
+
+        expect(config.streams_connection_options).to eq(
+          "postgres://app@pooler.example:6432/app port=5432"
+        )
+      end
+    end
+
+    context "when streams_database_url is set" do
+      it "wins over streams_host/streams_port" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_host = "ignored"
+        config.streams_port = 9999
+        config.streams_database_url = "postgres://stream@direct.example:5432/app"
+
+        expect(config.streams_connection_options).to eq(
+          "postgres://stream@direct.example:5432/app"
+        )
+      end
+
+      it "wins over the base connection_options entirely" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_database_url = "postgres://stream@direct.example:5432/app"
+
+        expect(config.streams_connection_options).to eq(
+          "postgres://stream@direct.example:5432/app"
+        )
+      end
+    end
+  end
 end

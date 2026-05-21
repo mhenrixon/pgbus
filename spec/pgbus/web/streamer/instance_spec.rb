@@ -88,6 +88,35 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
     [conn, reader_io]
   end
 
+  describe "#build_pg_connection" do
+    let(:fake_pg_module_conn) do
+      Class.new do
+        def close; end
+        def reset = nil
+      end.new
+    end
+
+    let(:streamer_config) do
+      Pgbus::Configuration.new.tap do |c|
+        c.connection_params = { host: "pooler.example", port: 6432, dbname: "app", user: "app" }
+        c.streams_port = 5432
+      end
+    end
+
+    it "uses streams_connection_options so the listener can be pointed at a different port" do
+      require "pg"
+      captured = nil
+      allow(PG).to receive(:connect) do |**kwargs|
+        captured = kwargs
+        fake_pg_module_conn
+      end
+
+      described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+
+      expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app")
+    end
+  end
+
   describe "#start" do
     it "starts the listener, dispatcher, and heartbeat threads" do
       streamer.start

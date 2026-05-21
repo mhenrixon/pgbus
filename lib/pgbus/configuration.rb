@@ -106,7 +106,8 @@ module Pgbus
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
                   :streams_stats_enabled, :streams_test_mode,
                   :streams_orphan_sweep_interval, :streams_orphan_threshold,
-                  :streams_durable_patterns
+                  :streams_durable_patterns,
+                  :streams_host, :streams_port, :streams_database_url
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
@@ -193,6 +194,22 @@ module Pgbus
       @streams_enabled = true
       @streams_path = nil
       @streams_queue_prefix = "pgbus_stream"
+      # Streamer-only connection overrides. The Streamer's Listener owns a
+      # dedicated long-lived `wait_for_notify` PG connection that can't go
+      # through a PgBouncer in transaction mode (LISTEN/NOTIFY don't survive
+      # transaction-pool COMMIT boundaries — see PlanetScale's docs). Setting
+      # any of these overrides only the Streamer's connection options; the
+      # worker, dispatcher, and client publish paths keep using the regular
+      # `database_url` / `connection_params` (typically pooled).
+      #
+      #   streams_host          — override host only
+      #   streams_port          — override port only (most common case:
+      #                           pooler is on 6432, direct is 5432)
+      #   streams_database_url  — full URL override; takes precedence over
+      #                           the host/port surgicals when set
+      @streams_host = nil
+      @streams_port = nil
+      @streams_database_url = nil
       @streams_signed_name_secret = nil
       @streams_default_retention = 5 * 60 # 5 minutes
       @streams_retention = {}
@@ -605,6 +622,43 @@ module Pgbus
       else
         raise ConfigurationError, "No database connection configured. " \
                                   "Set Pgbus.configuration.database_url, connection_params, or use with Rails."
+      end
+    end
+
+    # Connection options the Streamer's dedicated LISTEN/NOTIFY PG connection
+    # should use. Defaults to `connection_options` (same as workers and the
+    # publish path). If any of `streams_database_url`, `streams_host`, or
+    # `streams_port` is set, the Streamer's connection is reconfigured —
+    # everything else keeps using the base options.
+    #
+    # The typical use is "workers go through PgBouncer, streamer goes direct":
+    #
+    #   c.connects_to = { database: { writing: :pgbus } }   # pooler
+    #   c.streams_port = 5432                               # direct
+    #
+    # Precedence: streams_database_url > streams_host/port override > base.
+    def streams_connection_options
+      return streams_database_url if streams_database_url
+
+      base = connection_options
+      return base unless streams_host || streams_port
+
+      case base
+      when Hash
+        result = base.dup
+        result[:host] = streams_host if streams_host
+        result[:port] = streams_port if streams_port
+        result
+      when String
+        # libpq's conninfo parser takes later key=value pairs as overrides
+        # for earlier ones, so we just append. Handles both URI form
+        # (postgres://...) and key=value form.
+        parts = [base]
+        parts << "host=#{streams_host}" if streams_host
+        parts << "port=#{streams_port}" if streams_port
+        parts.join(" ")
+      else
+        base
       end
     end
 
