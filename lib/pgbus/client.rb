@@ -601,8 +601,6 @@ module Pgbus
       return unless config.group_mode
 
       @pgmq.create_fifo_index(full_name)
-    rescue StandardError => e
-      Pgbus.logger.debug { "[Pgbus::Client] FIFO index creation failed for #{full_name}: #{e.message}" }
     end
 
     # Check whether the NOTIFY trigger already exists on this queue with the

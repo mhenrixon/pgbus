@@ -310,12 +310,19 @@ module Pgbus
     VALID_GROUP_MODES = [nil, :fifo, :round_robin].freeze
 
     def group_mode=(mode)
-      mode = mode&.to_sym
-      unless VALID_GROUP_MODES.include?(mode)
-        raise ArgumentError, "Invalid group_mode: #{mode.inspect}. Must be nil, :fifo, or :round_robin"
+      coerced = case mode
+                when nil then nil
+                when Symbol then mode
+                when String then mode.to_sym
+                else
+                  raise ArgumentError,
+                        "Invalid group_mode type: #{mode.class}. Must be nil, String, or Symbol"
+                end
+      unless VALID_GROUP_MODES.include?(coerced)
+        raise ArgumentError, "Invalid group_mode: #{coerced.inspect}. Must be nil, :fifo, or :round_robin"
       end
 
-      @group_mode = mode
+      @group_mode = coerced
     end
 
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze

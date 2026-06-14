@@ -64,6 +64,12 @@ RSpec.describe Pgbus::Process::Worker do
       expect(worker.stats[:mode]).to eq(:threads)
       expect(worker.stats[:capacity]).to eq(5)
     end
+
+    it "raises ArgumentError for an invalid group_mode" do
+      expect do
+        described_class.new(queues: %w[default], threads: 5, group_mode: :nope)
+      end.to raise_error(ArgumentError, /group_mode/)
+    end
   end
 
   describe "#graceful_shutdown" do

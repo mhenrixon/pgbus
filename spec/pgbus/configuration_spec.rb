@@ -885,6 +885,11 @@ RSpec.describe Pgbus::Configuration do
       expect(config.group_mode).to eq(:fifo)
     end
 
+    it "raises ArgumentError (not NoMethodError) for non-string/symbol types" do
+      expect { config.group_mode = 1 }.to raise_error(ArgumentError, /type/)
+      expect { config.group_mode = true }.to raise_error(ArgumentError, /type/)
+    end
+
     it "rejects non-positive insights_default_minutes" do
       config.insights_default_minutes = 0
       expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)

@@ -24,11 +24,18 @@ namespace :pgbus do
     desc "Convert a queue's archive table to pg_partman-managed partitions (QUEUE=name)"
     task partition: :environment do
       queue = ENV.fetch("QUEUE") do
-        abort "Usage: rake pgbus:archives:partition QUEUE=<queue_name> [INTERVAL=daily] [RETENTION='30 days']"
+        abort "Usage: rake pgbus:archives:partition QUEUE=<queue_name> " \
+              "[INTERVAL=10000] [RETENTION=100000] [LEADING_PARTITION=10]"
       end
       interval = ENV.fetch("INTERVAL", "10000")
       retention = ENV.fetch("RETENTION", "100000")
-      leading = ENV.fetch("LEADING_PARTITION", "10").to_i
+      leading_raw = ENV.fetch("LEADING_PARTITION", "10")
+      leading = begin
+        Integer(leading_raw, 10)
+      rescue ArgumentError, TypeError
+        abort "LEADING_PARTITION must be a positive integer, got #{leading_raw.inspect}"
+      end
+      abort "LEADING_PARTITION must be a positive integer" if leading <= 0
 
       puts "Converting archive table for queue '#{queue}' to partitioned..."
       puts "  Partition interval: #{interval}"

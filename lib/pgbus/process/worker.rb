@@ -18,6 +18,10 @@ module Pgbus
         @config = config
         @execution_mode = ExecutionPools.normalize_mode(execution_mode)
         @group_mode = group_mode&.to_sym
+        unless Pgbus::Configuration::VALID_GROUP_MODES.include?(@group_mode)
+          raise ArgumentError,
+                "Invalid group_mode: #{@group_mode.inspect}. Must be nil, :fifo, or :round_robin"
+        end
         @single_active_consumer = single_active_consumer
         @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
