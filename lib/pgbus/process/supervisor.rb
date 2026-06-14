@@ -69,6 +69,7 @@ module Pgbus
         single_active = worker_config[:single_active_consumer] || worker_config["single_active_consumer"] || false
         priority = worker_config[:consumer_priority] || worker_config["consumer_priority"] || 0
         exec_mode = config.execution_mode_for(worker_config)
+        grp_mode = worker_config[:group_mode] || worker_config["group_mode"] || config.group_mode
 
         pid = fork do
           restore_signals
@@ -78,7 +79,7 @@ module Pgbus
           worker = Worker.new(
             queues: queues, threads: threads, config: config,
             single_active_consumer: single_active, consumer_priority: priority,
-            execution_mode: exec_mode
+            execution_mode: exec_mode, group_mode: grp_mode
           )
           worker.run
         end

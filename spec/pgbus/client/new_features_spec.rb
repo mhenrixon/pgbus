@@ -1,0 +1,260 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+RSpec.describe Pgbus::Client do
+  describe "pgmq-ruby 0.7.0 features" do
+    subject(:client) do
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      c = described_class.new(config)
+      c.instance_variable_set(:@schema_ensured, true)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    before do
+      allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
+      stub_const("PGMQ::Client", Class.new do
+        def initialize(*args, **kwargs); end
+      end)
+    end
+
+    let(:config) do
+      Pgbus::Configuration.new.tap do |c|
+        c.database_url = "postgres://localhost/pgbus_test"
+        c.queue_prefix = "pgbus_test"
+      end
+    end
+    let(:mock_pgmq) { build_mock_pgmq }
+
+    describe "#wait_for_notify" do
+      before do
+        allow(mock_pgmq).to receive(:wait_for_notify).and_return("pgmq.q_pgbus_test_default.INSERT")
+      end
+
+      it "delegates to pgmq-ruby wait_for_notify with the full queue name" do
+        client.wait_for_notify("default", timeout: 5)
+
+        expect(mock_pgmq).to have_received(:wait_for_notify).with("pgbus_test_default", timeout: 5)
+      end
+
+      it "returns the channel name from pgmq" do
+        result = client.wait_for_notify("default", timeout: 5)
+        expect(result).to eq("pgmq.q_pgbus_test_default.INSERT")
+      end
+
+      it "passes nil timeout for indefinite wait" do
+        client.wait_for_notify("default")
+        expect(mock_pgmq).to have_received(:wait_for_notify).with("pgbus_test_default", timeout: nil)
+      end
+
+      it "yields block to pgmq when given" do
+        yielded = nil
+        allow(mock_pgmq).to receive(:wait_for_notify).and_yield("ch", 42, "payload")
+
+        client.wait_for_notify("default", timeout: 1) { |ch, pid, pl| yielded = [ch, pid, pl] }
+
+        expect(yielded).to eq(["ch", 42, "payload"])
+      end
+    end
+
+    describe "#read_grouped" do
+      let(:messages) { [build_message_double(msg_id: 1), build_message_double(msg_id: 2)] }
+
+      before do
+        allow(mock_pgmq).to receive(:read_grouped).and_return(messages)
+      end
+
+      it "delegates to pgmq-ruby read_grouped with full queue name" do
+        client.read_grouped("default", qty: 10)
+
+        expect(mock_pgmq).to have_received(:read_grouped).with(
+          "pgbus_test_default", vt: config.visibility_timeout, qty: 10
+        )
+      end
+
+      it "returns messages from pgmq" do
+        result = client.read_grouped("default", qty: 5)
+        expect(result).to eq(messages)
+      end
+
+      it "allows custom visibility timeout" do
+        client.read_grouped("default", qty: 5, vt: 60)
+        expect(mock_pgmq).to have_received(:read_grouped).with("pgbus_test_default", vt: 60, qty: 5)
+      end
+    end
+
+    describe "#read_grouped_rr" do
+      let(:messages) { [build_message_double(msg_id: 1)] }
+
+      before do
+        allow(mock_pgmq).to receive(:read_grouped_rr).and_return(messages)
+      end
+
+      it "delegates to pgmq-ruby read_grouped_rr with full queue name" do
+        client.read_grouped_rr("default", qty: 10)
+
+        expect(mock_pgmq).to have_received(:read_grouped_rr).with(
+          "pgbus_test_default", vt: config.visibility_timeout, qty: 10
+        )
+      end
+    end
+
+    describe "#read_grouped_head" do
+      let(:messages) { [build_message_double(msg_id: 1)] }
+
+      before do
+        allow(mock_pgmq).to receive(:read_grouped_head).and_return(messages)
+      end
+
+      it "delegates to pgmq-ruby read_grouped_head" do
+        client.read_grouped_head("default", qty: 5)
+
+        expect(mock_pgmq).to have_received(:read_grouped_head).with(
+          "pgbus_test_default", vt: config.visibility_timeout, qty: 5
+        )
+      end
+    end
+
+    describe "#create_fifo_index" do
+      before do
+        allow(mock_pgmq).to receive(:create_fifo_index).and_return(nil)
+      end
+
+      it "delegates to pgmq-ruby with the full queue name" do
+        client.create_fifo_index("default")
+        expect(mock_pgmq).to have_received(:create_fifo_index).with("pgbus_test_default")
+      end
+    end
+
+    describe "#create_fifo_indexes_all" do
+      before do
+        allow(mock_pgmq).to receive(:create_fifo_indexes_all).and_return(nil)
+      end
+
+      it "delegates to pgmq-ruby" do
+        client.create_fifo_indexes_all
+        expect(mock_pgmq).to have_received(:create_fifo_indexes_all)
+      end
+    end
+
+    describe "#update_notify_insert" do
+      before do
+        allow(mock_pgmq).to receive(:update_notify_insert).and_return(nil)
+      end
+
+      it "delegates with full queue name and throttle interval" do
+        client.update_notify_insert("default", throttle_interval_ms: 500)
+
+        expect(mock_pgmq).to have_received(:update_notify_insert).with(
+          "pgbus_test_default", throttle_interval_ms: 500
+        )
+      end
+    end
+
+    describe "#list_notify_insert_throttles" do
+      let(:throttle_data) do
+        [double("NotifyThrottle", queue_name: "pgbus_test_default", throttle_interval_ms: 250, last_notified_at: nil)]
+      end
+
+      before do
+        allow(mock_pgmq).to receive(:list_notify_insert_throttles).and_return(throttle_data)
+      end
+
+      it "delegates to pgmq-ruby" do
+        result = client.list_notify_insert_throttles
+        expect(result).to eq(throttle_data)
+      end
+    end
+
+    describe "#convert_archive_partitioned" do
+      before do
+        allow(mock_pgmq).to receive(:convert_archive_partitioned).and_return(nil)
+      end
+
+      it "delegates with full queue name and options" do
+        client.convert_archive_partitioned(
+          "default",
+          partition_interval: "daily",
+          retention_interval: "30 days"
+        )
+
+        expect(mock_pgmq).to have_received(:convert_archive_partitioned).with(
+          "pgbus_test_default",
+          partition_interval: "daily",
+          retention_interval: "30 days",
+          leading_partition: 10
+        )
+      end
+
+      it "uses default options when not specified" do
+        client.convert_archive_partitioned("default")
+
+        expect(mock_pgmq).to have_received(:convert_archive_partitioned).with(
+          "pgbus_test_default",
+          partition_interval: "10000",
+          retention_interval: "100000",
+          leading_partition: 10
+        )
+      end
+    end
+
+    describe "FIFO index auto-creation during queue bootstrap" do
+      before do
+        allow(mock_pgmq).to receive(:create_fifo_index).and_return(nil)
+      end
+
+      context "when group_mode is :fifo" do
+        before { config.group_mode = :fifo }
+
+        it "creates a FIFO index when ensuring a queue" do
+          client.ensure_queue("default")
+          expect(mock_pgmq).to have_received(:create_fifo_index).with("pgbus_test_default")
+        end
+      end
+
+      context "when group_mode is :round_robin" do
+        before { config.group_mode = :round_robin }
+
+        it "creates a FIFO index when ensuring a queue" do
+          client.ensure_queue("default")
+          expect(mock_pgmq).to have_received(:create_fifo_index).with("pgbus_test_default")
+        end
+      end
+
+      context "when group_mode is nil (default)" do
+        it "does not create a FIFO index" do
+          client.ensure_queue("default")
+          expect(mock_pgmq).not_to have_received(:create_fifo_index)
+        end
+      end
+    end
+
+    describe "Time delay in send_message" do
+      let(:scheduled_at) { Time.utc(2026, 6, 14, 12, 0, 0) }
+
+      it "passes Time objects through to pgmq produce" do
+        client.send_message("default", { "type" => "test" }, delay: scheduled_at)
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_default",
+          anything,
+          headers: nil,
+          delay: scheduled_at
+        )
+      end
+
+      it "passes integer delay as before" do
+        client.send_message("default", { "type" => "test" }, delay: 60)
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_default",
+          anything,
+          headers: nil,
+          delay: 60
+        )
+      end
+    end
+  end
+end

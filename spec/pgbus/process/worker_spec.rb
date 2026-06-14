@@ -64,6 +64,12 @@ RSpec.describe Pgbus::Process::Worker do
       expect(worker.stats[:mode]).to eq(:threads)
       expect(worker.stats[:capacity]).to eq(5)
     end
+
+    it "raises ArgumentError for an invalid group_mode" do
+      expect do
+        described_class.new(queues: %w[default], threads: 5, group_mode: :nope)
+      end.to raise_error(ArgumentError, /group_mode/)
+    end
   end
 
   describe "#graceful_shutdown" do
@@ -193,6 +199,64 @@ RSpec.describe Pgbus::Process::Worker do
 
       it "returns an empty array" do
         expect(worker.send(:fetch_messages, 5)).to eq([])
+      end
+    end
+
+    context "with group_mode: :fifo" do
+      let(:worker) { described_class.new(queues: %w[default], threads: 5, group_mode: :fifo) }
+      let(:messages) { [build_message_double(msg_id: 1), build_message_double(msg_id: 2)] }
+
+      before do
+        allow(mock_client).to receive(:read_grouped).and_return(messages)
+      end
+
+      it "uses read_grouped instead of read_batch" do
+        worker.send(:fetch_messages, 5)
+        expect(mock_client).to have_received(:read_grouped).with("default", qty: 5)
+        expect(mock_client).not_to have_received(:read_batch)
+      end
+
+      it "returns [queue_name, message] pairs" do
+        results = worker.send(:fetch_messages, 5)
+        expect(results).to eq([["default", messages[0]], ["default", messages[1]]])
+      end
+    end
+
+    context "with group_mode: :round_robin" do
+      let(:worker) { described_class.new(queues: %w[default], threads: 5, group_mode: :round_robin) }
+      let(:messages) { [build_message_double(msg_id: 1)] }
+
+      before do
+        allow(mock_client).to receive(:read_grouped_rr).and_return(messages)
+      end
+
+      it "uses read_grouped_rr instead of read_batch" do
+        worker.send(:fetch_messages, 5)
+        expect(mock_client).to have_received(:read_grouped_rr).with("default", qty: 5)
+        expect(mock_client).not_to have_received(:read_batch)
+      end
+    end
+
+    context "with group_mode: :fifo and multiple queues" do
+      let(:worker) { described_class.new(queues: %w[critical default], threads: 5, group_mode: :fifo) }
+      let(:critical_msgs) { [build_message_double(msg_id: 1)] }
+      let(:default_msgs) { [build_message_double(msg_id: 2)] }
+
+      before do
+        allow(mock_client).to receive(:read_grouped) do |queue, **_kwargs|
+          case queue
+          when "critical" then critical_msgs
+          when "default" then default_msgs
+          else []
+          end
+        end
+      end
+
+      it "reads from each queue with grouped reads, respecting qty limit" do
+        results = worker.send(:fetch_messages, 5)
+        expect(results.size).to eq(2)
+        expect(mock_client).to have_received(:read_grouped).with("critical", qty: 5)
+        expect(mock_client).to have_received(:read_grouped).with("default", qty: 4)
       end
     end
   end

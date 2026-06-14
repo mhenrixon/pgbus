@@ -874,6 +874,33 @@ module Pgbus
         []
       end
 
+      # NOTIFY throttle status for all queues with notifications enabled.
+      # Returns an array of hashes: { queue_name:, throttle_interval_ms:, last_notified_at: }
+      def notify_throttles
+        @client.list_notify_insert_throttles.map do |throttle|
+          {
+            queue_name: throttle.queue_name,
+            throttle_interval_ms: throttle.throttle_interval_ms,
+            last_notified_at: throttle.last_notified_at
+          }
+        end
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching notify throttles: #{e.message}" }
+        []
+      end
+
+      # FIFO group head sampling for a specific queue.
+      # Returns the oldest visible message from each distinct group (up to qty).
+      # Useful for detecting head-of-line stalls in multi-tenant queues.
+      def queue_group_heads(queue_name, qty: 20)
+        logical = logical_queue_name(queue_name)
+        messages = @client.read_grouped_head(logical, qty: qty) || []
+        messages.map { |m| format_pgmq_message(m, queue_name) }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching group heads for #{queue_name}: #{e.message}" }
+        []
+      end
+
       private
 
       def connection
@@ -1110,6 +1137,19 @@ module Pgbus
           vt: row["vt"],
           message: row["message"],
           headers: row["headers"],
+          queue_name: queue_name
+        }
+      end
+
+      def format_pgmq_message(msg, queue_name)
+        {
+          msg_id: msg.msg_id.to_i,
+          read_ct: msg.read_ct.to_i,
+          enqueued_at: msg.enqueued_at,
+          last_read_at: msg.respond_to?(:last_read_at) ? msg.last_read_at : nil,
+          vt: msg.respond_to?(:vt) ? msg.vt : nil,
+          message: msg.message,
+          headers: msg.headers,
           queue_name: queue_name
         }
       end

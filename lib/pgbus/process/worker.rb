@@ -11,12 +11,24 @@ module Pgbus
 
       def initialize(queues:, threads: 5, config: Pgbus.configuration,
                      single_active_consumer: false, consumer_priority: 0,
-                     execution_mode: :threads)
+                     execution_mode: :threads, group_mode: nil)
         @queues = Array(queues)
         @wildcard = @queues.include?("*")
         @threads = threads
         @config = config
         @execution_mode = ExecutionPools.normalize_mode(execution_mode)
+        @group_mode = case group_mode
+                      when nil then nil
+                      when Symbol then group_mode
+                      when String then group_mode.to_sym
+                      else
+                        raise ArgumentError,
+                              "Invalid group_mode type: #{group_mode.class}. Must be nil, String, or Symbol"
+                      end
+        unless Pgbus::Configuration::VALID_GROUP_MODES.include?(@group_mode)
+          raise ArgumentError,
+                "Invalid group_mode: #{@group_mode.inspect}. Must be nil, :fifo, or :round_robin"
+        end
         @single_active_consumer = single_active_consumer
         @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
@@ -141,6 +153,8 @@ module Pgbus
 
         if priority_enabled?
           fetch_prioritized(active_queues, qty)
+        elsif @group_mode
+          fetch_grouped(active_queues, qty)
         elsif active_queues.size == 1
           queue = active_queues.first
           messages = Pgbus.client.read_batch(queue, qty: qty) || []
@@ -208,6 +222,29 @@ module Pgbus
           logical = m.queue_name&.delete_prefix(prefix) || active_queues.first
           [logical, m]
         end
+      end
+
+      # Use grouped reads for fair or throughput-optimized multi-tenant processing.
+      # Each queue is read independently with the configured group strategy.
+      def fetch_grouped(active_queues, qty)
+        remaining = qty
+        results = []
+
+        active_queues.each do |queue|
+          break if remaining <= 0
+
+          messages = case @group_mode
+                     when :round_robin
+                       Pgbus.client.read_grouped_rr(queue, qty: remaining) || []
+                     else # :fifo
+                       Pgbus.client.read_grouped(queue, qty: remaining) || []
+                     end
+
+          messages.each { |m| results << [queue, m] }
+          remaining -= messages.size
+        end
+
+        results
       end
 
       def priority_enabled?
