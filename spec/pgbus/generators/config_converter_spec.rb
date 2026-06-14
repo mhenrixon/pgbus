@@ -133,8 +133,8 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
       it "emits env-specific settings with Rails.env guards" do
         # The 'unless development' shape is preferred when there are 2 envs
         # and one is dev — keeps the production line clean.
-        expect(output).to match(/c\.max_jobs_per_worker = 10_000 unless Rails\.env\.development\?/)
-        expect(output).to match(/c\.max_memory_mb = 512 unless Rails\.env\.development\?/)
+        expect(output).to include("c.max_jobs_per_worker = 10_000 unless Rails.env.development?")
+        expect(output).to include("c.max_memory_mb = 512 unless Rails.env.development?")
       end
     end
 
@@ -206,8 +206,8 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
         # but NOT production. A case block with only dev+test clauses
         # is an acceptable shape — what we must prevent is the
         # production env silently inheriting the value.
-        expect(output).to match(/polling_interval/)
-        expect(output).to match(/development/)
+        expect(output).to include("polling_interval")
+        expect(output).to include("development")
         expect(output).to match(/\btest\b/)
         # Only `workers` should mention production (from a production:
         # capsule/worker config); polling_interval must not.
