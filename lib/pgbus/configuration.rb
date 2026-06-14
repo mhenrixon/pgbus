@@ -44,6 +44,12 @@ module Pgbus
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
+    # Grouped reads (PGMQ v1.11.0+ FIFO grouping).
+    # nil = disabled (default read_batch behavior).
+    # :fifo = use read_grouped (drains oldest group first, throughput-optimized).
+    # :round_robin = use read_grouped_rr (fair round-robin across groups).
+    attr_reader :group_mode
+
     # Archive compaction. Only the user-facing retention window is configurable;
     # the loop interval and batch size are tuned via constants on
     # Pgbus::Process::Dispatcher.
@@ -146,6 +152,7 @@ module Pgbus
 
       @priority_levels = nil
       @default_priority = 1
+      @group_mode = nil
 
       @archive_retention = 7 * 24 * 3600 # 7 days
 
@@ -298,6 +305,17 @@ module Pgbus
       end
 
       @streams_default_broadcast_mode = mode
+    end
+
+    VALID_GROUP_MODES = [nil, :fifo, :round_robin].freeze
+
+    def group_mode=(mode)
+      mode = mode&.to_sym
+      unless VALID_GROUP_MODES.include?(mode)
+        raise ArgumentError, "Invalid group_mode: #{mode.inspect}. Must be nil, :fifo, or :round_robin"
+      end
+
+      @group_mode = mode
     end
 
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze

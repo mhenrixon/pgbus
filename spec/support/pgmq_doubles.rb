@@ -12,6 +12,9 @@ module PgmqDoubles
         read_batch: [],
         read_with_poll: [],
         read_multi: [],
+        read_grouped: [],
+        read_grouped_rr: [],
+        read_grouped_head: [],
         delete: true,
         archive: true,
         set_vt: nil,
@@ -22,6 +25,12 @@ module PgmqDoubles
         drop_queue: true,
         bind_topic: nil,
         produce_topic: nil,
+        create_fifo_index: nil,
+        create_fifo_indexes_all: nil,
+        wait_for_notify: nil,
+        update_notify_insert: nil,
+        list_notify_insert_throttles: [],
+        convert_archive_partitioned: nil,
         close: nil
       )
       # Batch operations echo back the ids to mirror pgmq-ruby behavior
@@ -43,6 +52,9 @@ module PgmqDoubles
         read_message: nil,
         read_batch: [],
         read_multi: [],
+        read_grouped: [],
+        read_grouped_rr: [],
+        read_grouped_head: [],
         delete_message: true,
         archive_message: true,
         set_visibility_timeout: nil,
@@ -53,6 +65,12 @@ module PgmqDoubles
         drop_queue: true,
         bind_topic: nil,
         publish_to_topic: nil,
+        create_fifo_index: nil,
+        create_fifo_indexes_all: nil,
+        wait_for_notify: nil,
+        update_notify_insert: nil,
+        list_notify_insert_throttles: [],
+        convert_archive_partitioned: nil,
         close: nil,
         transaction: nil
       )

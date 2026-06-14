@@ -62,6 +62,10 @@ RSpec.describe Pgbus::Configuration do
       expect(config.default_priority).to eq(1)
     end
 
+    it "has no group_mode by default" do
+      expect(config.group_mode).to be_nil
+    end
+
     it "has default archive retention of 7 days" do
       expect(config.archive_retention).to eq(7 * 24 * 3600)
     end
@@ -855,6 +859,30 @@ RSpec.describe Pgbus::Configuration do
     it "accepts valid priority_levels" do
       config.priority_levels = 3
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts :fifo group_mode" do
+      config.group_mode = :fifo
+      expect(config.group_mode).to eq(:fifo)
+    end
+
+    it "accepts :round_robin group_mode" do
+      config.group_mode = :round_robin
+      expect(config.group_mode).to eq(:round_robin)
+    end
+
+    it "accepts nil group_mode (disabled)" do
+      config.group_mode = nil
+      expect(config.group_mode).to be_nil
+    end
+
+    it "rejects invalid group_mode" do
+      expect { config.group_mode = :invalid }.to raise_error(ArgumentError, /group_mode/)
+    end
+
+    it "coerces string group_mode to symbol" do
+      config.group_mode = "fifo"
+      expect(config.group_mode).to eq(:fifo)
     end
 
     it "rejects non-positive insights_default_minutes" do

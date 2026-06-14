@@ -351,6 +351,87 @@ module Pgbus
       total
     end
 
+    # --- Grouped reads (PGMQ v1.11.0+) ---
+
+    def read_grouped(queue_name, qty:, vt: nil)
+      full_name = config.queue_name(queue_name)
+      Instrumentation.instrument("pgbus.client.read_grouped", queue: full_name, qty: qty) do
+        with_stale_connection_retry do
+          synchronized { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        end
+      end
+    end
+
+    def read_grouped_rr(queue_name, qty:, vt: nil)
+      full_name = config.queue_name(queue_name)
+      Instrumentation.instrument("pgbus.client.read_grouped_rr", queue: full_name, qty: qty) do
+        with_stale_connection_retry do
+          synchronized { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        end
+      end
+    end
+
+    def read_grouped_head(queue_name, qty:, vt: nil)
+      full_name = config.queue_name(queue_name)
+      with_stale_connection_retry do
+        synchronized { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+      end
+    end
+
+    # --- FIFO index management (PGMQ v1.11.0+) ---
+
+    def create_fifo_index(queue_name)
+      full_name = config.queue_name(queue_name)
+      with_stale_connection_retry do
+        synchronized { @pgmq.create_fifo_index(full_name) }
+      end
+    end
+
+    def create_fifo_indexes_all
+      with_stale_connection_retry do
+        synchronized { @pgmq.create_fifo_indexes_all }
+      end
+    end
+
+    # --- LISTEN/NOTIFY management (PGMQ v1.11.0+) ---
+
+    def wait_for_notify(queue_name, timeout: nil, &block)
+      full_name = config.queue_name(queue_name)
+      with_stale_connection_retry do
+        synchronized { @pgmq.wait_for_notify(full_name, timeout: timeout, &block) }
+      end
+    end
+
+    def update_notify_insert(queue_name, throttle_interval_ms:)
+      full_name = config.queue_name(queue_name)
+      with_stale_connection_retry do
+        synchronized { @pgmq.update_notify_insert(full_name, throttle_interval_ms: throttle_interval_ms) }
+      end
+    end
+
+    def list_notify_insert_throttles
+      with_stale_connection_retry do
+        synchronized { @pgmq.list_notify_insert_throttles }
+      end
+    end
+
+    # --- Archive partitioning (requires pg_partman extension) ---
+
+    def convert_archive_partitioned(queue_name, partition_interval: "10000", retention_interval: "100000",
+                                    leading_partition: 10)
+      full_name = config.queue_name(queue_name)
+      with_stale_connection_retry do
+        synchronized do
+          @pgmq.convert_archive_partitioned(
+            full_name,
+            partition_interval: partition_interval,
+            retention_interval: retention_interval,
+            leading_partition: leading_partition
+          )
+        end
+      end
+    end
+
     # Topic routing
     def bind_topic(pattern, queue_name)
       full_name = config.queue_name(queue_name)
@@ -503,6 +584,7 @@ module Pgbus
           @pgmq.create(full_name)
           tune_autovacuum(full_name)
           enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
+          create_fifo_index_if_needed(full_name)
         end
         true
       end
@@ -513,6 +595,14 @@ module Pgbus
       return if notify_trigger_current?(full_name, throttle_ms)
 
       @pgmq.enable_notify_insert(full_name, throttle_interval_ms: throttle_ms)
+    end
+
+    def create_fifo_index_if_needed(full_name)
+      return unless config.group_mode
+
+      @pgmq.create_fifo_index(full_name)
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus::Client] FIFO index creation failed for #{full_name}: #{e.message}" }
     end
 
     # Check whether the NOTIFY trigger already exists on this queue with the

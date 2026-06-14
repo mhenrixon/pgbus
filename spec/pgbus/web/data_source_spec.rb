@@ -953,4 +953,47 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result[:totals]).to eq(broadcasts: 0, active_connections: 0, total_connections: 0, streams: 0)
     end
   end
+
+  describe "#notify_throttles" do
+    it "returns formatted notify throttle data from the client" do
+      throttle = double("NotifyThrottle",
+                        queue_name: "pgbus_default",
+                        throttle_interval_ms: 250,
+                        last_notified_at: "2026-06-14 12:00:00")
+      allow(mock_client).to receive(:list_notify_insert_throttles).and_return([throttle])
+
+      result = data_source.notify_throttles
+      expect(result).to eq([{
+                             queue_name: "pgbus_default",
+                             throttle_interval_ms: 250,
+                             last_notified_at: "2026-06-14 12:00:00"
+                           }])
+    end
+
+    it "returns empty array on error" do
+      allow(mock_client).to receive(:list_notify_insert_throttles).and_raise(StandardError, "boom")
+      expect(data_source.notify_throttles).to eq([])
+    end
+  end
+
+  describe "#queue_group_heads" do
+    it "returns formatted group head messages" do
+      msg = double("PGMQ::Message",
+                   msg_id: 42, message: '{"type":"order"}',
+                   read_ct: 0, headers: nil,
+                   enqueued_at: "2026-06-14T12:00:00.000000Z")
+      allow(msg).to receive(:respond_to?).with(:vt).and_return(false)
+      allow(msg).to receive(:respond_to?).with(:last_read_at).and_return(false)
+      allow(mock_client).to receive(:read_grouped_head).and_return([msg])
+
+      result = data_source.queue_group_heads("pgbus_default", qty: 5)
+      expect(result.size).to eq(1)
+      expect(result.first[:msg_id]).to eq(42)
+    end
+
+    it "returns empty array on error" do
+      allow(mock_client).to receive(:read_grouped_head).and_raise(StandardError, "boom")
+      expect(data_source.queue_group_heads("pgbus_default")).to eq([])
+    end
+  end
 end
