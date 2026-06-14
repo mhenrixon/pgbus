@@ -150,16 +150,31 @@ module Pgbus
           end
         end
 
-        # Hash form: just add the key. String form (URI/keyword string):
-        # append `replication=database`. The libpq parser accepts repeated
-        # key=value pairs; later wins, so this safely overrides any prior
-        # value the caller may have set.
+        # Hash form: just add the key. String form: append depending on
+        # whether it's a URI conninfo or a keyword/value string.
+        # libpq's URI form (postgres://...) cannot accept space-delimited
+        # key=value pairs after the URI — extras must go into the query
+        # string. Keyword/value strings ("host=... dbname=...") tolerate
+        # repeated keys with "later wins" semantics, so appending
+        # ` replication=database` is fine.
         def inject_replication_param(opts)
           case opts
           when Hash   then opts.merge(replication: "database")
-          when String then "#{opts} replication=database"
+          when String then append_replication_to_string(opts)
           else opts
           end
+        end
+
+        def append_replication_to_string(opts)
+          return "#{opts} replication=database" unless opts.match?(%r{\Apostgres(?:ql)?://}i)
+
+          require "uri"
+          uri = URI.parse(opts)
+          params = URI.decode_www_form(uri.query.to_s)
+          params.reject! { |k, _| k == "replication" }
+          params << %w[replication database]
+          uri.query = URI.encode_www_form(params)
+          uri.to_s
         end
 
         def build_pg_connection

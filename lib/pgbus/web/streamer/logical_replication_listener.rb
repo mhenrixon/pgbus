@@ -105,11 +105,12 @@ module Pgbus
           @running = false
           begin
             @conn.close if @conn.respond_to?(:close)
-          rescue StandardError
-            # best effort — connection may already be gone
+          rescue StandardError => e
+            @logger.debug { "[Pgbus::Streamer::LogicalReplicationListener] connection close failed (best effort): #{e.message}" }
           end
           @thread&.join(5)
           @thread = nil
+          drop_slot_quietly
           self
         end
 
@@ -155,6 +156,9 @@ module Pgbus
             # FOR ALL TABLES publication manually; we surface a clear error.
             begin
               admin.exec("CREATE PUBLICATION #{PUBLICATION_NAME} FOR TABLES IN SCHEMA #{QUEUE_SCHEMA} WITH (publish = 'insert')")
+            rescue PG::DuplicateObject
+              # Another worker won the race between our SELECT and CREATE.
+              nil
             rescue PG::SyntaxError => e
               raise Pgbus::ConfigurationError,
                     "Cannot CREATE PUBLICATION FOR TABLES IN SCHEMA (#{e.message}). " \
@@ -172,11 +176,30 @@ module Pgbus
             ).any?
             next if exists
 
+            begin
+              admin.exec_params(
+                "SELECT pg_create_logical_replication_slot($1, $2)",
+                [@slot_name, SLOT_PLUGIN]
+              )
+            rescue PG::DuplicateObject
+              # Another worker created the slot between our SELECT and create.
+              nil
+            end
+          end
+        end
+
+        # Drops this listener's slot during graceful shutdown so it doesn't
+        # linger and pin WAL. On crash this won't run — the orphan-sweep
+        # hook in Streamer::Instance is the safety net.
+        def drop_slot_quietly
+          with_admin_connection do |admin|
             admin.exec_params(
-              "SELECT pg_create_logical_replication_slot($1, $2)",
-              [@slot_name, SLOT_PLUGIN]
+              "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1",
+              [@slot_name]
             )
           end
+        rescue PG::Error => e
+          @logger.warn { "[Pgbus::Streamer::LogicalReplicationListener] drop slot failed: #{e.message}" }
         end
 
         # The replication-protocol connection (@conn) can't run arbitrary SQL —
@@ -232,13 +255,16 @@ module Pgbus
         def handle_copy_message(data)
           case data[0]
           when "w"
+            # XLogData header: 'w' Int64(start_lsn) Int64(end_lsn) Int64(send_time)
+            # Track the end LSN so standby status replies confirm progress and
+            # the slot can release WAL we've already processed.
+            @last_lsn = data[9, 8].unpack1("Q>")
             payload = data[25..]
             handle_pgoutput_message(payload)
           when "k"
-            # Keepalive. Bytes 1..8 end LSN, 9..16 server time, 17 reply-now flag.
-            # If the server is asking for a reply, send one to keep the slot
-            # advancing. We don't track LSNs precisely in the spike — sending
-            # @last_lsn is good enough to prevent slot bloat in dev.
+            # Keepalive: 'k' Int64(end_lsn) Int64(server_time) Int8(reply_now).
+            # When the server asks for a reply, send one with the latest LSN
+            # we observed in XLogData so the slot advances.
             reply_now = data[17].unpack1("C").nonzero?
             send_standby_status if reply_now
           end

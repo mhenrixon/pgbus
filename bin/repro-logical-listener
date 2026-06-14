@@ -53,7 +53,7 @@ end
 
 # Clean state: drop any old slot from a previous run so the script is idempotent.
 admin.exec_params(
-  "SELECT pg_drop_replication_slot($1) WHERE EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = $1)",
+  "SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE slot_name = $1",
   [SLOT]
 )
 admin.close
