@@ -17,7 +17,14 @@ module Pgbus
         @threads = threads
         @config = config
         @execution_mode = ExecutionPools.normalize_mode(execution_mode)
-        @group_mode = group_mode&.to_sym
+        @group_mode = case group_mode
+                      when nil then nil
+                      when Symbol then group_mode
+                      when String then group_mode.to_sym
+                      else
+                        raise ArgumentError,
+                              "Invalid group_mode type: #{group_mode.class}. Must be nil, String, or Symbol"
+                      end
         unless Pgbus::Configuration::VALID_GROUP_MODES.include?(@group_mode)
           raise ArgumentError,
                 "Invalid group_mode: #{@group_mode.inspect}. Must be nil, :fifo, or :round_robin"
