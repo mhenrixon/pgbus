@@ -1,6 +1,35 @@
 ---
 ja:
   pgbus:
+    batches:
+      index:
+        description: 進捗追跡とコールバック付きのジョブバッチ
+        empty: バッチが見つかりません
+        headers:
+          batch_id: バッチID
+          created: 作成日
+          description: 説明
+          jobs: ジョブ
+          progress: 進捗
+          status: ステータス
+        title: バッチ
+      show:
+        back: バッチに戻る
+        batch_id: バッチID
+        completed: 完了
+        created_at: 作成日時
+        details: 詳細
+        discarded: 破棄済み
+        finished_at: 完了日時
+        not_found: バッチが見つかりません
+        on_discard: 破棄時
+        on_finish: 完了時
+        on_success: 成功時
+        progress: 進捗
+        properties: プロパティ
+        remaining: 残り
+        title: バッチ
+        total_jobs: 合計ジョブ数
     dashboard:
       processes_table:
         empty: 実行中のプロセスはありません
@@ -189,6 +218,10 @@ ja:
         not_found: イベントが見つかりません
         title: イベント %{event_id}
     helpers:
+      batch_status:
+        finished: 完了
+        pending: 保留中
+        processing: 処理中
       bulk_select_all: すべて選択
       bulk_select_row: "%{id}を選択"
       bulk_selected: 選択済み
@@ -346,6 +379,7 @@ ja:
     layout:
       brand: Pgbus
       nav:
+        batches: バッチ
         dashboard: ダッシュボード
         dlq: DLQ
         events: イベント

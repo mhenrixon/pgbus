@@ -140,6 +140,35 @@ module DummyApp
     def processed_event(_id) = nil
     def registered_subscribers = []
 
+    def batches(limit: 100) # rubocop:disable Lint/UnusedMethodArgument
+      [
+        { batch_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", description: "Import users from CSV",
+          status: "processing", total_jobs: 250, completed_jobs: 180, discarded_jobs: 3, failed_jobs: 0,
+          progress_pct: 73, created_at: 45.minutes.ago, finished_at: nil },
+        { batch_id: "b2c3d4e5-f6a7-8901-bcde-f12345678901", description: "Send welcome emails",
+          status: "finished", total_jobs: 50, completed_jobs: 50, discarded_jobs: 0, failed_jobs: 0,
+          progress_pct: 100, created_at: 2.hours.ago, finished_at: 1.hour.ago },
+        { batch_id: "c3d4e5f6-a7b8-9012-cdef-123456789012", description: nil,
+          status: "pending", total_jobs: 0, completed_jobs: 0, discarded_jobs: 0, failed_jobs: 0,
+          progress_pct: 100, created_at: 5.minutes.ago, finished_at: 5.minutes.ago }
+      ]
+    end
+
+    def batch_detail(batch_id)
+      batch = batches.find { |b| b[:batch_id] == batch_id }
+      return nil unless batch
+
+      batch.merge(
+        properties: '{"source":"admin","user_id":42}',
+        on_finish_class: "BatchFinishJob",
+        on_success_class: "BatchSuccessNotifyJob",
+        on_discard_class: nil
+      )
+    end
+
+    def batches_count = 3
+    def active_batches_count = 1
+
     def job_locks
       [
         { lock_key: "uniqueness:ProcessPaymentJob:abc123", queue_name: "pgbus_default",

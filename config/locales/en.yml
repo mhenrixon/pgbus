@@ -1,6 +1,35 @@
 ---
 en:
   pgbus:
+    batches:
+      index:
+        description: Job batches with progress tracking and callbacks
+        empty: No batches found
+        headers:
+          batch_id: Batch ID
+          created: Created
+          description: Description
+          jobs: Jobs
+          progress: Progress
+          status: Status
+        title: Batches
+      show:
+        back: Back to batches
+        batch_id: Batch ID
+        completed: Completed
+        created_at: Created At
+        details: Details
+        discarded: Discarded
+        finished_at: Finished At
+        not_found: Batch not found
+        on_discard: On Discard
+        on_finish: On Finish
+        on_success: On Success
+        progress: Progress
+        properties: Properties
+        remaining: Remaining
+        title: Batch
+        total_jobs: Total Jobs
     dashboard:
       processes_table:
         empty: No processes running
@@ -189,6 +218,10 @@ en:
         not_found: Event not found
         title: Event %{event_id}
     helpers:
+      batch_status:
+        finished: Finished
+        pending: Pending
+        processing: Processing
       bulk_select_all: Select all
       bulk_select_row: Select %{id}
       bulk_selected: selected
@@ -346,6 +379,7 @@ en:
     layout:
       brand: Pgbus
       nav:
+        batches: Batches
         dashboard: Dashboard
         dlq: DLQ
         events: Events

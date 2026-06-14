@@ -1,6 +1,35 @@
 ---
 sv:
   pgbus:
+    batches:
+      index:
+        description: Jobbgrupper med framstegsspårning och callbacks
+        empty: Inga grupper hittades
+        headers:
+          batch_id: Grupp-ID
+          created: Skapad
+          description: Beskrivning
+          jobs: Jobb
+          progress: Framsteg
+          status: Status
+        title: Grupper
+      show:
+        back: Tillbaka till grupper
+        batch_id: Grupp-ID
+        completed: Slutförda
+        created_at: Skapad den
+        details: Detaljer
+        discarded: Kasserade
+        finished_at: Avslutad den
+        not_found: Grupp hittades inte
+        on_discard: Vid kassering
+        on_finish: Vid avslut
+        on_success: Vid framgång
+        progress: Framsteg
+        properties: Egenskaper
+        remaining: Återstående
+        title: Grupp
+        total_jobs: Totalt antal jobb
     dashboard:
       processes_table:
         empty: Inga processer körs
@@ -189,6 +218,10 @@ sv:
         not_found: Händelse hittades inte
         title: Händelse %{event_id}
     helpers:
+      batch_status:
+        finished: Slutförd
+        pending: Väntande
+        processing: Bearbetas
       bulk_select_all: Markera alla
       bulk_select_row: Markera %{id}
       bulk_selected: valda
@@ -346,6 +379,7 @@ sv:
     layout:
       brand: Pgbus
       nav:
+        batches: Grupper
         dashboard: Instrumentpanel
         dlq: DLQ
         events: Händelser

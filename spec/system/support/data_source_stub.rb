@@ -51,6 +51,10 @@ module Pgbus
       def processed_event(id) = @events_list.find { |e| e["id"].to_s == id.to_s }
       def registered_subscribers = @subscribers_list
       def jobs(queue_name: nil, page: 1, per_page: 25) = @jobs_list
+      def batches(limit: 100) = []
+      def batch_detail(batch_id) = nil
+      def batches_count = 0
+      def active_batches_count = 0
       def job_locks = @locks_list
       def queue_paused?(name) = @paused_queues.include?(name)
       def recurring_tasks = @recurring_tasks_list

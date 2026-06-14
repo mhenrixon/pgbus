@@ -1,6 +1,35 @@
 ---
 nl:
   pgbus:
+    batches:
+      index:
+        description: Taakgroepen met voortgangsregistratie en callbacks
+        empty: Geen groepen gevonden
+        headers:
+          batch_id: Groep-ID
+          created: Aangemaakt
+          description: Beschrijving
+          jobs: Taken
+          progress: Voortgang
+          status: Status
+        title: Groepen
+      show:
+        back: Terug naar groepen
+        batch_id: Groep-ID
+        completed: Voltooid
+        created_at: Aangemaakt op
+        details: Details
+        discarded: Verworpen
+        finished_at: Voltooid op
+        not_found: Groep niet gevonden
+        on_discard: Bij verwerping
+        on_finish: Bij voltooiing
+        on_success: Bij succes
+        progress: Voortgang
+        properties: Eigenschappen
+        remaining: Resterend
+        title: Groep
+        total_jobs: Totaal taken
     dashboard:
       processes_table:
         empty: Geen processen actief
@@ -189,6 +218,10 @@ nl:
         not_found: Gebeurtenis niet gevonden
         title: Gebeurtenis %{event_id}
     helpers:
+      batch_status:
+        finished: Voltooid
+        pending: In afwachting
+        processing: Bezig
       bulk_select_all: Alles selecteren
       bulk_select_row: Selecteer %{id}
       bulk_selected: geselecteerd
@@ -346,6 +379,7 @@ nl:
     layout:
       brand: Pgbus
       nav:
+        batches: Groepen
         dashboard: Dashboard
         dlq: DLQ
         events: Evenementen

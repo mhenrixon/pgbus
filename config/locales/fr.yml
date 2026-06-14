@@ -1,6 +1,35 @@
 ---
 fr:
   pgbus:
+    batches:
+      index:
+        description: Lots de tâches avec suivi de progression et callbacks
+        empty: Aucun lot trouvé
+        headers:
+          batch_id: ID du lot
+          created: Créé
+          description: Description
+          jobs: Tâches
+          progress: Progression
+          status: Statut
+        title: Lots
+      show:
+        back: Retour aux lots
+        batch_id: ID du lot
+        completed: Terminées
+        created_at: Créé le
+        details: Détails
+        discarded: Rejetées
+        finished_at: Terminé le
+        not_found: Lot non trouvé
+        on_discard: Au rejet
+        on_finish: À la fin
+        on_success: Au succès
+        progress: Progression
+        properties: Propriétés
+        remaining: Restantes
+        title: Lot
+        total_jobs: Total des tâches
     dashboard:
       processes_table:
         empty: Aucun processus en cours d'exécution
@@ -189,6 +218,10 @@ fr:
         not_found: Événement non trouvé
         title: Événement %{event_id}
     helpers:
+      batch_status:
+        finished: Terminé
+        pending: En attente
+        processing: En cours
       bulk_select_all: Tout sélectionner
       bulk_select_row: Sélectionner %{id}
       bulk_selected: sélectionné
@@ -346,6 +379,7 @@ fr:
     layout:
       brand: Pgbus
       nav:
+        batches: Lots
         dashboard: Tableau de bord
         dlq: DLQ
         events: Événements

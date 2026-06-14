@@ -1,6 +1,35 @@
 ---
 it:
   pgbus:
+    batches:
+      index:
+        description: Lotti di lavori con monitoraggio del progresso e callback
+        empty: Nessun lotto trovato
+        headers:
+          batch_id: ID lotto
+          created: Creato
+          description: Descrizione
+          jobs: Lavori
+          progress: Progresso
+          status: Stato
+        title: Lotti
+      show:
+        back: Torna ai lotti
+        batch_id: ID lotto
+        completed: Completati
+        created_at: Creato il
+        details: Dettagli
+        discarded: Scartati
+        finished_at: Terminato il
+        not_found: Lotto non trovato
+        on_discard: Allo scarto
+        on_finish: Al termine
+        on_success: Al successo
+        progress: Progresso
+        properties: Proprietà
+        remaining: Rimanenti
+        title: Lotto
+        total_jobs: Lavori totali
     dashboard:
       processes_table:
         empty: Nessun processo in esecuzione
@@ -189,6 +218,10 @@ it:
         not_found: Evento non trovato
         title: Evento %{event_id}
     helpers:
+      batch_status:
+        finished: Terminato
+        pending: In sospeso
+        processing: In elaborazione
       bulk_select_all: Seleziona tutto
       bulk_select_row: Seleziona %{id}
       bulk_selected: selezionato
@@ -346,6 +379,7 @@ it:
     layout:
       brand: Pgbus
       nav:
+        batches: Lotti
         dashboard: Cruscotto
         dlq: DLQ
         events: Eventi
