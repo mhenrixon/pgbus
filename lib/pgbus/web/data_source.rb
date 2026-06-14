@@ -590,6 +590,43 @@ module Pgbus
         []
       end
 
+      # Batches
+      def batches(limit: 100)
+        BatchEntry.order(created_at: :desc).limit(limit).map { |r| format_batch(r) }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching batches: #{e.message}" }
+        []
+      end
+
+      def batch_detail(batch_id)
+        record = BatchEntry.find_by(batch_id: batch_id)
+        return nil unless record
+
+        format_batch(record).merge(
+          properties: record.properties,
+          on_finish_class: record.on_finish_class,
+          on_success_class: record.on_success_class,
+          on_discard_class: record.on_discard_class
+        )
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching batch #{batch_id}: #{e.message}" }
+        nil
+      end
+
+      def batches_count
+        BatchEntry.count
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error counting batches: #{e.message}" }
+        0
+      end
+
+      def active_batches_count
+        BatchEntry.where.not(status: "finished").count
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error counting active batches: #{e.message}" }
+        0
+      end
+
       # Job stats
       def job_stats_summary(minutes: 60)
         JobStat.summary(minutes: minutes)
@@ -1168,6 +1205,25 @@ module Pgbus
           last_heartbeat_at: heartbeat_time,
           healthy: !stale,
           created_at: row["created_at"]
+        }
+      end
+
+      def format_batch(record)
+        total = record.total_jobs
+        done = record.completed_jobs + record.discarded_jobs
+        pct = total.positive? ? ((done * 100) / total) : 100
+
+        {
+          batch_id: record.batch_id,
+          description: record.description,
+          status: record.status,
+          total_jobs: total,
+          completed_jobs: record.completed_jobs,
+          discarded_jobs: record.discarded_jobs,
+          failed_jobs: record.failed_jobs,
+          progress_pct: pct,
+          created_at: record.created_at,
+          finished_at: record.finished_at
         }
       end
 

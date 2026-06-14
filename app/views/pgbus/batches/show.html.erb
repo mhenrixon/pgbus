@@ -1,0 +1,90 @@
+<div class="mb-6">
+  <div class="flex items-center space-x-2 mb-2">
+    <%= link_to t("pgbus.batches.show.back"), pgbus.batches_path,
+          class: "text-sm text-indigo-600 dark:text-indigo-400 hover:underline" %>
+  </div>
+  <h1 class="text-2xl font-bold text-gray-900 dark:text-white">
+    <%= t("pgbus.batches.show.title") %>
+    <span class="font-mono text-lg"><%= @batch[:batch_id][0..7] %></span>
+    <%= pgbus_batch_status_badge(@batch[:status]) %>
+  </h1>
+  <% if @batch[:description] %>
+    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400"><%= @batch[:description] %></p>
+  <% end %>
+</div>
+
+<!-- Progress -->
+<div class="mb-6 overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6">
+  <h2 class="text-sm font-semibold text-gray-900 dark:text-white mb-4"><%= t("pgbus.batches.show.progress") %></h2>
+
+  <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 mb-3">
+    <div class="h-4 rounded-full transition-all duration-300 <%= @batch[:discarded_jobs].to_i > 0 ? 'bg-amber-500' : 'bg-green-500' %>"
+         style="width: <%= @batch[:progress_pct] %>%"></div>
+  </div>
+
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+    <div>
+      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.total_jobs") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white font-mono"><%= @batch[:total_jobs] %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.completed") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400 font-mono"><%= @batch[:completed_jobs] %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.discarded") %></dt>
+      <dd class="mt-1 text-2xl font-semibold <%= @batch[:discarded_jobs].to_i > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white' %> font-mono"><%= @batch[:discarded_jobs] %></dd>
+    </div>
+    <div>
+      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.remaining") %></dt>
+      <dd class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white font-mono"><%= @batch[:total_jobs] - @batch[:completed_jobs] - @batch[:discarded_jobs] %></dd>
+    </div>
+  </div>
+</div>
+
+<!-- Details -->
+<div class="overflow-hidden rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700">
+  <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+    <h2 class="text-sm font-semibold text-gray-900 dark:text-white"><%= t("pgbus.batches.show.details") %></h2>
+  </div>
+  <dl class="divide-y divide-gray-100 dark:divide-gray-700">
+    <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+      <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.batch_id") %></dt>
+      <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:batch_id] %></dd>
+    </div>
+    <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+      <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.created_at") %></dt>
+      <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:created_at] %></dd>
+    </div>
+    <% if @batch[:finished_at] %>
+      <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.finished_at") %></dt>
+        <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:finished_at] %></dd>
+      </div>
+    <% end %>
+    <% if @batch[:on_finish_class] %>
+      <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.on_finish") %></dt>
+        <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:on_finish_class] %></dd>
+      </div>
+    <% end %>
+    <% if @batch[:on_success_class] %>
+      <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.on_success") %></dt>
+        <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:on_success_class] %></dd>
+      </div>
+    <% end %>
+    <% if @batch[:on_discard_class] %>
+      <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.on_discard") %></dt>
+        <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:on_discard_class] %></dd>
+      </div>
+    <% end %>
+    <% if @batch[:properties].present? %>
+      <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.properties") %></dt>
+        <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0 break-all"><%= @batch[:properties] %></dd>
+      </div>
+    <% end %>
+  </dl>
+</div>

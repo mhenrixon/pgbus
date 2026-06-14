@@ -1,6 +1,35 @@
 ---
 nb:
   pgbus:
+    batches:
+      index:
+        description: Jobbgrupper med fremdriftssporing og tilbakekall
+        empty: Ingen grupper funnet
+        headers:
+          batch_id: Gruppe-ID
+          created: Opprettet
+          description: Beskrivelse
+          jobs: Jobber
+          progress: Fremdrift
+          status: Status
+        title: Grupper
+      show:
+        back: Tilbake til grupper
+        batch_id: Gruppe-ID
+        completed: Fullført
+        created_at: Opprettet den
+        details: Detaljer
+        discarded: Forkastet
+        finished_at: Avsluttet den
+        not_found: Gruppe ikke funnet
+        on_discard: Ved forkastning
+        on_finish: Ved avslutning
+        on_success: Ved suksess
+        progress: Fremdrift
+        properties: Egenskaper
+        remaining: Gjenstående
+        title: Gruppe
+        total_jobs: Totalt antall jobber
     dashboard:
       processes_table:
         empty: Ingen prosesser kjører
@@ -189,6 +218,10 @@ nb:
         not_found: Hendelse ikke funnet
         title: Hendelse %{event_id}
     helpers:
+      batch_status:
+        finished: Fullført
+        pending: Avventer
+        processing: Behandler
       bulk_select_all: Velg alle
       bulk_select_row: Velg %{id}
       bulk_selected: valgt
@@ -346,6 +379,7 @@ nb:
     layout:
       brand: Pgbus
       nav:
+        batches: Grupper
         dashboard: Dashbord
         dlq: DLQ
         events: Hendelser

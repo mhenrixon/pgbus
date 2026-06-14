@@ -45,6 +45,7 @@ Pgbus::Engine.routes.draw do
     end
   end
 
+  resources :batches, only: %i[index show]
   resources :processes, only: [:index]
 
   resources :events, only: %i[index show] do

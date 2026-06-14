@@ -1,6 +1,35 @@
 ---
 es:
   pgbus:
+    batches:
+      index:
+        description: Lotes de trabajos con seguimiento de progreso y callbacks
+        empty: No se encontraron lotes
+        headers:
+          batch_id: ID de lote
+          created: Creado
+          description: Descripción
+          jobs: Trabajos
+          progress: Progreso
+          status: Estado
+        title: Lotes
+      show:
+        back: Volver a lotes
+        batch_id: ID de lote
+        completed: Completados
+        created_at: Creado el
+        details: Detalles
+        discarded: Descartados
+        finished_at: Finalizado el
+        not_found: Lote no encontrado
+        on_discard: Al descartar
+        on_finish: Al finalizar
+        on_success: Al tener éxito
+        progress: Progreso
+        properties: Propiedades
+        remaining: Restantes
+        title: Lote
+        total_jobs: Total de trabajos
     dashboard:
       processes_table:
         empty: No hay procesos en ejecución
@@ -189,6 +218,10 @@ es:
         not_found: Evento no encontrado
         title: Evento %{event_id}
     helpers:
+      batch_status:
+        finished: Finalizado
+        pending: Pendiente
+        processing: Procesando
       bulk_select_all: Seleccionar todo
       bulk_select_row: Seleccionar %{id}
       bulk_selected: seleccionado
@@ -346,6 +379,7 @@ es:
     layout:
       brand: Pgbus
       nav:
+        batches: Lotes
         dashboard: Panel de control
         dlq: DLQ
         events: Eventos

@@ -1,6 +1,35 @@
 ---
 da:
   pgbus:
+    batches:
+      index:
+        description: Jobbatches med fremdriftssporing og callbacks
+        empty: Ingen batches fundet
+        headers:
+          batch_id: Batch-ID
+          created: Oprettet
+          description: Beskrivelse
+          jobs: Jobs
+          progress: Fremgang
+          status: Status
+        title: Batches
+      show:
+        back: Tilbage til batches
+        batch_id: Batch-ID
+        completed: Fuldført
+        created_at: Oprettet den
+        details: Detaljer
+        discarded: Kasseret
+        finished_at: Afsluttet den
+        not_found: Batch ikke fundet
+        on_discard: Ved kassering
+        on_finish: Ved afslutning
+        on_success: Ved succes
+        progress: Fremgang
+        properties: Egenskaber
+        remaining: Resterende
+        title: Batch
+        total_jobs: Samlet antal jobs
     dashboard:
       processes_table:
         empty: Ingen processer kører
@@ -189,6 +218,10 @@ da:
         not_found: Begivenhed ikke fundet
         title: Begivenhed %{event_id}
     helpers:
+      batch_status:
+        finished: Afsluttet
+        pending: Afventer
+        processing: Behandler
       bulk_select_all: Vælg alle
       bulk_select_row: Vælg %{id}
       bulk_selected: valgt
@@ -346,6 +379,7 @@ da:
     layout:
       brand: Pgbus
       nav:
+        batches: Batches
         dashboard: Dashboard
         dlq: DLQ
         events: Begivenheder

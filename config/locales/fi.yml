@@ -1,6 +1,35 @@
 ---
 fi:
   pgbus:
+    batches:
+      index:
+        description: Tehtäväerät edistymisen seurannalla ja callback-kutsuilla
+        empty: Eriä ei löytynyt
+        headers:
+          batch_id: Erä-ID
+          created: Luotu
+          description: Kuvaus
+          jobs: Tehtävät
+          progress: Edistyminen
+          status: Tila
+        title: Erät
+      show:
+        back: Takaisin eriin
+        batch_id: Erä-ID
+        completed: Valmiit
+        created_at: Luotu
+        details: Tiedot
+        discarded: Hylätyt
+        finished_at: Valmistunut
+        not_found: Erää ei löytynyt
+        on_discard: Hylkäyksessä
+        on_finish: Valmistumisessa
+        on_success: Onnistumisessa
+        progress: Edistyminen
+        properties: Ominaisuudet
+        remaining: Jäljellä
+        title: Erä
+        total_jobs: Tehtäviä yhteensä
     dashboard:
       processes_table:
         empty: Ei käynnissä olevia prosesseja
@@ -189,6 +218,10 @@ fi:
         not_found: Tapahtumaa ei löytynyt
         title: Tapahtuma %{event_id}
     helpers:
+      batch_status:
+        finished: Valmis
+        pending: Odottaa
+        processing: Käsittelyssä
       bulk_select_all: Valitse kaikki
       bulk_select_row: Valitse %{id}
       bulk_selected: valittu
@@ -346,6 +379,7 @@ fi:
     layout:
       brand: Pgbus
       nav:
+        batches: Erät
         dashboard: Hallintapaneeli
         dlq: DLQ
         events: Tapahtumat

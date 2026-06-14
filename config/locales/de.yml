@@ -1,6 +1,35 @@
 ---
 de:
   pgbus:
+    batches:
+      index:
+        description: Job-Stapel mit Fortschrittsverfolgung und Callbacks
+        empty: Keine Stapel gefunden
+        headers:
+          batch_id: Stapel-ID
+          created: Erstellt
+          description: Beschreibung
+          jobs: Jobs
+          progress: Fortschritt
+          status: Status
+        title: Stapel
+      show:
+        back: Zurück zu Stapeln
+        batch_id: Stapel-ID
+        completed: Abgeschlossen
+        created_at: Erstellt am
+        details: Details
+        discarded: Verworfen
+        finished_at: Beendet am
+        not_found: Stapel nicht gefunden
+        on_discard: Bei Verwerfung
+        on_finish: Bei Beendigung
+        on_success: Bei Erfolg
+        progress: Fortschritt
+        properties: Eigenschaften
+        remaining: Verbleibend
+        title: Stapel
+        total_jobs: Gesamtanzahl Jobs
     dashboard:
       processes_table:
         empty: Keine Prozesse laufen
@@ -189,6 +218,10 @@ de:
         not_found: Ereignis nicht gefunden
         title: Ereignis %{event_id}
     helpers:
+      batch_status:
+        finished: Abgeschlossen
+        pending: Ausstehend
+        processing: In Bearbeitung
       bulk_select_all: Alle auswählen
       bulk_select_row: "%{id} auswählen"
       bulk_selected: ausgewählt
@@ -346,6 +379,7 @@ de:
     layout:
       brand: Pgbus
       nav:
+        batches: Stapel
         dashboard: Dashboard
         dlq: DLQ
         events: Ereignisse
