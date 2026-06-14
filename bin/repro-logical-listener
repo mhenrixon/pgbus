@@ -104,13 +104,12 @@ while Time.now < deadline
   end
 end
 
+puts ""
 if wake
-  puts ""
   puts "RESULT: LogicalReplicationListener delivered WakeMessage(queue_name: #{wake.queue_name.inspect}) via port #{PORT}."
   puts "        Through a transaction-mode PgBouncer, this is the path NOTIFY couldn't survive."
   exit_code = 0
 else
-  puts ""
   puts "RESULT: timeout — no WakeMessage received via port #{PORT}."
   exit_code = 1
 end

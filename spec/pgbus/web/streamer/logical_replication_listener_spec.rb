@@ -4,15 +4,6 @@ require "spec_helper"
 require "stringio"
 
 RSpec.describe Pgbus::Web::Streamer::LogicalReplicationListener do
-  before do
-    stub_const("PG", Module.new) unless defined?(PG)
-    stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
-  end
-
-  let(:dispatch_queue) { Queue.new }
-  let(:logger)         { Logger.new(IO::NULL) }
-  let(:fake_pg)        { Class.new { def close; end; def closed?; false; end }.new }
-
   subject(:listener) do
     described_class.new(
       pg_connection: fake_pg,
@@ -21,6 +12,23 @@ RSpec.describe Pgbus::Web::Streamer::LogicalReplicationListener do
       logger: logger,
       slot_name: "pgbus_streamer_test_slot"
     )
+  end
+
+  before do
+    stub_const("PG", Module.new) unless defined?(PG)
+    stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
+  end
+
+  let(:dispatch_queue) { Queue.new }
+  let(:logger)         { Logger.new(IO::NULL) }
+  let(:fake_pg)        do
+    Class.new do
+      def close; end
+
+      def closed?
+        false
+      end
+    end.new
   end
 
   describe "interest set (LISTEN equivalent)" do

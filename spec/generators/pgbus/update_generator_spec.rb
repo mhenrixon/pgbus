@@ -13,7 +13,7 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "has a description" do
-      expect(described_class.desc).to match(/Upgrade pgbus/)
+      expect(described_class.desc).to include("Upgrade pgbus")
       expect(described_class.desc).to include("YAML")
       expect(described_class.desc).to include("migrations")
     end
