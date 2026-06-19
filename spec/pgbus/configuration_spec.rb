@@ -1246,4 +1246,54 @@ RSpec.describe Pgbus::Configuration do
       end
     end
   end
+
+  describe "NOTIFY-gated wakeup (spike) settings" do
+    it "defaults worker_notify_wakeup to false" do
+      expect(config.worker_notify_wakeup).to be false
+    end
+
+    it "leaves the worker_notify connection overrides nil by default" do
+      expect(config.worker_notify_host).to be_nil
+      expect(config.worker_notify_port).to be_nil
+      expect(config.worker_notify_database_url).to be_nil
+    end
+
+    describe "#worker_notify_connection_options" do
+      it "returns the base connection_options when no override is set" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        expect(config.worker_notify_connection_options).to eq(config.connection_options)
+      end
+
+      it "pins the port on a Hash base without mutating the base" do
+        original = { host: "pooler.example", port: 6432, dbname: "app", sslmode: "require" }
+        config.connection_params = original
+        config.worker_notify_port = 5432
+
+        expect(config.worker_notify_connection_options).to eq(
+          host: "pooler.example", port: 5432, dbname: "app", sslmode: "require"
+        )
+        expect(config.connection_params).to eq(original)
+      end
+
+      it "appends a port override on a String/URL base" do
+        config.database_url = "postgres://app@pooler.example:6432/app"
+        config.worker_notify_port = 5432
+
+        expect(config.worker_notify_connection_options).to eq(
+          "postgres://app@pooler.example:6432/app port=5432"
+        )
+      end
+
+      it "lets worker_notify_database_url win over host/port and the base" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.worker_notify_host = "ignored"
+        config.worker_notify_port = 9999
+        config.worker_notify_database_url = "postgres://w@direct.example:5432/app"
+
+        expect(config.worker_notify_connection_options).to eq(
+          "postgres://w@direct.example:5432/app"
+        )
+      end
+    end
+  end
 end

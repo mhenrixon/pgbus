@@ -116,6 +116,16 @@ module Pgbus
                   :streams_host, :streams_port, :streams_database_url
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
+    # NOTIFY-gated worker/consumer wakeups (SPIKE — off by default).
+    # When true, each Worker/Consumer fork owns a dedicated NotifyListener
+    # connection that LISTENs on its queues' INSERT channels and wakes the
+    # loop on a real insert, so empty queues stop generating a pgmq.read per
+    # polling tick. The worker_notify_* overrides mirror the streams_* ones:
+    # the listener's LISTEN connection can be pinned to a direct port to
+    # survive PgBouncer transaction-pool mode. See docs/design/notify-wakeup.md.
+    attr_accessor :worker_notify_wakeup,
+                  :worker_notify_host, :worker_notify_port, :worker_notify_database_url
+
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
     # Set to false to opt out without uninstalling the appsignal gem.
     attr_accessor :appsignal_enabled, :appsignal_probe_enabled
@@ -217,6 +227,16 @@ module Pgbus
       @streams_host = nil
       @streams_port = nil
       @streams_database_url = nil
+
+      # NOTIFY-gated wakeup (spike) — disabled by default. Connection
+      # overrides default to the base connection_options; set the port (or
+      # host / full URL) to pin the listener past a transaction-pool PgBouncer,
+      # exactly like streams_port does for the SSE streamer.
+      @worker_notify_wakeup = false
+      @worker_notify_host = nil
+      @worker_notify_port = nil
+      @worker_notify_database_url = nil
+
       @streams_signed_name_secret = nil
       @streams_default_retention = 5 * 60 # 5 minutes
       @streams_retention = {}
@@ -681,6 +701,35 @@ module Pgbus
         parts = [base]
         parts << "host=#{streams_host}" if streams_host
         parts << "port=#{streams_port}" if streams_port
+        parts.join(" ")
+      else
+        base
+      end
+    end
+
+    # Connection options for a Worker/Consumer's dedicated NotifyListener
+    # connection. Mirrors streams_connection_options exactly: defaults to the
+    # base connection_options, overridable via worker_notify_database_url /
+    # worker_notify_host / worker_notify_port so the LISTEN connection can be
+    # pinned to a direct port (workers keep going through the pooler).
+    #
+    # Precedence: worker_notify_database_url > worker_notify_host/port > base.
+    def worker_notify_connection_options
+      return worker_notify_database_url if worker_notify_database_url
+
+      base = connection_options
+      return base unless worker_notify_host || worker_notify_port
+
+      case base
+      when Hash
+        result = base.dup
+        result[:host] = worker_notify_host if worker_notify_host
+        result[:port] = worker_notify_port if worker_notify_port
+        result
+      when String
+        parts = [base]
+        parts << "host=#{worker_notify_host}" if worker_notify_host
+        parts << "port=#{worker_notify_port}" if worker_notify_port
         parts.join(" ")
       else
         base

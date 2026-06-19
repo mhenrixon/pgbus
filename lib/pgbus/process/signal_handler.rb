@@ -51,6 +51,15 @@ module Pgbus
         drain_self_pipe
       end
 
+      # Wake a thread blocked in interruptible_sleep from any other thread.
+      # Used by the NotifyListener (NOTIFY-gated wakeup spike) to interrupt the
+      # consumer's poll sleep the instant an insert arrives. Uses the same
+      # self-pipe the signal traps write, so it composes with signal wakeups.
+      # Best-effort and non-blocking — a full pipe already means "wake pending".
+      def wake!
+        @self_pipe_w&.write_nonblock(".", exception: false)
+      end
+
       def graceful_shutdown
         raise NotImplementedError
       end

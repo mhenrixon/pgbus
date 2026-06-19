@@ -554,4 +554,64 @@ RSpec.describe Pgbus::Process::Worker do
       expect(priority_worker.stats[:consumer_priority]).to eq(10)
     end
   end
+
+  describe "NOTIFY-gated wakeup integration (spike)" do
+    after { worker.config.worker_notify_wakeup = false }
+
+    it "is off by default" do
+      expect(worker.send(:notify_wakeup?)).to be false
+    end
+
+    it "maps logical queues to physical (prefixed) channel names" do
+      prefix = worker.config.queue_prefix
+      expect(worker.send(:physical_queue_names)).to eq(["#{prefix}_default"])
+    end
+
+    it "round-trips a channel back to its physical queue name" do
+      channel = "pgmq.q_pgbus_default.INSERT"
+      expect(worker.send(:channel_to_physical, channel)).to eq("pgbus_default")
+    end
+
+    context "when wakeup is disabled" do
+      it "does not build a listener and uses the plain poll cadence" do
+        worker.config.worker_notify_wakeup = false
+        worker.send(:start_notify_listener)
+
+        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+        expect(worker.send(:wake_timeout)).to eq(worker.send(:effective_polling_interval))
+      end
+    end
+
+    context "when wakeup is enabled" do
+      let(:fake_listener) { instance_double(Pgbus::Process::NotifyListener, stop: nil) }
+
+      before do
+        worker.config.worker_notify_wakeup = true
+        allow(fake_listener).to receive(:start).and_return(fake_listener)
+        allow(Pgbus::Process::NotifyListener).to receive(:new).and_return(fake_listener)
+      end
+
+      it "builds a NotifyListener over the worker's physical queues" do
+        worker.send(:start_notify_listener)
+
+        expect(Pgbus::Process::NotifyListener).to have_received(:new).with(
+          hash_including(physical_queues: ["#{worker.config.queue_prefix}_default"])
+        )
+        expect(worker.instance_variable_get(:@notify_listener)).to eq(fake_listener)
+      end
+
+      it "raises the empty-fetch wait to the fallback ceiling (NOTIFY drives latency)" do
+        worker.send(:start_notify_listener)
+        expect(worker.send(:wake_timeout)).to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
+      end
+
+      it "falls back to polling (nil listener) if the listener fails to start" do
+        allow(Pgbus::Process::NotifyListener).to receive(:new).and_raise(StandardError, "boom")
+        worker.send(:start_notify_listener)
+
+        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+        expect(worker.send(:wake_timeout)).to eq(worker.send(:effective_polling_interval))
+      end
+    end
+  end
 end

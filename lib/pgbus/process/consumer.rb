@@ -7,6 +7,10 @@ module Pgbus
     class Consumer
       include SignalHandler
 
+      # Fallback poll ceiling when NOTIFY-gated wakeups are active (see
+      # Worker::NOTIFY_FALLBACK_POLL_SECONDS).
+      NOTIFY_FALLBACK_POLL_SECONDS = 15
+
       attr_reader :topics, :threads, :config, :execution_mode
 
       def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads)
@@ -17,13 +21,18 @@ module Pgbus
         @shutting_down = false
         @pool = ExecutionPools.build(mode: @execution_mode, capacity: threads)
         @registry = EventBus::Registry.instance
+        @notify_listener = nil
       end
 
       def run
         setup_signals
         start_heartbeat
         setup_subscriptions
-        Pgbus.logger.info { "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads}" }
+        start_notify_listener
+        Pgbus.logger.info do
+          "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads} " \
+            "notify_wakeup=#{notify_wakeup?}"
+        end
 
         loop do
           break if @shutting_down
@@ -55,7 +64,7 @@ module Pgbus
 
       def consume
         idle = @pool.available_capacity
-        return interruptible_sleep(config.polling_interval) if idle <= 0
+        return interruptible_sleep(consume_wake_timeout) if idle <= 0
 
         tagged_messages = if @queue_names.size == 1
                             queue = @queue_names.first
@@ -119,6 +128,35 @@ module Pgbus
           subscription_pattern.start_with?(topic_filter.delete_suffix(".#"))
       end
 
+      def notify_wakeup?
+        config.respond_to?(:worker_notify_wakeup) && config.worker_notify_wakeup
+      end
+
+      # See Worker#wake_timeout. With the listener active, the consumer's poll
+      # sleep becomes a safety-net ceiling (a missed NOTIFY costs bounded extra
+      # latency); the listener wakes it via wake! on a real insert.
+      def consume_wake_timeout
+        return config.polling_interval unless notify_wakeup? && @notify_listener
+
+        [config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def start_notify_listener
+        return unless notify_wakeup?
+        return if Array(@queue_names).empty?
+
+        @notify_listener = NotifyListener.new(
+          physical_queues: @queue_names,
+          on_wake: -> { wake! },
+          connection_options: config.worker_notify_connection_options,
+          health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
+          logger: Pgbus.logger
+        ).start
+      rescue StandardError => e
+        @notify_listener = nil
+        Pgbus.logger.error { "[Pgbus] Consumer NotifyListener failed to start, falling back to polling: #{e.class}: #{e.message}" }
+      end
+
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "consumer",
@@ -128,6 +166,7 @@ module Pgbus
       end
 
       def shutdown
+        @notify_listener&.stop
         @pool.shutdown
         @pool.wait_for_termination(30)
         @heartbeat&.stop

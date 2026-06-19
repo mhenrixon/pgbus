@@ -49,6 +49,7 @@ module Pgbus
         )
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @queue_lock = QueueLock.new if @single_active_consumer
+        @notify_listener = nil
       end
 
       def stats
@@ -70,10 +71,11 @@ module Pgbus
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
+        start_notify_listener
         @lifecycle.transition_to!(:running)
         Pgbus.logger.info do
           "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} " \
-            "mode=#{@execution_mode} pid=#{::Process.pid}"
+            "mode=#{@execution_mode} notify_wakeup=#{notify_wakeup?} pid=#{::Process.pid}"
         end
 
         loop do
@@ -109,6 +111,11 @@ module Pgbus
 
       WILDCARD_REFRESH_INTERVAL = 30 # seconds
 
+      # Fallback poll ceiling when NOTIFY-gated wakeups are active. A missed
+      # NOTIFY (connection drop / throttle coalescing) surfaces as at most this
+      # much extra pickup latency, never a stuck queue.
+      NOTIFY_FALLBACK_POLL_SECONDS = 15
+
       # Matches the physical queue name inside a "relation \"pgmq.q_foo\" does
       # not exist" error. Frozen module constant to avoid recompiling the
       # regex on every queue-missing error in hot fetch/read paths.
@@ -117,7 +124,7 @@ module Pgbus
       private
 
       def claim_and_execute
-        poll_interval = effective_polling_interval
+        poll_interval = wake_timeout
 
         idle = @pool.available_capacity
         return @wake_signal.wait(timeout: poll_interval) if idle <= 0
@@ -295,6 +302,7 @@ module Pgbus
           Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" } unless @last_wildcard_resolve
         end
         @last_wildcard_resolve = monotonic_now
+        sync_notify_listener_queues
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
         @queues = [config.default_queue] unless @last_wildcard_resolve
@@ -413,6 +421,63 @@ module Pgbus
         config.polling_interval
       end
 
+      def notify_wakeup?
+        config.respond_to?(:worker_notify_wakeup) && config.worker_notify_wakeup
+      end
+
+      # The empty-fetch wait timeout. Without notify-wakeup this is the primary
+      # poll cadence (read every effective_polling_interval). With notify-wakeup
+      # the NotifyListener fires the WakeSignal on a real insert, so this becomes
+      # a SAFETY-NET ceiling for a missed NOTIFY (connection drop / throttle
+      # coalescing) rather than the steady-state cadence — we can wait much
+      # longer between blind reads on an idle queue. Capped so a dropped wakeup
+      # costs bounded latency, never a stuck queue.
+      def wake_timeout
+        return effective_polling_interval unless notify_wakeup? && @notify_listener
+
+        [effective_polling_interval, config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def start_notify_listener
+        return unless notify_wakeup?
+
+        @notify_listener = NotifyListener.new(
+          physical_queues: physical_queue_names,
+          on_wake: -> { @wake_signal.notify! },
+          connection_options: config.worker_notify_connection_options,
+          health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
+          logger: Pgbus.logger
+        ).start
+      rescue StandardError => e
+        # A listener failure must never take down the worker — fall back to
+        # plain polling (wake_timeout reverts to effective_polling_interval
+        # because @notify_listener stays nil).
+        @notify_listener = nil
+        Pgbus.logger.error { "[Pgbus] NotifyListener failed to start, falling back to polling: #{e.class}: #{e.message}" }
+      end
+
+      # Re-LISTEN the listener on the current queue set after a wildcard
+      # refresh or eviction. No-op when notify-wakeup is off.
+      def sync_notify_listener_queues
+        return unless @notify_listener
+
+        desired = physical_queue_names.to_set
+        current = @notify_listener.listening_to.to_set { |c| channel_to_physical(c) }
+        (desired - current).each { |q| @notify_listener.add_queue(q) }
+        (current - desired).each { |q| @notify_listener.remove_queue(q) }
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] NotifyListener queue sync failed: #{e.class}: #{e.message}" }
+      end
+
+      def physical_queue_names
+        prefix = "#{config.queue_prefix}_"
+        queues.map { |q| "#{prefix}#{q}" }
+      end
+
+      def channel_to_physical(channel)
+        channel.delete_prefix(NotifyListener::CHANNEL_PREFIX).delete_suffix(NotifyListener::CHANNEL_SUFFIX)
+      end
+
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "worker",
@@ -427,6 +492,7 @@ module Pgbus
 
       def shutdown
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
+        @notify_listener&.stop
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop
