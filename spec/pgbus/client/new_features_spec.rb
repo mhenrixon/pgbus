@@ -282,13 +282,15 @@ RSpec.describe Pgbus::Client do
     let(:mock_pgmq) { build_mock_pgmq }
 
     it "delegates to pgmq-ruby tune_autovacuum with the physical queue name" do
-      client.send(:tune_autovacuum, "pgbus_test_jobs")
-      expect(mock_pgmq).to have_received(:tune_autovacuum).with("pgbus_test_jobs")
+      physical_queue = config.queue_name("jobs")
+      client.send(:tune_autovacuum, physical_queue)
+      expect(mock_pgmq).to have_received(:tune_autovacuum).with(physical_queue)
     end
 
     it "swallows tuning failures (best-effort, never blocks queue use)" do
       allow(mock_pgmq).to receive(:tune_autovacuum).and_raise(StandardError, "boom")
-      expect { client.send(:tune_autovacuum, "pgbus_test_jobs") }.not_to raise_error
+      physical_queue = config.queue_name("jobs")
+      expect { client.send(:tune_autovacuum, physical_queue) }.not_to raise_error
     end
   end
 end
