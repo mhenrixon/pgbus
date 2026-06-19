@@ -257,4 +257,40 @@ RSpec.describe Pgbus::Client do
       end
     end
   end
+
+  describe "#tune_autovacuum (delegates to pgmq-ruby v0.7+)" do
+    subject(:client) do
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      c = described_class.new(config)
+      c.instance_variable_set(:@schema_ensured, true)
+      c
+    end
+
+    before do
+      allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
+      stub_const("PGMQ::Client", Class.new do
+        def initialize(*args, **kwargs); end
+      end)
+    end
+
+    let(:config) do
+      Pgbus::Configuration.new.tap do |c|
+        c.database_url = "postgres://localhost/pgbus_test"
+        c.queue_prefix = "pgbus_test"
+      end
+    end
+    let(:mock_pgmq) { build_mock_pgmq }
+
+    it "delegates to pgmq-ruby tune_autovacuum with the physical queue name" do
+      physical_queue = config.queue_name("jobs")
+      client.send(:tune_autovacuum, physical_queue)
+      expect(mock_pgmq).to have_received(:tune_autovacuum).with(physical_queue)
+    end
+
+    it "swallows tuning failures (best-effort, never blocks queue use)" do
+      allow(mock_pgmq).to receive(:tune_autovacuum).and_raise(StandardError, "boom")
+      physical_queue = config.queue_name("jobs")
+      expect { client.send(:tune_autovacuum, physical_queue) }.not_to raise_error
+    end
+  end
 end

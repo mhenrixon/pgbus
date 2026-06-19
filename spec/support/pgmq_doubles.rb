@@ -31,6 +31,7 @@ module PgmqDoubles
         update_notify_insert: nil,
         list_notify_insert_throttles: [],
         convert_archive_partitioned: nil,
+        tune_autovacuum: nil,
         close: nil
       )
       # Batch operations echo back the ids to mirror pgmq-ruby behavior

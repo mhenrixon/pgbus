@@ -4,10 +4,6 @@ source "https://rubygems.org"
 
 gemspec
 
-# Track pgmq-ruby main for unreleased 0.7.0 features (grouped reads, wait_for_notify,
-# FIFO indexes, Time delay, archive partitioning). Pin to git until 0.7.0 ships.
-gem "pgmq-ruby", git: "https://github.com/mensfeld/pgmq-ruby.git", branch: "master"
-
 gem "irb"
 gem "rake", "~> 13.0"
 

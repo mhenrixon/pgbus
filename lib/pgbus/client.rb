@@ -632,11 +632,21 @@ module Pgbus
       false
     end
 
+    # Apply PGMQ-tuned autovacuum + storage parameters to a queue's tables.
+    #
+    # Delegates to pgmq-ruby's tune_autovacuum (v0.7+), which sets the same
+    # queue/archive parameters pgbus used to apply by hand — vacuum scale
+    # factor 0.01/0.05, cost_delay 2/5, analyze scale factor 0.05, and
+    # fillfactor 70 on the queue table — plus a vacuum_threshold floor of 50.
+    # It quotes/lowercases the table name and runs both ALTER TABLEs in one
+    # pooled checkout. Tuning is best-effort: a failure here never blocks a
+    # queue from being usable, so we log and move on.
+    #
+    # Pgbus::AutovacuumTuning is still the source for the migration generators
+    # (sql_for_all_queues, sql_for_high_churn_tables) which tune pgbus-owned
+    # metadata tables the gem doesn't know about.
     def tune_autovacuum(queue_name)
-      with_raw_connection do |conn|
-        conn.exec(AutovacuumTuning.sql_for_queue(queue_name))
-        conn.exec(TableMaintenance.fillfactor_sql_for_queue(queue_name))
-      end
+      @pgmq.tune_autovacuum(queue_name)
     rescue StandardError => e
       Pgbus.logger.debug { "[Pgbus::Client] Autovacuum tuning failed for #{queue_name}: #{e.message}" }
     end

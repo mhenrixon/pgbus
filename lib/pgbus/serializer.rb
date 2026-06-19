@@ -58,7 +58,7 @@ module Pgbus
       raise ArgumentError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
 
       allowed = Pgbus.configuration.allowed_global_id_models
-      if allowed&.empty?
+      if allowed && allowed.empty?
         raise ArgumentError,
               "GlobalID deserialization is disabled (allowed_global_id_models is empty). " \
               "Set to nil to allow all models, or add permitted classes."
