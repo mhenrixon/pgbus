@@ -31,6 +31,14 @@ RSpec.describe "Dashboard interaction UX" do # rubocop:disable RSpec/DescribeCla
     end
   end
 
+  describe "batches table links" do
+    let(:batches_table) { views_dir.join("pgbus", "batches", "_batches_table.html.erb").read }
+
+    it "uses turbo_frame _top for batch links to break out of the turbo frame" do
+      expect(batches_table).to include("turbo_frame: \"_top\"")
+    end
+  end
+
   describe "queue show page" do
     let(:queue_show) { views_dir.join("pgbus", "queues", "show.html.erb").read }
 
