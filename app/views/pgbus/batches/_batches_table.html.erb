@@ -16,7 +16,8 @@
           <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
             <td data-label="Batch ID" class="px-4 py-3 text-sm">
               <%= link_to batch[:batch_id][0..7], pgbus.batch_path(batch[:batch_id]),
-                    class: "font-mono text-indigo-600 dark:text-indigo-400 hover:underline" %>
+                    class: "font-mono text-indigo-600 dark:text-indigo-400 hover:underline",
+                    data: { turbo_frame: "_top" } %>
             </td>
             <td data-label="Description" class="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 max-w-xs truncate">
               <%= batch[:description] || "—" %>
