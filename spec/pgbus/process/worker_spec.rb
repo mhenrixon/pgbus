@@ -672,6 +672,18 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     describe "#start_notify_listener" do
+      # worker.config is the globally-memoized Pgbus.configuration, so mutating
+      # polling_interval here leaks into any later example whose worker is also
+      # built from the global config (everything in this file). Snapshot and
+      # restore around every example in this block to keep #wake_timeout and
+      # #effective_polling_interval reading the original value.
+      around do |example|
+        original = Pgbus.configuration.polling_interval
+        example.run
+      ensure
+        Pgbus.configuration.polling_interval = original
+      end
+
       it "does not construct a listener when notify_wakeup? is off" do
         allow(worker).to receive(:notify_wakeup?).and_return(false)
         allow(Pgbus::Process::NotifyListener).to receive(:new)
@@ -716,16 +728,14 @@ RSpec.describe Pgbus::Process::Worker do
 
       it "clamps health_check_ms above 5000ms down to the ceiling" do
         # polling_interval 30s → 30000ms → clamped down to 5000ms maximum.
-        # Build a fresh worker since polling_interval mutation must not
-        # leak into other examples.
-        big_poll_worker = described_class.new(queues: %w[default], threads: 5)
-        big_poll_worker.config.polling_interval = 30
-        allow(big_poll_worker).to receive(:notify_wakeup?).and_return(true)
-        allow(big_poll_worker.config).to receive(:worker_notify_connection_options)
+        # The around hook above restores polling_interval after the example.
+        worker.config.polling_interval = 30
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(worker.config).to receive(:worker_notify_connection_options)
           .and_return({ dbname: "test" })
         allow(Pgbus::Process::NotifyListener).to receive(:new).and_return(fake_listener)
 
-        big_poll_worker.send(:start_notify_listener)
+        worker.send(:start_notify_listener)
 
         expect(Pgbus::Process::NotifyListener).to have_received(:new)
           .with(hash_including(health_check_ms: 5000))
