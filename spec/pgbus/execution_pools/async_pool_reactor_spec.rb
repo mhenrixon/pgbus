@@ -14,6 +14,14 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
     pool.wait_for_termination(5)
   end
 
+  # Block until the pool has a free slot, mirroring the worker's idle<=0
+  # backpressure so a tight post loop never overruns capacity.
+  def wait_for_capacity(pool, timeout: 5)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    Thread.pass until pool.available_capacity.positive? ||
+                      Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+  end
+
   describe "reactor does not use blocking Kernel#sleep" do
     let(:source) do
       File.read(
@@ -58,10 +66,88 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
         latencies << (t1 - t0)
       end
 
+      # Assert on the MEDIAN, not a tail percentile: scheduler jitter on a
+      # loaded CI box inflates the tail, but the median exposes the steady-state
+      # mechanism. Polling sleep(0.01) floors the median near ~5ms (you wait, on
+      # average, half a poll cycle); notification wake pushes it sub-millisecond.
+      # A median < 3ms is unreachable with the old blocking-sleep poll loop.
       sorted = latencies.sort
-      p90 = sorted[(latencies.size * 0.9).floor]
-      expect(p90).to be < 0.005,
-                     "p90 post-to-execute latency was #{(p90 * 1000).round(2)}ms (expected <5ms)"
+      median = sorted[latencies.size / 2]
+      expect(median).to be < 0.003,
+                        "median post-to-execute latency was #{(median * 1000).round(2)}ms " \
+                        "(expected <3ms; blocking-sleep polling floors this near 5ms)"
+    end
+  end
+
+  # The worker's main loop parks in WakeSignal#wait between fetches. The ONLY
+  # thing that wakes it when the pool is saturated is the on_state_change
+  # callback fired as fibers complete and free capacity (Worker wires it to
+  # WakeSignal#notify!). PR #164 (NOTIFY-gated wakeup) raises that wait to a
+  # 15s fallback ceiling, so a missed on_state_change strands work for up to
+  # 15s under execution_mode: :async. These tests pin the wake contract so the
+  # 15s ceiling stays a safety net, never the steady-state latency.
+  describe "on_state_change wake contract (de-risks #164 async fallback)" do
+    it "fires on_state_change for every fiber that frees capacity" do
+      total = 50
+      done = Concurrent::CountDownLatch.new(total)
+
+      # Post within capacity: each task completes quickly and frees a slot
+      # before the next post, mirroring the worker's idle<=0 backpressure.
+      total.times do |i|
+        wait_for_capacity(pool)
+        pool.post do
+          done.count_down
+        end
+        # Yield so the reactor schedules and the fiber completes between posts.
+        Thread.pass if (i % capacity).zero?
+      end
+
+      expect(done.wait(5)).to be(true), "Not all fibers completed"
+
+      # Each completion restores capacity and pokes on_state_change. With
+      # serialized within-capacity posting, every task frees a slot from a
+      # saturated-or-near-saturated state, so the callback must fire at least
+      # once per task — never fewer (a dropped poke = a missed worker wake).
+      expect(state_changes.value).to be >= total
+    end
+
+    it "wakes a saturated worker-style waiter the moment capacity frees" do
+      # Saturate the pool with blocking work, then park a waiter exactly as the
+      # worker loop does: WakeSignal#wait with a long (15s-style) timeout that
+      # must be interrupted early by on_state_change, not by the timeout.
+      wake_signal = Pgbus::Process::WakeSignal.new
+      saturating_pool = described_class.new(capacity: 2, on_state_change: -> { wake_signal.notify! })
+      release = Concurrent::Event.new
+      saturate(saturating_pool, count: 2, release: release)
+
+      woke_after = Concurrent::IVar.new
+      waiter = park_waiter(wake_signal, woke_after, timeout: 15) # the #164 fallback ceiling
+      sleep 0.05
+      release.set # fibers finish → restore_capacity → on_state_change → notify!
+
+      elapsed = woke_after.value(5)
+      expect(elapsed).not_to be_nil, "Waiter never woke (stranded on the 15s ceiling)"
+      expect(elapsed).to be < 1.0,
+                         "Waiter woke after #{elapsed.round(2)}s — on_state_change " \
+                         "did not interrupt the 15s fallback wait (issue #164 risk)"
+    ensure
+      waiter&.kill
+      saturating_pool&.shutdown
+      saturating_pool&.wait_for_termination(2)
+    end
+
+    def saturate(pool, count:, release:)
+      count.times { pool.post { release.wait(5) } }
+      sleep 0.05
+      expect(pool.available_capacity).to eq(0)
+    end
+
+    def park_waiter(wake_signal, woke_after, timeout:)
+      Thread.new do
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        wake_signal.wait(timeout: timeout)
+        woke_after.set(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
+      end
     end
   end
 
