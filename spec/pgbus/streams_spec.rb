@@ -94,6 +94,55 @@ RSpec.describe Pgbus::Streams do
       end
     end
 
+    describe "#broadcast with coalesce: (issue #171)" do
+      let(:coalescer) { instance_spy(Pgbus::Streams::Coalescer) }
+
+      before { allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer) }
+
+      it "submits to the coalescer instead of broadcasting immediately" do
+        stream.broadcast("<turbo-stream/>", coalesce: 80, target: "cursor")
+
+        expect(client).not_to have_received(:send_message)
+        expect(coalescer).to have_received(:submit).with(
+          stream_name: "chat",
+          target: "cursor",
+          payload: "<turbo-stream/>",
+          window_ms: 80,
+          opts: { visible_to: nil, durable: nil, exclude: nil, event: nil }
+        )
+      end
+
+      it "uses the default window when coalesce: true" do
+        stream.broadcast("<turbo-stream/>", coalesce: true, target: "cursor")
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(window_ms: Pgbus::Streams::Coalescer::DEFAULT_WINDOW_MS)
+        )
+      end
+
+      it "forwards visible_to/exclude/durable/event in opts" do
+        stream.broadcast("x", coalesce: 50, target: "t", visible_to: :admins, exclude: "c1", event: "reactive", durable: true)
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: :admins, durable: true, exclude: "c1", event: "reactive" })
+        )
+      end
+
+      it "requires a target when coalescing (cannot dedupe without a key)" do
+        expect { stream.broadcast("x", coalesce: 50) }
+          .to raise_error(ArgumentError, /target/)
+        expect(coalescer).not_to have_received(:submit)
+      end
+
+      it "returns nil (the broadcast is deferred to the flush)" do
+        expect(stream.broadcast("x", coalesce: 50, target: "t")).to be_nil
+      end
+
+      it "does not coalesce when coalesce is nil/false (normal broadcast)" do
+        stream.broadcast("x", coalesce: false, target: "t")
+        expect(coalescer).not_to have_received(:submit)
+        expect(client).to have_received(:send_message)
+      end
+    end
+
     describe "#broadcast_render" do
       # A Phlex-like renderable: Phlex::HTML#call returns the rendered
       # markup string. This is the shape the issue's example uses
@@ -195,6 +244,22 @@ RSpec.describe Pgbus::Streams do
             "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
             "event" => "reactive"
           }
+        )
+      end
+
+      it "coalesces on its target when coalesce: is set (issue #171)" do
+        coalescer = instance_spy(Pgbus::Streams::Coalescer)
+        allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer)
+
+        stream.broadcast_render(renderable: "<span>c</span>", target: "cursor", action: :update, coalesce: 30)
+
+        expect(client).not_to have_received(:send_message)
+        expect(coalescer).to have_received(:submit).with(
+          stream_name: "chat",
+          target: "cursor",
+          payload: '<turbo-stream action="update" target="cursor"><template><span>c</span></template></turbo-stream>',
+          window_ms: 30,
+          opts: { visible_to: nil, durable: nil, exclude: nil, event: nil }
         )
       end
     end

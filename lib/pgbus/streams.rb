@@ -34,6 +34,25 @@ module Pgbus
       @filters = nil
     end
 
+    # Process-wide publish-side coalescer for high-frequency broadcasts
+    # (issue #171). Lazily built; the flush re-enters the normal broadcast
+    # path so a coalesced frame is just a deferred ordinary broadcast.
+    def self.coalescer
+      # `target:` is part of the flush signature but unused here — it's only
+      # a coalescing key; the target is already encoded in the payload's
+      # turbo-stream tag. Absorbed via ** so it isn't a broadcast argument.
+      @coalescer ||= Coalescer.new(
+        flush: lambda do |stream_name:, payload:, opts:, **|
+          Pgbus.stream(stream_name).broadcast(payload, **opts)
+        end
+      )
+    end
+
+    # Clears the coalescer. Used by tests; not intended for runtime.
+    def self.reset_coalescer!
+      @coalescer = nil
+    end
+
     # A handle on a single logical stream. The name can be any string, an
     # object responding to `to_gid_param`, or an array of streamables (which
     # are joined with colons — turbo-rails-compatible).
@@ -99,7 +118,27 @@ module Pgbus
       # default consumers still receive the standard turbo-stream/`message`
       # path. The default (`nil` or `"turbo-stream"`) is not carried on the
       # wire — it's the implicit default the dispatcher applies.
-      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil, event: nil)
+      # High-frequency coalescing: pass `coalesce:` (a window in milliseconds,
+      # or `true` for the default window) together with `target:` to batch
+      # rapid broadcasts to the same (stream, target) and publish only the
+      # latest within the window. Superseded frames never reach the bus.
+      # Last-write-wins, so this is only safe for idempotent replace/update
+      # of a stable target (the high-frequency case: cursors, typing,
+      # progress). Returns nil — the actual broadcast is deferred to the
+      # coalescer's flush. See issue #171 and Pgbus::Streams::Coalescer.
+      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil, event: nil, coalesce: nil, target: nil)
+        if coalesce
+          return coalesce_broadcast(
+            payload,
+            coalesce: coalesce,
+            target: target,
+            visible_to: visible_to,
+            durable: durable,
+            exclude: exclude,
+            event: event
+          )
+        end
+
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
         wrapped["exclude"] = exclude.to_s if exclude && !exclude.to_s.empty?
@@ -150,9 +189,10 @@ module Pgbus
       # rendered by the app (which has the request context) and the
       # resulting string passed as `renderable:`.
       def broadcast_render(target:, action: :replace, renderable: nil, visible_to: nil, durable: nil, exclude: nil,
-                           event: nil)
+                           event: nil, coalesce: nil)
         html = Renderer.turbo_stream_tag(action: action, target: target, renderable: renderable)
-        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude, event: event)
+        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude, event: event,
+                        coalesce: coalesce, target: target)
       end
 
       def current_msg_id
@@ -223,6 +263,30 @@ module Pgbus
 
       def broadcast_ephemeral(wrapped)
         @client.notify_stream(@name, wrapped)
+        nil
+      end
+
+      # Submits a frame to the process-wide coalescer instead of
+      # broadcasting now. Requires a target (the dedupe key — there's no
+      # way to last-write-win without one). The window is `coalesce` in ms
+      # when numeric, else the coalescer's default. Returns nil; the
+      # coalescer flushes the latest frame as an ordinary broadcast.
+      def coalesce_broadcast(payload, coalesce:, target:, visible_to:, durable:, exclude:, event:)
+        if target.nil? || target.to_s.empty?
+          raise ArgumentError,
+                "broadcast(coalesce:) requires target: — coalescing keys on (stream, target), " \
+                "so the latest frame per target can win. Use broadcast_render(coalesce:) which " \
+                "already has a target, or pass target: explicitly."
+        end
+
+        window_ms = coalesce == true ? Coalescer::DEFAULT_WINDOW_MS : coalesce
+        Streams.coalescer.submit(
+          stream_name: @name,
+          target: target.to_s,
+          payload: payload.to_s,
+          window_ms: window_ms,
+          opts: { visible_to: visible_to, durable: durable, exclude: exclude, event: event }
+        )
         nil
       end
 
