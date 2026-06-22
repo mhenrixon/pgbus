@@ -161,7 +161,9 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
   describe "reconnect on connection error" do
     it "rebuilds the connection and re-LISTENs every channel" do
-      second_pg = fake_pg.clone
+      # Don't use Object#clone — it shallow-copies @events/@executed, so a
+      # missed reconnect could pass by reading channels from the first conn.
+      second_pg = fake_pg.class.new
       call_count = 0
       allow_any_instance_of(described_class).to receive(:build_connection) do
         call_count += 1

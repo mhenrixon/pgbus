@@ -24,11 +24,17 @@ module Pgbus
     # NOTIFY channel naming (pgmq trigger): PG_NOTIFY('pgmq.' || table || '.' ||
     # TG_OP). For queue `pgbus_default` the table is `q_pgbus_default`, so the
     # channel is `pgmq.q_pgbus_default.INSERT`.
+    #
+    # Thread safety: @running, @conn, and @listening_to are guarded by
+    # @state_mutex. The listener thread owns @conn during wait_for_notify (a
+    # blocking IO call where the mutex MUST NOT be held), so wait_once reads
+    # the connection out of the mutex first and operates on a local. Reconnect
+    # publishes the new connection + channel set under the mutex.
     class NotifyListener
       CHANNEL_PREFIX = "pgmq.q_"
       CHANNEL_SUFFIX = ".INSERT"
 
-      attr_reader :listening_to
+      RECONNECT_BACKOFF_SECONDS = 0.5
 
       def initialize(physical_queues:, on_wake:, connection_options:,
                      health_check_ms: 1000, logger: Pgbus.logger)
@@ -37,6 +43,7 @@ module Pgbus
         @connection_options = connection_options
         @health_check_ms = health_check_ms
         @logger = logger
+        @state_mutex = Mutex.new
         @listening_to = Set.new
         @commands = Queue.new
         @running = false
@@ -44,22 +51,34 @@ module Pgbus
         @conn = nil
       end
 
-      def start
-        return self if @running
+      def listening_to
+        @state_mutex.synchronize { @listening_to.dup }
+      end
 
-        @running = true
+      def start
+        @state_mutex.synchronize do
+          return self if @running
+
+          @running = true
+        end
         @physical_queues.each { |q| @commands << [:listen, q] }
         @thread = Thread.new { run_loop }
         self
       end
 
       def stop
-        return self unless @running
+        conn_to_close = nil
+        @state_mutex.synchronize do
+          return self unless @running
 
-        @running = false
+          @running = false
+          conn_to_close = @conn
+        end
         @commands << [:stop]
+        # Interrupt the blocking wait by closing the socket; the rescue in
+        # wait_once sees @running == false and exits cleanly.
         begin
-          @conn&.close if @conn.respond_to?(:close)
+          conn_to_close&.close if conn_to_close.respond_to?(:close)
         rescue StandardError
           nil
         end
@@ -78,33 +97,41 @@ module Pgbus
 
       private
 
+      def running?
+        @state_mutex.synchronize { @running }
+      end
+
       def run_loop
-        @conn = build_connection
+        conn = build_connection
+        @state_mutex.synchronize { @conn = conn }
         drain_commands
 
         loop do
-          break unless @running
+          break unless running?
 
           drain_commands
-          break unless @running
+          break unless running?
 
           wait_once
         end
       rescue StandardError => e
-        @logger.error { "[Pgbus::NotifyListener] fatal: #{e.class}: #{e.message}" } if @running
+        @logger.error { "[Pgbus::NotifyListener] fatal: #{e.class}: #{e.message}" } if running?
       ensure
         safe_unlisten_all
         safe_close
       end
 
       def wait_once
+        conn = @state_mutex.synchronize { @conn }
+        return reconnect! unless conn
+
         timeout_s = @health_check_ms / 1000.0
-        got_notify = @conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
+        got_notify = conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
           @on_wake.call
         end
-        run_health_check unless got_notify
+        run_health_check(conn) unless got_notify
       rescue IOError, PG::Error => e
-        return unless @running
+        return unless running?
 
         @logger.warn { "[Pgbus::NotifyListener] connection error (#{e.class}: #{e.message}) — reconnecting" }
         reconnect!
@@ -117,7 +144,7 @@ module Pgbus
           when :listen   then do_listen(cmd[1])
           when :unlisten then do_unlisten(cmd[1])
           when :stop
-            @running = false
+            @state_mutex.synchronize { @running = false }
             return
           end
         rescue ThreadError
@@ -127,36 +154,60 @@ module Pgbus
 
       def do_listen(physical_queue)
         channel = channel_for(physical_queue)
-        return if @listening_to.include?(channel)
+        conn = @state_mutex.synchronize do
+          return if @listening_to.include?(channel)
 
-        @conn.exec(%(LISTEN "#{channel}"))
-        @listening_to.add(channel)
+          @conn
+        end
+        return unless conn
+
+        conn.exec(%(LISTEN "#{channel}"))
+        @state_mutex.synchronize { @listening_to.add(channel) }
       end
 
       def do_unlisten(physical_queue)
         channel = channel_for(physical_queue)
-        return unless @listening_to.include?(channel)
+        conn = @state_mutex.synchronize do
+          return unless @listening_to.include?(channel)
 
-        @conn.exec(%(UNLISTEN "#{channel}"))
-        @listening_to.delete(channel)
-      end
-
-      def run_health_check
-        @conn.exec("SELECT 1")
-      end
-
-      def reconnect!
-        safe_close
-        @conn = build_connection
-        to_relisten = @listening_to.to_a
-        @listening_to = Set.new
-        to_relisten.each do |channel|
-          @conn.exec(%(LISTEN "#{channel}"))
-          @listening_to.add(channel)
+          @conn
         end
-      rescue PG::Error => e
-        @logger.error { "[Pgbus::NotifyListener] reconnect failed: #{e.class}: #{e.message}" }
-        sleep 0.5
+        return unless conn
+
+        conn.exec(%(UNLISTEN "#{channel}"))
+        @state_mutex.synchronize { @listening_to.delete(channel) }
+      end
+
+      def run_health_check(conn)
+        conn.exec("SELECT 1")
+      end
+
+      # Retry reconnect until either we succeed (new conn + every channel
+      # re-LISTENed) or @running flips to false. Without the loop, a single
+      # PG::Error during build/LISTEN left @conn nil and the listener degraded
+      # silently — wait_once would re-enter and fail forever or run with an
+      # incomplete subscription set.
+      def reconnect!
+        channels = @state_mutex.synchronize { @listening_to.to_a }
+        loop do
+          return unless running?
+
+          safe_close
+          begin
+            new_conn = build_connection
+            channels.each { |channel| new_conn.exec(%(LISTEN "#{channel}")) }
+          rescue PG::Error => e
+            @logger.error { "[Pgbus::NotifyListener] reconnect failed: #{e.class}: #{e.message}" }
+            sleep RECONNECT_BACKOFF_SECONDS
+            next
+          end
+
+          @state_mutex.synchronize do
+            @conn = new_conn
+            @listening_to = Set.new(channels)
+          end
+          return
+        end
       end
 
       def build_connection
@@ -173,20 +224,24 @@ module Pgbus
       end
 
       def safe_unlisten_all
-        @listening_to.each do |channel|
-          @conn&.exec(%(UNLISTEN "#{channel}"))
+        channels, conn = @state_mutex.synchronize { [@listening_to.to_a, @conn] }
+        channels.each do |channel|
+          conn&.exec(%(UNLISTEN "#{channel}"))
         rescue PG::Error
           nil
         end
-        @listening_to.clear
+        @state_mutex.synchronize { @listening_to.clear }
       end
 
       def safe_close
-        @conn&.close if @conn.respond_to?(:close)
+        conn = @state_mutex.synchronize do
+          c = @conn
+          @conn = nil
+          c
+        end
+        conn&.close if conn.respond_to?(:close)
       rescue StandardError
         nil
-      ensure
-        @conn = nil
       end
 
       def channel_for(physical_queue)
