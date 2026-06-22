@@ -5,8 +5,6 @@ module Pgbus
     class AsyncPool
       attr_reader :capacity
 
-      IDLE_WAIT_INTERVAL = 0.01
-
       def initialize(capacity:, on_state_change: nil)
         @capacity = capacity
         @on_state_change = on_state_change
@@ -17,6 +15,7 @@ module Pgbus
         @fatal_error = nil
         @boot_queue = Thread::Queue.new
         @pending = Thread::Queue.new
+        @wake_rd, @wake_wr = IO.pipe
 
         validate_dependencies!
         @reactor_thread = start_reactor
@@ -32,6 +31,7 @@ module Pgbus
         reserve_capacity!
         reserved = true
         @pending << block
+        wake_reactor
       rescue StandardError
         restore_capacity if reserved
         raise
@@ -52,6 +52,7 @@ module Pgbus
 
           @shutdown_flag = true
         end
+        wake_reactor
       end
 
       def shutdown?
@@ -96,7 +97,18 @@ module Pgbus
             @boot_queue << :ready
 
             wait_for_executions(semaphore)
-            wait_for_inflight
+            wait_for_inflight(task)
+          ensure
+            begin
+              @wake_rd.close
+            rescue IOError
+              nil
+            end
+            begin
+              @wake_wr.close
+            rescue IOError
+              nil
+            end
           end
         rescue Exception => e
           register_fatal_error(e)
@@ -110,8 +122,33 @@ module Pgbus
           schedule_pending(semaphore)
           break if shutdown? && @pending.empty?
 
-          sleep(IDLE_WAIT_INTERVAL) if @pending.empty?
+          wait_for_wake if @pending.empty?
         end
+      end
+
+      # Fiber-aware wait: yields the reactor fiber until the main thread
+      # writes a wake byte via wake_reactor. IO#wait_readable integrates
+      # with the Async scheduler so other fibers continue running.
+      def wait_for_wake
+        return if @wake_rd.closed?
+
+        @wake_rd.wait_readable
+        drain_wake_pipe
+      rescue IOError, Errno::EBADF
+        nil
+      end
+
+      def drain_wake_pipe
+        @wake_rd.read_nonblock(256)
+      rescue IOError, SystemCallError
+        nil
+      end
+
+      # Thread-safe: called from the main thread to wake the reactor fiber.
+      def wake_reactor
+        @wake_wr.write_nonblock(".")
+      rescue IO::WaitWritable, IOError, Errno::EBADF, Errno::EPIPE
+        nil
       end
 
       def schedule_pending(semaphore)
@@ -160,6 +197,7 @@ module Pgbus
           @available_capacity += 1
           @available_capacity.positive?
         end
+        wake_reactor
         @on_state_change&.call if should_notify
       end
 
@@ -174,8 +212,8 @@ module Pgbus
         raise error if error
       end
 
-      def wait_for_inflight
-        sleep(IDLE_WAIT_INTERVAL) while inflight?
+      def wait_for_inflight(task)
+        task.sleep(0.01) while inflight?
       end
 
       def inflight?
