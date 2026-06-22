@@ -500,13 +500,26 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
   end
 
   describe "connection-driven presence (issue #169)" do
+    subject(:dispatcher) do
+      described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500,
+        config: presence_config, presence_provider: presence_provider
+      )
+    end
+
     # A fake presence handle recording join/leave/touch calls. One per
     # stream, vended by the injected presence_provider.
     let(:presence_class) do
       Class.new do
         attr_reader :joined, :left, :touched
 
-        def initialize = (@joined = []; @left = []; @touched = [])
+        def initialize
+          @joined = []
+          @left = []
+          @touched = []
+        end
+
         def join(member_id:, metadata: {}) = @joined << { member_id: member_id, metadata: metadata }
         def leave(member_id:) = @left << member_id
         def touch(member_id:) = @touched << member_id
@@ -525,14 +538,6 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
           ctx.is_a?(Hash) && ctx[:member_id] ? { id: ctx[:member_id].to_s, metadata: ctx[:metadata] || {} } : nil
         end
       end
-    end
-
-    subject(:dispatcher) do
-      described_class.new(
-        client: client, registry: registry, listener: listener,
-        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500,
-        config: presence_config, presence_provider: presence_provider
-      )
     end
 
     before { allow(client).to receive(:read_after).and_return([]) }

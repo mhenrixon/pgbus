@@ -200,12 +200,12 @@ RSpec.describe Pgbus::Streams::Key do
       # The hazard is in the *join* of multiple fragments, so the
       # explanatory message is asserted on the multi-arg form. (A single
       # colon-bearing String is now treated as a pre-built key and
-      # returned unchanged — see the idempotency context below.)
+      # returned unchanged — see the already-built-key context below.)
       expect { described_class.stream_key("a:b", :c) }
         .to raise_error(ArgumentError, /collapse to the same key/)
     end
 
-    context "idempotency for an already-built key (single String arg)" do
+    context "with an already-built key (single String arg, idempotent)" do
       # A consumer often holds a pre-built key (e.g. from a `stream_key`
       # helper) and passes the *same* value to both `turbo_stream_from`
       # and the broadcaster. Re-keying it must not raise just because it
