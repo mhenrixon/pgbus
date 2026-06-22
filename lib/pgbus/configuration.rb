@@ -113,6 +113,7 @@ module Pgbus
                   :streams_stats_enabled, :streams_test_mode,
                   :streams_orphan_sweep_interval, :streams_orphan_threshold,
                   :streams_durable_patterns,
+                  :streams_presence_patterns, :streams_presence_member,
                   :streams_host, :streams_port, :streams_database_url
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
@@ -247,6 +248,15 @@ module Pgbus
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
       @streams_durable_patterns = []
+      # Streams matching these patterns get connection-driven presence:
+      # auto-join on SSE connect, auto-leave on disconnect, touch on the
+      # keepalive heartbeat (issue #169). Empty by default (opt-in).
+      @streams_presence_patterns = []
+      # Extracts a presence member { id:, metadata: } from a connection's
+      # authorize-hook context. Defaults to nil, which uses the built-in
+      # extractor (see #presence_member_for): a Hash with :member_id/:id,
+      # or an object responding to #id.
+      @streams_presence_member = nil
 
       # AppSignal: auto-on when the appsignal gem is loaded; probe runs in
       # the same process, so the operator can disable it independently.
@@ -411,6 +421,8 @@ module Pgbus
 
       raise ArgumentError, "streams_durable_patterns must be an Array of strings/regex" unless streams_durable_patterns.is_a?(Array)
 
+      raise ArgumentError, "streams_presence_patterns must be an Array of strings/regex" unless streams_presence_patterns.is_a?(Array)
+
       return if streams_orphan_threshold.nil?
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
@@ -425,6 +437,35 @@ module Pgbus
       return true if patterns.any? { |p| p.is_a?(Regexp) ? p.match?(name) : p == name }
 
       streams_default_broadcast_mode == :durable
+    end
+
+    # Returns true if the given stream name should have connection-driven
+    # presence based on `streams_presence_patterns` (exact string or
+    # Regexp match). Presence is opt-in, so the default (no patterns) is
+    # false. See issue #169.
+    def stream_presence?(name)
+      patterns = streams_presence_patterns || []
+      patterns.any? { |p| p.is_a?(Regexp) ? p.match?(name) : p == name }
+    end
+
+    # Derives a presence member { id:, metadata: } from a connection's
+    # authorize-hook context, or nil when no member can be derived (an
+    # anonymous connection — presence is simply skipped). Uses
+    # `streams_presence_member` when configured; otherwise the built-in
+    # extractor handles the common shapes:
+    #   - Hash with :member_id (or :id) and optional :metadata
+    #   - an object responding to #id (e.g. a User model)
+    # The id is always coerced to a String and metadata defaults to {}.
+    def presence_member_for(context)
+      return nil if context.nil?
+
+      raw = streams_presence_member ? streams_presence_member.call(context) : default_presence_member(context)
+      return nil unless raw.is_a?(Hash)
+
+      id = raw[:id]
+      return nil if id.nil? || id.to_s.empty?
+
+      { id: id.to_s, metadata: raw[:metadata] || {} }
     end
 
     # Set the worker capsule list. Accepts:
@@ -688,6 +729,20 @@ module Pgbus
     end
 
     private
+
+    # Built-in presence-member extractor used when no custom
+    # `streams_presence_member` is configured. Returns a { id:, metadata: }
+    # Hash or nil; #presence_member_for normalizes the id/metadata.
+    def default_presence_member(context)
+      if context.is_a?(Hash)
+        id = context[:member_id] || context[:id]
+        return nil if id.nil?
+
+        { id: id, metadata: context[:metadata] || {} }
+      elsif context.respond_to?(:id)
+        { id: context.id, metadata: {} }
+      end
+    end
 
     # Coerce a duration setting value to a positive Numeric.
     #

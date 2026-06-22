@@ -32,9 +32,13 @@ module Pgbus
       # disambiguate from Pgbus::Process::Dispatcher, which is an
       # unrelated worker-side pool coordinator. See issue #98 item 8.
       class StreamEventDispatcher
-        WakeMessage       = Listener::WakeMessage
-        ConnectMessage    = Data.define(:connection)
-        DisconnectMessage = Data.define(:connection)
+        WakeMessage          = Listener::WakeMessage
+        ConnectMessage       = Data.define(:connection)
+        DisconnectMessage    = Data.define(:connection)
+        # Posted by the Heartbeat once per tick with the current presence
+        # connections, so the touch (a last_seen_at refresh) runs on the
+        # dispatcher thread where AR connections are released each pass.
+        PresenceTouchMessage = Data.define(:connections)
 
         # An unwrapped stream broadcast. Similar shape to
         # Pgbus::Client::ReadAfter::Envelope (msg_id + payload) so
@@ -59,13 +63,18 @@ module Pgbus
 
         def initialize(client:, registry:, listener:, dispatch_queue:,
                        logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
-                       filters: nil, config: nil, stream_counter: nil)
+                       filters: nil, config: nil, stream_counter: nil,
+                       presence_provider: nil)
           @client = client
           @registry = registry
           @listener = listener
           @queue = dispatch_queue
           @logger = logger
           @read_limit = read_limit
+          # Vends a presence handle for a logical stream name. Injected so
+          # tests can record join/leave/touch without a DB. Production
+          # defaults to the real per-stream Presence via Pgbus.stream.
+          @presence_provider = presence_provider || ->(name) { Pgbus.stream(name).presence }
           # Filters default to the process-wide registry so production
           # code picks up whatever was registered at boot. Tests inject
           # a fresh Filters instance to avoid cross-test pollution.
@@ -183,9 +192,10 @@ module Pgbus
 
         def handle(msg)
           case msg
-          when WakeMessage       then handle_wake(msg)
-          when ConnectMessage    then handle_connect(msg)
-          when DisconnectMessage then handle_disconnect(msg)
+          when WakeMessage          then handle_wake(msg)
+          when ConnectMessage       then handle_connect(msg)
+          when DisconnectMessage    then handle_disconnect(msg)
+          when PresenceTouchMessage then handle_presence_touch(msg)
           else
             @logger.warn { "[Pgbus::Streamer::StreamEventDispatcher] unknown message: #{msg.class}" }
           end
@@ -330,6 +340,7 @@ module Pgbus
           else
             @stream_counter.increment_connections(stream)
             @registry.register(connection)
+            presence_join(connection, stream)
           end
 
           record_stat(
@@ -356,6 +367,7 @@ module Pgbus
           removed = @registry.unregister(connection)
           @scanned_cursor.delete(connection)
           @stream_counter.decrement_connections(stream) if removed
+          presence_leave(connection, stream)
           cleanup_stream_if_unused(stream)
 
           record_stat(
@@ -363,6 +375,21 @@ module Pgbus
             event_type: "disconnect",
             started_at: started_at
           )
+        end
+
+        # Touches (refreshes last_seen_at for) the presence members on the
+        # given connections. Posted by the Heartbeat each tick so idle but
+        # still-connected members don't get swept. Connections without a
+        # presence member (non-presence streams, anonymous) are skipped.
+        def handle_presence_touch(msg)
+          msg.connections.each do |connection|
+            member_id = presence_member_of(connection)
+            next unless member_id
+
+            @presence_provider.call(connection.stream_name).touch(member_id: member_id)
+          rescue StandardError => e
+            @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] presence touch failed: #{e.class}: #{e.message}" }
+          end
         end
 
         # If this stream has no remaining subscribers (registered or
@@ -500,6 +527,37 @@ module Pgbus
           return false if exclude.nil? || exclude.to_s.empty?
 
           connection.respond_to?(:id) && connection.id.to_s == exclude.to_s
+        end
+
+        # Connection-driven presence (issue #169). Auto-joins a member when
+        # the stream is configured for presence and the connection's
+        # authorize-context yields a member id. Stores the member id on the
+        # connection so handle_disconnect/handle_presence_touch can act on
+        # it. Failures are logged and swallowed: a presence DB hiccup must
+        # not knock a live SSE connection out of the registry.
+        def presence_join(connection, stream)
+          return unless @config&.stream_presence?(stream)
+
+          member = @config.presence_member_for(connection.context)
+          return unless member
+
+          @presence_provider.call(stream).join(member_id: member[:id], metadata: member[:metadata] || {})
+          connection.presence_member = member[:id] if connection.respond_to?(:presence_member=)
+        rescue StandardError => e
+          @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] presence join failed: #{e.class}: #{e.message}" }
+        end
+
+        def presence_leave(connection, stream)
+          member_id = presence_member_of(connection)
+          return unless member_id
+
+          @presence_provider.call(stream).leave(member_id: member_id)
+        rescue StandardError => e
+          @logger.error { "[Pgbus::Streamer::StreamEventDispatcher] presence leave failed: #{e.class}: #{e.message}" }
+        end
+
+        def presence_member_of(connection)
+          connection.respond_to?(:presence_member) ? connection.presence_member : nil
         end
 
         def monotonic_ms

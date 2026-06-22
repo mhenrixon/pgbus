@@ -13,6 +13,7 @@ module Pgbus
       # is fiber-safe under Falcon's scheduler.
       class FalconConnection
         attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
+        attr_accessor :presence_member
 
         def initialize(id:, stream_name:, body:, since_id:, write_deadline_ms:, context: nil)
           @id = id
@@ -24,6 +25,7 @@ module Pgbus
           @mutex = Mutex.new
           @dead = false
           @closed = false
+          @presence_member = nil
           @created_at = monotonic
           @last_write_at = @created_at
           @context = context

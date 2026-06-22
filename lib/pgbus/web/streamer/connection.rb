@@ -14,6 +14,10 @@ module Pgbus
       # the client-side leg of the replay-race fix (§6.5 of the design doc).
       class Connection
         attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
+        # The presence member id this connection auto-joined as, or nil for
+        # non-presence streams / anonymous connections. Set by the
+        # Dispatcher on connect; read on disconnect and heartbeat touch.
+        attr_accessor :presence_member
 
         def initialize(id:, stream_name:, io:, since_id:, writer:, write_deadline_ms:, context: nil)
           @id = id
@@ -25,6 +29,7 @@ module Pgbus
           @mutex = Mutex.new
           @dead = false
           @closed = false
+          @presence_member = nil
           @created_at = monotonic
           @last_write_at = @created_at
           # Context is whatever the StreamApp's authorize hook returned
