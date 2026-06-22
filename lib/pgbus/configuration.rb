@@ -117,6 +117,14 @@ module Pgbus
                   :streams_host, :streams_port, :streams_database_url
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
+    # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
+    # dedicated NotifyListener PG connection that LISTENs on its queues'
+    # INSERT channels and wakes the loop on a real insert. Defaults to the
+    # value of listen_notify. The worker_notify_* overrides mirror
+    # streams_* so the LISTEN connection can bypass PgBouncer.
+    attr_accessor :worker_notify_wakeup,
+                  :worker_notify_host, :worker_notify_port, :worker_notify_database_url
+
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
     # Set to false to opt out without uninstalling the appsignal gem.
     attr_accessor :appsignal_enabled, :appsignal_probe_enabled
@@ -170,6 +178,11 @@ module Pgbus
       @error_reporters = []
 
       @listen_notify = true
+
+      @worker_notify_wakeup = nil
+      @worker_notify_host = nil
+      @worker_notify_port = nil
+      @worker_notify_database_url = nil
 
       @pgmq_schema_mode = :auto
 
@@ -729,6 +742,41 @@ module Pgbus
         parts.join(" ")
       else
         base
+      end
+    end
+
+    # Connection options for the Worker's dedicated NotifyListener connection.
+    # Mirrors streams_connection_options: defaults to the base connection_options,
+    # overridable via worker_notify_database_url / worker_notify_host /
+    # worker_notify_port so the LISTEN connection can bypass PgBouncer.
+    def worker_notify_connection_options
+      return worker_notify_database_url if worker_notify_database_url
+
+      base = connection_options
+      return base unless worker_notify_host || worker_notify_port
+
+      case base
+      when Hash
+        result = base.dup
+        result[:host] = worker_notify_host if worker_notify_host
+        result[:port] = worker_notify_port if worker_notify_port
+        result
+      when String
+        parts = [base]
+        parts << "host=#{worker_notify_host}" if worker_notify_host
+        parts << "port=#{worker_notify_port}" if worker_notify_port
+        parts.join(" ")
+      else
+        base
+      end
+    end
+
+    # Resolved notify wakeup flag: defaults to listen_notify when nil.
+    def worker_notify_wakeup?
+      if @worker_notify_wakeup.nil?
+        listen_notify
+      else
+        @worker_notify_wakeup
       end
     end
 
