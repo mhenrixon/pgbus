@@ -17,6 +17,11 @@
 //   channel             — compatibility shim; ignored
 //
 // Events (dispatched on the element):
+//   message            (MessageEvent) data = turbo-stream HTML;
+//                      lastEventId = the frame's msg_id (revision)
+//   pgbus:message      { msgId, data } — same frame, for optimistic-UI
+//                      reconciliation (skip morph if a newer rev for the
+//                      target was already applied). See #168.
 //   pgbus:open         { lastEventId, connectionId }
 //   pgbus:connected    { connectionId }
 //   pgbus:replay-start { fromId, toId }
@@ -172,7 +177,7 @@ class PgbusStreamSourceElement extends HTMLElement {
 
     this.eventSource.addEventListener("turbo-stream", (event) => {
       this.lastEventId = event.lastEventId
-      this.dispatchEvent(new MessageEvent("message", { data: event.data }))
+      this.emitTurboStream(event.data, event.lastEventId)
     })
 
     this.eventSource.addEventListener("pgbus:connected", (event) => {
@@ -208,7 +213,7 @@ class PgbusStreamSourceElement extends HTMLElement {
     if (id !== null) this.lastEventId = id
 
     if (event === "turbo-stream") {
-      this.dispatchEvent(new MessageEvent("message", { data }))
+      this.emitTurboStream(data, id)
     } else if (event === "pgbus:connected") {
       this.handleConnected(data)
     } else if (event === "pgbus:gap-detected") {
@@ -236,6 +241,38 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.setAttribute("connection-id", connectionId)
     this.dispatchEvent(new CustomEvent("pgbus:connected", {
       detail: { connectionId }
+    }))
+  }
+
+  // Delivers a turbo-stream frame to two audiences (issue #168):
+  //
+  //   1. Turbo's StreamObserver, via a `message` MessageEvent whose `data`
+  //      is the turbo-stream HTML. The MessageEvent's standard
+  //      `lastEventId` field carries the frame's msg_id, so a reactive
+  //      runtime that listens for `message` can read the revision without
+  //      any pgbus-specific API. (Turbo ignores lastEventId.)
+  //
+  //   2. A reactive runtime doing optimistic-UI reconciliation, via a
+  //      `pgbus:message` CustomEvent carrying { msgId, data }. msgId is the
+  //      monotonic per-stream revision (a negative value marks an ephemeral
+  //      frame that was never persisted). Pattern: track the highest msgId
+  //      you have applied per target; when a frame arrives, skip the morph
+  //      if you have already applied a newer revision for that target —
+  //      this stops a late echo from clobbering a newer optimistic edit.
+  //      Complements #165: exclude handles the actor; this handles
+  //      out-of-order delivery for everyone else.
+  //
+  // msgId is parsed to a Number when numeric so consumers can compare
+  // revisions with `>` directly; left as-is otherwise.
+  emitTurboStream(data, id) {
+    const msgId = id === null || id === undefined || id === "" ? null
+      : (Number.isNaN(Number(id)) ? id : Number(id))
+
+    const message = new MessageEvent("message", { data, lastEventId: id == null ? "" : String(id) })
+    this.dispatchEvent(message)
+
+    this.dispatchEvent(new CustomEvent("pgbus:message", {
+      detail: { msgId, data }
     }))
   }
 
