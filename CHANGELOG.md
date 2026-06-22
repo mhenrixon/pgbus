@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Added
+
+- **Streams: `Pgbus.stream_key` is idempotent for an already-built key, plus `Pgbus.stream_key!`.** A single `String` argument is now treated as a pre-built pgbus stream key and returned unchanged (after the queue-name budget check) instead of tripping the colon-separator guard. This lets a consumer hold one `stream_key` value and pass it to both `turbo_stream_from` and the broadcaster without `stream_key("chat:lobby")` raising `ArgumentError`. The guard still fires for the genuinely ambiguous multi-fragment join (`stream_key("a:b", :c)`), and `Symbol`/record fragments with colons are still rejected (a colon there never came from `stream_key`). `Pgbus.stream_key!(key)` accepts a pre-built key explicitly (String required, budget enforced). Refs #167.
+
 ### Breaking Changes
 
 - **Queue names must be alphanumeric and underscores only.** Queue names containing dashes (e.g., `my-app-queue`) will now raise `ArgumentError`. Rename to underscored form (e.g., `my_app_queue`) before upgrading. This restriction prevents SQL injection via PGMQ queue identifiers, which are interpolated into table names and cannot be parameterized.

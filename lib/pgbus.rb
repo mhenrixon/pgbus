@@ -130,6 +130,17 @@ module Pgbus
       Streams::Key.stream_key(*parts, **)
     end
 
+    # Accepts an already-built stream key verbatim (no re-keying), only
+    # enforcing the queue-name budget. Use when you hold a key string and
+    # want to pass it to both `turbo_stream_from` and a broadcaster
+    # without the colon-separator guard raising on the second call.
+    #
+    #   key = Pgbus.stream_key(chat, :messages)
+    #   Pgbus.stream(Pgbus.stream_key!(key)).broadcast(html)
+    def stream_key!(key)
+      Streams::Key.stream_key!(key)
+    end
+
     def reset!
       @client&.close
       @client = nil

@@ -63,9 +63,42 @@ module Pgbus
       # `to_stream_key`/`to_gid_param` implementation that forgot to
       # sanitize) raise an ArgumentError at the call site.
       def stream_key(*parts, digest_bits: DEFAULT_DIGEST_BITS)
-        fragments = Array(parts).flatten.map { |part| normalize(part, digest_bits: digest_bits) }
+        flattened = Array(parts).flatten
+
+        # Idempotency for an already-built key: a single String argument
+        # is treated as a pre-built pgbus stream key and returned
+        # unchanged (after the budget check). This lets a consumer hold
+        # one `stream_key` value and pass it to both `turbo_stream_from`
+        # and the broadcaster without the colon separator guard raising
+        # on the second call. The guard only protects against ambiguous
+        # *joins* (`stream_key('a:b', :c)` vs `stream_key('a', 'b:c')`),
+        # and there is no second fragment here to collapse against, so the
+        # hazard cannot arise. Symbols and records are NOT keys — a colon
+        # in those never came from `stream_key` and stays a mistake.
+        return stream_key!(flattened.first) if flattened.length == 1 && flattened.first.is_a?(String)
+
+        fragments = flattened.map { |part| normalize(part, digest_bits: digest_bits) }
         fragments.each { |fragment| reject_colons!(fragment) }
-        key = fragments.join(":")
+        validate_budget!(fragments.join(":"))
+      end
+
+      # Accepts an already-built stream key verbatim, skipping the
+      # per-fragment colon guard (a pre-built key legitimately contains
+      # ':' separators). Still enforces the queue-name budget so an
+      # oversized key fails at the call site rather than deep inside
+      # Client#ensure_stream_queue. Use this when you hold a key string
+      # and want to be explicit that no re-keying should happen — e.g.
+      # passing the same value to `turbo_stream_from` and a broadcaster.
+      def stream_key!(key)
+        raise ArgumentError, "stream_key! key must be a String, got #{key.class}" unless key.is_a?(String)
+
+        validate_budget!(key)
+      end
+
+      # Returns the key when it fits the pgbus queue-name budget; raises
+      # ArgumentError with an actionable message otherwise. Shared by
+      # `stream_key` and `stream_key!` so both paths fail identically.
+      def validate_budget!(key)
         budget = queue_name_budget
         return key if key.length <= budget
 
