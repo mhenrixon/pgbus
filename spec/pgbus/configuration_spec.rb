@@ -34,6 +34,20 @@ RSpec.describe Pgbus::Configuration do
       expect(config.listen_notify).to be true
     end
 
+    it "leaves worker_notify_wakeup unset by default so it inherits listen_notify" do
+      # The raw attribute stays nil; the worker_notify_wakeup? resolver
+      # falls back to listen_notify. This is what makes NOTIFY wakeups
+      # on by default without forcing operators who already turned
+      # listen_notify off to also flip a second flag.
+      expect(config.worker_notify_wakeup).to be_nil
+    end
+
+    it "leaves worker_notify_host/port/database_url unset by default" do
+      expect(config.worker_notify_host).to be_nil
+      expect(config.worker_notify_port).to be_nil
+      expect(config.worker_notify_database_url).to be_nil
+    end
+
     it "has no worker recycling limits by default" do
       expect(config.max_jobs_per_worker).to be_nil
       expect(config.max_memory_mb).to be_nil
@@ -1027,6 +1041,114 @@ RSpec.describe Pgbus::Configuration do
         result = config.connection_options
         expect(result).to be_a(Proc)
         expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
+  end
+
+  describe "#worker_notify_wakeup?" do
+    # Resolver lives at lib/pgbus/configuration.rb:775 and gates the
+    # NotifyListener startup at lib/pgbus/process/worker.rb:430-452.
+    # Flipping it to false must demonstrably keep the listener from
+    # being constructed; nil must inherit listen_notify so a user who
+    # already turned listen_notify off doesn't accidentally still pay
+    # for a dedicated PG connection per worker fork.
+
+    it "inherits from listen_notify when unset (default-on)" do
+      expect(config.worker_notify_wakeup).to be_nil
+      expect(config.listen_notify).to be true
+      expect(config.worker_notify_wakeup?).to be true
+    end
+
+    it "inherits 'off' from listen_notify when listen_notify is false" do
+      config.listen_notify = false
+      expect(config.worker_notify_wakeup?).to be false
+    end
+
+    it "honors an explicit true even if listen_notify is false" do
+      config.listen_notify = false
+      config.worker_notify_wakeup = true
+      expect(config.worker_notify_wakeup?).to be true
+    end
+
+    it "honors an explicit false even if listen_notify is true" do
+      config.listen_notify = true
+      config.worker_notify_wakeup = false
+      expect(config.worker_notify_wakeup?).to be false
+    end
+  end
+
+  describe "#worker_notify_connection_options" do
+    # Mirrors streams_connection_options: defaults to connection_options,
+    # overridable so the listener's persistent LISTEN connection can be
+    # pinned past a transaction-pool PgBouncer (where LISTEN silently
+    # unbinds on COMMIT). Precedence is database_url > host/port > base,
+    # and both Hash and String base shapes have to compose cleanly.
+
+    context "when no overrides are set" do
+      it "returns the base connection_options Hash unchanged" do
+        params = { host: "localhost", dbname: "test" }
+        config.connection_params = params
+        expect(config.worker_notify_connection_options).to eq(params)
+      end
+
+      it "returns the base connection_options String unchanged" do
+        config.database_url = "postgres://localhost/test"
+        expect(config.worker_notify_connection_options).to eq("postgres://localhost/test")
+      end
+    end
+
+    context "with worker_notify_database_url set" do
+      it "returns the override URL even when host/port overrides are also set" do
+        config.database_url = "postgres://pool.example/test"
+        config.worker_notify_database_url = "postgres://direct.example/test"
+        config.worker_notify_host = "ignored"
+        config.worker_notify_port = 9999
+        expect(config.worker_notify_connection_options)
+          .to eq("postgres://direct.example/test")
+      end
+    end
+
+    context "with worker_notify_host / worker_notify_port over a Hash base" do
+      it "overrides only host" do
+        config.connection_params = { host: "pool.example", port: 6432, dbname: "test" }
+        config.worker_notify_host = "direct.example"
+        result = config.worker_notify_connection_options
+        expect(result).to eq(host: "direct.example", port: 6432, dbname: "test")
+      end
+
+      it "overrides only port" do
+        config.connection_params = { host: "shared.example", port: 6432, dbname: "test" }
+        config.worker_notify_port = 5432
+        result = config.worker_notify_connection_options
+        expect(result).to eq(host: "shared.example", port: 5432, dbname: "test")
+      end
+
+      it "overrides both host and port without mutating the base Hash" do
+        base = { host: "pool.example", port: 6432, dbname: "test" }
+        config.connection_params = base
+        config.worker_notify_host = "direct.example"
+        config.worker_notify_port = 5432
+        result = config.worker_notify_connection_options
+        expect(result).to eq(host: "direct.example", port: 5432, dbname: "test")
+        # Mutating the override return value must NOT leak into the base hash.
+        expect(base).to eq(host: "pool.example", port: 6432, dbname: "test")
+      end
+    end
+
+    context "with worker_notify_host / worker_notify_port over a String base" do
+      it "appends host=… as a libpq key=value pair" do
+        config.database_url = "postgres://pool.example/test"
+        config.worker_notify_host = "direct.example"
+        expect(config.worker_notify_connection_options)
+          .to eq("postgres://pool.example/test host=direct.example")
+      end
+
+      it "appends both host=… and port=…" do
+        config.database_url = "postgres://pool.example/test"
+        config.worker_notify_host = "direct.example"
+        config.worker_notify_port = 5432
+        expect(config.worker_notify_connection_options)
+          .to eq("postgres://pool.example/test host=direct.example port=5432")
       end
     end
   end

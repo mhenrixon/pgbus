@@ -589,4 +589,216 @@ RSpec.describe Pgbus::Process::Worker do
       expect(priority_worker.stats[:consumer_priority]).to eq(10)
     end
   end
+
+  describe "NOTIFY-gated wakeup wiring" do
+    # These specs pin the load-bearing private API around the NotifyListener:
+    # construction, queue sync, channel ↔ physical-queue conversion, the
+    # raised wait_timeout when the listener is active, and shutdown cleanup.
+    # The listener itself is stubbed — its internals are covered in
+    # notify_listener_spec.rb; here we only exercise how the worker wires it.
+
+    let(:fake_listener) do
+      instance_double(
+        Pgbus::Process::NotifyListener,
+        start: nil, stop: nil, add_queue: nil, remove_queue: nil,
+        listening_to: []
+      ).tap { |l| allow(l).to receive(:start).and_return(l) }
+    end
+
+    describe "#notify_wakeup?" do
+      it "is true when config.worker_notify_wakeup? is true" do
+        allow(worker.config).to receive(:worker_notify_wakeup?).and_return(true)
+        expect(worker.send(:notify_wakeup?)).to be true
+      end
+
+      it "is false when config.worker_notify_wakeup? is false" do
+        allow(worker.config).to receive(:worker_notify_wakeup?).and_return(false)
+        expect(worker.send(:notify_wakeup?)).to be false
+      end
+
+      it "is false when config does not respond to worker_notify_wakeup? (old configs)" do
+        stripped_config = double("Config")
+        allow(stripped_config).to receive(:respond_to?).with(:worker_notify_wakeup?).and_return(false)
+        worker.instance_variable_set(:@config, stripped_config)
+        expect(worker.send(:notify_wakeup?)).to be false
+      end
+    end
+
+    describe "#physical_queue_names" do
+      let(:prefix) { worker.config.queue_prefix }
+
+      it "prefixes each logical queue with the configured queue_prefix" do
+        multi_worker = described_class.new(queues: %w[default low], threads: 4)
+        expect(multi_worker.send(:physical_queue_names))
+          .to eq(["#{prefix}_default", "#{prefix}_low"])
+      end
+
+      it "uses the current @queues, not the initial set (post-eviction safe)" do
+        worker.instance_variable_set(:@queues, %w[events])
+        expect(worker.send(:physical_queue_names)).to eq(["#{prefix}_events"])
+      end
+    end
+
+    describe "#channel_to_physical" do
+      it "round-trips a channel name back to its physical queue" do
+        prefix = worker.config.queue_prefix
+        channel = "#{Pgbus::Process::NotifyListener::CHANNEL_PREFIX}#{prefix}_default" \
+                  "#{Pgbus::Process::NotifyListener::CHANNEL_SUFFIX}"
+        expect(worker.send(:channel_to_physical, channel)).to eq("#{prefix}_default")
+      end
+    end
+
+    describe "#wake_timeout" do
+      it "returns effective_polling_interval when notify_wakeup? is off" do
+        allow(worker).to receive(:notify_wakeup?).and_return(false)
+        expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
+      end
+
+      it "returns effective_polling_interval when wakeup is on but no listener attached yet" do
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        worker.instance_variable_set(:@notify_listener, nil)
+        expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
+      end
+
+      it "raises the wait to the NOTIFY_FALLBACK_POLL_SECONDS ceiling when a listener is active" do
+        # When NOTIFY drives latency, the empty-fetch wait is a safety net,
+        # not the steady-state cadence. The ceiling lets one missed NOTIFY
+        # cost bounded latency, never a stuck queue.
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        worker.instance_variable_set(:@notify_listener, fake_listener)
+        expect(worker.send(:wake_timeout))
+          .to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
+      end
+    end
+
+    describe "#start_notify_listener" do
+      it "does not construct a listener when notify_wakeup? is off" do
+        allow(worker).to receive(:notify_wakeup?).and_return(false)
+        allow(Pgbus::Process::NotifyListener).to receive(:new)
+        worker.send(:start_notify_listener)
+        expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
+        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+      end
+
+      it "constructs and starts a listener for every physical queue when wakeup is on" do
+        prefix = worker.config.queue_prefix
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(worker.config).to receive(:worker_notify_connection_options)
+          .and_return({ dbname: "test" })
+        allow(Pgbus::Process::NotifyListener).to receive(:new).and_return(fake_listener)
+
+        worker.send(:start_notify_listener)
+
+        expect(Pgbus::Process::NotifyListener).to have_received(:new).with(
+          physical_queues: ["#{prefix}_default"],
+          on_wake: an_instance_of(Proc),
+          connection_options: { dbname: "test" },
+          health_check_ms: an_instance_of(Integer),
+          logger: Pgbus.logger
+        )
+        expect(fake_listener).to have_received(:start)
+        expect(worker.instance_variable_get(:@notify_listener)).to be(fake_listener)
+      end
+
+      it "clamps health_check_ms below 250ms up to the floor" do
+        # polling_interval 0.1s → 100ms → clamped up to 250ms minimum.
+        worker.config.polling_interval = 0.1
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(worker.config).to receive(:worker_notify_connection_options)
+          .and_return({ dbname: "test" })
+        allow(Pgbus::Process::NotifyListener).to receive(:new).and_return(fake_listener)
+
+        worker.send(:start_notify_listener)
+
+        expect(Pgbus::Process::NotifyListener).to have_received(:new)
+          .with(hash_including(health_check_ms: 250))
+      end
+
+      it "clamps health_check_ms above 5000ms down to the ceiling" do
+        # polling_interval 30s → 30000ms → clamped down to 5000ms maximum.
+        # Build a fresh worker since polling_interval mutation must not
+        # leak into other examples.
+        big_poll_worker = described_class.new(queues: %w[default], threads: 5)
+        big_poll_worker.config.polling_interval = 30
+        allow(big_poll_worker).to receive(:notify_wakeup?).and_return(true)
+        allow(big_poll_worker.config).to receive(:worker_notify_connection_options)
+          .and_return({ dbname: "test" })
+        allow(Pgbus::Process::NotifyListener).to receive(:new).and_return(fake_listener)
+
+        big_poll_worker.send(:start_notify_listener)
+
+        expect(Pgbus::Process::NotifyListener).to have_received(:new)
+          .with(hash_including(health_check_ms: 5000))
+      end
+
+      it "swallows listener startup errors and falls back to polling without crashing the worker" do
+        # A NotifyListener failure must NEVER take down the worker — that
+        # was the whole point of making it default-on without a feature
+        # flag at the worker layer. The rescue logs and leaves
+        # @notify_listener nil; wake_timeout reverts to the polling
+        # interval as if NOTIFY had never been enabled.
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(worker.config).to receive(:worker_notify_connection_options)
+          .and_raise(StandardError, "no direct port configured")
+        allow(Pgbus.logger).to receive(:error)
+
+        expect { worker.send(:start_notify_listener) }.not_to raise_error
+        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+        expect(Pgbus.logger).to have_received(:error)
+      end
+    end
+
+    describe "#sync_notify_listener_queues" do
+      let(:multi_worker) { described_class.new(queues: %w[default low], threads: 4) }
+      let(:queue_prefix) { multi_worker.config.queue_prefix }
+
+      before { multi_worker.instance_variable_set(:@notify_listener, fake_listener) }
+
+      it "adds new physical queues and removes dropped ones based on the set difference" do
+        # Listener currently watches default + statistics; @queues is
+        # default + low. Expect statistics to be unlistened and low to
+        # be added; default is untouched because it overlaps both sets.
+        ch_prefix = Pgbus::Process::NotifyListener::CHANNEL_PREFIX
+        ch_suffix = Pgbus::Process::NotifyListener::CHANNEL_SUFFIX
+        allow(fake_listener).to receive(:listening_to).and_return(
+          ["#{ch_prefix}#{queue_prefix}_default#{ch_suffix}",
+           "#{ch_prefix}#{queue_prefix}_statistics#{ch_suffix}"]
+        )
+
+        multi_worker.send(:sync_notify_listener_queues)
+
+        expect(fake_listener).to have_received(:add_queue).with("#{queue_prefix}_low")
+        expect(fake_listener).to have_received(:remove_queue).with("#{queue_prefix}_statistics")
+        expect(fake_listener).not_to have_received(:add_queue).with("#{queue_prefix}_default")
+      end
+
+      it "is a no-op when no listener is attached" do
+        multi_worker.instance_variable_set(:@notify_listener, nil)
+        expect { multi_worker.send(:sync_notify_listener_queues) }.not_to raise_error
+        expect(fake_listener).not_to have_received(:add_queue)
+        expect(fake_listener).not_to have_received(:remove_queue)
+      end
+
+      it "logs and survives a listener error so a sync failure doesn't crash the loop" do
+        allow(fake_listener).to receive(:listening_to).and_raise(StandardError, "listener gone")
+        allow(Pgbus.logger).to receive(:warn)
+
+        expect { multi_worker.send(:sync_notify_listener_queues) }.not_to raise_error
+        expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
+
+    describe "#shutdown" do
+      it "stops the notify listener before draining the pool" do
+        worker.instance_variable_set(:@notify_listener, fake_listener)
+        worker.send(:shutdown)
+        expect(fake_listener).to have_received(:stop)
+      end
+
+      it "is a no-op for the listener when none was started (default-off path)" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        expect { worker.send(:shutdown) }.not_to raise_error
+      end
+    end
+  end
 end
