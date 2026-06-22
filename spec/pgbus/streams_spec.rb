@@ -42,6 +42,30 @@ RSpec.describe Pgbus::Streams do
         stream.broadcast("C")
         expect(client).to have_received(:ensure_stream_queue).once
       end
+
+      it "carries exclude: in the wrapped payload for actor-echo suppression" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "conn-abc123")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>", "exclude" => "conn-abc123" })
+      end
+
+      it "omits exclude from the payload when nil (the common path)" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: nil)
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+      end
+
+      it "omits exclude from the payload when blank" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+      end
+
+      it "composes exclude with visible_to" do
+        stream.broadcast("X", visible_to: :admins, exclude: "conn-9")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "X", "visible_to" => "admins", "exclude" => "conn-9" })
+      end
     end
 
     describe "#broadcast inside an AR transaction" do

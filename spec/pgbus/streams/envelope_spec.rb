@@ -89,6 +89,35 @@ RSpec.describe Pgbus::Streams::Envelope do
     end
   end
 
+  describe ".connected" do
+    it "encodes a pgbus:connected frame carrying the connection id as JSON" do
+      result = described_class.connected(id: "abc123def456")
+      expect(result).to eq(
+        "event: pgbus:connected\n" \
+        "data: {\"connectionId\":\"abc123def456\"}\n" \
+        "\n"
+      )
+    end
+
+    it "does not carry an SSE id: line (the connection id is not a replay cursor)" do
+      # A pgbus:connected frame is metadata, not a broadcast. Giving it an
+      # id: would advance the client's Last-Event-ID and corrupt the
+      # replay cursor on reconnect.
+      result = described_class.connected(id: "x")
+      expect(result).not_to include("id:")
+    end
+
+    it "raises when id is nil or empty" do
+      expect { described_class.connected(id: nil) }.to raise_error(ArgumentError, /id/)
+      expect { described_class.connected(id: "") }.to raise_error(ArgumentError, /id/)
+    end
+
+    it "JSON-escapes a hostile connection id (defense in depth)" do
+      result = described_class.connected(id: 'a"b')
+      expect(result).to include('data: {"connectionId":"a\\"b"}')
+    end
+  end
+
   describe ".http_response_headers" do
     it "returns the SSE response status line and headers as a single string" do
       result = described_class.http_response_headers

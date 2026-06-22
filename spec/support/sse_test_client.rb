@@ -2,6 +2,7 @@
 
 require "net/http"
 require "uri"
+require "json"
 
 module SseTestSupport
   # Minimal Server-Sent Events client for the streams integration tests.
@@ -26,7 +27,7 @@ module SseTestSupport
   class SseTestClient
     Event = Struct.new(:id, :event, :data)
 
-    attr_reader :events
+    attr_reader :events, :control_events
 
     def self.connect(url:, headers: {}, timeout: 5)
       client = new(url: url, headers: headers, timeout: timeout)
@@ -39,6 +40,10 @@ module SseTestSupport
       @headers = headers
       @timeout = timeout
       @events  = []
+      # pgbus control frames (event: pgbus:*) are kept separate from data
+      # events so broadcast-delivery assertions (events.first / count:) are
+      # not perturbed by the pgbus:connected handshake frame (issue #165).
+      @control_events = []
       @mutex   = Mutex.new
       @thread  = nil
       @http    = nil
@@ -87,6 +92,28 @@ module SseTestSupport
       sleep seconds
       current = @mutex.synchronize { @events.size }
       current == baseline
+    end
+
+    # Blocks until a pgbus:connected control frame arrives, then returns
+    # the connection id it carried (or nil on timeout). Used by the
+    # actor-echo (exclude) integration test.
+    def wait_for_connection_id(timeout: 5)
+      deadline = monotonic + timeout
+      loop do
+        frame = @mutex.synchronize { @control_events.find { |e| e.event == "pgbus:connected" } }
+        if frame
+          parsed = begin
+            JSON.parse(frame.data)
+          rescue JSON::ParserError
+            nil
+          end
+          return parsed && parsed["connectionId"]
+        end
+        break if monotonic > deadline || @closed
+
+        sleep 0.01
+      end
+      nil
     end
 
     private
@@ -163,7 +190,15 @@ module SseTestSupport
 
       return unless recognized
 
-      @mutex.synchronize { @events << event }
+      # Route pgbus control frames (event: pgbus:connected, pgbus:shutdown,
+      # pgbus:gap-detected) into a separate list. They are connection
+      # metadata, not broadcasts, so they must not shift the index/count of
+      # data events that delivery assertions rely on.
+      if event.event.to_s.start_with?("pgbus:")
+        @mutex.synchronize { @control_events << event }
+      else
+        @mutex.synchronize { @events << event }
+      end
     end
 
     def wait_until_open(timeout)

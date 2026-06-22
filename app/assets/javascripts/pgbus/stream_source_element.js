@@ -17,11 +17,22 @@
 //   channel             — compatibility shim; ignored
 //
 // Events (dispatched on the element):
-//   pgbus:open         { lastEventId }
+//   pgbus:open         { lastEventId, connectionId }
+//   pgbus:connected    { connectionId }
 //   pgbus:replay-start { fromId, toId }
 //   pgbus:replay-end   {}
 //   pgbus:gap-detected { lastSeenId, archiveOldestId }
 //   pgbus:close        { code, reason }
+//
+// Connection id (issue #165 — actor-echo suppression): the server sends a
+// `pgbus:connected` frame right after the open handshake carrying the
+// server-minted connection id. This element captures it, reflects it onto
+// the `connection-id` attribute, and re-dispatches it as `pgbus:connected`.
+// A page reads it (from the element or a `<meta name="pgbus-connection-id">`
+// the app mirrors it to) and sends it back as the `X-Pgbus-Connection`
+// header on action requests. The broadcaster then passes
+// `exclude: request.headers["X-Pgbus-Connection"]` so the actor does not
+// receive the echo of its own broadcast.
 //
 // The element integrates with Turbo via connectStreamSource /
 // disconnectStreamSource + dispatching MessageEvent("message") so Turbo
@@ -48,7 +59,15 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.abortController = null
     this.eventSource = null
     this.lastEventId = null
+    this.connectionId = null
     this.closed = false
+  }
+
+  // The server-minted connection id for this SSE connection, or null
+  // until the `pgbus:connected` frame arrives. Public read accessor so
+  // a reactive runtime can grab it without poking at attributes.
+  get pgbusConnectionId() {
+    return this.connectionId
   }
 
   connectedCallback() {
@@ -99,7 +118,7 @@ class PgbusStreamSourceElement extends HTMLElement {
 
       this.setAttribute("connected", "")
       this.dispatchEvent(new CustomEvent("pgbus:open", {
-        detail: { lastEventId: this.lastEventId }
+        detail: { lastEventId: this.lastEventId, connectionId: this.connectionId }
       }))
 
       const reader = response.body.getReader()
@@ -143,7 +162,7 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.eventSource.addEventListener("open", () => {
       this.setAttribute("connected", "")
       this.dispatchEvent(new CustomEvent("pgbus:open", {
-        detail: { lastEventId: this.lastEventId }
+        detail: { lastEventId: this.lastEventId, connectionId: this.connectionId }
       }))
     })
 
@@ -154,6 +173,10 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.eventSource.addEventListener("turbo-stream", (event) => {
       this.lastEventId = event.lastEventId
       this.dispatchEvent(new MessageEvent("message", { data: event.data }))
+    })
+
+    this.eventSource.addEventListener("pgbus:connected", (event) => {
+      this.handleConnected(event.data)
     })
 
     this.eventSource.addEventListener("pgbus:gap-detected", (event) => {
@@ -186,6 +209,8 @@ class PgbusStreamSourceElement extends HTMLElement {
 
     if (event === "turbo-stream") {
       this.dispatchEvent(new MessageEvent("message", { data }))
+    } else if (event === "pgbus:connected") {
+      this.handleConnected(data)
     } else if (event === "pgbus:gap-detected") {
       this.dispatchEvent(new CustomEvent("pgbus:gap-detected", {
         detail: this.safeJsonParse(data)
@@ -195,6 +220,23 @@ class PgbusStreamSourceElement extends HTMLElement {
         detail: { code: "shutdown", reason: "worker restart" }
       }))
     }
+  }
+
+  // Captures the server-minted connection id from a `pgbus:connected`
+  // frame: stores it, reflects it onto the `connection-id` attribute (so
+  // it's visible in the DOM / to MutationObservers), and re-dispatches it
+  // as a `pgbus:connected` CustomEvent. Idempotent across reconnects — the
+  // server mints a fresh id per connection, so a reconnect updates it.
+  handleConnected(data) {
+    const detail = this.safeJsonParse(data)
+    const connectionId = detail && detail.connectionId
+    if (!connectionId) return
+
+    this.connectionId = connectionId
+    this.setAttribute("connection-id", connectionId)
+    this.dispatchEvent(new CustomEvent("pgbus:connected", {
+      detail: { connectionId }
+    }))
   }
 
   buildUrl({ includeSince }) {

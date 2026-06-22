@@ -117,10 +117,11 @@ module Pgbus
         hijack_result = env["rack.hijack"].call
         io = hijack_result || env["rack.hijack_io"]
 
-        write_headers(io, stream_name: stream_name, since_id: since_id)
+        connection_id = SecureRandom.hex(8)
+        write_headers(io, stream_name: stream_name, since_id: since_id, connection_id: connection_id)
 
         connection = Pgbus::Web::Streamer::Connection.new(
-          id: SecureRandom.hex(8),
+          id: connection_id,
           stream_name: stream_name,
           io: io,
           since_id: since_id,
@@ -138,14 +139,16 @@ module Pgbus
         require_relative "streamer/falcon_connection" unless defined?(Pgbus::Web::Streamer::FalconConnection)
 
         body = ::Protocol::HTTP::Body::Writable.new
+        connection_id = SecureRandom.hex(8)
 
         body.write(Pgbus::Streams::Envelope.retry_directive(2_000))
         body.write(Pgbus::Streams::Envelope.comment(
                      "pgbus stream open since_id=#{since_id} stream=#{stream_name}"
                    ))
+        body.write(Pgbus::Streams::Envelope.connected(id: connection_id))
 
         connection = Pgbus::Web::Streamer::FalconConnection.new(
-          id: SecureRandom.hex(8),
+          id: connection_id,
           stream_name: stream_name,
           body: body,
           since_id: since_id,
@@ -165,10 +168,11 @@ module Pgbus
         }
       end
 
-      def write_headers(io, stream_name:, since_id:)
+      def write_headers(io, stream_name:, since_id:, connection_id:)
         io.write(Pgbus::Streams::Envelope.http_response_headers)
         io.write(Pgbus::Streams::Envelope.retry_directive(2_000))
         io.write(Pgbus::Streams::Envelope.comment("pgbus stream open since_id=#{since_id} stream=#{stream_name}"))
+        io.write(Pgbus::Streams::Envelope.connected(id: connection_id))
       end
 
       def streamer

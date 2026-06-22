@@ -76,9 +76,20 @@ module Pgbus
       # Per-broadcast `durable:` overrides the stream-level default for a
       # single broadcast. `nil` (the default) defers to the stream's own
       # `durable?` setting; `true`/`false` flip the mode for this call only.
-      def broadcast(payload, visible_to: nil, durable: nil)
+      #
+      # Actor-echo suppression: pass `exclude:` with the broadcaster's own
+      # SSE connection id (surfaced to the page as
+      # `<meta name="pgbus-connection-id">` / the element's `connection-id`
+      # attribute, sent back on the action request as the
+      # `X-Pgbus-Connection` header). The dispatcher skips delivery to that
+      # one connection, so the actor doesn't receive the echo of its own
+      # broadcast — it already applied the change via the action's HTTP
+      # response. Everyone else gets the broadcast. A nil/blank `exclude`
+      # is a no-op (the common path).
+      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil)
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
+        wrapped["exclude"] = exclude.to_s if exclude && !exclude.to_s.empty?
 
         use_durable = durable.nil? ? @durable : durable
         return broadcast_ephemeral(wrapped) unless use_durable

@@ -39,11 +39,19 @@ module Pgbus
         # An unwrapped stream broadcast. Similar shape to
         # Pgbus::Client::ReadAfter::Envelope (msg_id + payload) so
         # Connection#enqueue can consume either type via duck typing,
-        # but adds the `visible_to` label carried through from
-        # Pgbus::Streams::Stream#broadcast. The Dispatcher uses
-        # visible_to to decide per-connection delivery; Connection
-        # never sees the field.
-        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to)
+        # but adds two delivery-control fields carried through from
+        # Pgbus::Streams::Stream#broadcast:
+        #   - `visible_to` — audience filter label (evaluated per-connection)
+        #   - `exclude`    — a connection id to skip (actor-echo suppression:
+        #                    the broadcaster's own SSE connection does not
+        #                    receive the echo of its own broadcast)
+        # The Dispatcher uses both to decide per-connection delivery;
+        # Connection never sees either field.
+        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to, :exclude) do
+          def initialize(msg_id:, enqueued_at:, payload:, source:, visible_to: nil, exclude: nil)
+            super
+          end
+        end
 
         DEFAULT_READ_LIMIT = 500
 
@@ -239,6 +247,7 @@ module Pgbus
 
           visible_to = parsed["visible_to"]
           visible_to = visible_to.to_sym if visible_to.is_a?(String)
+          exclude = parsed["exclude"]
 
           @ephemeral_seq += 1
           envelope = StreamEnvelope.new(
@@ -246,7 +255,8 @@ module Pgbus
             enqueued_at: Time.now.utc.iso8601(6),
             payload: html,
             source: "ephemeral",
-            visible_to: visible_to
+            visible_to: visible_to,
+            exclude: exclude
           )
 
           registered.each do |conn|
@@ -442,13 +452,15 @@ module Pgbus
 
           visible_to = parsed["visible_to"]
           visible_to = visible_to.to_sym if visible_to.is_a?(String)
+          exclude = parsed["exclude"]
 
           StreamEnvelope.new(
             msg_id: envelope.msg_id,
             enqueued_at: envelope.enqueued_at,
             payload: html,
             source: envelope.source,
-            visible_to: visible_to
+            visible_to: visible_to,
+            exclude: exclude
           )
         rescue JSON::ParserError
           envelope
@@ -460,11 +472,34 @@ module Pgbus
         # Filters registry. Envelopes that predate the StreamEnvelope
         # refactor (plain ReadAfter::Envelope with no visible_to) also
         # pass through.
+        #
+        # Actor-echo suppression: an envelope carrying `exclude:` (a
+        # connection id) is dropped for the connection whose id matches.
+        # This lets the broadcaster's own SSE connection skip the echo of
+        # its own broadcast — the actor already applied the change via its
+        # action's HTTP response, so re-applying the SSE echo would
+        # double-apply (re-run animations, clobber optimistic edits). The
+        # exclude check runs *before* the audience filter so an excluded
+        # actor is skipped even when it would otherwise match visible_to.
         def visible_envelopes_for(envelopes, connection)
           envelopes.select do |envelope|
+            next false if excluded?(envelope, connection)
+
             label = envelope.respond_to?(:visible_to) ? envelope.visible_to : nil
             @filters.visible?(label, connection.context)
           end
+        end
+
+        # True when the envelope names this connection in its `exclude`
+        # field. Guarded by respond_to? so plain ReadAfter::Envelopes
+        # (no exclude field) and connections without an id never match.
+        def excluded?(envelope, connection)
+          return false unless envelope.respond_to?(:exclude)
+
+          exclude = envelope.exclude
+          return false if exclude.nil? || exclude.to_s.empty?
+
+          connection.respond_to?(:id) && connection.id.to_s == exclude.to_s
         end
 
         def monotonic_ms

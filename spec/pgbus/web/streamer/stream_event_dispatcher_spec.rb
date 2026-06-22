@@ -401,6 +401,86 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     end
   end
 
+  describe "actor-echo suppression via exclude" do
+    let(:actor_conn)     { build_conn(id: "actor-conn", stream_name: "chat") }
+    let(:bystander_conn) { build_conn(id: "bystander-conn", stream_name: "chat") }
+
+    before do
+      registry.register(actor_conn)
+      registry.register(bystander_conn)
+    end
+
+    it "skips delivery to the excluded connection but delivers to everyone else" do
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream>msg</turbo-stream>","exclude":"actor-conn"}',
+                   msg_id: 100, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([100])
+    end
+
+    it "delivers to everyone when exclude is absent" do
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream>msg</turbo-stream>"}',
+                   msg_id: 101, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued.map(&:msg_id)).to eq([101])
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([101])
+    end
+
+    it "advances the actor's scanned cursor past the excluded message (no re-read loop)" do
+      excluded = double("raw",
+                        payload: '{"html":"<turbo-stream>own</turbo-stream>","exclude":"actor-conn"}',
+                        msg_id: 200, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).with("chat", after_id: 0, limit: 500).and_return([excluded])
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+      expect(actor_conn.enqueued).to be_empty
+
+      later = double("raw_later",
+                     payload: '{"html":"<turbo-stream>next</turbo-stream>"}',
+                     msg_id: 205, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).with("chat", after_id: 200, limit: 500).and_return([later])
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued.map(&:msg_id)).to eq([205])
+    end
+
+    it "suppresses the actor's echo on the ephemeral (NOTIFY) path too" do
+      msg = described_class::WakeMessage.new(
+        queue_name: "chat",
+        payload: '{"html":"<turbo-stream>ephemeral</turbo-stream>","exclude":"actor-conn"}'
+      )
+      dispatcher.send(:handle, msg)
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:payload)).to eq(["<turbo-stream>ephemeral</turbo-stream>"])
+    end
+
+    it "composes with visible_to: an excluded actor is skipped even if it matches the filter" do
+      filters = Pgbus::Streams::Filters.new
+      filters.register(:everyone) { |_ctx| true }
+      excluding_dispatcher = described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500, filters: filters
+      )
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream/>","visible_to":"everyone","exclude":"actor-conn"}',
+                   msg_id: 300, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      excluding_dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([300])
+    end
+  end
+
   describe "DisconnectMessage" do
     it "unregisters the connection" do
       conn = build_conn(id: "a", stream_name: "chat")
