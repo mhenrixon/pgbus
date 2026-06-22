@@ -38,7 +38,7 @@ module Pgbus
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
-              event: "turbo-stream",
+              event: sse_event_for(envelope),
               data: envelope.payload
             )
 
@@ -95,6 +95,12 @@ module Pgbus
         end
 
         private
+
+        # See Connection#sse_event_for. (issue #170)
+        def sse_event_for(envelope)
+          event = envelope.respond_to?(:event) ? envelope.event : nil
+          event && !event.to_s.empty? ? event.to_s : Pgbus::Streams::DEFAULT_SSE_EVENT
+        end
 
         def write_to_body(bytes)
           @mutex.synchronize do

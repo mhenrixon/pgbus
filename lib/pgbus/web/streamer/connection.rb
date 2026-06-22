@@ -48,7 +48,7 @@ module Pgbus
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
-              event: "turbo-stream",
+              event: sse_event_for(envelope),
               data: envelope.payload
             )
 
@@ -119,6 +119,15 @@ module Pgbus
         end
 
         private
+
+        # The SSE event name for a frame: the envelope's typed event when
+        # present, else the default turbo-stream. Plain ReadAfter::Envelopes
+        # (no event field) and StreamEnvelopes with a nil event both fall
+        # back to the default. (issue #170)
+        def sse_event_for(envelope)
+          event = envelope.respond_to?(:event) ? envelope.event : nil
+          event && !event.to_s.empty? ? event.to_s : Pgbus::Streams::DEFAULT_SSE_EVENT
+        end
 
         def monotonic
           # Qualify ::Process because Pgbus::Process already exists as a

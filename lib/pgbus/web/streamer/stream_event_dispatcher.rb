@@ -51,8 +51,12 @@ module Pgbus
         #                    receive the echo of its own broadcast)
         # The Dispatcher uses both to decide per-connection delivery;
         # Connection never sees either field.
-        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to, :exclude) do
-          def initialize(msg_id:, enqueued_at:, payload:, source:, visible_to: nil, exclude: nil)
+        #   - `event`      — the SSE `event:` name for the delivered frame.
+        #                    nil means the default (turbo-stream); a typed
+        #                    name (e.g. "presence", "reactive") lets clients
+        #                    route without sniffing the HTML (issue #170).
+        StreamEnvelope = Data.define(:msg_id, :enqueued_at, :payload, :source, :visible_to, :exclude, :event) do
+          def initialize(msg_id:, enqueued_at:, payload:, source:, visible_to: nil, exclude: nil, event: nil)
             super
           end
         end
@@ -266,7 +270,8 @@ module Pgbus
             payload: html,
             source: "ephemeral",
             visible_to: visible_to,
-            exclude: exclude
+            exclude: exclude,
+            event: parsed["event"]
           )
 
           registered.each do |conn|
@@ -487,7 +492,8 @@ module Pgbus
             payload: html,
             source: envelope.source,
             visible_to: visible_to,
-            exclude: exclude
+            exclude: exclude,
+            event: parsed["event"]
           )
         rescue JSON::ParserError
           envelope

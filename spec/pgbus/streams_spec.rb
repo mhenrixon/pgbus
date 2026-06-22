@@ -66,6 +66,32 @@ RSpec.describe Pgbus::Streams do
         expect(client).to have_received(:send_message)
           .with("chat", { "html" => "X", "visible_to" => "admins", "exclude" => "conn-9" })
       end
+
+      it "carries a typed event name in the wrapped payload" do
+        stream.broadcast("<turbo-stream/>", event: "presence")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>", "event" => "presence" })
+      end
+
+      it "omits event from the payload when nil (default turbo-stream path)" do
+        stream.broadcast("<turbo-stream/>", event: nil)
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>" })
+      end
+
+      it "omits event when it is the default turbo-stream (no need to carry it)" do
+        stream.broadcast("<turbo-stream/>", event: "turbo-stream")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>" })
+      end
+
+      it "composes event with visible_to and exclude" do
+        stream.broadcast("X", event: "reactive", visible_to: :admins, exclude: "c1")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => "X", "visible_to" => "admins", "exclude" => "c1", "event" => "reactive" }
+        )
+      end
     end
 
     describe "#broadcast_render" do
@@ -159,6 +185,17 @@ RSpec.describe Pgbus::Streams do
 
       it "returns the msg_id from the underlying broadcast" do
         expect(stream.broadcast_render(renderable: "x", target: "t")).to eq(1248)
+      end
+
+      it "passes a typed event through to the broadcast" do
+        stream.broadcast_render(renderable: "x", target: "t", event: "reactive")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "event" => "reactive"
+          }
+        )
       end
     end
 

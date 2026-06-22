@@ -15,6 +15,12 @@ module Pgbus
     # this specifically can rescue Pgbus::Streams::StreamNameTooLong.
     class StreamNameTooLong < ArgumentError; end
 
+    # The default SSE `event:` name for a broadcast frame. Turbo's
+    # StreamObserver consumes frames the client re-dispatches as the
+    # `message` DOM event; the client maps this SSE event name to
+    # `message`. Broadcasts may override it with a typed name (issue #170).
+    DEFAULT_SSE_EVENT = "turbo-stream"
+
     # Process-wide registry of server-side audience filter predicates.
     # Register filters at boot time via:
     #   Pgbus::Streams.filters.register(:admin_only) { |user| user.admin? }
@@ -86,10 +92,18 @@ module Pgbus
       # broadcast — it already applied the change via the action's HTTP
       # response. Everyone else gets the broadcast. A nil/blank `exclude`
       # is a no-op (the common path).
-      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil)
+      # Typed SSE event name: pass `event:` to set the SSE `event:` field
+      # on the delivered frame (e.g. `event: "presence"`, `event:
+      # "reactive"`) while keeping the payload a Turbo Stream. Clients that
+      # care can route on the typed event without sniffing the HTML;
+      # default consumers still receive the standard turbo-stream/`message`
+      # path. The default (`nil` or `"turbo-stream"`) is not carried on the
+      # wire — it's the implicit default the dispatcher applies.
+      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil, event: nil)
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
         wrapped["exclude"] = exclude.to_s if exclude && !exclude.to_s.empty?
+        wrapped["event"] = event.to_s if event && event.to_s != DEFAULT_SSE_EVENT
 
         use_durable = durable.nil? ? @durable : durable
         return broadcast_ephemeral(wrapped) unless use_durable
@@ -135,9 +149,10 @@ module Pgbus
       # Components that need URL helpers or a full view context should be
       # rendered by the app (which has the request context) and the
       # resulting string passed as `renderable:`.
-      def broadcast_render(target:, action: :replace, renderable: nil, visible_to: nil, durable: nil, exclude: nil)
+      def broadcast_render(target:, action: :replace, renderable: nil, visible_to: nil, durable: nil, exclude: nil,
+                           event: nil)
         html = Renderer.turbo_stream_tag(action: action, target: target, renderable: renderable)
-        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude)
+        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude, event: event)
       end
 
       def current_msg_id

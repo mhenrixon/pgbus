@@ -22,6 +22,10 @@
 //   pgbus:message      { msgId, data } — same frame, for optimistic-UI
 //                      reconciliation (skip morph if a newer rev for the
 //                      target was already applied). See #168.
+//   pgbus:event        { event, data, msgId } — a typed broadcast (any SSE
+//                      event name other than turbo-stream). See #170.
+//   pgbus:<event>      { data, msgId } — the same typed broadcast, named
+//                      for ergonomic addEventListener("pgbus:presence").
 //   pgbus:open         { lastEventId, connectionId }
 //   pgbus:connected    { connectionId }
 //   pgbus:replay-start { fromId, toId }
@@ -194,6 +198,15 @@ class PgbusStreamSourceElement extends HTMLElement {
         detail: { code: "shutdown", reason: "worker restart" }
       }))
     })
+
+    // Typed broadcasts (issue #170): EventSource only fires listeners
+    // registered by name, so we register one per declared typed event.
+    for (const name of this.declaredTypedEvents()) {
+      this.eventSource.addEventListener(name, (event) => {
+        if (event.lastEventId) this.lastEventId = event.lastEventId
+        this.emitTypedEvent(name, event.data, event.lastEventId)
+      })
+    }
   }
 
   // Parses a single SSE event block (: comment | id: ... | event: ... | data: ...)
@@ -224,6 +237,9 @@ class PgbusStreamSourceElement extends HTMLElement {
       this.dispatchEvent(new CustomEvent("pgbus:close", {
         detail: { code: "shutdown", reason: "worker restart" }
       }))
+    } else {
+      // A typed broadcast (issue #170): event: presence | reactive | ...
+      this.emitTypedEvent(event, data, id)
     }
   }
 
@@ -274,6 +290,37 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.dispatchEvent(new CustomEvent("pgbus:message", {
       detail: { msgId, data }
     }))
+  }
+
+  // Delivers a typed broadcast (issue #170) — a frame whose SSE event name
+  // is something other than turbo-stream (e.g. "presence", "reactive").
+  // The payload is still whatever the broadcaster sent (usually a Turbo
+  // Stream); the typed name lets a client route without sniffing the HTML.
+  // Dispatched two ways for ergonomics:
+  //   - a generic `pgbus:event` { event, data, msgId } (one listener for all)
+  //   - a named `pgbus:<event>`  { data, msgId }      (addEventListener by name)
+  emitTypedEvent(event, data, id) {
+    const msgId = id === null || id === undefined || id === "" ? null
+      : (Number.isNaN(Number(id)) ? id : Number(id))
+
+    this.dispatchEvent(new CustomEvent("pgbus:event", {
+      detail: { event, data, msgId }
+    }))
+    this.dispatchEvent(new CustomEvent(`pgbus:${event}`, {
+      detail: { data, msgId }
+    }))
+  }
+
+  // Typed event names the EventSource (reconnect) path should listen for,
+  // declared by the app via the `listen-events` attribute (comma- or
+  // space-separated). EventSource only invokes listeners registered by
+  // name, so unlike the fetch path it cannot route unknown typed events
+  // generically; declaring them here keeps typed delivery working across
+  // reconnects. The fetch (initial) path always routes typed events.
+  declaredTypedEvents() {
+    const raw = this.getAttribute("listen-events")
+    if (!raw) return []
+    return raw.split(/[\s,]+/).filter((name) => name && name !== "turbo-stream")
   }
 
   buildUrl({ includeSince }) {
