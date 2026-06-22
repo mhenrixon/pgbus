@@ -112,6 +112,34 @@ module Pgbus
         end
       end
 
+      # Renders a renderable (a Phlex component, a ViewComponent, or a
+      # pre-rendered HTML string) into a complete `<turbo-stream>` action
+      # tag and broadcasts it atomically — the render and the broadcast in
+      # one call. This removes the #1 footgun in server-driven UI: building
+      # the off-request render context and the turbo-stream wrapper by hand
+      # at every call site.
+      #
+      #   Pgbus.stream("chat", room).broadcast_render(
+      #     renderable: Chat::Message.new(chat_message: msg),
+      #     action: :append, target: "chat-messages-#{room}",
+      #     exclude: connection_id   # composes with #165
+      #   )
+      #
+      # `action` defaults to :replace. `target` is required. `exclude:`,
+      # `visible_to:`, and `durable:` are forwarded to #broadcast unchanged,
+      # so actor-echo suppression and audience filtering compose. Returns
+      # whatever #broadcast returns (msg_id, or nil when deferred to
+      # after_commit inside a transaction).
+      #
+      # See Pgbus::Streams::Renderer for the renderable-resolution order.
+      # Components that need URL helpers or a full view context should be
+      # rendered by the app (which has the request context) and the
+      # resulting string passed as `renderable:`.
+      def broadcast_render(target:, action: :replace, renderable: nil, visible_to: nil, durable: nil, exclude: nil)
+        html = Renderer.turbo_stream_tag(action: action, target: target, renderable: renderable)
+        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude)
+      end
+
       def current_msg_id
         @client.stream_current_msg_id(@name)
       end

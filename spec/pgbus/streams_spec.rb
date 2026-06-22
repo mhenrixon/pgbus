@@ -68,6 +68,100 @@ RSpec.describe Pgbus::Streams do
       end
     end
 
+    describe "#broadcast_render" do
+      # A Phlex-like renderable: Phlex::HTML#call returns the rendered
+      # markup string. This is the shape the issue's example uses
+      # (Chat::Message.new(...)).
+      let(:phlex_like) do
+        Class.new do
+          def initialize(text) = (@text = text)
+          def call = "<div class=\"msg\">#{@text}</div>"
+        end
+      end
+
+      it "renders the component, wraps it in a turbo-stream action tag, and broadcasts" do
+        stream.broadcast_render(renderable: phlex_like.new("hi"), action: :append, target: "messages")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="append" target="messages"><template><div class="msg">hi</div></template></turbo-stream>' }
+        )
+      end
+
+      it "defaults the action to replace" do
+        stream.broadcast_render(renderable: phlex_like.new("x"), target: "item_1")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="item_1"><template><div class="msg">x</div></template></turbo-stream>' }
+        )
+      end
+
+      it "accepts a pre-rendered HTML string as the renderable" do
+        stream.broadcast_render(renderable: "<p>plain</p>", action: :prepend, target: "list")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="prepend" target="list"><template><p>plain</p></template></turbo-stream>' }
+        )
+      end
+
+      it "omits the <template> for content-less actions like remove" do
+        stream.broadcast_render(action: :remove, target: "item_9")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="remove" target="item_9"></turbo-stream>' }
+        )
+      end
+
+      it "HTML-escapes the action and target attributes" do
+        stream.broadcast_render(renderable: "x", action: :replace, target: 'a"b')
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="a&quot;b"><template>x</template></turbo-stream>' }
+        )
+      end
+
+      it "passes exclude through to the broadcast (composes with #165)" do
+        stream.broadcast_render(renderable: "x", target: "t", exclude: "conn-7")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "exclude" => "conn-7"
+          }
+        )
+      end
+
+      it "passes visible_to through to the broadcast" do
+        stream.broadcast_render(renderable: "x", target: "t", visible_to: :admins)
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "visible_to" => "admins"
+          }
+        )
+      end
+
+      it "renders an object that responds to render_in (ViewComponent/Phlex-rails shape)" do
+        renderable = Class.new do
+          def render_in(_view_context) = "<span>vc</span>"
+        end.new
+        stream.broadcast_render(renderable: renderable, target: "t")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="t"><template><span>vc</span></template></turbo-stream>' }
+        )
+      end
+
+      it "requires a target" do
+        expect { stream.broadcast_render(renderable: "x", target: nil) }
+          .to raise_error(ArgumentError, /target/)
+      end
+
+      it "returns the msg_id from the underlying broadcast" do
+        expect(stream.broadcast_render(renderable: "x", target: "t")).to eq(1248)
+      end
+    end
+
     describe "#broadcast inside an AR transaction" do
       # Use a plain double here instead of instance_double(Pgbus::Client)
       # because instance_double walks the class's ancestor chain, and
