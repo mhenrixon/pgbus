@@ -21,15 +21,19 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
   let(:fake_pg) do
     Class.new do
-      attr_reader :executed
+      attr_reader :executed, :close_count
 
       def initialize
         @executed = []
         @events = Queue.new
+        @exec_errors = []
+        @close_count = 0
       end
 
       def exec(sql)
         @executed << sql
+        raise @exec_errors.shift if @exec_errors.any?
+
         nil
       end
 
@@ -48,10 +52,19 @@ RSpec.describe Pgbus::Process::NotifyListener do
         end
       end
 
-      def close = (@events << [:close])
+      def close
+        @close_count += 1
+        @events << [:close]
+      end
+
+      def closed?
+        @close_count.positive?
+      end
+
       def push_notify(channel) = @events << [:notify, channel]
       def push_timeout = @events << [:timeout]
       def push_error(error) = @events << [:raise, error]
+      def push_exec_error(error) = @exec_errors << error
     end.new
   end
 
@@ -186,6 +199,38 @@ RSpec.describe Pgbus::Process::NotifyListener do
         "pgmq.q_pgbus_low.INSERT"
       )
     end
+
+    context "when re-LISTEN fails mid-rebuild (no leaked conn)" do
+      let(:half_built) do
+        fake_pg.class.new.tap { |c| c.push_exec_error(PG::Error.new("listen failed mid-rebuild")) }
+      end
+      let(:good_pg) { fake_pg.class.new }
+
+      before do
+        call_sequence = [fake_pg, half_built, good_pg]
+        allow_any_instance_of(described_class).to receive(:build_connection) { call_sequence.shift }
+        stub_const("Pgbus::Process::NotifyListener::RECONNECT_BACKOFF_SECONDS", 0.01)
+        listener.start
+        fake_pg.push_timeout
+        wait_until { listener.listening_to.size == 2 }
+
+        fake_pg.push_error(PG::Error.new("connection reset"))
+        good_pg.push_timeout
+        wait_until { half_built.closed? }
+        wait_until { good_pg.executed.count { |s| s.start_with?("LISTEN") } >= 2 }
+      end
+
+      it "closes the partially-built conn before retrying" do
+        expect(half_built).to be_closed
+      end
+
+      it "ends up subscribed via the successor connection" do
+        expect(listener.listening_to).to contain_exactly(
+          "pgmq.q_pgbus_default.INSERT",
+          "pgmq.q_pgbus_low.INSERT"
+        )
+      end
+    end
   end
 
   describe "#stop" do
@@ -196,6 +241,17 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       listener.stop
       expect(listener.listening_to).to be_empty
+    end
+
+    it "clears @running after the thread exits so start can spawn a fresh thread" do
+      allow_any_instance_of(described_class).to receive(:build_connection)
+        .and_raise(PG::Error.new("boot failed"))
+
+      listener.start
+      # Thread crashes immediately on build_connection.
+      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+
+      expect(listener.instance_variable_get(:@running)).to be(false)
     end
   end
 end

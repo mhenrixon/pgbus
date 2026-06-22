@@ -117,6 +117,10 @@ module Pgbus
       rescue StandardError => e
         @logger.error { "[Pgbus::NotifyListener] fatal: #{e.class}: #{e.message}" } if running?
       ensure
+        # Clear @running so #start can spawn a fresh thread after a fatal exit
+        # (e.g. build_connection raising at boot). Without this, the dead
+        # thread's @running stays true and #start returns early forever.
+        @state_mutex.synchronize { @running = false }
         safe_unlisten_all
         safe_close
       end
@@ -193,10 +197,16 @@ module Pgbus
           return unless running?
 
           safe_close
+          new_conn = nil
           begin
             new_conn = build_connection
             channels.each { |channel| new_conn.exec(%(LISTEN "#{channel}")) }
           rescue PG::Error => e
+            # build_connection may have succeeded before a later LISTEN raised.
+            # Without this close, the partially-built conn is orphaned and the
+            # next retry just allocates another one — leaking PG connections on
+            # repeated failures.
+            close_quietly(new_conn)
             @logger.error { "[Pgbus::NotifyListener] reconnect failed: #{e.class}: #{e.message}" }
             sleep RECONNECT_BACKOFF_SECONDS
             next
@@ -239,6 +249,12 @@ module Pgbus
           @conn = nil
           c
         end
+        close_quietly(conn)
+      end
+
+      # Close an unpublished PG::Connection (one that never made it into @conn,
+      # e.g. a half-built reconnect attempt where LISTEN raised). Best-effort.
+      def close_quietly(conn)
         conn&.close if conn.respond_to?(:close)
       rescue StandardError
         nil
