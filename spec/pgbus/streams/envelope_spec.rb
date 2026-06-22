@@ -57,6 +57,22 @@ RSpec.describe Pgbus::Streams::Envelope do
       result = described_class.message(id: 1, event: "msg", data: "x")
       expect(result).to end_with("\n\n")
     end
+
+    it "strips newlines from the event name so a crafted value can't inject SSE fields" do
+      # A typed event carrying \n could otherwise terminate the event:
+      # line early and inject a forged id:/data: into the frame.
+      result = described_class.message(id: 1, event: "presence\nid: 999\ndata: evil", data: "ok")
+      expect(result).to eq("id: 1\nevent: presenceid: 999data: evil\ndata: ok\n\n")
+      # The crafted "\nid: 999\ndata: evil" cannot become its own SSE fields:
+      # there is exactly one id:, one event:, one data: line in the frame.
+      expect(result.scan(/^id:/).size).to eq(1)
+      expect(result.scan(/^data:/).size).to eq(1)
+    end
+
+    it "strips carriage returns from the event name" do
+      result = described_class.message(id: 1, event: "a\r\nb", data: "x")
+      expect(result).to include("event: ab\n")
+    end
   end
 
   describe ".comment" do

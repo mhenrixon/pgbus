@@ -423,6 +423,10 @@ module Pgbus
 
       raise ArgumentError, "streams_presence_patterns must be an Array of strings/regex" unless streams_presence_patterns.is_a?(Array)
 
+      if !streams_presence_member.nil? && !streams_presence_member.respond_to?(:call)
+        raise ArgumentError, "streams_presence_member must respond to #call (a Proc/lambda) or be nil"
+      end
+
       return if streams_orphan_threshold.nil?
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 

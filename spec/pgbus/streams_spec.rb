@@ -108,7 +108,7 @@ RSpec.describe Pgbus::Streams do
           target: "cursor",
           payload: "<turbo-stream/>",
           window_ms: 80,
-          opts: { visible_to: nil, durable: nil, exclude: nil, event: nil }
+          opts: { visible_to: nil, durable: true, exclude: nil, event: nil }
         )
       end
 
@@ -140,6 +140,75 @@ RSpec.describe Pgbus::Streams do
         stream.broadcast("x", coalesce: false, target: "t")
         expect(coalescer).not_to have_received(:submit)
         expect(client).to have_received(:send_message)
+      end
+
+      it "rejects a non-numeric, non-true coalesce value at the API boundary" do
+        expect { stream.broadcast("x", coalesce: "50", target: "t") }
+          .to raise_error(ArgumentError, /coalesce: must be true or a positive Numeric/)
+        expect { stream.broadcast("x", coalesce: :fast, target: "t") }
+          .to raise_error(ArgumentError, /coalesce:/)
+        expect { stream.broadcast("x", coalesce: -5, target: "t") }
+          .to raise_error(ArgumentError, /coalesce:/)
+      end
+
+      it "resolves durable: nil against the stream instance before submitting" do
+        # An ephemeral stream's coalesced frame must stay ephemeral even
+        # though the coalescer flush re-enters Pgbus.stream(name).
+        ephemeral_stream = described_class.new("chat", client: client, durable: false)
+        ephemeral_stream.broadcast("x", coalesce: 50, target: "t")
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: nil, durable: false, exclude: nil, event: nil })
+        )
+      end
+
+      it "preserves an explicit durable: override in the submitted opts" do
+        stream.broadcast("x", coalesce: 50, target: "t", durable: true)
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: nil, durable: true, exclude: nil, event: nil })
+        )
+      end
+    end
+
+    describe "#broadcast with coalesce: inside an AR transaction" do
+      subject(:stream) { described_class.new("chat", client: client, durable: true) }
+
+      let(:client) do
+        double("Pgbus::Client", ensure_stream_queue: nil, send_message: 1248,
+                                stream_current_msg_id: 1247, read_after: [])
+      end
+      let(:coalescer) { instance_spy(Pgbus::Streams::Coalescer) }
+      let(:transaction) do
+        Class.new do
+          def initialize = (@callbacks = [])
+          def open? = true
+          def after_commit(&blk) = (@callbacks << blk)
+          def run_callbacks! = @callbacks.each(&:call)
+          attr_reader :callbacks
+        end.new
+      end
+
+      before do
+        allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer)
+        tx = transaction
+        conn = Object.new
+        conn.define_singleton_method(:current_transaction) { tx }
+        ar_base = Class.new
+        ar_base.define_singleton_method(:connection) { conn }
+        stub_const("ActiveRecord::Base", ar_base)
+      end
+
+      it "defers a durable coalesced submit to after_commit (does not submit immediately)" do
+        stream.broadcast("x", coalesce: 50, target: "t")
+        expect(coalescer).not_to have_received(:submit)
+
+        transaction.run_callbacks!
+        expect(coalescer).to have_received(:submit).with(hash_including(target: "t"))
+      end
+
+      it "does NOT submit if the transaction never commits (rolls back)" do
+        stream.broadcast("x", coalesce: 50, target: "t")
+        # No run_callbacks! → simulates rollback.
+        expect(coalescer).not_to have_received(:submit)
       end
     end
 
@@ -259,7 +328,7 @@ RSpec.describe Pgbus::Streams do
           target: "cursor",
           payload: '<turbo-stream action="update" target="cursor"><template><span>c</span></template></turbo-stream>',
           window_ms: 30,
-          opts: { visible_to: nil, durable: nil, exclude: nil, event: nil }
+          opts: { visible_to: nil, durable: true, exclude: nil, event: nil }
         )
       end
     end

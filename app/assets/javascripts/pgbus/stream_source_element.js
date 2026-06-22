@@ -108,6 +108,12 @@ class PgbusStreamSourceElement extends HTMLElement {
   // the URL. Parses the SSE event stream by hand because EventSource
   // doesn't expose custom query strings uniformly across browsers.
   async openFetchStream() {
+    // Each transport open is a fresh connection: the server mints a new id
+    // and sends a new pgbus:connected frame. Clear the previous id so
+    // pgbus:open (which fires before that frame arrives) can't surface a
+    // stale connection id — a stale id would produce a wrong X-Pgbus-Connection
+    // exclude header during reconnect windows.
+    this.resetConnectionId()
     const url = this.buildUrl({ includeSince: true })
     this.abortController = new AbortController()
 
@@ -165,6 +171,10 @@ class PgbusStreamSourceElement extends HTMLElement {
   switchToEventSource() {
     if (this.closed) return
 
+    // Fresh connection on reconnect — drop the previous connection id so
+    // pgbus:open can't emit a stale one before the new pgbus:connected
+    // frame lands. See openFetchStream.
+    this.resetConnectionId()
     const url = this.buildUrl({ includeSince: true })
     this.eventSource = new EventSource(url, { withCredentials: true })
 
@@ -258,6 +268,15 @@ class PgbusStreamSourceElement extends HTMLElement {
     this.dispatchEvent(new CustomEvent("pgbus:connected", {
       detail: { connectionId }
     }))
+  }
+
+  // Clears the cached connection id and its reflected attribute. Called at
+  // the start of every transport open so a reconnect doesn't carry the
+  // previous connection's id into pgbus:open before the new pgbus:connected
+  // frame arrives.
+  resetConnectionId() {
+    this.connectionId = null
+    this.removeAttribute("connection-id")
   }
 
   // Delivers a turbo-stream frame to two audiences (issue #168):

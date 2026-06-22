@@ -31,7 +31,11 @@ module Pgbus
         raise ArgumentError, "id is required" if id.nil?
         raise ArgumentError, "event is required" if event.nil? || event.to_s.empty?
 
-        "id: #{id}\nevent: #{event}\ndata: #{strip_newlines(data.to_s)}\n\n"
+        # Strip newlines from BOTH event and data, not just data: each is
+        # interpolated into its own SSE field line, so an unescaped \r/\n in
+        # either would terminate the field early and let a crafted value
+        # inject extra SSE fields (a forged id:/data:) into the frame.
+        "id: #{id}\nevent: #{strip_newlines(event.to_s)}\ndata: #{strip_newlines(data.to_s)}\n\n"
       end
 
       def self.comment(text)

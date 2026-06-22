@@ -279,15 +279,46 @@ module Pgbus
                 "already has a target, or pass target: explicitly."
         end
 
-        window_ms = coalesce == true ? Coalescer::DEFAULT_WINDOW_MS : coalesce
-        Streams.coalescer.submit(
-          stream_name: @name,
-          target: target.to_s,
-          payload: payload.to_s,
-          window_ms: window_ms,
-          opts: { visible_to: visible_to, durable: durable, exclude: exclude, event: event }
-        )
+        window_ms = coalesce_window_ms(coalesce)
+        # Resolve durability against THIS stream instance now, not nil. The
+        # coalescer's flush re-enters Pgbus.stream(@name), whose durability
+        # could resolve differently (config patterns) than this instance —
+        # passing the resolved value keeps the coalesced frame's mode stable.
+        resolved_durable = durable.nil? ? @durable : durable
+
+        submit = lambda do
+          Streams.coalescer.submit(
+            stream_name: @name,
+            target: target.to_s,
+            payload: payload.to_s,
+            window_ms: window_ms,
+            opts: { visible_to: visible_to, durable: resolved_durable, exclude: exclude, event: event }
+          )
+        end
+
+        # Transaction gating: a coalesced DURABLE broadcast made inside an
+        # open transaction must not flush if the transaction rolls back, so
+        # defer the submission to after_commit (mirrors the non-coalesced
+        # path). Ephemeral coalescing is fire-and-forget, so it submits now.
+        transaction = resolved_durable ? current_open_transaction : nil
+        if transaction
+          transaction.after_commit { submit.call }
+        else
+          submit.call
+        end
         nil
+      end
+
+      # Resolves the coalescing window in ms. `true` → the default window;
+      # a positive Numeric is used as-is. Anything else is a misuse and is
+      # rejected at the API boundary with an actionable error rather than a
+      # cryptic NoMethodError deep inside the coalescer's timer math.
+      def coalesce_window_ms(coalesce)
+        return Coalescer::DEFAULT_WINDOW_MS if coalesce == true
+        return coalesce if coalesce.is_a?(Numeric) && coalesce.positive?
+
+        raise ArgumentError,
+              "coalesce: must be true or a positive Numeric window in milliseconds, got #{coalesce.inspect}"
       end
 
       def ensure_queue!

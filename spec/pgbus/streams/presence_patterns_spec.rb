@@ -21,6 +21,25 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#streams_presence_member validation" do
+    subject(:config) { described_class.new }
+
+    it "accepts nil (uses the built-in extractor)" do
+      config.streams_presence_member = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a callable (Proc/lambda)" do
+      config.streams_presence_member = ->(ctx) { { id: ctx[:id] } }
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a non-callable value at boot (fail fast)" do
+      config.streams_presence_member = "not callable"
+      expect { config.validate! }.to raise_error(ArgumentError, /streams_presence_member must respond to #call/)
+    end
+  end
+
   describe "#stream_presence?" do
     subject(:config) { described_class.new }
 

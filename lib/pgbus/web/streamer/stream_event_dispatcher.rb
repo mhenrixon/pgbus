@@ -271,7 +271,7 @@ module Pgbus
             source: "ephemeral",
             visible_to: visible_to,
             exclude: exclude,
-            event: parsed["event"]
+            event: normalize_sse_event(parsed["event"])
           )
 
           registered.each do |conn|
@@ -468,6 +468,22 @@ module Pgbus
           @client.config.queue_name(stream_name)
         end
 
+        # Sanitizes a typed SSE event name from an untrusted broadcast
+        # payload before it reaches the SSE `event:` line. Returns nil
+        # (→ the default turbo-stream event) for non-strings, blanks, or
+        # any value containing CR/LF — a crafted event with a newline could
+        # otherwise inject extra SSE fields (a forged id:/data:) into the
+        # frame and corrupt cursor/event routing. Defense in depth with
+        # Envelope.message, which also strips newlines.
+        def normalize_sse_event(value)
+          return nil unless value.is_a?(String)
+
+          event = value.strip
+          return nil if event.empty? || event.match?(/[\r\n]/)
+
+          event
+        end
+
         # Pgbus::Streams::Stream#broadcast wraps HTML payloads as
         # {"html": "..."} so PGMQ's JSONB column accepts them. Here we
         # unwrap the html field and return a new envelope whose payload
@@ -493,7 +509,7 @@ module Pgbus
             source: envelope.source,
             visible_to: visible_to,
             exclude: exclude,
-            event: parsed["event"]
+            event: normalize_sse_event(parsed["event"])
           )
         rescue JSON::ParserError
           envelope

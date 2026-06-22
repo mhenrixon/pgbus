@@ -408,6 +408,33 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     end
   end
 
+  describe "#normalize_sse_event (typed event sanitization, issue #170)" do
+    it "passes a clean typed event through" do
+      expect(dispatcher.send(:normalize_sse_event, "presence")).to eq("presence")
+    end
+
+    it "strips surrounding whitespace" do
+      expect(dispatcher.send(:normalize_sse_event, "  reactive  ")).to eq("reactive")
+    end
+
+    it "returns nil (default) for a non-String" do
+      expect(dispatcher.send(:normalize_sse_event, 42)).to be_nil
+      expect(dispatcher.send(:normalize_sse_event, nil)).to be_nil
+    end
+
+    it "returns nil for a blank event" do
+      expect(dispatcher.send(:normalize_sse_event, "   ")).to be_nil
+    end
+
+    it "rejects an event name containing a newline (SSE injection guard)" do
+      expect(dispatcher.send(:normalize_sse_event, "presence\nid: 999\ndata: evil")).to be_nil
+    end
+
+    it "rejects an event name containing a carriage return" do
+      expect(dispatcher.send(:normalize_sse_event, "a\rb")).to be_nil
+    end
+  end
+
   describe "actor-echo suppression via exclude" do
     let(:actor_conn)     { build_conn(id: "actor-conn", stream_name: "chat") }
     let(:bystander_conn) { build_conn(id: "bystander-conn", stream_name: "chat") }
