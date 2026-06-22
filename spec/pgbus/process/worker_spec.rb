@@ -202,6 +202,41 @@ RSpec.describe Pgbus::Process::Worker do
       end
     end
 
+    context "when eviction removes ALL queues (regression: issue #174)" do
+      let(:prefix) { worker.config.queue_prefix }
+
+      before do
+        worker.instance_variable_set(:@queues, %w[only_queue])
+        error_message = "Database connection error: ERROR:  relation \"pgmq.q_#{prefix}_only_queue\" does not exist"
+        allow(mock_client).to receive(:read_batch)
+          .and_raise(StandardError, error_message)
+      end
+
+      it "recovers by falling back to the default queue" do
+        worker.send(:fetch_messages, 5)
+        expect(worker.queues).not_to be_empty
+        expect(worker.queues).to eq([worker.config.default_queue])
+      end
+    end
+
+    context "when circuit breaker pauses all queues (#174 diagnostic)" do
+      let(:worker) { described_class.new(queues: %w[default low], threads: 5) }
+      let(:warn_messages) { [] }
+
+      before do
+        allow(circuit_breaker).to receive(:paused?).and_return(true)
+        allow(Pgbus.logger).to receive(:debug) do |&block|
+          warn_messages << block.call if block
+        end
+      end
+
+      it "logs which queues were filtered out" do
+        worker.send(:fetch_messages, 5)
+        filtered_log = warn_messages.find { |m| m.include?("all queues filtered") }
+        expect(filtered_log).not_to be_nil
+      end
+    end
+
     context "with group_mode: :fifo" do
       let(:worker) { described_class.new(queues: %w[default], threads: 5, group_mode: :fifo) }
       let(:messages) { [build_message_double(msg_id: 1), build_message_double(msg_id: 2)] }

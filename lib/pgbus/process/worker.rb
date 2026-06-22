@@ -13,6 +13,7 @@ module Pgbus
                      single_active_consumer: false, consumer_priority: 0,
                      execution_mode: :threads, group_mode: nil)
         @queues = Array(queues)
+        @initial_queues = @queues.dup.freeze
         @wildcard = @queues.include?("*")
         @threads = threads
         @config = config
@@ -49,6 +50,7 @@ module Pgbus
         )
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @queue_lock = QueueLock.new if @single_active_consumer
+        @notify_listener = nil
       end
 
       def stats
@@ -66,14 +68,17 @@ module Pgbus
         }.merge(@pool.metadata)
       end
 
+      NOTIFY_FALLBACK_POLL_SECONDS = 15
+
       def run
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
+        start_notify_listener
         @lifecycle.transition_to!(:running)
         Pgbus.logger.info do
           "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} " \
-            "mode=#{@execution_mode} pid=#{::Process.pid}"
+            "mode=#{@execution_mode} notify_wakeup=#{notify_wakeup?} pid=#{::Process.pid}"
         end
 
         loop do
@@ -117,7 +122,7 @@ module Pgbus
       private
 
       def claim_and_execute
-        poll_interval = effective_polling_interval
+        poll_interval = wake_timeout
 
         idle = @pool.available_capacity
         return @wake_signal.wait(timeout: poll_interval) if idle <= 0
@@ -147,9 +152,19 @@ module Pgbus
       # Returns an array of [queue_name, message] pairs so we always know
       # which queue each message came from.
       def fetch_messages(qty)
+        restore_evicted_queues if queues.empty? && !@wildcard
+
         active_queues = queues.reject { |q| @circuit_breaker.paused?(q) }
         active_queues = active_queues.select { |q| @queue_lock.try_lock(q) } if @single_active_consumer
-        return [] if active_queues.empty?
+
+        if active_queues.empty?
+          Pgbus.logger.debug do
+            paused = queues.select { |q| @circuit_breaker.paused?(q) }
+            "[Pgbus] Worker fetch: all queues filtered — queues=#{queues.join(",")} " \
+              "paused=#{paused.join(",")}"
+          end
+          return []
+        end
 
         if priority_enabled?
           fetch_prioritized(active_queues, qty)
@@ -295,6 +310,7 @@ module Pgbus
           Pgbus.logger.info { "[Pgbus] Wildcard queue '*' resolved to: #{@queues.join(", ")}" } unless @last_wildcard_resolve
         end
         @last_wildcard_resolve = monotonic_now
+        sync_notify_listener_queues
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Failed to resolve wildcard queues: #{e.message} — falling back to default" }
         @queues = [config.default_queue] unless @last_wildcard_resolve
@@ -321,6 +337,15 @@ module Pgbus
           end
         end
         Pgbus.logger.error { "[Pgbus] Queue table missing: #{error.message}" }
+        restore_evicted_queues if @queues.empty? && !@wildcard
+      end
+
+      def restore_evicted_queues
+        @queues = @initial_queues.dup
+        Pgbus.logger.warn do
+          "[Pgbus] Worker queue list was empty after eviction — " \
+            "restoring initial queues: #{@queues.join(", ")}"
+        end
       end
 
       def detect_zombie(queue_name, message)
@@ -401,6 +426,16 @@ module Pgbus
         end
       end
 
+      def notify_wakeup?
+        config.respond_to?(:worker_notify_wakeup?) && config.worker_notify_wakeup?
+      end
+
+      def wake_timeout
+        return effective_polling_interval unless notify_wakeup? && @notify_listener
+
+        [effective_polling_interval, config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
       def effective_polling_interval
         return config.polling_interval if @consumer_priority.zero?
 
@@ -411,6 +446,43 @@ module Pgbus
         )
       rescue StandardError
         config.polling_interval
+      end
+
+      def start_notify_listener
+        return unless notify_wakeup?
+
+        @notify_listener = NotifyListener.new(
+          physical_queues: physical_queue_names,
+          on_wake: -> { @wake_signal.notify! },
+          connection_options: config.worker_notify_connection_options,
+          health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
+          logger: Pgbus.logger
+        ).start
+      rescue StandardError => e
+        @notify_listener = nil
+        Pgbus.logger.error do
+          "[Pgbus] NotifyListener failed to start, falling back to polling: #{e.class}: #{e.message}"
+        end
+      end
+
+      def sync_notify_listener_queues
+        return unless @notify_listener
+
+        desired = physical_queue_names.to_set
+        current = @notify_listener.listening_to.to_set { |c| channel_to_physical(c) }
+        (desired - current).each { |q| @notify_listener.add_queue(q) }
+        (current - desired).each { |q| @notify_listener.remove_queue(q) }
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] NotifyListener queue sync failed: #{e.class}: #{e.message}" }
+      end
+
+      def physical_queue_names
+        prefix = "#{config.queue_prefix}_"
+        queues.map { |q| "#{prefix}#{q}" }
+      end
+
+      def channel_to_physical(channel)
+        channel.delete_prefix(NotifyListener::CHANNEL_PREFIX).delete_suffix(NotifyListener::CHANNEL_SUFFIX)
       end
 
       def start_heartbeat
@@ -427,6 +499,7 @@ module Pgbus
 
       def shutdown
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
+        @notify_listener&.stop
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop
