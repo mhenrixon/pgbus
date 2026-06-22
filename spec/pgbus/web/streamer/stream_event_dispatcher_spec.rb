@@ -16,9 +16,15 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
   end
 
   # Dispatcher config: independent of Pgbus.configuration so toggling
-  # streams_stats_enabled in one test can't bleed into another.
+  # streams_stats_enabled in one test can't bleed into another. Presence
+  # is off by default here; the presence describe block injects its own
+  # config that enables it.
   let(:dispatcher_config) do
-    instance_double(Pgbus::Configuration, streams_stats_enabled: false)
+    instance_double(
+      Pgbus::Configuration,
+      streams_stats_enabled: false,
+      stream_presence?: false
+    )
   end
 
   let(:client) do
@@ -39,7 +45,7 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
   # Connection's write path.
   let(:conn_class) do
     Class.new do
-      attr_accessor :last_msg_id_sent
+      attr_accessor :last_msg_id_sent, :presence_member
       attr_reader :id, :stream_name, :enqueued, :context
 
       def initialize(id:, stream_name:, last_msg_id_sent: 0, context: nil)
@@ -49,6 +55,7 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
         @context = context
         @enqueued = []
         @dead = false
+        @presence_member = nil
       end
 
       def enqueue(envelopes)
@@ -401,6 +408,113 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     end
   end
 
+  describe "#normalize_sse_event (typed event sanitization, issue #170)" do
+    it "passes a clean typed event through" do
+      expect(dispatcher.send(:normalize_sse_event, "presence")).to eq("presence")
+    end
+
+    it "strips surrounding whitespace" do
+      expect(dispatcher.send(:normalize_sse_event, "  reactive  ")).to eq("reactive")
+    end
+
+    it "returns nil (default) for a non-String" do
+      expect(dispatcher.send(:normalize_sse_event, 42)).to be_nil
+      expect(dispatcher.send(:normalize_sse_event, nil)).to be_nil
+    end
+
+    it "returns nil for a blank event" do
+      expect(dispatcher.send(:normalize_sse_event, "   ")).to be_nil
+    end
+
+    it "rejects an event name containing a newline (SSE injection guard)" do
+      expect(dispatcher.send(:normalize_sse_event, "presence\nid: 999\ndata: evil")).to be_nil
+    end
+
+    it "rejects an event name containing a carriage return" do
+      expect(dispatcher.send(:normalize_sse_event, "a\rb")).to be_nil
+    end
+  end
+
+  describe "actor-echo suppression via exclude" do
+    let(:actor_conn)     { build_conn(id: "actor-conn", stream_name: "chat") }
+    let(:bystander_conn) { build_conn(id: "bystander-conn", stream_name: "chat") }
+
+    before do
+      registry.register(actor_conn)
+      registry.register(bystander_conn)
+    end
+
+    it "skips delivery to the excluded connection but delivers to everyone else" do
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream>msg</turbo-stream>","exclude":"actor-conn"}',
+                   msg_id: 100, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([100])
+    end
+
+    it "delivers to everyone when exclude is absent" do
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream>msg</turbo-stream>"}',
+                   msg_id: 101, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued.map(&:msg_id)).to eq([101])
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([101])
+    end
+
+    it "advances the actor's scanned cursor past the excluded message (no re-read loop)" do
+      excluded = double("raw",
+                        payload: '{"html":"<turbo-stream>own</turbo-stream>","exclude":"actor-conn"}',
+                        msg_id: 200, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).with("chat", after_id: 0, limit: 500).and_return([excluded])
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+      expect(actor_conn.enqueued).to be_empty
+
+      later = double("raw_later",
+                     payload: '{"html":"<turbo-stream>next</turbo-stream>"}',
+                     msg_id: 205, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).with("chat", after_id: 200, limit: 500).and_return([later])
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued.map(&:msg_id)).to eq([205])
+    end
+
+    it "suppresses the actor's echo on the ephemeral (NOTIFY) path too" do
+      msg = described_class::WakeMessage.new(
+        queue_name: "chat",
+        payload: '{"html":"<turbo-stream>ephemeral</turbo-stream>","exclude":"actor-conn"}'
+      )
+      dispatcher.send(:handle, msg)
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:payload)).to eq(["<turbo-stream>ephemeral</turbo-stream>"])
+    end
+
+    it "composes with visible_to: an excluded actor is skipped even if it matches the filter" do
+      filters = Pgbus::Streams::Filters.new
+      filters.register(:everyone) { |_ctx| true }
+      excluding_dispatcher = described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500, filters: filters
+      )
+      raw = double("raw",
+                   payload: '{"html":"<turbo-stream/>","visible_to":"everyone","exclude":"actor-conn"}',
+                   msg_id: 300, enqueued_at: nil, source: "live")
+      allow(client).to receive(:read_after).and_return([raw])
+
+      excluding_dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(actor_conn.enqueued).to be_empty
+      expect(bystander_conn.enqueued.map(&:msg_id)).to eq([300])
+    end
+  end
+
   describe "DisconnectMessage" do
     it "unregisters the connection" do
       conn = build_conn(id: "a", stream_name: "chat")
@@ -409,6 +523,125 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: conn))
 
       expect(registry.connections_for("chat")).to be_empty
+    end
+  end
+
+  describe "connection-driven presence (issue #169)" do
+    subject(:dispatcher) do
+      described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500,
+        config: presence_config, presence_provider: presence_provider
+      )
+    end
+
+    # A fake presence handle recording join/leave/touch calls. One per
+    # stream, vended by the injected presence_provider.
+    let(:presence_class) do
+      Class.new do
+        attr_reader :joined, :left, :touched
+
+        def initialize
+          @joined = []
+          @left = []
+          @touched = []
+        end
+
+        def join(member_id:, metadata: {}) = @joined << { member_id: member_id, metadata: metadata }
+        def leave(member_id:) = @left << member_id
+        def touch(member_id:) = @touched << member_id
+      end
+    end
+
+    let(:presence) { presence_class.new }
+    let(:presence_provider) { ->(_stream_name) { presence } }
+
+    # Config that turns on presence for the "room" stream and derives the
+    # member from a Hash context's :member_id.
+    let(:presence_config) do
+      instance_double(Pgbus::Configuration, streams_stats_enabled: false).tap do |c|
+        allow(c).to receive(:stream_presence?) { |name| name == "room" }
+        allow(c).to receive(:presence_member_for) do |ctx|
+          ctx.is_a?(Hash) && ctx[:member_id] ? { id: ctx[:member_id].to_s, metadata: ctx[:metadata] || {} } : nil
+        end
+      end
+    end
+
+    before { allow(client).to receive(:read_after).and_return([]) }
+
+    it "auto-joins on connect when the stream has presence and a member is derivable" do
+      conn = build_conn(id: "c1", stream_name: "room", context: { member_id: "7", metadata: { name: "Ann" } })
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+
+      expect(presence.joined).to eq([{ member_id: "7", metadata: { name: "Ann" } }])
+      expect(conn.presence_member).to eq("7")
+    end
+
+    it "does NOT join when the stream is not a presence stream" do
+      conn = build_conn(id: "c1", stream_name: "chat", context: { member_id: "7" })
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+
+      expect(presence.joined).to be_empty
+      expect(conn.presence_member).to be_nil
+    end
+
+    it "does NOT join when no member can be derived (anonymous connection)" do
+      conn = build_conn(id: "c1", stream_name: "room", context: { role: "viewer" })
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+
+      expect(presence.joined).to be_empty
+      expect(conn.presence_member).to be_nil
+    end
+
+    it "auto-leaves on disconnect for a connection that had joined" do
+      conn = build_conn(id: "c1", stream_name: "room", context: { member_id: "7" })
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: conn))
+
+      expect(presence.left).to eq(["7"])
+    end
+
+    it "does NOT leave a connection that never joined presence" do
+      conn = build_conn(id: "c1", stream_name: "chat")
+      registry.register(conn)
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: conn))
+
+      expect(presence.left).to be_empty
+    end
+
+    it "touches presence members on a PresenceTouchMessage" do
+      conn = build_conn(id: "c1", stream_name: "room", context: { member_id: "7" })
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+
+      dispatcher.send(:handle, described_class::PresenceTouchMessage.new(connections: [conn]))
+
+      expect(presence.touched).to eq(["7"])
+    end
+
+    it "ignores a touch for a connection without a presence member" do
+      conn = build_conn(id: "c1", stream_name: "chat")
+      dispatcher.send(:handle, described_class::PresenceTouchMessage.new(connections: [conn]))
+      expect(presence.touched).to be_empty
+    end
+
+    it "does not let a presence join failure break the connect path" do
+      failing = Class.new do
+        def join(**) = raise("presence DB down")
+        def leave(**) = nil
+        def touch(**) = nil
+      end.new
+      failing_dispatcher = described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500,
+        config: presence_config, presence_provider: ->(_n) { failing }
+      )
+      conn = build_conn(id: "c1", stream_name: "room", context: { member_id: "7" })
+
+      expect do
+        failing_dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+      end.not_to raise_error
+      # The connection is still registered despite the presence failure.
+      expect(registry.connections_for("room")).to include(conn)
     end
   end
 
@@ -524,7 +757,7 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
 
     context "when streams_stats_enabled is true" do
       let(:dispatcher_config) do
-        instance_double(Pgbus::Configuration, streams_stats_enabled: true)
+        instance_double(Pgbus::Configuration, streams_stats_enabled: true, stream_presence?: false)
       end
 
       it "records a broadcast with fanout = registered + in-flight subscriber count" do

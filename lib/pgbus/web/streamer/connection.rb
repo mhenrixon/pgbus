@@ -14,6 +14,10 @@ module Pgbus
       # the client-side leg of the replay-race fix (§6.5 of the design doc).
       class Connection
         attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
+        # The presence member id this connection auto-joined as, or nil for
+        # non-presence streams / anonymous connections. Set by the
+        # Dispatcher on connect; read on disconnect and heartbeat touch.
+        attr_accessor :presence_member
 
         def initialize(id:, stream_name:, io:, since_id:, writer:, write_deadline_ms:, context: nil)
           @id = id
@@ -25,6 +29,7 @@ module Pgbus
           @mutex = Mutex.new
           @dead = false
           @closed = false
+          @presence_member = nil
           @created_at = monotonic
           @last_write_at = @created_at
           # Context is whatever the StreamApp's authorize hook returned
@@ -43,7 +48,7 @@ module Pgbus
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
-              event: "turbo-stream",
+              event: sse_event_for(envelope),
               data: envelope.payload
             )
 
@@ -114,6 +119,15 @@ module Pgbus
         end
 
         private
+
+        # The SSE event name for a frame: the envelope's typed event when
+        # present, else the default turbo-stream. Plain ReadAfter::Envelopes
+        # (no event field) and StreamEnvelopes with a nil event both fall
+        # back to the default. (issue #170)
+        def sse_event_for(envelope)
+          event = envelope.respond_to?(:event) ? envelope.event : nil
+          event && !event.to_s.empty? ? event.to_s : Pgbus::Streams::DEFAULT_SSE_EVENT
+        end
 
         def monotonic
           # Qualify ::Process because Pgbus::Process already exists as a

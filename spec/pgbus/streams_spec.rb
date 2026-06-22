@@ -42,6 +42,295 @@ RSpec.describe Pgbus::Streams do
         stream.broadcast("C")
         expect(client).to have_received(:ensure_stream_queue).once
       end
+
+      it "carries exclude: in the wrapped payload for actor-echo suppression" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "conn-abc123")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>", "exclude" => "conn-abc123" })
+      end
+
+      it "omits exclude from the payload when nil (the common path)" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: nil)
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+      end
+
+      it "omits exclude from the payload when blank" do
+        stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+      end
+
+      it "composes exclude with visible_to" do
+        stream.broadcast("X", visible_to: :admins, exclude: "conn-9")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "X", "visible_to" => "admins", "exclude" => "conn-9" })
+      end
+
+      it "carries a typed event name in the wrapped payload" do
+        stream.broadcast("<turbo-stream/>", event: "presence")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>", "event" => "presence" })
+      end
+
+      it "omits event from the payload when nil (default turbo-stream path)" do
+        stream.broadcast("<turbo-stream/>", event: nil)
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>" })
+      end
+
+      it "omits event when it is the default turbo-stream (no need to carry it)" do
+        stream.broadcast("<turbo-stream/>", event: "turbo-stream")
+        expect(client).to have_received(:send_message)
+          .with("chat", { "html" => "<turbo-stream/>" })
+      end
+
+      it "composes event with visible_to and exclude" do
+        stream.broadcast("X", event: "reactive", visible_to: :admins, exclude: "c1")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => "X", "visible_to" => "admins", "exclude" => "c1", "event" => "reactive" }
+        )
+      end
+    end
+
+    describe "#broadcast with coalesce: (issue #171)" do
+      let(:coalescer) { instance_spy(Pgbus::Streams::Coalescer) }
+
+      before { allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer) }
+
+      it "submits to the coalescer instead of broadcasting immediately" do
+        stream.broadcast("<turbo-stream/>", coalesce: 80, target: "cursor")
+
+        expect(client).not_to have_received(:send_message)
+        expect(coalescer).to have_received(:submit).with(
+          stream_name: "chat",
+          target: "cursor",
+          payload: "<turbo-stream/>",
+          window_ms: 80,
+          opts: { visible_to: nil, durable: true, exclude: nil, event: nil }
+        )
+      end
+
+      it "uses the default window when coalesce: true" do
+        stream.broadcast("<turbo-stream/>", coalesce: true, target: "cursor")
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(window_ms: Pgbus::Streams::Coalescer::DEFAULT_WINDOW_MS)
+        )
+      end
+
+      it "forwards visible_to/exclude/durable/event in opts" do
+        stream.broadcast("x", coalesce: 50, target: "t", visible_to: :admins, exclude: "c1", event: "reactive", durable: true)
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: :admins, durable: true, exclude: "c1", event: "reactive" })
+        )
+      end
+
+      it "requires a target when coalescing (cannot dedupe without a key)" do
+        expect { stream.broadcast("x", coalesce: 50) }
+          .to raise_error(ArgumentError, /target/)
+        expect(coalescer).not_to have_received(:submit)
+      end
+
+      it "returns nil (the broadcast is deferred to the flush)" do
+        expect(stream.broadcast("x", coalesce: 50, target: "t")).to be_nil
+      end
+
+      it "does not coalesce when coalesce is nil/false (normal broadcast)" do
+        stream.broadcast("x", coalesce: false, target: "t")
+        expect(coalescer).not_to have_received(:submit)
+        expect(client).to have_received(:send_message)
+      end
+
+      it "rejects a non-numeric, non-true coalesce value at the API boundary" do
+        expect { stream.broadcast("x", coalesce: "50", target: "t") }
+          .to raise_error(ArgumentError, /coalesce: must be true or a positive Numeric/)
+        expect { stream.broadcast("x", coalesce: :fast, target: "t") }
+          .to raise_error(ArgumentError, /coalesce:/)
+        expect { stream.broadcast("x", coalesce: -5, target: "t") }
+          .to raise_error(ArgumentError, /coalesce:/)
+      end
+
+      it "resolves durable: nil against the stream instance before submitting" do
+        # An ephemeral stream's coalesced frame must stay ephemeral even
+        # though the coalescer flush re-enters Pgbus.stream(name).
+        ephemeral_stream = described_class.new("chat", client: client, durable: false)
+        ephemeral_stream.broadcast("x", coalesce: 50, target: "t")
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: nil, durable: false, exclude: nil, event: nil })
+        )
+      end
+
+      it "preserves an explicit durable: override in the submitted opts" do
+        stream.broadcast("x", coalesce: 50, target: "t", durable: true)
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(opts: { visible_to: nil, durable: true, exclude: nil, event: nil })
+        )
+      end
+    end
+
+    describe "#broadcast with coalesce: inside an AR transaction" do
+      subject(:stream) { described_class.new("chat", client: client, durable: true) }
+
+      let(:client) do
+        double("Pgbus::Client", ensure_stream_queue: nil, send_message: 1248,
+                                stream_current_msg_id: 1247, read_after: [])
+      end
+      let(:coalescer) { instance_spy(Pgbus::Streams::Coalescer) }
+      let(:transaction) do
+        Class.new do
+          def initialize = (@callbacks = [])
+          def open? = true
+          def after_commit(&blk) = (@callbacks << blk)
+          def run_callbacks! = @callbacks.each(&:call)
+          attr_reader :callbacks
+        end.new
+      end
+
+      before do
+        allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer)
+        tx = transaction
+        conn = Object.new
+        conn.define_singleton_method(:current_transaction) { tx }
+        ar_base = Class.new
+        ar_base.define_singleton_method(:connection) { conn }
+        stub_const("ActiveRecord::Base", ar_base)
+      end
+
+      it "defers a durable coalesced submit to after_commit (does not submit immediately)" do
+        stream.broadcast("x", coalesce: 50, target: "t")
+        expect(coalescer).not_to have_received(:submit)
+
+        transaction.run_callbacks!
+        expect(coalescer).to have_received(:submit).with(hash_including(target: "t"))
+      end
+
+      it "does NOT submit if the transaction never commits (rolls back)" do
+        stream.broadcast("x", coalesce: 50, target: "t")
+        # No run_callbacks! → simulates rollback.
+        expect(coalescer).not_to have_received(:submit)
+      end
+    end
+
+    describe "#broadcast_render" do
+      # A Phlex-like renderable: Phlex::HTML#call returns the rendered
+      # markup string. This is the shape the issue's example uses
+      # (Chat::Message.new(...)).
+      let(:phlex_like) do
+        Class.new do
+          def initialize(text) = (@text = text)
+          def call = "<div class=\"msg\">#{@text}</div>"
+        end
+      end
+
+      it "renders the component, wraps it in a turbo-stream action tag, and broadcasts" do
+        stream.broadcast_render(renderable: phlex_like.new("hi"), action: :append, target: "messages")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="append" target="messages"><template><div class="msg">hi</div></template></turbo-stream>' }
+        )
+      end
+
+      it "defaults the action to replace" do
+        stream.broadcast_render(renderable: phlex_like.new("x"), target: "item_1")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="item_1"><template><div class="msg">x</div></template></turbo-stream>' }
+        )
+      end
+
+      it "accepts a pre-rendered HTML string as the renderable" do
+        stream.broadcast_render(renderable: "<p>plain</p>", action: :prepend, target: "list")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="prepend" target="list"><template><p>plain</p></template></turbo-stream>' }
+        )
+      end
+
+      it "omits the <template> for content-less actions like remove" do
+        stream.broadcast_render(action: :remove, target: "item_9")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="remove" target="item_9"></turbo-stream>' }
+        )
+      end
+
+      it "HTML-escapes the action and target attributes" do
+        stream.broadcast_render(renderable: "x", action: :replace, target: 'a"b')
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="a&quot;b"><template>x</template></turbo-stream>' }
+        )
+      end
+
+      it "passes exclude through to the broadcast (composes with #165)" do
+        stream.broadcast_render(renderable: "x", target: "t", exclude: "conn-7")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "exclude" => "conn-7"
+          }
+        )
+      end
+
+      it "passes visible_to through to the broadcast" do
+        stream.broadcast_render(renderable: "x", target: "t", visible_to: :admins)
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "visible_to" => "admins"
+          }
+        )
+      end
+
+      it "renders an object that responds to render_in (ViewComponent/Phlex-rails shape)" do
+        renderable = Class.new do
+          def render_in(_view_context) = "<span>vc</span>"
+        end.new
+        stream.broadcast_render(renderable: renderable, target: "t")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          { "html" => '<turbo-stream action="replace" target="t"><template><span>vc</span></template></turbo-stream>' }
+        )
+      end
+
+      it "requires a target" do
+        expect { stream.broadcast_render(renderable: "x", target: nil) }
+          .to raise_error(ArgumentError, /target/)
+      end
+
+      it "returns the msg_id from the underlying broadcast" do
+        expect(stream.broadcast_render(renderable: "x", target: "t")).to eq(1248)
+      end
+
+      it "passes a typed event through to the broadcast" do
+        stream.broadcast_render(renderable: "x", target: "t", event: "reactive")
+        expect(client).to have_received(:send_message).with(
+          "chat",
+          {
+            "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
+            "event" => "reactive"
+          }
+        )
+      end
+
+      it "coalesces on its target when coalesce: is set (issue #171)" do
+        coalescer = instance_spy(Pgbus::Streams::Coalescer)
+        allow(Pgbus::Streams).to receive(:coalescer).and_return(coalescer)
+
+        stream.broadcast_render(renderable: "<span>c</span>", target: "cursor", action: :update, coalesce: 30)
+
+        expect(client).not_to have_received(:send_message)
+        expect(coalescer).to have_received(:submit).with(
+          stream_name: "chat",
+          target: "cursor",
+          payload: '<turbo-stream action="update" target="cursor"><template><span>c</span></template></turbo-stream>',
+          window_ms: 30,
+          opts: { visible_to: nil, durable: true, exclude: nil, event: nil }
+        )
+      end
     end
 
     describe "#broadcast inside an AR transaction" do

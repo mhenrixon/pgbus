@@ -57,6 +57,22 @@ RSpec.describe Pgbus::Streams::Envelope do
       result = described_class.message(id: 1, event: "msg", data: "x")
       expect(result).to end_with("\n\n")
     end
+
+    it "strips newlines from the event name so a crafted value can't inject SSE fields" do
+      # A typed event carrying \n could otherwise terminate the event:
+      # line early and inject a forged id:/data: into the frame.
+      result = described_class.message(id: 1, event: "presence\nid: 999\ndata: evil", data: "ok")
+      expect(result).to eq("id: 1\nevent: presenceid: 999data: evil\ndata: ok\n\n")
+      # The crafted "\nid: 999\ndata: evil" cannot become its own SSE fields:
+      # there is exactly one id:, one event:, one data: line in the frame.
+      expect(result.scan(/^id:/).size).to eq(1)
+      expect(result.scan(/^data:/).size).to eq(1)
+    end
+
+    it "strips carriage returns from the event name" do
+      result = described_class.message(id: 1, event: "a\r\nb", data: "x")
+      expect(result).to include("event: ab\n")
+    end
   end
 
   describe ".comment" do
@@ -86,6 +102,35 @@ RSpec.describe Pgbus::Streams::Envelope do
     it "rejects non-integer values" do
       expect { described_class.retry_directive(1.5) }
         .to raise_error(ArgumentError, /retry/)
+    end
+  end
+
+  describe ".connected" do
+    it "encodes a pgbus:connected frame carrying the connection id as JSON" do
+      result = described_class.connected(id: "abc123def456")
+      expect(result).to eq(
+        "event: pgbus:connected\n" \
+        "data: {\"connectionId\":\"abc123def456\"}\n" \
+        "\n"
+      )
+    end
+
+    it "does not carry an SSE id: line (the connection id is not a replay cursor)" do
+      # A pgbus:connected frame is metadata, not a broadcast. Giving it an
+      # id: would advance the client's Last-Event-ID and corrupt the
+      # replay cursor on reconnect.
+      result = described_class.connected(id: "x")
+      expect(result).not_to include("id:")
+    end
+
+    it "raises when id is nil or empty" do
+      expect { described_class.connected(id: nil) }.to raise_error(ArgumentError, /id/)
+      expect { described_class.connected(id: "") }.to raise_error(ArgumentError, /id/)
+    end
+
+    it "JSON-escapes a hostile connection id (defense in depth)" do
+      result = described_class.connected(id: 'a"b')
+      expect(result).to include('data: {"connectionId":"a\\"b"}')
     end
   end
 

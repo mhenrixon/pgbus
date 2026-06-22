@@ -94,5 +94,15 @@ RSpec.describe Pgbus::Streams::Streamable do
       key = Pgbus.stream_key(record.to_stream_key, :messages)
       expect(key.length).to be <= Pgbus::Streams::Key.queue_name_budget
     end
+
+    it "round-trips an already-built key through Pgbus.stream_key (idempotent)" do
+      key = Pgbus.stream_key(record.to_stream_key, :messages)
+      expect(Pgbus.stream_key(key)).to eq(key)
+    end
+
+    it "accepts an already-built key via Pgbus.stream_key! verbatim" do
+      key = Pgbus.stream_key(record.to_stream_key, :messages)
+      expect(Pgbus.stream_key!(key)).to eq(key)
+    end
   end
 end

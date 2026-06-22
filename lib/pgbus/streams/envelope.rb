@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Pgbus
   module Streams
     # Encodes Server-Sent Events frames per https://html.spec.whatwg.org/multipage/server-sent-events.html.
@@ -29,11 +31,28 @@ module Pgbus
         raise ArgumentError, "id is required" if id.nil?
         raise ArgumentError, "event is required" if event.nil? || event.to_s.empty?
 
-        "id: #{id}\nevent: #{event}\ndata: #{strip_newlines(data.to_s)}\n\n"
+        # Strip newlines from BOTH event and data, not just data: each is
+        # interpolated into its own SSE field line, so an unescaped \r/\n in
+        # either would terminate the field early and let a crafted value
+        # inject extra SSE fields (a forged id:/data:) into the frame.
+        "id: #{id}\nevent: #{strip_newlines(event.to_s)}\ndata: #{strip_newlines(data.to_s)}\n\n"
       end
 
       def self.comment(text)
         ": #{strip_newlines(text.to_s)}\n\n"
+      end
+
+      # Emits a `pgbus:connected` frame carrying the server-minted
+      # connection id as JSON. Sent once, right after the open handshake,
+      # so the page can read its own connection id and send it back as
+      # `X-Pgbus-Connection` on action requests (actor-echo suppression,
+      # issue #165). Deliberately omits an `id:` line: this is connection
+      # metadata, not a broadcast, and giving it a cursor id would corrupt
+      # the client's Last-Event-ID replay position on reconnect.
+      def self.connected(id:)
+        raise ArgumentError, "id is required" if id.nil? || id.to_s.empty?
+
+        "event: pgbus:connected\ndata: #{JSON.generate({ connectionId: id.to_s })}\n\n"
       end
 
       def self.retry_directive(milliseconds)

@@ -197,8 +197,75 @@ RSpec.describe Pgbus::Streams::Key do
     end
 
     it "explains the ambiguous-collision failure mode in the error" do
-      expect { described_class.stream_key("a:b") }
+      # The hazard is in the *join* of multiple fragments, so the
+      # explanatory message is asserted on the multi-arg form. (A single
+      # colon-bearing String is now treated as a pre-built key and
+      # returned unchanged — see the already-built-key context below.)
+      expect { described_class.stream_key("a:b", :c) }
         .to raise_error(ArgumentError, /collapse to the same key/)
+    end
+
+    context "with an already-built key (single String arg, idempotent)" do
+      # A consumer often holds a pre-built key (e.g. from a `stream_key`
+      # helper) and passes the *same* value to both `turbo_stream_from`
+      # and the broadcaster. Re-keying it must not raise just because it
+      # contains the ':' separator: with a single string there is no
+      # second fragment to collapse against, so the collision hazard the
+      # colon guard protects against cannot arise.
+      it "returns a single colon-bearing String unchanged" do
+        expect(described_class.stream_key("chat:lobby")).to eq("chat:lobby")
+      end
+
+      it "is idempotent: stream_key(stream_key(a, b)) == stream_key(a, b)" do
+        built = described_class.stream_key("room", :messages)
+        expect(described_class.stream_key(built)).to eq(built)
+      end
+
+      it "still validates the budget for a pre-built key" do
+        oversized = "a:#{"x" * described_class.queue_name_budget}"
+        expect { described_class.stream_key(oversized) }
+          .to raise_error(ArgumentError, /exceeds pgbus budget/)
+      end
+
+      it "does NOT relax the guard when a colon-bearing string is combined with other parts" do
+        # Two fragments where one carries a colon is exactly the
+        # ambiguous case (stream_key('a:b', :c) vs stream_key('a', 'b:c')).
+        # The single-arg fast path must not leak into the multi-arg path.
+        expect { described_class.stream_key("a:b", :c) }
+          .to raise_error(ArgumentError, /contains ':'/)
+      end
+
+      it "does NOT treat a lone Symbol with a colon as a pre-built key" do
+        # Only a String is a key; a colon in a Symbol fragment is still a
+        # mistake (it never came from stream_key, which returns a String).
+        expect { described_class.stream_key(:"a:b") }
+          .to raise_error(ArgumentError, /contains ':'/)
+      end
+
+      it "leaves a colon-free single string on the normal path" do
+        expect(described_class.stream_key("messages")).to eq("messages")
+      end
+    end
+  end
+
+  describe ".stream_key!" do
+    it "accepts a pre-built key verbatim" do
+      expect(described_class.stream_key!("chat:lobby")).to eq("chat:lobby")
+    end
+
+    it "accepts a colon-free key verbatim" do
+      expect(described_class.stream_key!("messages")).to eq("messages")
+    end
+
+    it "still enforces the queue-name budget" do
+      oversized = "x" * (described_class.queue_name_budget + 1)
+      expect { described_class.stream_key!(oversized) }
+        .to raise_error(ArgumentError, /exceeds pgbus budget/)
+    end
+
+    it "requires a String (a pre-built key is always a String)" do
+      expect { described_class.stream_key!(:lobby) }
+        .to raise_error(ArgumentError, /must be a String/)
     end
   end
 

@@ -27,12 +27,13 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
   let(:conn_class) do
     Class.new do
       attr_reader :id, :stream_name, :comments
-      attr_accessor :idle_for_value
+      attr_accessor :idle_for_value, :presence_member
 
-      def initialize(id:, stream_name:, idle_for: 0)
+      def initialize(id:, stream_name:, idle_for: 0, presence_member: nil)
         @id = id
         @stream_name = stream_name
         @idle_for_value = idle_for
+        @presence_member = presence_member
         @comments = []
         @dead = false
       end
@@ -48,8 +49,8 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
     end
   end
 
-  def build_conn(id:, stream_name: "chat", idle_for: 0)
-    conn_class.new(id: id, stream_name: stream_name, idle_for: idle_for)
+  def build_conn(id:, stream_name: "chat", idle_for: 0, presence_member: nil)
+    conn_class.new(id: id, stream_name: stream_name, idle_for: idle_for, presence_member: presence_member)
   end
 
   describe "#tick" do
@@ -107,6 +108,45 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
       heartbeat.tick
       expect(c1.dead?).to be false
       expect(c1.comments).to eq(["heartbeat 0"])
+    end
+
+    context "with presence touch (issue #169)" do
+      it "posts a PresenceTouchMessage with the live presence connections" do
+        presence_conn = build_conn(id: "a", stream_name: "room", presence_member: "7")
+        plain_conn = build_conn(id: "b", stream_name: "chat")
+        registry.register(presence_conn)
+        registry.register(plain_conn)
+
+        heartbeat.tick
+
+        msgs = []
+        msgs << dispatch_queue.pop(true) until dispatch_queue.empty?
+        touch = msgs.find { |m| m.is_a?(Pgbus::Web::Streamer::StreamEventDispatcher::PresenceTouchMessage) }
+        expect(touch).not_to be_nil
+        expect(touch.connections).to contain_exactly(presence_conn)
+      end
+
+      it "does not post a PresenceTouchMessage when no connection has presence" do
+        registry.register(build_conn(id: "a", stream_name: "chat"))
+
+        heartbeat.tick
+
+        msgs = []
+        msgs << dispatch_queue.pop(true) until dispatch_queue.empty?
+        expect(msgs).not_to(include(be_a(Pgbus::Web::Streamer::StreamEventDispatcher::PresenceTouchMessage)))
+      end
+
+      it "does not include dead presence connections in the touch" do
+        dead_presence = build_conn(id: "a", stream_name: "room", presence_member: "7")
+        dead_presence.mark_dead!
+        registry.register(dead_presence)
+
+        heartbeat.tick
+
+        msgs = []
+        msgs << dispatch_queue.pop(true) until dispatch_queue.empty?
+        expect(msgs).not_to(include(be_a(Pgbus::Web::Streamer::StreamEventDispatcher::PresenceTouchMessage)))
+      end
     end
   end
 

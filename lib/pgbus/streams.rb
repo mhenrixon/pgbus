@@ -15,6 +15,12 @@ module Pgbus
     # this specifically can rescue Pgbus::Streams::StreamNameTooLong.
     class StreamNameTooLong < ArgumentError; end
 
+    # The default SSE `event:` name for a broadcast frame. Turbo's
+    # StreamObserver consumes frames the client re-dispatches as the
+    # `message` DOM event; the client maps this SSE event name to
+    # `message`. Broadcasts may override it with a typed name (issue #170).
+    DEFAULT_SSE_EVENT = "turbo-stream"
+
     # Process-wide registry of server-side audience filter predicates.
     # Register filters at boot time via:
     #   Pgbus::Streams.filters.register(:admin_only) { |user| user.admin? }
@@ -26,6 +32,25 @@ module Pgbus
     # Clears the filters registry. Used by tests; not intended for runtime.
     def self.reset_filters!
       @filters = nil
+    end
+
+    # Process-wide publish-side coalescer for high-frequency broadcasts
+    # (issue #171). Lazily built; the flush re-enters the normal broadcast
+    # path so a coalesced frame is just a deferred ordinary broadcast.
+    def self.coalescer
+      # `target:` is part of the flush signature but unused here — it's only
+      # a coalescing key; the target is already encoded in the payload's
+      # turbo-stream tag. Absorbed via ** so it isn't a broadcast argument.
+      @coalescer ||= Coalescer.new(
+        flush: lambda do |stream_name:, payload:, opts:, **|
+          Pgbus.stream(stream_name).broadcast(payload, **opts)
+        end
+      )
+    end
+
+    # Clears the coalescer. Used by tests; not intended for runtime.
+    def self.reset_coalescer!
+      @coalescer = nil
     end
 
     # A handle on a single logical stream. The name can be any string, an
@@ -76,9 +101,48 @@ module Pgbus
       # Per-broadcast `durable:` overrides the stream-level default for a
       # single broadcast. `nil` (the default) defers to the stream's own
       # `durable?` setting; `true`/`false` flip the mode for this call only.
-      def broadcast(payload, visible_to: nil, durable: nil)
+      #
+      # Actor-echo suppression: pass `exclude:` with the broadcaster's own
+      # SSE connection id (surfaced to the page as
+      # `<meta name="pgbus-connection-id">` / the element's `connection-id`
+      # attribute, sent back on the action request as the
+      # `X-Pgbus-Connection` header). The dispatcher skips delivery to that
+      # one connection, so the actor doesn't receive the echo of its own
+      # broadcast — it already applied the change via the action's HTTP
+      # response. Everyone else gets the broadcast. A nil/blank `exclude`
+      # is a no-op (the common path).
+      # Typed SSE event name: pass `event:` to set the SSE `event:` field
+      # on the delivered frame (e.g. `event: "presence"`, `event:
+      # "reactive"`) while keeping the payload a Turbo Stream. Clients that
+      # care can route on the typed event without sniffing the HTML;
+      # default consumers still receive the standard turbo-stream/`message`
+      # path. The default (`nil` or `"turbo-stream"`) is not carried on the
+      # wire — it's the implicit default the dispatcher applies.
+      # High-frequency coalescing: pass `coalesce:` (a window in milliseconds,
+      # or `true` for the default window) together with `target:` to batch
+      # rapid broadcasts to the same (stream, target) and publish only the
+      # latest within the window. Superseded frames never reach the bus.
+      # Last-write-wins, so this is only safe for idempotent replace/update
+      # of a stable target (the high-frequency case: cursors, typing,
+      # progress). Returns nil — the actual broadcast is deferred to the
+      # coalescer's flush. See issue #171 and Pgbus::Streams::Coalescer.
+      def broadcast(payload, visible_to: nil, durable: nil, exclude: nil, event: nil, coalesce: nil, target: nil)
+        if coalesce
+          return coalesce_broadcast(
+            payload,
+            coalesce: coalesce,
+            target: target,
+            visible_to: visible_to,
+            durable: durable,
+            exclude: exclude,
+            event: event
+          )
+        end
+
         wrapped = { "html" => payload.to_s }
         wrapped["visible_to"] = visible_to.to_s if visible_to
+        wrapped["exclude"] = exclude.to_s if exclude && !exclude.to_s.empty?
+        wrapped["event"] = event.to_s if event && event.to_s != DEFAULT_SSE_EVENT
 
         use_durable = durable.nil? ? @durable : durable
         return broadcast_ephemeral(wrapped) unless use_durable
@@ -99,6 +163,36 @@ module Pgbus
             @client.send_message(@name, wrapped)
           end
         end
+      end
+
+      # Renders a renderable (a Phlex component, a ViewComponent, or a
+      # pre-rendered HTML string) into a complete `<turbo-stream>` action
+      # tag and broadcasts it atomically — the render and the broadcast in
+      # one call. This removes the #1 footgun in server-driven UI: building
+      # the off-request render context and the turbo-stream wrapper by hand
+      # at every call site.
+      #
+      #   Pgbus.stream("chat", room).broadcast_render(
+      #     renderable: Chat::Message.new(chat_message: msg),
+      #     action: :append, target: "chat-messages-#{room}",
+      #     exclude: connection_id   # composes with #165
+      #   )
+      #
+      # `action` defaults to :replace. `target` is required. `exclude:`,
+      # `visible_to:`, and `durable:` are forwarded to #broadcast unchanged,
+      # so actor-echo suppression and audience filtering compose. Returns
+      # whatever #broadcast returns (msg_id, or nil when deferred to
+      # after_commit inside a transaction).
+      #
+      # See Pgbus::Streams::Renderer for the renderable-resolution order.
+      # Components that need URL helpers or a full view context should be
+      # rendered by the app (which has the request context) and the
+      # resulting string passed as `renderable:`.
+      def broadcast_render(target:, action: :replace, renderable: nil, visible_to: nil, durable: nil, exclude: nil,
+                           event: nil, coalesce: nil)
+        html = Renderer.turbo_stream_tag(action: action, target: target, renderable: renderable)
+        broadcast(html, visible_to: visible_to, durable: durable, exclude: exclude, event: event,
+                        coalesce: coalesce, target: target)
       end
 
       def current_msg_id
@@ -170,6 +264,61 @@ module Pgbus
       def broadcast_ephemeral(wrapped)
         @client.notify_stream(@name, wrapped)
         nil
+      end
+
+      # Submits a frame to the process-wide coalescer instead of
+      # broadcasting now. Requires a target (the dedupe key — there's no
+      # way to last-write-win without one). The window is `coalesce` in ms
+      # when numeric, else the coalescer's default. Returns nil; the
+      # coalescer flushes the latest frame as an ordinary broadcast.
+      def coalesce_broadcast(payload, coalesce:, target:, visible_to:, durable:, exclude:, event:)
+        if target.nil? || target.to_s.empty?
+          raise ArgumentError,
+                "broadcast(coalesce:) requires target: — coalescing keys on (stream, target), " \
+                "so the latest frame per target can win. Use broadcast_render(coalesce:) which " \
+                "already has a target, or pass target: explicitly."
+        end
+
+        window_ms = coalesce_window_ms(coalesce)
+        # Resolve durability against THIS stream instance now, not nil. The
+        # coalescer's flush re-enters Pgbus.stream(@name), whose durability
+        # could resolve differently (config patterns) than this instance —
+        # passing the resolved value keeps the coalesced frame's mode stable.
+        resolved_durable = durable.nil? ? @durable : durable
+
+        submit = lambda do
+          Streams.coalescer.submit(
+            stream_name: @name,
+            target: target.to_s,
+            payload: payload.to_s,
+            window_ms: window_ms,
+            opts: { visible_to: visible_to, durable: resolved_durable, exclude: exclude, event: event }
+          )
+        end
+
+        # Transaction gating: a coalesced DURABLE broadcast made inside an
+        # open transaction must not flush if the transaction rolls back, so
+        # defer the submission to after_commit (mirrors the non-coalesced
+        # path). Ephemeral coalescing is fire-and-forget, so it submits now.
+        transaction = resolved_durable ? current_open_transaction : nil
+        if transaction
+          transaction.after_commit { submit.call }
+        else
+          submit.call
+        end
+        nil
+      end
+
+      # Resolves the coalescing window in ms. `true` → the default window;
+      # a positive Numeric is used as-is. Anything else is a misuse and is
+      # rejected at the API boundary with an actionable error rather than a
+      # cryptic NoMethodError deep inside the coalescer's timer math.
+      def coalesce_window_ms(coalesce)
+        return Coalescer::DEFAULT_WINDOW_MS if coalesce == true
+        return coalesce if coalesce.is_a?(Numeric) && coalesce.positive?
+
+        raise ArgumentError,
+              "coalesce: must be true or a positive Numeric window in milliseconds, got #{coalesce.inspect}"
       end
 
       def ensure_queue!

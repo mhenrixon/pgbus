@@ -61,6 +61,7 @@ module Pgbus
         # code goes through the background thread.
         def tick
           now = @clock.call
+          presence_conns = []
           @registry.each_connection do |connection|
             if connection.dead?
               # Already dead (e.g. IoWriter returned :closed on a previous
@@ -76,8 +77,15 @@ module Pgbus
             end
 
             result = connection.write_comment("heartbeat #{now.to_i}")
-            enqueue_disconnect(connection) if connection.dead? || result != :ok
+            if connection.dead? || result != :ok
+              enqueue_disconnect(connection)
+              next
+            end
+
+            presence_conns << connection if presence_member?(connection)
           end
+
+          enqueue_presence_touch(presence_conns)
         end
 
         private
@@ -98,6 +106,20 @@ module Pgbus
 
         def enqueue_disconnect(connection)
           @queue << StreamEventDispatcher::DisconnectMessage.new(connection: connection)
+        end
+
+        def presence_member?(connection)
+          connection.respond_to?(:presence_member) && !connection.presence_member.nil?
+        end
+
+        # Posts one batched touch per tick so the dispatcher (which owns AR
+        # connection release) refreshes last_seen_at for live presence
+        # members, keeping them out of the sweeper. No message when no
+        # connection has presence — avoids waking the dispatcher for nothing.
+        def enqueue_presence_touch(connections)
+          return if connections.empty?
+
+          @queue << StreamEventDispatcher::PresenceTouchMessage.new(connections: connections)
         end
       end
     end

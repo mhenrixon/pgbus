@@ -83,6 +83,30 @@ RSpec.describe Pgbus::Web::Streamer::Connection do
       expect(conn.last_msg_id_sent).to eq(1249)
     end
 
+    describe "typed SSE event names (issue #170)" do
+      def stream_envelope(msg_id:, event: nil, payload: "<x/>")
+        Pgbus::Web::Streamer::StreamEventDispatcher::StreamEnvelope.new(
+          msg_id: msg_id, enqueued_at: nil, payload: payload, source: "live", event: event
+        )
+      end
+
+      it "defaults to the turbo-stream SSE event when the envelope has no event" do
+        conn.enqueue([build_envelope(msg_id: 1248)])
+        expect(writer.writes.first[:bytes]).to include("event: turbo-stream")
+      end
+
+      it "uses the envelope's event name when set" do
+        conn.enqueue([stream_envelope(msg_id: 1248, event: "presence")])
+        expect(writer.writes.first[:bytes]).to include("event: presence")
+        expect(writer.writes.first[:bytes]).not_to include("event: turbo-stream")
+      end
+
+      it "falls back to turbo-stream when the envelope's event is nil" do
+        conn.enqueue([stream_envelope(msg_id: 1248, event: nil)])
+        expect(writer.writes.first[:bytes]).to include("event: turbo-stream")
+      end
+    end
+
     it "skips envelopes with msg_id <= last_msg_id_sent (dedup on overlap)" do
       conn.enqueue([build_envelope(msg_id: 1248)])
       writer.writes.clear
