@@ -154,6 +154,9 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride do
 
   after do
     Thread.current[:pgbus_broadcast_durable] = nil
+    Thread.current[:pgbus_broadcast_exclude] = nil
+    Thread.current[:pgbus_broadcast_visible_to] = nil
+    Thread.current[:pgbus_broadcast_event] = nil
   end
 
   describe "instance-level durable: kwarg" do
@@ -244,6 +247,60 @@ RSpec.describe Pgbus::Streams::BroadcastableOverride do
       end.to raise_error(RuntimeError, "boom")
 
       expect(Thread.current[:pgbus_broadcast_durable]).to be_nil
+    end
+  end
+
+  describe "instance-level exclude: / visible_to: / event: kwargs" do
+    it "forwards exclude: to Stream#broadcast (actor-echo suppression)" do
+      model.broadcast_replace_to("room:42", exclude: "conn-abc", html: "<div/>")
+
+      expect(fake_stream).to have_received(:broadcast)
+        .with(anything, hash_including(exclude: "conn-abc"))
+    end
+
+    it "forwards visible_to: to Stream#broadcast" do
+      model.broadcast_replace_to("room:42", visible_to: :admins, html: "<div/>")
+
+      expect(fake_stream).to have_received(:broadcast)
+        .with(anything, hash_including(visible_to: :admins))
+    end
+
+    it "forwards event: to Stream#broadcast" do
+      model.broadcast_replace_to("room:42", event: "presence", html: "<div/>")
+
+      expect(fake_stream).to have_received(:broadcast)
+        .with(anything, hash_including(event: "presence"))
+    end
+
+    it "composes exclude: with durable: (both reach their destinations)" do
+      model.broadcast_append_to("room:42", durable: true, exclude: "conn-9", html: "<div/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
+      expect(fake_stream).to have_received(:broadcast)
+        .with(anything, hash_including(exclude: "conn-9"))
+    end
+
+    it "passes nil for the opts when none are given (unchanged default path)" do
+      model.broadcast_replace_to("room:42", html: "<div/>")
+
+      expect(fake_stream).to have_received(:broadcast)
+        .with(anything, hash_including(exclude: nil, visible_to: nil, event: nil))
+    end
+
+    it "does NOT leak exclude: into turbo-rails rendering kwargs" do
+      # The override must delete :exclude from kwargs before calling super,
+      # so it never reaches Turbo's renderer (which would error on it).
+      expect do
+        model.broadcast_replace_to("room:42", exclude: "conn-abc", html: "<div/>")
+      end.not_to raise_error
+    end
+
+    it "cleans up the exclude/visible_to/event thread-locals after the broadcast" do
+      model.broadcast_replace_to("room:42", exclude: "conn-abc", visible_to: :admins, event: "x", html: "<div/>")
+
+      expect(Thread.current[:pgbus_broadcast_exclude]).to be_nil
+      expect(Thread.current[:pgbus_broadcast_visible_to]).to be_nil
+      expect(Thread.current[:pgbus_broadcast_event]).to be_nil
     end
   end
 

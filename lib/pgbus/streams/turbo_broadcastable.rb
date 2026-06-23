@@ -42,7 +42,12 @@ module Pgbus
                   else
                     override
                   end
-        Pgbus.stream(name, durable: durable).broadcast(content)
+        Pgbus.stream(name, durable: durable).broadcast(
+          content,
+          exclude: Thread.current[:pgbus_broadcast_exclude],
+          visible_to: Thread.current[:pgbus_broadcast_visible_to],
+          event: Thread.current[:pgbus_broadcast_event]
+        )
       end
     end
 
