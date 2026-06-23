@@ -36,17 +36,23 @@ module Pgbus
         broadcast_action_to
       ].freeze
 
+      # pgbus-specific broadcast options that Turbo's own broadcast helpers
+      # don't understand. We pull them out of kwargs (so they never reach
+      # turbo-rails' renderer) and thread them to broadcast_stream_to via
+      # thread-locals, mirroring the original durable: shim.
+      PGBUS_BROADCAST_OPTS = %i[durable exclude visible_to event].freeze
+
       BROADCAST_METHODS.each do |method_name|
         define_method(method_name) do |*streamables, **kwargs|
-          durable = kwargs.delete(:durable)
-          with_pgbus_durable(durable) { super(*streamables, **kwargs) }
+          opts = extract_pgbus_broadcast_opts(kwargs)
+          with_pgbus_broadcast_opts(**opts) { super(*streamables, **kwargs) }
         end
       end
 
       BROADCAST_ACTION_METHODS.each do |method_name|
         define_method(method_name) do |*streamables, action:, **kwargs|
-          durable = kwargs.delete(:durable)
-          with_pgbus_durable(durable) { super(*streamables, action: action, **kwargs) }
+          opts = extract_pgbus_broadcast_opts(kwargs)
+          with_pgbus_broadcast_opts(**opts) { super(*streamables, action: action, **kwargs) }
         end
       end
 
@@ -121,14 +127,41 @@ module Pgbus
 
       private
 
-      def with_pgbus_durable(value)
-        return yield if value.nil?
+      def extract_pgbus_broadcast_opts(kwargs)
+        PGBUS_BROADCAST_OPTS.each_with_object({}) do |key, opts|
+          opts[key] = kwargs.delete(key) if kwargs.key?(key)
+        end
+      end
 
-        previous = Thread.current[:pgbus_broadcast_durable]
-        Thread.current[:pgbus_broadcast_durable] = value
+      # Set the pgbus broadcast thread-locals for the duration of the block,
+      # restoring previous values afterwards (nested/concurrent-safe). Only
+      # keys actually passed are touched, so unrelated outer broadcasts keep
+      # their values.
+      def with_pgbus_broadcast_opts(durable: :__unset__, exclude: :__unset__, visible_to: :__unset__, event: :__unset__)
+        previous = {}
+        set = lambda do |tl_key, value|
+          next if value == :__unset__
+
+          previous[tl_key] = Thread.current[tl_key]
+          Thread.current[tl_key] = value
+        end
+
+        set.call(:pgbus_broadcast_durable, durable)
+        set.call(:pgbus_broadcast_exclude, exclude)
+        set.call(:pgbus_broadcast_visible_to, visible_to)
+        set.call(:pgbus_broadcast_event, event)
+
         yield
       ensure
-        Thread.current[:pgbus_broadcast_durable] = previous unless value.nil?
+        previous.each { |tl_key, value| Thread.current[tl_key] = value }
+      end
+
+      # Kept for backward compatibility — the class-level durable callbacks
+      # (broadcasts_to with durable:) and any external callers may still use it.
+      def with_pgbus_durable(value, &)
+        return yield if value.nil?
+
+        with_pgbus_broadcast_opts(durable: value, &)
       end
     end
   end
