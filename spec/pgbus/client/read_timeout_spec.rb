@@ -47,6 +47,12 @@ RSpec.describe Pgbus::Client do
           expect { client.read_multi(%w[default], qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
 
+        it "raises ReadTimeoutError when read_message exceeds the timeout" do
+          allow(mock_pgmq).to receive(:read) { sleep 5 }
+
+          expect { client.read_message("default") }.to raise_error(Pgbus::ReadTimeoutError)
+        end
+
         it "does not interfere with fast reads" do
           allow(mock_pgmq).to receive(:read_batch).and_return([])
 

@@ -145,8 +145,10 @@ module Pgbus
         break if remaining <= 0
 
         msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
-          with_stale_connection_retry do
-            synchronized { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) }
+          with_read_timeout do
+            with_stale_connection_retry do
+              synchronized { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) }
+            end
           end
         end || []
 
@@ -363,8 +365,10 @@ module Pgbus
     def read_grouped(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_grouped", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        with_read_timeout do
+          with_stale_connection_retry do
+            synchronized { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          end
         end
       end
     end
@@ -372,16 +376,20 @@ module Pgbus
     def read_grouped_rr(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_grouped_rr", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        with_read_timeout do
+          with_stale_connection_retry do
+            synchronized { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          end
         end
       end
     end
 
     def read_grouped_head(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      with_stale_connection_retry do
-        synchronized { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+      with_read_timeout do
+        with_stale_connection_retry do
+          synchronized { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        end
       end
     end
 

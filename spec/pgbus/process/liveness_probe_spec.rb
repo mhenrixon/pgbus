@@ -47,12 +47,18 @@ RSpec.describe Pgbus::Process::Worker do
         expect(captured_args).to include(loop_tick_supplier: an_instance_of(Proc))
       end
 
-      it "updates @loop_tick_at on each loop tick" do
+      it "stamp_loop_tick writes a wall-clock timestamp to @loop_tick_at" do
         tick_ref = worker.instance_variable_get(:@loop_tick_at)
         expect(tick_ref.get).to be_nil
 
-        tick_ref.set(123.456)
-        expect(tick_ref.get).to eq(123.456)
+        before = Time.now.to_f
+        worker.send(:stamp_loop_tick)
+        after = Time.now.to_f
+
+        stamped = tick_ref.get
+        expect(stamped).to be_a(Float)
+        expect(stamped).to be >= before
+        expect(stamped).to be <= after
       end
     end
   end

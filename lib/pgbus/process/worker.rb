@@ -83,7 +83,7 @@ module Pgbus
         end
 
         loop do
-          @loop_tick_at.set(monotonic_now)
+          stamp_loop_tick
           process_signals
           check_recycle
           refresh_wildcard_queues
@@ -514,6 +514,14 @@ module Pgbus
 
       def monotonic_now
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
+      end
+
+      # Stamp the loop-progress beacon with a wall-clock timestamp.
+      # Wall clock is required because the supervisor watchdog reads
+      # this value from a different process (cross-fork) and the
+      # dashboard reads it from a different host.
+      def stamp_loop_tick
+        @loop_tick_at.set(Time.now.to_f)
       end
     end
   end

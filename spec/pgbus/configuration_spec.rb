@@ -868,6 +868,36 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.not_to raise_error
     end
 
+    it "rejects non-numeric stall_threshold" do
+      config.stall_threshold = "90"
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
+    it "rejects zero stall_threshold" do
+      config.stall_threshold = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
+    it "accepts nil stall_threshold (disabled)" do
+      config.stall_threshold = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects non-numeric read_timeout" do
+      config.read_timeout = "30"
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "rejects zero read_timeout" do
+      config.read_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "accepts nil read_timeout (disabled)" do
+      config.read_timeout = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
     it "rejects invalid priority_levels" do
       config.priority_levels = 0
       expect { config.validate! }.to raise_error(ArgumentError, /priority_levels/)
