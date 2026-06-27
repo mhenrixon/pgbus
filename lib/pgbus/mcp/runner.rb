@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "active_support/security_utils"
+
 module Pgbus
   module MCP
     # Boots the pgbus diagnostic MCP server over stdio. This is what
@@ -27,9 +29,10 @@ module Pgbus
       def run(env: ENV)
         authorize!(env)
 
-        server = Server.build(allow_payloads: truthy?(env["PGBUS_MCP_ALLOW_PAYLOADS"]))
+        allow_payloads = truthy?(env["PGBUS_MCP_ALLOW_PAYLOADS"])
+        server = Server.build(allow_payloads: allow_payloads)
         transport = ::MCP::Server::Transports::StdioTransport.new(server)
-        log_start(env)
+        log_start(allow_payloads)
         transport.open
       end
 
@@ -51,17 +54,18 @@ module Pgbus
       end
 
       # Constant-time comparison to avoid leaking the token via timing.
+      # Delegates to ActiveSupport's vetted implementation (railties already
+      # pulls in active_support). secure_compare handles unequal lengths
+      # safely — it compares fixed-length SHA256 digests, then verifies the
+      # raw values match — so it never raises on a length mismatch.
       def secure_compare?(expected, provided)
         return false if provided.nil?
-        return false unless expected.bytesize == provided.bytesize
 
-        left  = expected.unpack("C*")
-        right = provided.unpack("C*")
-        left.zip(right).reduce(0) { |acc, (a, b)| acc | (a ^ b) }.zero?
+        ActiveSupport::SecurityUtils.secure_compare(expected, provided)
       end
 
-      def log_start(env)
-        mode = truthy?(env["PGBUS_MCP_ALLOW_PAYLOADS"]) ? "payloads ALLOWED" : "payloads redacted"
+      def log_start(allow_payloads)
+        mode = allow_payloads ? "payloads ALLOWED" : "payloads redacted"
         Pgbus.logger.info { "[Pgbus::MCP] starting read-only diagnostic server over stdio (#{mode})" }
       end
     end

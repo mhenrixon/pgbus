@@ -34,8 +34,7 @@ module Pgbus
           detail = data_source.job_detail(queue, msg_id)
           return error_response("Message #{msg_id} not found in #{queue}") unless detail
 
-          allow = payloads_allowed?(server_context, include_payloads)
-          json_response(job: Redactor.redact(detail, include_payloads: allow))
+          json_response({ job: detail }, server_context: server_context, include_payloads: include_payloads)
         end
       end
     end

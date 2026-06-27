@@ -35,11 +35,10 @@ module Pgbus
           page = [page.to_i, 1].max
           rows = data_source.dlq_messages(page: page, per_page: per_page)
 
-          allow = payloads_allowed?(server_context, include_payloads)
           json_response(
-            page: page,
-            per_page: per_page,
-            messages: Redactor.redact_all(rows, include_payloads: allow)
+            { page: page, per_page: per_page, messages: rows },
+            server_context: server_context,
+            include_payloads: include_payloads
           )
         end
       end

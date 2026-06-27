@@ -19,7 +19,7 @@ module Pgbus
 
         def self.call(server_context: nil)
           data_source = data_source_from(server_context)
-          json_response(recurring_tasks: data_source.recurring_tasks)
+          json_response({ recurring_tasks: data_source.recurring_tasks })
         end
       end
     end

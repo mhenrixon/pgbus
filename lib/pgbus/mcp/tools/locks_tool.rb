@@ -20,7 +20,7 @@ module Pgbus
 
         def self.call(server_context: nil)
           data_source = data_source_from(server_context)
-          json_response(locks: data_source.job_locks)
+          json_response({ locks: data_source.job_locks })
         end
       end
     end

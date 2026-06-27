@@ -213,4 +213,25 @@ RSpec.describe "Pgbus MCP tools" do # rubocop:disable RSpec/DescribeClass
       expect(body(Pgbus::MCP::Tools::LocksTool.call(server_context: nil))).to eq({ "locks" => [] })
     end
   end
+
+  describe "fail-safe redaction at the response boundary" do
+    # A tool that returns a payload-bearing key without remembering to redact
+    # is still safe: BaseTool.json_response strips payloads by default.
+    let(:leaky_tool) do
+      Class.new(Pgbus::MCP::BaseTool) do
+        def self.call(server_context: nil)
+          json_response({ rows: [{ msg_id: 1, message: "secret-body", headers: "h" }] }, server_context: server_context)
+        end
+      end
+    end
+
+    it "redacts payloads even when the tool never calls Redactor itself" do
+      result = body(leaky_tool.call(server_context: context))
+      row = result["rows"].first
+
+      expect(row["message"]).to eq(Pgbus::MCP::Redactor::REDACTED)
+      expect(row["headers"]).to eq(Pgbus::MCP::Redactor::REDACTED)
+      expect(row["msg_id"]).to eq(1)
+    end
+  end
 end

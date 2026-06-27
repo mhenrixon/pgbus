@@ -27,7 +27,7 @@ module Pgbus
         def self.call(minutes: 60, server_context: nil)
           data_source = data_source_from(server_context)
           window = minutes.to_i.clamp(1, MAX_MINUTES)
-          json_response(minutes: window, throughput: data_source.job_throughput(minutes: window))
+          json_response({ minutes: window, throughput: data_source.job_throughput(minutes: window) })
         end
       end
     end

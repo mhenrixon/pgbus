@@ -50,9 +50,19 @@ module Pgbus
           !!include_payloads
         end
 
-        # Wrap any Ruby value as a single text-content JSON response.
-        def json_response(value)
-          ::MCP::Tool::Response.new([{ type: "text", text: JSON.pretty_generate(value) }])
+        # Wrap any Ruby value as a single text-content JSON response, applying
+        # payload redaction at this boundary as a fail-safe. Redaction is the
+        # default: a tool returns metadata, and any payload-bearing key (at any
+        # depth) is stripped unless this call is explicitly allowed to include
+        # payloads. A tool author who forgets about redaction therefore cannot
+        # leak message bodies — they have to opt in.
+        #
+        # Pass +server_context+ and the tool's per-call +include_payloads+ flag
+        # to enable payloads; both gates must be open (see #payloads_allowed?).
+        def json_response(value, server_context: nil, include_payloads: false)
+          allow = payloads_allowed?(server_context, include_payloads)
+          redacted = Redactor.deep_redact(value, include_payloads: allow)
+          ::MCP::Tool::Response.new([{ type: "text", text: JSON.generate(redacted) }])
         end
 
         # Wrap an error message as an MCP error response (isError: true) so the

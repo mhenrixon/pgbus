@@ -34,11 +34,16 @@ module Pgbus
         processes = @data_source.processes
         health    = safe_queue_health
 
-        reasons = []
-        reasons.concat(stalled_reasons(queues, processes))
-        degraded = degraded_reasons(queues, processes, health)
+        # Partition queues once: non-DLQ (the operational set) and the subset
+        # of those with visible, claimable backlog. Every reason check and the
+        # summary derive from these, so we never re-filter the array.
+        non_dlq = queues.reject { |q| dlq?(q) }
+        backlog = non_dlq.select { |q| q[:queue_visible_length].to_i.positive? }
 
-        status = if reasons.any?
+        stalled  = stalled_reasons(backlog, processes)
+        degraded = degraded_reasons(queues, backlog, processes, health)
+
+        status = if stalled.any?
                    "STALLED"
                  elsif degraded.any?
                    "DEGRADED"
@@ -48,13 +53,17 @@ module Pgbus
 
         {
           status: status,
-          reasons: reasons + degraded,
+          reasons: stalled + degraded,
           checked_at: Time.now.utc.iso8601,
-          summary: build_summary(queues, processes, health)
+          summary: build_summary(queues, non_dlq, processes, health)
         }
       end
 
       private
+
+      def dlq?(queue)
+        queue[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
+      end
 
       def safe_queue_health
         @data_source.queue_health_stats
@@ -62,10 +71,9 @@ module Pgbus
         {}
       end
 
-      # STALLED detection: a backed-up non-DLQ queue while a worker is in the
-      # :stalled state, or backed up with live-but-idle workers present.
-      def stalled_reasons(queues, processes)
-        backlog = backed_up_queues(queues)
+      # STALLED detection: a backed-up queue while a worker is in the :stalled
+      # state, or backed up with live-but-idle workers present.
+      def stalled_reasons(backlog, processes)
         return [] if backlog.empty?
 
         workers = processes.select { |p| p[:kind] == WORKER_KIND }
@@ -86,28 +94,22 @@ module Pgbus
       end
 
       # DEGRADED detection: conditions worth surfacing that are not the wedge.
-      def degraded_reasons(queues, processes, health)
+      def degraded_reasons(queues, backlog, processes, health)
         reasons = []
 
         stale = processes.select { |p| p[:status].to_s == "stale" }
         reasons << "#{stale.size} process(es) stale (no recent heartbeat)" if stale.any?
 
-        paused_backlog = backed_up_queues(queues).select { |q| q[:paused] }
+        paused_backlog = backlog.select { |q| q[:paused] }
         reasons << "#{paused_backlog.size} paused queue(s) holding a backlog: #{backlog_names(paused_backlog)}" if paused_backlog.any?
 
-        dlq = queues.select { |q| q[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX) && q[:queue_length].to_i.positive? }
+        dlq = queues.select { |q| dlq?(q) && q[:queue_length].to_i.positive? }
         reasons << "#{dlq.size} dead-letter queue(s) hold messages" if dlq.any?
 
         age = health[:oldest_transaction_age_sec]
         reasons << "oldest open transaction is #{age}s old (MVCC horizon pinning risk)" if age && age > 300
 
         reasons
-      end
-
-      # Non-DLQ queues with at least one visible (claimable) message.
-      def backed_up_queues(queues)
-        queues.reject { |q| q[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX) }
-              .select { |q| q[:queue_visible_length].to_i.positive? }
       end
 
       # The strongest wedge signal: visible messages that have never been read.
@@ -121,15 +123,24 @@ module Pgbus
         queues.map { |q| q[:name] }.join(", ")
       end
 
-      def build_summary(queues, processes, health)
-        non_dlq = queues.reject { |q| q[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX) }
+      def build_summary(queues, non_dlq, processes, health)
+        workers = stale = stalled = 0
+        processes.each do |p|
+          status = p[:status].to_s
+          stale += 1 if status == "stale"
+          next unless p[:kind] == WORKER_KIND
+
+          workers += 1
+          stalled += 1 if status == "stalled"
+        end
+
         {
           queues: queues.size,
           total_visible: non_dlq.sum { |q| q[:queue_visible_length].to_i },
           total_depth: non_dlq.sum { |q| q[:queue_length].to_i },
-          workers: processes.count { |p| p[:kind] == WORKER_KIND },
-          stalled_workers: processes.count { |p| p[:status].to_s == "stalled" },
-          stale_processes: processes.count { |p| p[:status].to_s == "stale" },
+          workers: workers,
+          stalled_workers: stalled,
+          stale_processes: stale,
           oldest_transaction_age_sec: health[:oldest_transaction_age_sec]
         }
       end

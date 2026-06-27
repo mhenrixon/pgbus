@@ -43,12 +43,10 @@ module Pgbus
           page = [page.to_i, 1].max
           rows = data_source.jobs(queue_name: queue, page: page, per_page: per_page)
 
-          allow = payloads_allowed?(server_context, include_payloads)
           json_response(
-            queue: queue,
-            page: page,
-            per_page: per_page,
-            jobs: Redactor.redact_all(rows, include_payloads: allow)
+            { queue: queue, page: page, per_page: per_page, jobs: rows },
+            server_context: server_context,
+            include_payloads: include_payloads
           )
         end
       end

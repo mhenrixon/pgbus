@@ -27,9 +27,11 @@ module Pgbus
           data_source = data_source_from(server_context)
           window = minutes.to_i.clamp(1, MAX_MINUTES)
           json_response(
-            minutes: window,
-            status_counts: data_source.job_status_counts(minutes: window),
-            summary: data_source.job_stats_summary(minutes: window)
+            {
+              minutes: window,
+              status_counts: data_source.job_status_counts(minutes: window),
+              summary: data_source.job_stats_summary(minutes: window)
+            }
           )
         end
       end

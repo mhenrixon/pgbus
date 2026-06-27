@@ -32,8 +32,7 @@ module Pgbus
           detail = data_source.dlq_message_detail(msg_id)
           return error_response("Dead-letter message #{msg_id} not found") unless detail
 
-          allow = payloads_allowed?(server_context, include_payloads)
-          json_response(message: Redactor.redact(detail, include_payloads: allow))
+          json_response({ message: detail }, server_context: server_context, include_payloads: include_payloads)
         end
       end
     end

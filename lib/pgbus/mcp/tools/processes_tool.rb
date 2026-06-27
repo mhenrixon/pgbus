@@ -24,7 +24,7 @@ module Pgbus
 
         def self.call(server_context: nil)
           data_source = data_source_from(server_context)
-          json_response(processes: data_source.processes)
+          json_response({ processes: data_source.processes })
         end
       end
     end
