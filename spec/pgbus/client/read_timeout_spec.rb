@@ -69,6 +69,47 @@ RSpec.describe Pgbus::Client do
           expect(client.read_batch("default", qty: 5)).to eq([])
         end
       end
+
+      # On the shared-connection path a single mutex serializes all reads.
+      # The timeout clock must start only after the mutex is acquired, so a
+      # thread queued behind a slow read is not charged for the wait. Here a
+      # fast read whose mutex wait exceeds the timeout must still succeed.
+      context "when a read waits on the client mutex (shared connection)" do
+        subject(:shared_client) do
+          allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+          c = described_class.new(shared_config)
+          c.instance_variable_set(:@schema_ensured, true)
+          allow(c).to receive(:tune_autovacuum)
+          allow(c).to receive(:notify_trigger_current?).and_return(false)
+          c
+        end
+
+        let(:shared_config) do
+          Pgbus::Configuration.new.tap do |c|
+            c.connection_params = -> { :raw_conn }
+            c.read_timeout = 1
+          end
+        end
+
+        it "uses the mutex path" do
+          expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+        end
+
+        it "does not raise ReadTimeoutError for time spent waiting on the mutex" do
+          mutex = shared_client.instance_variable_get(:@pgmq_mutex)
+          allow(mock_pgmq).to receive(:read_batch).and_return([])
+
+          # Hold the mutex longer than the timeout, then release. The read's
+          # own work is instant, so it must complete without a timeout error.
+          holder = Thread.new do
+            mutex.synchronize { sleep 1.5 }
+          end
+          sleep 0.1 # ensure the holder has the mutex before we call
+
+          expect { shared_client.read_batch("default", qty: 5) }.not_to raise_error
+          holder.join
+        end
+      end
     end
   end
 end
