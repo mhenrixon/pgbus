@@ -18,6 +18,7 @@ module Pgbus
   class ConcurrencyLimitExceeded < Error; end
   class JobNotUnique < Error; end
   class SchemaNotReady < Error; end
+  class ReadTimeoutError < Error; end
 
   class << self
     # Process-global flag set by Worker#graceful_shutdown so the adapter

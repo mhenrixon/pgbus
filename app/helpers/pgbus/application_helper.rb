@@ -29,10 +29,20 @@ module Pgbus
       end
     end
 
-    def pgbus_status_badge(healthy)
-      if healthy
+    def pgbus_status_badge(healthy_or_status)
+      status = case healthy_or_status
+               when true then :healthy
+               when Symbol, String then healthy_or_status.to_sym
+               else :stale
+               end
+
+      case status
+      when :healthy
         tag.span(I18n.t("pgbus.helpers.status_badge.healthy"),
                  class: "inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800")
+      when :stalled
+        tag.span(I18n.t("pgbus.helpers.status_badge.stalled"),
+                 class: "inline-flex items-center rounded-full bg-yellow-100 px-2.5 py-0.5 text-xs font-medium text-yellow-800")
       else
         tag.span(I18n.t("pgbus.helpers.status_badge.stale"),
                  class: "inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800")

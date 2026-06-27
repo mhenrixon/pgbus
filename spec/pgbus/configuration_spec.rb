@@ -134,6 +134,14 @@ RSpec.describe Pgbus::Configuration do
     it "defaults execution_mode to :threads" do
       expect(config.execution_mode).to eq(:threads)
     end
+
+    it "has default stall_threshold of 90 seconds" do
+      expect(config.stall_threshold).to eq(90)
+    end
+
+    it "has default read_timeout of 30 seconds" do
+      expect(config.read_timeout).to eq(30)
+    end
   end
 
   describe "#execution_mode_for" do
@@ -858,6 +866,46 @@ RSpec.describe Pgbus::Configuration do
     it "accepts valid prefetch_limit" do
       config.prefetch_limit = 10
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects non-numeric stall_threshold" do
+      config.stall_threshold = "90"
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
+    it "rejects zero stall_threshold" do
+      config.stall_threshold = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
+    it "accepts nil stall_threshold (disabled)" do
+      config.stall_threshold = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects false stall_threshold" do
+      config.stall_threshold = false
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
+    it "rejects non-numeric read_timeout" do
+      config.read_timeout = "30"
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "rejects zero read_timeout" do
+      config.read_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "accepts nil read_timeout (disabled)" do
+      config.read_timeout = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects false read_timeout" do
+      config.read_timeout = false
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
     end
 
     it "rejects invalid priority_levels" do

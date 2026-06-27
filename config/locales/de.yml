@@ -235,6 +235,7 @@ de:
       status_badge:
         healthy: Gesund
         stale: Veraltet
+        stalled: Blockiert
     insights:
       show:
         charts:

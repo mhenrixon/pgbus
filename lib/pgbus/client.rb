@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "timeout"
 require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
 require_relative "client/notify_stream"
@@ -110,7 +111,7 @@ module Pgbus
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
         with_stale_connection_retry do
-          synchronized { @pgmq.read(full_name, vt: vt || config.visibility_timeout) }
+          synchronized { with_read_timeout { @pgmq.read(full_name, vt: vt || config.visibility_timeout) } }
         end
       end
     end
@@ -119,7 +120,7 @@ module Pgbus
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
         with_stale_connection_retry do
-          synchronized { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          synchronized { with_read_timeout { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
         end
       end
     end
@@ -141,7 +142,7 @@ module Pgbus
 
         msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
           with_stale_connection_retry do
-            synchronized { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) }
+            synchronized { with_read_timeout { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) } }
           end
         end || []
 
@@ -180,7 +181,9 @@ module Pgbus
       Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty, limit: limit) do
         with_stale_connection_retry do
           synchronized do
-            @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+            with_read_timeout do
+              @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+            end
           end
         end
       end
@@ -357,7 +360,7 @@ module Pgbus
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_grouped", queue: full_name, qty: qty) do
         with_stale_connection_retry do
-          synchronized { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          synchronized { with_read_timeout { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
         end
       end
     end
@@ -366,7 +369,7 @@ module Pgbus
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_grouped_rr", queue: full_name, qty: qty) do
         with_stale_connection_retry do
-          synchronized { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          synchronized { with_read_timeout { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
         end
       end
     end
@@ -374,7 +377,7 @@ module Pgbus
     def read_grouped_head(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
       with_stale_connection_retry do
-        synchronized { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        synchronized { with_read_timeout { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
       end
     end
 
@@ -696,6 +699,30 @@ module Pgbus
     # connection was dead *before* pgmq-ruby tried to use it, so no SQL was
     # ever sent. Mid-flight errors like "server closed the connection" are
     # excluded from the pattern list for this reason.
+    # Bound a read at config.read_timeout so a dead socket raises
+    # Pgbus::ReadTimeoutError instead of blocking the worker loop forever.
+    #
+    # MUST wrap only the bare `@pgmq.read*` call, sitting *inside* both
+    # `synchronized` and `with_stale_connection_retry`:
+    #
+    #   with_stale_connection_retry { synchronized { with_read_timeout { @pgmq.read* } } }
+    #
+    # Two reasons for this nesting:
+    #   1. On the shared-connection path @pgmq_mutex serializes all reads.
+    #      The timeout clock must start only after the mutex is acquired,
+    #      otherwise a thread queued behind another read is charged for the
+    #      wait and raises a false ReadTimeoutError for a socket it never
+    #      touched.
+    #   2. with_stale_connection_retry can retry once; with the timeout
+    #      inside, each socket attempt gets its own full timeout budget
+    #      rather than sharing one across both attempts.
+    def with_read_timeout(&)
+      timeout = config.read_timeout
+      return yield unless timeout&.positive?
+
+      Timeout.timeout(timeout, Pgbus::ReadTimeoutError, &)
+    end
+
     def with_stale_connection_retry
       attempts = 0
       begin

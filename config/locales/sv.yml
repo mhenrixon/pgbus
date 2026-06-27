@@ -235,6 +235,7 @@ sv:
       status_badge:
         healthy: Hälsosam
         stale: Föråldrad
+        stalled: Fastlåst
     insights:
       show:
         charts:

@@ -235,6 +235,7 @@ pt:
       status_badge:
         healthy: Saudável
         stale: Obsoleto
+        stalled: Bloqueado
     insights:
       show:
         charts:

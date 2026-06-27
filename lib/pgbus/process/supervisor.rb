@@ -6,6 +6,7 @@ module Pgbus
       include SignalHandler
 
       FORK_WAIT = 1 # seconds between fork checks
+      WATCHDOG_INTERVAL = 10 # seconds between stall checks
 
       attr_reader :config
 
@@ -13,6 +14,7 @@ module Pgbus
         @config = config
         @forks = {}
         @shutting_down = false
+        @last_watchdog_at = monotonic_now
       end
 
       def run
@@ -240,6 +242,7 @@ module Pgbus
 
           process_signals
           reap_children
+          check_stalled_workers unless @shutting_down
           interruptible_sleep(FORK_WAIT)
         end
       end
@@ -280,6 +283,43 @@ module Pgbus
         end
       end
 
+      def check_stalled_workers
+        now = monotonic_now
+        return if (now - @last_watchdog_at) < WATCHDOG_INTERVAL
+
+        @last_watchdog_at = now
+        threshold = config.stall_threshold
+        return unless threshold&.positive?
+
+        worker_pids = @forks.select { |_, info| info[:type] == :worker }.keys
+        return if worker_pids.empty?
+
+        rows = ProcessEntry.where(kind: "worker", pid: worker_pids).to_a
+        rows.each do |entry|
+          meta = entry.metadata
+          next unless meta.is_a?(Hash)
+
+          loop_tick = meta["loop_tick_at"]
+          next unless loop_tick
+
+          age = Time.current.to_f - loop_tick.to_f
+          next unless age > threshold
+
+          pid = entry.pid
+          Pgbus.logger.error do
+            "[Pgbus] Supervisor watchdog: worker pid=#{pid} claim loop stalled " \
+              "(loop_tick_at age=#{age.round(1)}s > threshold=#{threshold}s), sending SIGKILL"
+          end
+          begin
+            ::Process.kill("KILL", pid)
+          rescue Errno::ESRCH
+            # already gone
+          end
+        end
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Supervisor watchdog check failed: #{e.message}" }
+      end
+
       def signal_children(sig)
         @forks.each_key do |pid|
           ::Process.kill(sig, pid)
@@ -316,6 +356,10 @@ module Pgbus
           metadata: { pid: ::Process.pid, hostname: Socket.gethostname }
         )
         @heartbeat.start
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
 
       def shutdown

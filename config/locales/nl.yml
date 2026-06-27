@@ -235,6 +235,7 @@ nl:
       status_badge:
         healthy: Gezond
         stale: Verouderd
+        stalled: Vastgelopen
     insights:
       show:
         charts:

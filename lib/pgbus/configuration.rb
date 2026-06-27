@@ -26,6 +26,12 @@ module Pgbus
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
 
+    # Liveness probe: supervisor kills a worker whose claim loop has not
+    # advanced for longer than stall_threshold seconds (default 90).
+    # read_timeout caps how long a single PGMQ read can block (default 30s),
+    # so a dead socket raises instead of parking the loop forever.
+    attr_accessor :stall_threshold, :read_timeout
+
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
@@ -149,6 +155,9 @@ module Pgbus
       @max_jobs_per_worker = nil
       @max_memory_mb = nil
       @max_worker_lifetime = nil
+
+      @stall_threshold = 90
+      @read_timeout = 30
 
       @dispatch_interval = 1.0
 
@@ -372,6 +381,13 @@ module Pgbus
       raise ArgumentError, "retry_backoff_max must be > 0" unless retry_backoff_max.is_a?(Numeric) && retry_backoff_max.positive?
       unless retry_backoff_jitter.is_a?(Numeric) && retry_backoff_jitter >= 0 && retry_backoff_jitter <= 1
         raise ArgumentError, "retry_backoff_jitter must be between 0 and 1"
+      end
+
+      unless stall_threshold.nil? || (stall_threshold.is_a?(Numeric) && stall_threshold.positive?)
+        raise ArgumentError, "stall_threshold must be a positive number or nil to disable"
+      end
+      unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
+        raise ArgumentError, "read_timeout must be a positive number or nil to disable"
       end
 
       # Validate global execution_mode

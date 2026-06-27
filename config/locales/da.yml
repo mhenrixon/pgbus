@@ -235,6 +235,7 @@ da:
       status_badge:
         healthy: Sund
         stale: Forældet
+        stalled: Gået i stå
     insights:
       show:
         charts:
