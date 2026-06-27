@@ -101,13 +101,21 @@ RSpec.describe Pgbus::Client do
 
           # Hold the mutex longer than the timeout, then release. The read's
           # own work is instant, so it must complete without a timeout error.
+          # Handshake via a Queue so we know the holder is inside the
+          # synchronized block before issuing the read — a plain sleep is
+          # racy on slow CI runners.
+          locked = Queue.new
           holder = Thread.new do
-            mutex.synchronize { sleep 1.5 }
+            mutex.synchronize do
+              locked << true
+              sleep 1.5
+            end
           end
-          sleep 0.1 # ensure the holder has the mutex before we call
 
+          locked.pop
           expect { shared_client.read_batch("default", qty: 5) }.not_to raise_error
-          holder.join
+        ensure
+          holder&.join
         end
       end
     end
