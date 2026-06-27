@@ -842,13 +842,59 @@ When `config.metrics_enabled = true` (default), the dashboard exposes Prometheus
 
 Pgbus ships an optional, **read-only** [MCP](https://modelcontextprotocol.io) server so an AI agent (or any MCP client) can diagnose pgbus directly — "are queues backed up?", "is `read_ct` advancing?", "are workers heart-beating but not claiming?" — instead of hand-writing `pgmq` / `pg_stat_activity` SQL against production. It is a thin adapter over the same read layer the dashboard uses, so it adds no new database access path.
 
-The server never starts unless you ask for it:
+Add the optional `mcp` gem to your `Gemfile` first (`gem "mcp"`); both entry points below tell you if it's missing.
+
+#### Choosing a deployment
+
+There are two ways to run it, depending on **who connects and from where**:
+
+| | **stdio** (`pgbus mcp`) | **HTTP** (mount in Rails) |
+|---|---|---|
+| Who connects | A local operator (Claude Desktop / Claude Code on your machine) | A remote agent or alerting system |
+| Process model | The MCP client **spawns** a short-lived process on demand | Runs **inside your existing Rails server** — no second process |
+| Reaches production? | Only if run where prod DB creds are available | Yes — co-located with the app, same credentials |
+| Use it for | Hands-on, interactive debugging | Automated/remote diagnostics & alerting |
+
+> **Don't start a second `bin/pgbus` instance for HTTP.** The HTTP transport is a Rack app — mount it in the Rails app you already deploy.
+
+##### stdio (local operator)
 
 ```bash
 bundle exec pgbus mcp        # speaks MCP over stdio
 ```
 
-Add the optional `mcp` gem to your `Gemfile` first (`gem "mcp"`); the command tells you so if it's missing.
+##### HTTP (mount in Rails)
+
+```ruby
+# config/routes.rb
+Rails.application.routes.draw do
+  # ... your routes ...
+  mount Pgbus::MCP.rack_app(token: ENV["PGBUS_MCP_TOKEN"]) => "/pgbus/mcp"
+end
+```
+
+`Pgbus::MCP.rack_app` returns a gated Rack app. It runs the transport in **stateless + JSON-response mode**, so every request is a self-contained POST with no in-memory session — safe behind multiple Puma/Falcon workers (any worker can answer any request). Keep the endpoint on an internal network / behind your VPN; it is not meant to be internet-exposed.
+
+Options:
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `token:` | `nil` | Shared secret. When set, requests must send `Authorization: Bearer <token>` (constant-time compared). |
+| `auth:` | `nil` | A callable `->(rack_request) { ... }` returning truthy to allow — mirrors `config.web_auth`. Wins over `token:`. |
+| `allow_payloads:` | `false` | When true, tools honor a per-call `include_payloads` flag (see Security). |
+
+If you set neither `token:` nor `auth:`, pgbus logs a warning — an unauthenticated diagnostic endpoint exposes operational metadata to anyone who can reach it.
+
+> Clients must send `Accept: application/json` and `Content-Type: application/json` on every POST, or the transport replies `406 Not Acceptable`. MCP clients do this automatically.
+
+Need a **standalone HTTP pod** instead of mounting in your main app? The same Rack app works under any Rack server, e.g. a one-line `config.ru`:
+
+```ruby
+require "pgbus"
+Pgbus::MCP.load!
+run Pgbus::MCP.rack_app(token: ENV["PGBUS_MCP_TOKEN"])
+# rackup -p 9293   (run it in a container that shares the app's DB config)
+```
 
 #### Tools
 
@@ -871,14 +917,16 @@ All tools are read-only — no tool mutates state, and there is no raw-SQL passt
 The server is built to be safe against a production datastore:
 
 - **Read-only by default.** No tool mutates state and no arbitrary-query tool exists.
-- **Payloads redacted.** Message bodies, headers, and job arguments are replaced with `[redacted]` unless you start the server with `PGBUS_MCP_ALLOW_PAYLOADS=1` **and** pass `include_payloads: true` on the call. Both gates must be open.
+- **Payloads redacted.** Message bodies, headers, and job arguments are replaced with `[redacted]` unless payloads are explicitly allowed **and** `include_payloads: true` is passed on the call. Both gates must be open. Allow payloads with `PGBUS_MCP_ALLOW_PAYLOADS=1` (stdio) or `Pgbus::MCP.rack_app(allow_payloads: true)` (HTTP).
 - **Bounded queries.** Every list tool paginates with a row cap (`pgbus_jobs` / `pgbus_dlq` cap at 100 rows/page; time windows cap at 1440 minutes).
 - **Reuses your DB credentials.** No new privileged path — it reads through the app's existing connection config.
-- **Optional token gate.** Set `PGBUS_MCP_TOKEN` and the server refuses to start unless `PGBUS_MCP_AUTH_TOKEN` matches (constant-time compare). Run it co-located with the app, not internet-exposed.
+- **Authentication.**
+  - *HTTP:* set `token:` (clients send `Authorization: Bearer <token>`) or a custom `auth:` callable; unauthenticated requests get `401`.
+  - *stdio:* the channel is local (the client spawns the process), so the gate is a boot-time precondition — set `PGBUS_MCP_TOKEN` and the server refuses to start unless `PGBUS_MCP_AUTH_TOKEN` matches (constant-time compare).
 
 #### Client configuration
 
-A minimal MCP client config (Claude Code / Claude Desktop style):
+For the **stdio** transport, a minimal MCP client config (Claude Code / Claude Desktop style):
 
 ```json
 {
@@ -887,6 +935,19 @@ A minimal MCP client config (Claude Code / Claude Desktop style):
       "command": "bundle",
       "args": ["exec", "pgbus", "mcp"],
       "env": { "RAILS_ENV": "production" }
+    }
+  }
+}
+```
+
+For the **HTTP** transport, point the client at the mounted URL with a streamable-HTTP server config, sending the bearer token, e.g.:
+
+```json
+{
+  "mcpServers": {
+    "pgbus": {
+      "url": "https://your-app.internal/pgbus/mcp",
+      "headers": { "Authorization": "Bearer ${PGBUS_MCP_TOKEN}" }
     }
   }
 }

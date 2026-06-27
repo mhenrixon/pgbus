@@ -29,6 +29,7 @@ module Pgbus
       pgbus/mcp/tools/recurring_tool
       pgbus/mcp/server
       pgbus/mcp/runner
+      pgbus/mcp/rack_app
     ].freeze
 
     module_function
