@@ -120,6 +120,16 @@ RSpec.describe "Pgbus MCP tools" do # rubocop:disable RSpec/DescribeClass
       body(described_class.call(page: 0, per_page: 0, server_context: context))
       expect(data_source).to have_received(:jobs).with(queue_name: nil, page: 1, per_page: 1)
     end
+
+    it "caps page at MAX_PAGE so OFFSET can't be driven to an unbounded scan" do
+      allow(data_source).to receive(:jobs)
+        .with(queue_name: nil, page: described_class::MAX_PAGE, per_page: 25)
+        .and_return([])
+
+      body(described_class.call(page: 10_000_000, server_context: context))
+      expect(data_source).to have_received(:jobs)
+        .with(queue_name: nil, page: described_class::MAX_PAGE, per_page: 25)
+    end
   end
 
   describe Pgbus::MCP::Tools::JobDetailTool do
@@ -147,10 +157,21 @@ RSpec.describe "Pgbus MCP tools" do # rubocop:disable RSpec/DescribeClass
       result = body(described_class.call(server_context: context))
       expect(result["messages"].first["message"]).to eq(Pgbus::MCP::Redactor::REDACTED)
     end
+
+    it "caps page at MAX_PAGE so OFFSET can't be driven to an unbounded scan" do
+      allow(data_source).to receive(:dlq_messages)
+        .with(page: described_class::MAX_PAGE, per_page: 25)
+        .and_return([])
+
+      body(described_class.call(page: 10_000_000, server_context: context))
+      expect(data_source).to have_received(:dlq_messages)
+        .with(page: described_class::MAX_PAGE, per_page: 25)
+    end
   end
 
   describe Pgbus::MCP::Tools::DlqDetailTool do
-    it "returns a redacted detail" do
+    it "returns a redacted detail when only one DLQ is present" do
+      allow(data_source).to receive_messages(queues_with_metrics: [])
       allow(data_source).to receive(:dlq_message_detail).with(5)
                                                         .and_return({ msg_id: 5, message: "secret" })
 
@@ -159,9 +180,32 @@ RSpec.describe "Pgbus MCP tools" do # rubocop:disable RSpec/DescribeClass
     end
 
     it "errors when not found" do
-      allow(data_source).to receive(:dlq_message_detail).and_return(nil)
+      allow(data_source).to receive_messages(queues_with_metrics: [], dlq_message_detail: nil)
 
       expect(described_class.call(msg_id: 5, server_context: context).error?).to be(true)
+    end
+
+    it "queries the named DLQ directly when queue: is supplied (no cross-scan)" do
+      allow(data_source).to receive(:job_detail).with("pgbus_orders_dlq", 5)
+                                                .and_return({ msg_id: 5, message: "secret" })
+
+      result = body(described_class.call(msg_id: 5, queue: "pgbus_orders_dlq", server_context: context))
+
+      expect(result["message"]["msg_id"]).to eq(5)
+      expect(data_source).not_to have_received(:job_detail).with("pgbus_default_dlq", 5)
+    end
+
+    it "refuses to guess when msg_id is ambiguous across multiple DLQs" do
+      allow(data_source).to receive_messages(queues_with_metrics: [
+                                               { name: "pgbus_default_dlq" },
+                                               { name: "pgbus_orders_dlq" }
+                                             ])
+      allow(data_source).to receive(:job_detail).and_return({ msg_id: 5, message: "x" })
+
+      response = described_class.call(msg_id: 5, server_context: context)
+
+      expect(response.error?).to be(true)
+      expect(response.content.first[:text]).to include("ambiguous")
     end
   end
 

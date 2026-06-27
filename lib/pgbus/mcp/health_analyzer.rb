@@ -30,18 +30,20 @@ module Pgbus
       # Returns a machine-readable verdict hash suitable for both interactive
       # agent use and automated alerting.
       def verdict
-        queues    = @data_source.queues_with_metrics
-        processes = @data_source.processes
-        health    = safe_queue_health
+        queues          = @data_source.queues_with_metrics
+        processes       = @data_source.processes
+        health, health_error = safe_queue_health
 
         # Partition queues once: non-DLQ (the operational set) and the subset
-        # of those with visible, claimable backlog. Every reason check and the
-        # summary derive from these, so we never re-filter the array.
+        # of those with visible, claimable backlog. Paused queues are removed
+        # from the STALLED backlog (an intentional pause is not the wedge —
+        # it's reported under DEGRADED), but kept in `non_dlq` for the summary.
         non_dlq = queues.reject { |q| dlq?(q) }
         backlog = non_dlq.select { |q| q[:queue_visible_length].to_i.positive? }
+        active_backlog = backlog.reject { |q| q[:paused] }
 
-        stalled  = stalled_reasons(backlog, processes)
-        degraded = degraded_reasons(queues, backlog, processes, health)
+        stalled  = stalled_reasons(active_backlog, processes)
+        degraded = degraded_reasons(queues, backlog, processes, health, health_error)
 
         status = if stalled.any?
                    "STALLED"
@@ -65,14 +67,20 @@ module Pgbus
         queue[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
       end
 
+      # Returns [health_hash, error_or_nil]. We never raise — pgbus_health
+      # must always produce a verdict — but we DO surface the failure so the
+      # caller knows the verdict was built from partial data, and we log it
+      # for operators (per the project's no-silent-errors rule).
       def safe_queue_health
-        @data_source.queue_health_stats
-      rescue StandardError
-        {}
+        [@data_source.queue_health_stats, nil]
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus::MCP] queue_health_stats failed: #{e.class}: #{e.message}" }
+        [{}, e]
       end
 
-      # STALLED detection: a backed-up queue while a worker is in the :stalled
-      # state, or backed up with live-but-idle workers present.
+      # STALLED detection: an active (non-paused) backed-up queue while a
+      # worker is in the :stalled state, or backed up with live-but-idle
+      # workers present.
       def stalled_reasons(backlog, processes)
         return [] if backlog.empty?
 
@@ -94,8 +102,10 @@ module Pgbus
       end
 
       # DEGRADED detection: conditions worth surfacing that are not the wedge.
-      def degraded_reasons(queues, backlog, processes, health)
+      def degraded_reasons(queues, backlog, processes, health, health_error)
         reasons = []
+
+        reasons << "queue health stats unavailable: #{health_error.class}: #{health_error.message}" if health_error
 
         stale = processes.select { |p| p[:status].to_s == "stale" }
         reasons << "#{stale.size} process(es) stale (no recent heartbeat)" if stale.any?

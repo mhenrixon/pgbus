@@ -169,11 +169,37 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
   end
 
   describe "#verdict resilience" do
-    it "tolerates queue_health_stats raising" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [])
-      allow(data_source).to receive(:queue_health_stats).and_raise(StandardError)
+    before { allow(Pgbus.logger).to receive(:warn) }
 
-      expect(analyzer.verdict[:status]).to eq("OK")
+    it "still produces a verdict when queue_health_stats raises" do
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [])
+      allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("queue health stats unavailable")
+    end
+
+    it "logs the queue_health_stats failure rather than swallowing it" do
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [])
+      allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
+
+      analyzer.verdict
+
+      expect(Pgbus.logger).to have_received(:warn)
+    end
+  end
+
+  describe "STALLED excludes paused queues" do
+    it "classifies a paused queue with read_ct=0 backlog as DEGRADED, not STALLED" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_default", length: 5, visible: 5, paused: true, max_read_ct: 0)],
+        processes: [worker(status: :healthy)]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("paused")
     end
   end
 end

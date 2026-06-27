@@ -16,6 +16,7 @@ module Pgbus
         DESC
 
         MAX_PER_PAGE = 100
+        MAX_PAGE = 1_000
 
         input_schema(
           properties: {
@@ -32,7 +33,7 @@ module Pgbus
         def self.call(page: 1, per_page: 25, include_payloads: false, server_context: nil)
           data_source = data_source_from(server_context)
           per_page = per_page.to_i.clamp(1, MAX_PER_PAGE)
-          page = [page.to_i, 1].max
+          page = page.to_i.clamp(1, MAX_PAGE)
           rows = data_source.dlq_messages(page: page, per_page: per_page)
 
           json_response(

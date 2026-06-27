@@ -36,15 +36,21 @@ module Pgbus
 
     # Require the `mcp` gem and the whole pgbus MCP subsystem. Idempotent.
     # Raises Pgbus::Error with an actionable message if the gem is missing.
+    #
+    # Only the `require "mcp"` is wrapped — a LoadError from an internal
+    # `pgbus/mcp/...` path (typo, missing file) propagates verbatim so the
+    # real broken require shows up in the message instead of being masked
+    # as "add gem `mcp`".
     def load!
-      require "mcp"
+      begin
+        require "mcp"
+      rescue LoadError
+        raise Pgbus::Error,
+              "The pgbus MCP server requires the `mcp` gem. Add `gem \"mcp\"` to your Gemfile and run `bundle install`."
+      end
+
       REQUIRES.each { |path| require path }
       true
-    rescue LoadError => e
-      raise e unless e.message.include?("mcp")
-
-      raise Pgbus::Error,
-            "The pgbus MCP server requires the `mcp` gem. Add `gem \"mcp\"` to your Gemfile and run `bundle install`."
     end
   end
 end
