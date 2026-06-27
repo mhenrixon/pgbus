@@ -50,7 +50,6 @@ module Pgbus
       end
 
       REQUIRES.each { |path| require path }
-      true
     end
   end
 end
