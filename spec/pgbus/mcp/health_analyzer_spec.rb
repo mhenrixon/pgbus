@@ -60,7 +60,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("STALLED")
-      expect(verdict[:reasons].first).to match(/stalled/)
+      expect(verdict[:reasons].first).to include("stalled")
     end
 
     it "is STALLED when backlog is unread (read_ct 0) and workers are alive" do
@@ -71,7 +71,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("STALLED")
-      expect(verdict[:reasons].first).to match(/never claimed/)
+      expect(verdict[:reasons].first).to include("never claimed")
     end
 
     it "treats backlog without read_ct metric as unread (conservative wedge default)" do
@@ -120,7 +120,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("DEGRADED")
-      expect(verdict[:reasons].first).to match(/stale/)
+      expect(verdict[:reasons].first).to include("stale")
     end
 
     it "is DEGRADED when a paused queue holds a backlog" do
@@ -131,7 +131,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("DEGRADED")
-      expect(verdict[:reasons].join).to match(/paused/)
+      expect(verdict[:reasons].join).to include("paused")
     end
 
     it "is DEGRADED when a dead-letter queue holds messages" do
@@ -142,7 +142,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("DEGRADED")
-      expect(verdict[:reasons].join).to match(/dead-letter/)
+      expect(verdict[:reasons].join).to include("dead-letter")
     end
 
     it "is DEGRADED when the oldest transaction pins the MVCC horizon" do
@@ -154,7 +154,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("DEGRADED")
-      expect(verdict[:reasons].join).to match(/MVCC/)
+      expect(verdict[:reasons].join).to include("MVCC")
     end
 
     it "STALLED takes precedence over DEGRADED conditions" do
