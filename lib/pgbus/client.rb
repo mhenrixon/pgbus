@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "timeout"
 require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
 require_relative "client/notify_stream"
@@ -109,8 +110,10 @@ module Pgbus
     def read_message(queue_name, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
-        with_stale_connection_retry do
-          synchronized { @pgmq.read(full_name, vt: vt || config.visibility_timeout) }
+        with_read_timeout do
+          with_stale_connection_retry do
+            synchronized { @pgmq.read(full_name, vt: vt || config.visibility_timeout) }
+          end
         end
       end
     end
@@ -118,8 +121,10 @@ module Pgbus
     def read_batch(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
       Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+        with_read_timeout do
+          with_stale_connection_retry do
+            synchronized { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) }
+          end
         end
       end
     end
@@ -178,9 +183,11 @@ module Pgbus
     def read_multi(queue_names, qty:, vt: nil, limit: nil)
       full_names = queue_names.map { |q| config.queue_name(q) }
       Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty, limit: limit) do
-        with_stale_connection_retry do
-          synchronized do
-            @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+        with_read_timeout do
+          with_stale_connection_retry do
+            synchronized do
+              @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+            end
           end
         end
       end
@@ -696,6 +703,13 @@ module Pgbus
     # connection was dead *before* pgmq-ruby tried to use it, so no SQL was
     # ever sent. Mid-flight errors like "server closed the connection" are
     # excluded from the pattern list for this reason.
+    def with_read_timeout(&)
+      timeout = config.read_timeout
+      return yield unless timeout&.positive?
+
+      Timeout.timeout(timeout, Pgbus::ReadTimeoutError, &)
+    end
+
     def with_stale_connection_retry
       attempts = 0
       begin

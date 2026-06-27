@@ -1195,17 +1195,34 @@ module Pgbus
         heartbeat = row["last_heartbeat_at"]
         heartbeat_time = heartbeat.is_a?(String) ? Time.parse(heartbeat) : heartbeat
         stale = heartbeat_time && (Time.now - heartbeat_time) > Process::Heartbeat::ALIVE_THRESHOLD
+        metadata = row["metadata"].is_a?(String) ? JSON.parse(row["metadata"]) : row["metadata"]
+        status = derive_process_status(stale, metadata, row["kind"])
 
         {
           id: row["id"].to_i,
           kind: row["kind"],
           hostname: row["hostname"],
           pid: row["pid"].to_i,
-          metadata: row["metadata"].is_a?(String) ? JSON.parse(row["metadata"]) : row["metadata"],
+          metadata: metadata,
           last_heartbeat_at: heartbeat_time,
-          healthy: !stale,
+          healthy: status == :healthy,
+          status: status,
           created_at: row["created_at"]
         }
+      end
+
+      def derive_process_status(stale, metadata, kind)
+        return :stale if stale
+        return :healthy unless kind == "worker" && metadata.is_a?(Hash)
+
+        loop_tick = metadata["loop_tick_at"]
+        return :healthy unless loop_tick
+
+        threshold = Pgbus.configuration.stall_threshold
+        return :healthy unless threshold&.positive?
+
+        age = Time.now.to_f - loop_tick.to_f
+        age > threshold ? :stalled : :healthy
       end
 
       def format_batch(record)

@@ -235,6 +235,7 @@ it:
       status_badge:
         healthy: Sano
         stale: Obsoleto
+        stalled: Bloccato
     insights:
       show:
         charts:

@@ -37,6 +37,7 @@ module Pgbus
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
         @in_flight = Concurrent::AtomicFixnum.new(0)
+        @loop_tick_at = Concurrent::AtomicReference.new(nil)
         @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
         @started_at = Time.current
         @started_at_monotonic = monotonic_now
@@ -82,6 +83,7 @@ module Pgbus
         end
 
         loop do
+          @loop_tick_at.set(monotonic_now)
           process_signals
           check_recycle
           refresh_wildcard_queues
@@ -492,7 +494,8 @@ module Pgbus
             queues: queues, threads: threads, pid: ::Process.pid,
             execution_mode: @execution_mode, consumer_priority: @consumer_priority
           },
-          on_beat: -> { @rate_counter.snapshot! }
+          on_beat: -> { @rate_counter.snapshot! },
+          loop_tick_supplier: -> { @loop_tick_at.get }
         )
         @heartbeat.start
       end

@@ -134,6 +134,14 @@ RSpec.describe Pgbus::Configuration do
     it "defaults execution_mode to :threads" do
       expect(config.execution_mode).to eq(:threads)
     end
+
+    it "has default stall_threshold of 90 seconds" do
+      expect(config.stall_threshold).to eq(90)
+    end
+
+    it "has default read_timeout of 30 seconds" do
+      expect(config.read_timeout).to eq(30)
+    end
   end
 
   describe "#execution_mode_for" do

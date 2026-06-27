@@ -235,6 +235,7 @@ fr:
       status_badge:
         healthy: Sain
         stale: Obsolète
+        stalled: Bloqué
     insights:
       show:
         charts:

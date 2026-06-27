@@ -235,6 +235,7 @@ fi:
       status_badge:
         healthy: Toimiva
         stale: Vanha
+        stalled: Juuttunut
     insights:
       show:
         charts:

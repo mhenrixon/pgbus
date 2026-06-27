@@ -235,6 +235,7 @@ nb:
       status_badge:
         healthy: Sunn
         stale: Utdatert
+        stalled: Fastlåst
     insights:
       show:
         charts:

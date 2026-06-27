@@ -26,6 +26,12 @@ module Pgbus
     # Worker recycling
     attr_accessor :max_jobs_per_worker, :max_memory_mb, :max_worker_lifetime
 
+    # Liveness probe: supervisor kills a worker whose claim loop has not
+    # advanced for longer than stall_threshold seconds (default 90).
+    # read_timeout caps how long a single PGMQ read can block (default 30s),
+    # so a dead socket raises instead of parking the loop forever.
+    attr_accessor :stall_threshold, :read_timeout
+
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
@@ -149,6 +155,9 @@ module Pgbus
       @max_jobs_per_worker = nil
       @max_memory_mb = nil
       @max_worker_lifetime = nil
+
+      @stall_threshold = 90
+      @read_timeout = 30
 
       @dispatch_interval = 1.0
 

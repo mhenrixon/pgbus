@@ -11,10 +11,11 @@ module Pgbus
 
       attr_reader :process_entry
 
-      def initialize(kind:, metadata: {}, on_beat: nil)
+      def initialize(kind:, metadata: {}, on_beat: nil, loop_tick_supplier: nil)
         @kind = kind
         @metadata = metadata
         @on_beat = on_beat
+        @loop_tick_supplier = loop_tick_supplier
         @timer = nil
       end
 
@@ -33,7 +34,12 @@ module Pgbus
         return unless @process_id
 
         @on_beat&.call
-        ProcessEntry.where(id: @process_id).update_all(last_heartbeat_at: Time.current)
+        updates = { last_heartbeat_at: Time.current }
+        if @loop_tick_supplier
+          tick = @loop_tick_supplier.call
+          updates[:metadata] = @metadata.merge("loop_tick_at" => tick&.to_f)
+        end
+        ProcessEntry.where(id: @process_id).update_all(updates)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }
       end

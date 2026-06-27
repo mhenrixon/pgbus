@@ -235,6 +235,7 @@ ja:
       status_badge:
         healthy: 正常
         stale: 期限切れ
+        stalled: 停滞
     insights:
       show:
         charts:
