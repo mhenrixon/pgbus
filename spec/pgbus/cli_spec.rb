@@ -27,6 +27,21 @@ RSpec.describe Pgbus::CLI do
     it "defaults to help when no args" do
       expect { described_class.start([]) }.to output(/Usage: pgbus/).to_stdout
     end
+
+    it "lists the mcp command in help" do
+      expect { described_class.start(["help"]) }.to output(/mcp\s+Start the read-only MCP/).to_stdout
+    end
+
+    it "routes 'mcp' to the MCP runner after loading the subsystem" do
+      Pgbus::MCP.load!
+      allow(Pgbus::MCP).to receive(:load!)
+      allow(Pgbus::MCP::Runner).to receive(:run)
+
+      described_class.start(["mcp"])
+
+      expect(Pgbus::MCP).to have_received(:load!)
+      expect(Pgbus::MCP::Runner).to have_received(:run)
+    end
   end
 
   describe ".start with start command" do

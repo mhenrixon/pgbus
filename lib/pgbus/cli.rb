@@ -16,6 +16,8 @@ module Pgbus
         show_status
       when "queues"
         list_queues
+      when "mcp"
+        start_mcp_server
       when "version"
         puts "pgbus #{Pgbus::VERSION}"
       when "help", "--help", "-h"
@@ -132,6 +134,13 @@ module Pgbus
       end
     end
 
+    # Boots the read-only MCP diagnostic server over stdio. Loaded lazily so
+    # the optional `mcp` gem is only required when this command is invoked.
+    def start_mcp_server
+      Pgbus::MCP.load!
+      Pgbus::MCP::Runner.run
+    end
+
     def list_queues
       Pgbus.client.list_queues
       metrics = Pgbus.client.metrics
@@ -154,6 +163,7 @@ module Pgbus
           start    Start the Pgbus supervisor (workers + dispatcher)
           status   Show running Pgbus processes
           queues   List queues with metrics
+          mcp      Start the read-only MCP diagnostic server over stdio
           version  Show version
           help     Show this help
 
@@ -172,6 +182,12 @@ module Pgbus
                              pattern)
           --execution-mode   Execution mode: threads (default) or async
                              (fiber-based, lower connection usage)
+
+        Environment for `mcp`:
+          PGBUS_MCP_TOKEN          If set, PGBUS_MCP_AUTH_TOKEN must match for
+                                   the server to start (optional token gate).
+          PGBUS_MCP_ALLOW_PAYLOADS Truthy to let tools return raw message
+                                   bodies/headers (off by default; redacted).
       HELP
     end
   end

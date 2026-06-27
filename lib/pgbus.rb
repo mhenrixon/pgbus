@@ -36,11 +36,19 @@ module Pgbus
           "pgbus" => "Pgbus",
           "cli" => "CLI",
           "dsl" => "DSL",
-          "capsule_dsl" => "CapsuleDSL"
+          "capsule_dsl" => "CapsuleDSL",
+          "mcp" => "MCP"
         )
         loader.ignore("#{__dir__}/generators")
         loader.ignore("#{__dir__}/active_job")
         loader.ignore("#{__dir__}/pgbus/testing")
+        # The MCP diagnostic server is optional — its tool classes subclass
+        # MCP::Tool from the (optional) `mcp` gem. Keeping it out of Zeitwerk
+        # means we never reference the gem's constants at autoload time;
+        # `Pgbus::MCP.load!` (called by the `pgbus mcp` CLI command) requires
+        # the gem and loads the subsystem explicitly.
+        loader.ignore("#{__dir__}/pgbus/mcp")
+        loader.ignore("#{__dir__}/pgbus/mcp.rb")
         # Vendor integrations are loaded conditionally (when the vendor gem
         # is present) by lib/pgbus/engine.rb. Keeping them out of Zeitwerk
         # means we don't reference vendor constants at autoload time.
@@ -175,3 +183,8 @@ end
 
 require "active_job/queue_adapters/pgbus_adapter" if defined?(ActiveJob)
 require "pgbus/engine" if defined?(Rails::Engine)
+
+# Define the optional MCP namespace and its `load!` entrypoint. This file is
+# excluded from Zeitwerk (it references the optional `mcp` gem only inside
+# load!), so require it explicitly here. Requiring it does NOT load the gem.
+require "pgbus/mcp"
