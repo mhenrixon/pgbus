@@ -42,5 +42,6 @@ group :development, :test do
   gem "activejob", ">= 7.1", "< 9.0"
   gem "activerecord", ">= 7.1", "< 9.0"
   gem "globalid", ">= 1.0"
+  gem "mcp", "~> 0.22"
   gem "pg", "~> 1.5"
 end

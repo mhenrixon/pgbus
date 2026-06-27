@@ -1,0 +1,69 @@
+# frozen_string_literal: true
+
+module Pgbus
+  module MCP
+    # Boots the pgbus diagnostic MCP server over stdio. This is what
+    # `pgbus mcp` invokes. Separated from Server so the server assembly stays
+    # transport-agnostic and unit-testable without touching $stdin/$stdout.
+    #
+    # Security posture (issue #180):
+    #   * Never starts unless explicitly invoked (`pgbus mcp`).
+    #   * Reuses the app's existing DB connection/config — no new privileged
+    #     path is opened.
+    #   * Payloads are redacted unless PGBUS_MCP_ALLOW_PAYLOADS is truthy.
+    #   * Optional token gate: when PGBUS_MCP_TOKEN is set, the same value must
+    #     be present in PGBUS_MCP_AUTH_TOKEN at boot or the server refuses to
+    #     start. stdio is a local, parent-spawned channel, so the gate is a
+    #     boot-time precondition rather than a per-message header.
+    module Runner
+      TRUTHY = %w[1 true yes on].freeze
+
+      module_function
+
+      # Build the server, enforce the optional token gate, and drive the stdio
+      # transport until the client disconnects.
+      #
+      # @param env [Hash] environment to read flags from (injectable for tests).
+      def run(env: ENV)
+        authorize!(env)
+
+        server = Server.build(allow_payloads: truthy?(env["PGBUS_MCP_ALLOW_PAYLOADS"]))
+        transport = ::MCP::Server::Transports::StdioTransport.new(server)
+        log_start(env)
+        transport.open
+      end
+
+      # Raise unless the configured token matches. No-op when PGBUS_MCP_TOKEN
+      # is unset (token gating is opt-in).
+      def authorize!(env)
+        expected = env["PGBUS_MCP_TOKEN"]
+        return if expected.nil? || expected.empty?
+
+        provided = env["PGBUS_MCP_AUTH_TOKEN"]
+        return if secure_compare?(expected, provided)
+
+        raise Pgbus::Error,
+              "pgbus MCP: authentication failed. PGBUS_MCP_TOKEN is set; provide a matching PGBUS_MCP_AUTH_TOKEN."
+      end
+
+      def truthy?(value)
+        TRUTHY.include?(value.to_s.strip.downcase)
+      end
+
+      # Constant-time comparison to avoid leaking the token via timing.
+      def secure_compare?(expected, provided)
+        return false if provided.nil?
+        return false unless expected.bytesize == provided.bytesize
+
+        left  = expected.unpack("C*")
+        right = provided.unpack("C*")
+        left.zip(right).reduce(0) { |acc, (a, b)| acc | (a ^ b) }.zero?
+      end
+
+      def log_start(env)
+        mode = truthy?(env["PGBUS_MCP_ALLOW_PAYLOADS"]) ? "payloads ALLOWED" : "payloads redacted"
+        Pgbus.logger.info { "[Pgbus::MCP] starting read-only diagnostic server over stdio (#{mode})" }
+      end
+    end
+  end
+end

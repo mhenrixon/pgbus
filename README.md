@@ -838,6 +838,60 @@ When `config.metrics_enabled = true` (default), the dashboard exposes Prometheus
 | `pgbus_worker_pool_busy` | Currently busy worker threads |
 | `pgbus_worker_pool_utilization` | Busy / capacity ratio |
 
+### MCP diagnostic server (read-only)
+
+Pgbus ships an optional, **read-only** [MCP](https://modelcontextprotocol.io) server so an AI agent (or any MCP client) can diagnose pgbus directly — "are queues backed up?", "is `read_ct` advancing?", "are workers heart-beating but not claiming?" — instead of hand-writing `pgmq` / `pg_stat_activity` SQL against production. It is a thin adapter over the same read layer the dashboard uses, so it adds no new database access path.
+
+The server never starts unless you ask for it:
+
+```bash
+bundle exec pgbus mcp        # speaks MCP over stdio
+```
+
+Add the optional `mcp` gem to your `Gemfile` first (`gem "mcp"`); the command tells you so if it's missing.
+
+#### Tools
+
+All tools are read-only — no tool mutates state, and there is no raw-SQL passthrough.
+
+| Tool | Purpose |
+|------|---------|
+| `pgbus_health` | One-call verdict: `OK` / `DEGRADED` / `STALLED`. STALLED is the silent-worker-wedge signal (visible backlog while workers heart-beat but don't claim). Suitable for automated alerting. |
+| `pgbus_queues` | All queues: depth, visible count, oldest-message age, paused state. |
+| `pgbus_queue_detail` | Per-queue metrics + paused state + table health (dead tuples, bloat, vacuum age). |
+| `pgbus_processes` | Every process with kind, pid, heartbeat age, and `healthy`/`stale`/`stalled` status. |
+| `pgbus_jobs` / `pgbus_job_detail` | Inspect enqueued messages (`read_ct`, `vt`, `enqueued_at`). Paginated. |
+| `pgbus_dlq` / `pgbus_dlq_detail` | Dead-letter inspection. Paginated. |
+| `pgbus_locks` | Active uniqueness locks (the leaked-lock diagnostic). |
+| `pgbus_throughput` / `pgbus_stats` | Recent throughput time series and status counts. |
+| `pgbus_recurring` | Recurring task schedule + last/next run times. |
+
+#### Security
+
+The server is built to be safe against a production datastore:
+
+- **Read-only by default.** No tool mutates state and no arbitrary-query tool exists.
+- **Payloads redacted.** Message bodies, headers, and job arguments are replaced with `[redacted]` unless you start the server with `PGBUS_MCP_ALLOW_PAYLOADS=1` **and** pass `include_payloads: true` on the call. Both gates must be open.
+- **Bounded queries.** Every list tool paginates with a row cap (`pgbus_jobs` / `pgbus_dlq` cap at 100 rows/page; time windows cap at 1440 minutes).
+- **Reuses your DB credentials.** No new privileged path — it reads through the app's existing connection config.
+- **Optional token gate.** Set `PGBUS_MCP_TOKEN` and the server refuses to start unless `PGBUS_MCP_AUTH_TOKEN` matches (constant-time compare). Run it co-located with the app, not internet-exposed.
+
+#### Client configuration
+
+A minimal MCP client config (Claude Code / Claude Desktop style):
+
+```json
+{
+  "mcpServers": {
+    "pgbus": {
+      "command": "bundle",
+      "args": ["exec", "pgbus", "mcp"],
+      "env": { "RAILS_ENV": "production" }
+    }
+  }
+}
+```
+
 ## Real-time broadcasts (turbo-streams replacement)
 
 Pgbus ships a drop-in replacement for turbo-rails' `turbo_stream_from` helper that fixes several well-known ActionCable correctness bugs by using PGMQ message IDs as a replay cursor. Same API as turbo-rails. No Redis. No ActionCable. No lost messages on reconnect.
