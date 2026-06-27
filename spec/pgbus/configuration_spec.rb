@@ -883,6 +883,11 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.not_to raise_error
     end
 
+    it "rejects false stall_threshold" do
+      config.stall_threshold = false
+      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+    end
+
     it "rejects non-numeric read_timeout" do
       config.read_timeout = "30"
       expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
@@ -896,6 +901,11 @@ RSpec.describe Pgbus::Configuration do
     it "accepts nil read_timeout (disabled)" do
       config.read_timeout = nil
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects false read_timeout" do
+      config.read_timeout = false
+      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
     end
 
     it "rejects invalid priority_levels" do

@@ -383,10 +383,10 @@ module Pgbus
         raise ArgumentError, "retry_backoff_jitter must be between 0 and 1"
       end
 
-      if stall_threshold && !(stall_threshold.is_a?(Numeric) && stall_threshold.positive?)
+      unless stall_threshold.nil? || (stall_threshold.is_a?(Numeric) && stall_threshold.positive?)
         raise ArgumentError, "stall_threshold must be a positive number or nil to disable"
       end
-      if read_timeout && !(read_timeout.is_a?(Numeric) && read_timeout.positive?)
+      unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise ArgumentError, "read_timeout must be a positive number or nil to disable"
       end
 
