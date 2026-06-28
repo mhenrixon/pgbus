@@ -44,7 +44,12 @@ module Pgbus
       def failed_events(page: 1, per_page: 25) = @failed_events_list
       def failed_events_count = @failed_events_list.size
       def failed_event(id) = @failed_events_list.find { |e| e["id"].to_s == id.to_s }
-      def dlq_messages(page: 1, per_page: 25) = @dlq_messages_list
+
+      def dlq_messages(page: 1, per_page: 25)
+        offset = (page - 1) * per_page
+        @dlq_messages_list.slice(offset, per_page) || []
+      end
+
       def dlq_total_count = @dlq_messages_list.size
       def dlq_message_detail(msg_id) = @dlq_messages_list.find { |m| m[:msg_id].to_s == msg_id.to_s }
       def processed_events(page: 1, per_page: 25) = @events_list

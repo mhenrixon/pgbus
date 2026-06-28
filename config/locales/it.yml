@@ -84,6 +84,7 @@ it:
       stats_cards:
         enqueued: In coda
         failed_dlq: Falliti / DLQ
+        failed_dlq_labels: Falliti / Dead Lettered
         processes: Processi
         queues: Code
         recurring: Ricorrente
@@ -126,6 +127,7 @@ it:
           queue: 'Coda:'
           visible_at: 'Visibile alle:'
         retry: Riprova
+        total_label: messaggi nella coda dei messaggi non recapitati
       show:
         back: Torna a DLQ
         discard: Scarta
@@ -225,6 +227,10 @@ it:
       bulk_select_all: Seleziona tutto
       bulk_select_row: Seleziona %{id}
       bulk_selected: selezionato
+      pagination:
+        next: Avanti
+        previous: Indietro
+        showing: Visualizzazione %{from}–%{to} di %{total}
       paused_badge: In pausa
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ it:
         resume: Riprendi
       show:
         arguments: Argomenti
+        back: Torna alle code
         delete_confirm: Eliminare permanentemente questa coda? Questa azione non può essere annullata.
         delete_queue: Elimina coda
         depth: 'Profondità:'

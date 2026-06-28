@@ -1,4 +1,11 @@
-<turbo-frame id="dlq-messages" data-auto-refresh data-src="<%= pgbus.dead_letter_index_path(frame: 'list') %>">
+<turbo-frame id="dlq-messages" data-auto-refresh data-src="<%= pgbus.dead_letter_index_path(frame: 'list', page: @page) %>">
+  <%# Count badge lives inside the frame so it refreshes in lockstep with the table. %>
+  <% if @total_count && @total_count > 0 %>
+    <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">
+      <span class="inline-flex items-center rounded-full bg-red-100 dark:bg-red-900 px-2.5 py-0.5 text-sm font-medium text-red-800 dark:text-red-200"><%= @total_count %></span>
+      <%= t("pgbus.dead_letter.messages_table.total_label") %>
+    </p>
+  <% end %>
   <%# Bulk form outside table to avoid nested form issues %>
   <form id="bulk-discard-dlq-form" action="<%= pgbus.discard_selected_dead_letter_index_path %>" method="post" data-turbo-frame="_top" class="hidden">
     <%= hidden_field_tag :authenticity_token, form_authenticity_token %>

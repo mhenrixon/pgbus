@@ -84,6 +84,7 @@ fi:
       stats_cards:
         enqueued: Lisätty jonoon
         failed_dlq: Epäonnistuneet / DLQ
+        failed_dlq_labels: Epäonnistuneet / Dead Lettered
         processes: Prosessit
         queues: Jonot
         recurring: Toistuva
@@ -126,6 +127,7 @@ fi:
           queue: 'Jono:'
           visible_at: 'Näkyvissä klo:'
         retry: Yritä uudelleen
+        total_label: viestiä dead letter -jonossa
       show:
         back: Takaisin DLQ:hon
         discard: Hylkää
@@ -225,6 +227,10 @@ fi:
       bulk_select_all: Valitse kaikki
       bulk_select_row: Valitse %{id}
       bulk_selected: valittu
+      pagination:
+        next: Seuraava
+        previous: Edellinen
+        showing: Näytetään %{from}–%{to} / %{total}
       paused_badge: Tauolla
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ fi:
         resume: Jatka
       show:
         arguments: Argumentit
+        back: Takaisin jonoihin
         delete_confirm: Poista tämä jono pysyvästi? Tätä ei voi kumota.
         delete_queue: Poista jono
         depth: 'Syvyys:'

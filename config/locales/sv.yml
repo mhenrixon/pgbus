@@ -84,6 +84,7 @@ sv:
       stats_cards:
         enqueued: Inlagda
         failed_dlq: Misslyckade / DLQ
+        failed_dlq_labels: Misslyckade / Dead Lettered
         processes: Processer
         queues: Köer
         recurring: Återkommande
@@ -126,6 +127,7 @@ sv:
           queue: 'Kö:'
           visible_at: 'Synlig vid:'
         retry: Försök igen
+        total_label: meddelanden i dead letter-kö
       show:
         back: Tillbaka till DLQ
         discard: Kassera
@@ -225,6 +227,10 @@ sv:
       bulk_select_all: Markera alla
       bulk_select_row: Markera %{id}
       bulk_selected: valda
+      pagination:
+        next: Nästa
+        previous: Föregående
+        showing: Visar %{from}–%{to} av %{total}
       paused_badge: Pausad
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ sv:
         resume: Återuppta
       show:
         arguments: Argument
+        back: Tillbaka till köer
         delete_confirm: Ta bort denna kö permanent? Detta kan inte ångras.
         delete_queue: Ta bort kö
         depth: 'Djup:'

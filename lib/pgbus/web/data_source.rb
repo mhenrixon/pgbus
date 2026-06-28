@@ -41,7 +41,17 @@ module Pgbus
       # Queues — query via ActiveRecord for reliability in web processes
       # (avoids PGMQ client connection issues when the web server uses a
       # different connection lifecycle than the worker processes).
+      # Memoized for the lifetime of this data-source instance (one per web
+      # request — see ApplicationController#data_source). A single page can ask
+      # for queue metrics more than once (e.g. the DLQ page reads both the
+      # message rows and the total count); without the memo each call re-runs
+      # the meta query + batched metrics. Mutations redirect to a fresh request
+      # with a new instance, so a per-request memo never serves stale data.
       def queues_with_metrics
+        @queues_with_metrics ||= fetch_queues_with_metrics
+      end
+
+      def fetch_queues_with_metrics
         queue_names = connection.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
         return [] if queue_names.empty?
 
@@ -53,6 +63,7 @@ module Pgbus
         Pgbus.logger.error { "[Pgbus::Web] Error fetching queue metrics: #{e.class}: #{e.message}" }
         []
       end
+      private :fetch_queues_with_metrics
 
       # name is the full PGMQ queue name (e.g. "pgbus_default") as returned
       # by queues_with_metrics. No prefix is added.

@@ -84,6 +84,7 @@ da:
       stats_cards:
         enqueued: Sat i kø
         failed_dlq: Mislykkedes / DLQ
+        failed_dlq_labels: Fejlet / Dead Lettered
         processes: Processer
         queues: Køer
         recurring: Gentagende
@@ -126,6 +127,7 @@ da:
           queue: 'Kø:'
           visible_at: 'Synlig ved:'
         retry: Forsøg igen
+        total_label: beskeder i dead letter-kø
       show:
         back: Tilbage til DLQ
         discard: Kassér
@@ -225,6 +227,10 @@ da:
       bulk_select_all: Vælg alle
       bulk_select_row: Vælg %{id}
       bulk_selected: valgt
+      pagination:
+        next: Næste
+        previous: Forrige
+        showing: Viser %{from}–%{to} af %{total}
       paused_badge: Pause
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ da:
         resume: Genoptag
       show:
         arguments: Argumenter
+        back: Tilbage til køer
         delete_confirm: Slet denne kø permanent? Dette kan ikke fortrydes.
         delete_queue: Slet kø
         depth: 'Dybde:'

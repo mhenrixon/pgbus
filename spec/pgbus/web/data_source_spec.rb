@@ -917,6 +917,51 @@ RSpec.describe Pgbus::Web::DataSource do
     end
   end
 
+  describe "#dlq_total_count" do
+    let(:queue_metrics) do
+      [
+        { name: "pgbus_default_dlq", queue_length: 5 },
+        { name: "pgbus_low_dlq", queue_length: 2 },
+        { name: "pgbus_default", queue_length: 10 }
+      ]
+    end
+
+    it "sums queue_length across DLQ queues only" do
+      allow(data_source).to receive(:queues_with_metrics).and_return(queue_metrics)
+
+      expect(data_source.dlq_total_count).to eq(7)
+    end
+
+    it "returns 0 when there are no DLQ queues" do
+      allow(data_source).to receive(:queues_with_metrics).and_return([{ name: "pgbus_default", queue_length: 10 }])
+
+      expect(data_source.dlq_total_count).to eq(0)
+    end
+  end
+
+  describe "queue-metrics memoization" do
+    it "fetches queue metrics only once across repeated calls in one request" do
+      allow(mock_connection).to receive(:select_values).and_return(["pgbus_default_dlq"])
+      allow(mock_connection).to receive(:quote) { |v| "'#{v}'" }
+      allow(mock_connection).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [{
+                             "queue_name" => "pgbus_default_dlq",
+                             "queue_length" => 4, "queue_visible_length" => 4,
+                             "oldest_msg_age_sec" => nil, "newest_msg_age_sec" => nil,
+                             "total_messages" => 4
+                           }]))
+
+      # The DLQ page reads both the rows and the total count; the meta query
+      # must run once, not once per call.
+      data_source.queues_with_metrics
+      data_source.dlq_total_count
+
+      expect(mock_connection).to have_received(:select_values)
+        .with(a_string_matching(/pgmq\.meta/)).once
+    end
+  end
+
   describe "#live_stream_metrics" do
     let(:counter) { Pgbus::Web::Streamer::StreamCounter.new }
 

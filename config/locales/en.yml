@@ -127,6 +127,7 @@ en:
           queue: 'Queue:'
           visible_at: 'Visible at:'
         retry: Retry
+        total_label: messages in dead letter queue
       show:
         back: Back to DLQ
         discard: Discard
@@ -219,10 +220,6 @@ en:
         not_found: Event not found
         title: Event %{event_id}
     helpers:
-      pagination:
-        showing: Showing %{from}–%{to} of %{total}
-        next: Next
-        previous: Previous
       batch_status:
         finished: Finished
         pending: Pending
@@ -230,6 +227,10 @@ en:
       bulk_select_all: Select all
       bulk_select_row: Select %{id}
       bulk_selected: selected
+      pagination:
+        next: Next
+        previous: Previous
+        showing: Showing %{from}–%{to} of %{total}
       paused_badge: Paused
       queue_badge:
         dlq: DLQ
