@@ -89,7 +89,7 @@ RSpec.describe Pgbus do
     before do
       allow(ActiveJob::Base).to receive(:deserialize).and_return(job_double)
       allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
-      stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+      stub_const("Pgbus::JobStat", Class.new)
       allow(Pgbus::JobStat).to receive(:record!)
     end
 

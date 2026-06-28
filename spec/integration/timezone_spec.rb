@@ -166,7 +166,7 @@ RSpec.describe "Timezone handling (integration)", :integration do
 
       allow(ActiveJob::Base).to receive(:deserialize).and_return(job_double)
       allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
-      stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+      stub_const("Pgbus::JobStat", Class.new)
       allow(Pgbus::JobStat).to receive(:record!)
 
       enqueued_at = (Time.now.utc - 1).strftime("%Y-%m-%d %H:%M:%S.%6N")
