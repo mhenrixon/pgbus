@@ -276,6 +276,16 @@ module Pgbus
         []
       end
 
+      def dlq_total_count
+        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
+        queues_with_metrics
+          .select { |q| q[:name].end_with?(dlq_suffix) }
+          .sum { |q| q[:queue_length] }
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] Error fetching DLQ count: #{e.message}" }
+        0
+      end
+
       def dlq_message_detail(msg_id)
         dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
         queues = queues_with_metrics.select { |q| q[:name].end_with?(dlq_suffix) }

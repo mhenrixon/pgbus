@@ -31,6 +31,7 @@
       <p class="mt-1 text-3xl font-semibold <%= (@stats[:failed_count] + @stats[:dlq_depth]) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white' %>">
         <%= @stats[:failed_count] %> / <%= @stats[:dlq_depth] %>
       </p>
+      <p class="text-xs text-gray-400 dark:text-gray-500"><%= t("pgbus.dashboard.stats_cards.failed_dlq_labels") %></p>
     </div>
 
     <div class="rounded-lg bg-white dark:bg-gray-800 p-5 shadow ring-1 ring-gray-200 dark:ring-gray-700">

@@ -84,6 +84,7 @@ en:
       stats_cards:
         enqueued: Enqueued
         failed_dlq: Failed / DLQ
+        failed_dlq_labels: Failed / Dead Lettered
         processes: Processes
         queues: Queues
         recurring: Recurring
@@ -218,6 +219,10 @@ en:
         not_found: Event not found
         title: Event %{event_id}
     helpers:
+      pagination:
+        showing: Showing %{from}–%{to} of %{total}
+        next: Next
+        previous: Previous
       batch_status:
         finished: Finished
         pending: Pending
@@ -477,6 +482,7 @@ en:
         resume: Resume
       show:
         arguments: Arguments
+        back: Back to Queues
         delete_confirm: Permanently delete this queue? This cannot be undone.
         delete_queue: Delete Queue
         depth: 'Depth:'
