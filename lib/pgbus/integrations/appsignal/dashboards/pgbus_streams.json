@@ -39,7 +39,7 @@
         "display": "LINE",
         "title": "Active SSE connections",
         "description": "Estimated from connect/disconnect events in the last 60 minutes.",
-        "line_label": "%hostname%",
+        "line_label": "Active connections",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -50,12 +50,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },
@@ -64,7 +59,7 @@
         "display": "LINE",
         "title": "Average fanout per broadcast",
         "description": "Mean number of connections that received each broadcast over the last hour.",
-        "line_label": "%hostname%",
+        "line_label": "Avg fanout",
         "format": "number",
         "draw_null_as_zero": false,
         "metrics": [
@@ -75,12 +70,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },

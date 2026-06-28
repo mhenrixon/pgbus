@@ -127,6 +127,14 @@ RSpec.describe "Pgbus::Integrations::Appsignal" do
       "Pgbus — Streams"
     )
 
+    throughput = definitions.find { |d| d["dashboard"]["title"] == "Pgbus — Throughput & Latency" }
+    expect(throughput["metric_keys"]).to include(
+      "pgbus_queue_job_count",
+      "pgbus_event_count",
+      "pgbus_messages_sent",
+      "pgbus_messages_read"
+    )
+
     definitions.each do |d|
       expect(d["metric_keys"]).to be_an(Array)
       expect(d["dashboard"]["visuals"]).to be_an(Array)

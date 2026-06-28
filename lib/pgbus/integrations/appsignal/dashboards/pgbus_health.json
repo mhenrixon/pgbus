@@ -11,7 +11,7 @@
         "display": "LINE",
         "title": "Queue depth (visible vs total)",
         "description": "Visible depth excludes messages whose VT hasn't expired. A divergence between the two means workers are slow but the queue isn't growing.",
-        "line_label": "%hostname% - %queue%",
+        "line_label": "%name% - %queue%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -25,10 +25,6 @@
             "tags": [
               {
                 "key": "queue",
-                "value": "*"
-              },
-              {
-                "key": "hostname",
                 "value": "*"
               }
             ]
@@ -44,10 +40,6 @@
               {
                 "key": "queue",
                 "value": "*"
-              },
-              {
-                "key": "hostname",
-                "value": "*"
               }
             ]
           }
@@ -58,7 +50,7 @@
         "display": "LINE",
         "title": "Queue latency",
         "description": "Age of the oldest message per queue (milliseconds). High latency means consumers can't keep up.",
-        "line_label": "%hostname% - %queue%",
+        "line_label": "%queue%",
         "format": "duration",
         "draw_null_as_zero": true,
         "metrics": [
@@ -73,10 +65,6 @@
               {
                 "key": "queue",
                 "value": "*"
-              },
-              {
-                "key": "hostname",
-                "value": "*"
               }
             ]
           }
@@ -87,7 +75,7 @@
         "display": "LINE",
         "title": "DLQ depth + failed events",
         "description": "Messages that exceeded max_retries plus the failed-events table. Spikes after a deploy point at a regression.",
-        "line_label": "%hostname%",
+        "line_label": "%name%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -98,12 +86,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           },
           {
             "name": "pgbus_failed_events_total",
@@ -112,12 +95,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },
@@ -157,7 +135,7 @@
         "type": "timeseries",
         "display": "LINE",
         "title": "Active processes",
-        "description": "Workers + dispatcher + scheduler currently heartbeating into pgbus_processes.",
+        "description": "Workers + dispatcher + scheduler currently heartbeating, scoped per host.",
         "line_label": "%hostname%",
         "format": "number",
         "draw_null_as_zero": true,
@@ -183,7 +161,7 @@
         "display": "LINE",
         "title": "Dead tuples in queue/archive tables",
         "description": "If autovacuum can't keep up the index gets bloated and lock acquisition slows. Tune autovacuum_vacuum_scale_factor on the offending tables when this climbs.",
-        "line_label": "%hostname%",
+        "line_label": "Dead tuples",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -194,12 +172,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },
@@ -208,7 +181,7 @@
         "display": "LINE",
         "title": "Oldest open transaction (seconds)",
         "description": "MVCC horizon pin. Long-running transactions prevent VACUUM from cleaning the dead tuples above. Anything over 60s is a smell.",
-        "line_label": "%hostname%",
+        "line_label": "Oldest transaction",
         "format": "duration",
         "draw_null_as_zero": true,
         "metrics": [
@@ -219,12 +192,7 @@
                 "field": "GAUGE"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },

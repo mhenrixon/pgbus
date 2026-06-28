@@ -1,6 +1,9 @@
 {
   "metric_keys": [
-    "pgbus_queue_job_count"
+    "pgbus_queue_job_count",
+    "pgbus_event_count",
+    "pgbus_messages_sent",
+    "pgbus_messages_read"
   ],
   "dashboard": {
     "title": "Pgbus — Throughput & Latency",

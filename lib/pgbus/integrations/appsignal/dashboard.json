@@ -98,7 +98,7 @@
         "display": "LINE",
         "title": "Queue depth",
         "description": "Total messages waiting in each queue.",
-        "line_label": "%hostname% - %queue%",
+        "line_label": "%queue%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -113,10 +113,6 @@
               {
                 "key": "queue",
                 "value": "*"
-              },
-              {
-                "key": "hostname",
-                "value": "*"
               }
             ]
           }
@@ -127,7 +123,7 @@
         "display": "LINE",
         "title": "Queue latency",
         "description": "Age of the oldest message in each queue (milliseconds). High latency means consumers can't keep up.",
-        "line_label": "%hostname% - %queue%",
+        "line_label": "%queue%",
         "format": "duration",
         "draw_null_as_zero": true,
         "metrics": [
@@ -142,10 +138,6 @@
               {
                 "key": "queue",
                 "value": "*"
-              },
-              {
-                "key": "hostname",
-                "value": "*"
               }
             ]
           }
@@ -156,7 +148,7 @@
         "display": "LINE",
         "title": "Dead letter queue depth",
         "description": "Messages that exceeded max retries and were routed to the DLQ.",
-        "line_label": "%hostname%",
+        "line_label": "DLQ depth",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -167,12 +159,7 @@
                 "field": "gauge"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       },
@@ -180,7 +167,7 @@
         "type": "timeseries",
         "display": "LINE",
         "title": "Worker / Process count",
-        "description": "Active pgbus supervisor processes.",
+        "description": "Active pgbus supervisor processes per host.",
         "line_label": "%hostname%",
         "format": "number",
         "draw_null_as_zero": true,
@@ -298,8 +285,8 @@
         "type": "timeseries",
         "display": "LINE",
         "title": "Database health",
-        "description": "Dead tuples and oldest transaction age — indicators of MVCC pressure on queue tables.",
-        "line_label": "%name% - %hostname%",
+        "description": "Dead tuples, tables needing vacuum, and oldest transaction age — indicators of MVCC pressure on queue tables.",
+        "line_label": "%name%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -310,12 +297,7 @@
                 "field": "gauge"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           },
           {
             "name": "pgbus_tables_needing_vacuum",
@@ -324,12 +306,16 @@
                 "field": "gauge"
               }
             ],
-            "tags": [
+            "tags": []
+          },
+          {
+            "name": "pgbus_oldest_transaction_age_seconds",
+            "fields": [
               {
-                "key": "hostname",
-                "value": "*"
+                "field": "gauge"
               }
-            ]
+            ],
+            "tags": []
           }
         ]
       },
@@ -338,7 +324,7 @@
         "display": "LINE",
         "title": "Stream broadcasts",
         "description": "Turbo Stream broadcast count and active SSE connections.",
-        "line_label": "%name% - %hostname%",
+        "line_label": "%name%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -349,12 +335,7 @@
                 "field": "gauge"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           },
           {
             "name": "pgbus_stream_active_connections",
@@ -363,12 +344,7 @@
                 "field": "gauge"
               }
             ],
-            "tags": [
-              {
-                "key": "hostname",
-                "value": "*"
-              }
-            ]
+            "tags": []
           }
         ]
       }
