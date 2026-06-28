@@ -84,6 +84,7 @@ en:
       stats_cards:
         enqueued: Enqueued
         failed_dlq: Failed / DLQ
+        failed_dlq_labels: Failed / Dead Lettered
         processes: Processes
         queues: Queues
         recurring: Recurring
@@ -126,6 +127,7 @@ en:
           queue: 'Queue:'
           visible_at: 'Visible at:'
         retry: Retry
+        total_label: messages in dead letter queue
       show:
         back: Back to DLQ
         discard: Discard
@@ -225,6 +227,10 @@ en:
       bulk_select_all: Select all
       bulk_select_row: Select %{id}
       bulk_selected: selected
+      pagination:
+        next: Next
+        previous: Previous
+        showing: Showing %{from}–%{to} of %{total}
       paused_badge: Paused
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ en:
         resume: Resume
       show:
         arguments: Arguments
+        back: Back to Queues
         delete_confirm: Permanently delete this queue? This cannot be undone.
         delete_queue: Delete Queue
         depth: 'Depth:'

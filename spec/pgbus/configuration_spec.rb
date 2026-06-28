@@ -104,8 +104,8 @@ RSpec.describe Pgbus::Configuration do
       expect(config.zombie_detection).to be true
     end
 
-    it "has insights_default_minutes of 30 days" do
-      expect(config.insights_default_minutes).to eq(30 * 24 * 60)
+    it "has insights_default_minutes of 1 hour" do
+      expect(config.insights_default_minutes).to eq(60)
     end
 
     it "has outbox disabled by default" do

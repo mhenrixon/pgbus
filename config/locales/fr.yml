@@ -84,6 +84,7 @@ fr:
       stats_cards:
         enqueued: Enregistré
         failed_dlq: Échoué / DLQ
+        failed_dlq_labels: Échoués / Dead Lettered
         processes: Processus
         queues: Files d'attente
         recurring: Récurrent
@@ -126,6 +127,7 @@ fr:
           queue: 'File d''attente :'
           visible_at: 'Visible à :'
         retry: Réessayer
+        total_label: messages dans la file de lettres mortes
       show:
         back: Retour à la DLQ
         discard: Ignorer
@@ -225,6 +227,10 @@ fr:
       bulk_select_all: Tout sélectionner
       bulk_select_row: Sélectionner %{id}
       bulk_selected: sélectionné
+      pagination:
+        next: Suivant
+        previous: Précédent
+        showing: Affichage de %{from}–%{to} sur %{total}
       paused_badge: En pause
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ fr:
         resume: Reprendre
       show:
         arguments: Arguments
+        back: Retour aux files d'attente
         delete_confirm: Supprimer définitivement cette file d'attente ? Cette action est irréversible.
         delete_queue: Supprimer la file d'attente
         depth: 'Profondeur :'

@@ -18,12 +18,13 @@ RSpec.describe "Dead Letter Queue", type: :system do
       ]
     end
 
-    it "displays DLQ messages" do
+    it "displays DLQ messages with total count" do
       visit "/pgbus/dlq"
 
       expect(page).to have_text("99")
       expect(page).to have_text("pgbus_default")
       expect(page).to have_text("FailedJob")
+      expect(page).to have_text("Showing 1–1 of 1")
     end
 
     it "shows bulk action buttons" do

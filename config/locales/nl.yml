@@ -84,6 +84,7 @@ nl:
       stats_cards:
         enqueued: In de wachtrij geplaatst
         failed_dlq: Mislukt / DLQ
+        failed_dlq_labels: Mislukt / Dead Lettered
         processes: Processen
         queues: Wachtrijen
         recurring: Terugkerend
@@ -126,6 +127,7 @@ nl:
           queue: 'Wachtrij:'
           visible_at: 'Zichtbaar op:'
         retry: Opnieuw proberen
+        total_label: berichten in dead letter-wachtrij
       show:
         back: Terug naar DLQ
         discard: Verwerpen
@@ -225,6 +227,10 @@ nl:
       bulk_select_all: Alles selecteren
       bulk_select_row: Selecteer %{id}
       bulk_selected: geselecteerd
+      pagination:
+        next: Volgende
+        previous: Vorige
+        showing: "%{from}–%{to} van %{total} weergegeven"
       paused_badge: Gepauzeerd
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ nl:
         resume: Hervatten
       show:
         arguments: Argumenten
+        back: Terug naar wachtrijen
         delete_confirm: Deze wachtrij permanent verwijderen? Dit kan niet ongedaan worden gemaakt.
         delete_queue: Wachtrij verwijderen
         depth: 'Diepte:'

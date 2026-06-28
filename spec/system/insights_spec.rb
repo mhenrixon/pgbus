@@ -20,11 +20,12 @@ RSpec.describe "Insights", type: :system do
       expect(page).to have_text("DEAD LETTERED")
     end
 
-    it "shows the time range selector" do
+    it "shows the time range selector with 4h option" do
       visit "/pgbus/insights"
 
       within("nav[aria-label='Time range']") do
         expect(page).to have_link("1h")
+        expect(page).to have_link("4h")
         expect(page).to have_link("24h")
         expect(page).to have_link("7d")
         expect(page).to have_link("30d")

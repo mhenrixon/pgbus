@@ -84,6 +84,7 @@ de:
       stats_cards:
         enqueued: Eingereiht
         failed_dlq: Fehlgeschlagen / DLQ
+        failed_dlq_labels: Fehlgeschlagen / Dead Lettered
         processes: Prozesse
         queues: Warteschlangen
         recurring: Wiederkehrend
@@ -126,6 +127,7 @@ de:
           queue: 'Warteschlange:'
           visible_at: 'Sichtbar um:'
         retry: Erneut versuchen
+        total_label: Nachrichten in der Dead-Letter-Warteschlange
       show:
         back: Zurück zur DLQ
         discard: Verwerfen
@@ -225,6 +227,10 @@ de:
       bulk_select_all: Alle auswählen
       bulk_select_row: "%{id} auswählen"
       bulk_selected: ausgewählt
+      pagination:
+        next: Weiter
+        previous: Zurück
+        showing: Zeige %{from}–%{to} von %{total}
       paused_badge: Pausiert
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ de:
         resume: Fortsetzen
       show:
         arguments: Argumente
+        back: Zurück zu Warteschlangen
         delete_confirm: Diese Warteschlange dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.
         delete_queue: Warteschlange löschen
         depth: 'Tiefe:'

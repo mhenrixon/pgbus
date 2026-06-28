@@ -19,7 +19,7 @@
           <% @recent_failures.each do |f| %>
             <tr>
               <td data-label="Queue" class="px-4 py-3 text-sm text-gray-700"><%= f["queue_name"] %></td>
-              <td data-label="Error" class="px-4 py-3 text-sm text-red-600 truncate max-w-xs"><%= f["error_class"] %>: <%= truncate(f["error_message"].to_s, length: 60) %></td>
+              <td data-label="Error" class="px-4 py-3 text-sm text-red-600 truncate max-w-xs" title="<%= f["error_class"] %>: <%= f["error_message"] %>"><%= f["error_class"] %>: <%= truncate(f["error_message"].to_s, length: 60) %></td>
               <td data-label="Time" class="px-4 py-3 text-sm text-gray-500"><%= pgbus_time_ago(f["failed_at"]) %></td>
             </tr>
           <% end %>

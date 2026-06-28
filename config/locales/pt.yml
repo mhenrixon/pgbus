@@ -84,6 +84,7 @@ pt:
       stats_cards:
         enqueued: Enfileirado
         failed_dlq: Falhou / DLQ
+        failed_dlq_labels: Falhados / Dead Lettered
         processes: Processos
         queues: Filas
         recurring: Recorrente
@@ -126,6 +127,7 @@ pt:
           queue: 'Fila:'
           visible_at: 'Visível em:'
         retry: Tentar novamente
+        total_label: mensagens na fila de mensagens mortas
       show:
         back: Voltar para DLQ
         discard: Descartar
@@ -225,6 +227,10 @@ pt:
       bulk_select_all: Selecionar todos
       bulk_select_row: Selecionar %{id}
       bulk_selected: selecionado
+      pagination:
+        next: Próximo
+        previous: Anterior
+        showing: Mostrando %{from}–%{to} de %{total}
       paused_badge: Pausado
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ pt:
         resume: Retomar
       show:
         arguments: Argumentos
+        back: Voltar às filas
         delete_confirm: Excluir permanentemente esta fila? Esta ação não pode ser desfeita.
         delete_queue: Excluir fila
         depth: 'Profundidade:'

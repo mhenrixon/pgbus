@@ -216,7 +216,7 @@ module Pgbus
       @web_per_page = 25
       @web_live_updates = true
       @web_data_source = nil
-      @insights_default_minutes = 30 * 24 * 60 # 30 days
+      @insights_default_minutes = 60 # 1 hour
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
       @metrics_enabled = true

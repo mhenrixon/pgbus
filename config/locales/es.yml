@@ -84,6 +84,7 @@ es:
       stats_cards:
         enqueued: Encolado
         failed_dlq: Fallidos / DLQ
+        failed_dlq_labels: Fallidos / Dead Lettered
         processes: Procesos
         queues: Colas
         recurring: Recurrente
@@ -126,6 +127,7 @@ es:
           queue: 'Cola:'
           visible_at: 'Visible en:'
         retry: Reintentar
+        total_label: mensajes en la cola de mensajes fallidos
       show:
         back: Volver a DLQ
         discard: Descartar
@@ -225,6 +227,10 @@ es:
       bulk_select_all: Seleccionar todo
       bulk_select_row: Seleccionar %{id}
       bulk_selected: seleccionado
+      pagination:
+        next: Siguiente
+        previous: Anterior
+        showing: Mostrando %{from}–%{to} de %{total}
       paused_badge: Pausado
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ es:
         resume: Reanudar
       show:
         arguments: Argumentos
+        back: Volver a colas
         delete_confirm: "¿Eliminar permanentemente esta cola? Esto no se puede deshacer."
         delete_queue: Eliminar cola
         depth: 'Profundidad:'

@@ -84,6 +84,7 @@ ja:
       stats_cards:
         enqueued: キューに追加済み
         failed_dlq: 失敗 / DLQ
+        failed_dlq_labels: 失敗 / Dead Lettered
         processes: プロセス
         queues: キュー
         recurring: 繰り返し
@@ -126,6 +127,7 @@ ja:
           queue: 'キュー:'
           visible_at: '表示日時:'
         retry: 再試行
+        total_label: デッドレターキュー内のメッセージ
       show:
         back: DLQに戻る
         discard: 破棄
@@ -225,6 +227,10 @@ ja:
       bulk_select_all: すべて選択
       bulk_select_row: "%{id}を選択"
       bulk_selected: 選択済み
+      pagination:
+        next: 次へ
+        previous: 前へ
+        showing: "%{total} 件中 %{from}–%{to} 件を表示"
       paused_badge: 一時停止中
       queue_badge:
         dlq: DLQ
@@ -477,6 +483,7 @@ ja:
         resume: 再開
       show:
         arguments: 引数
+        back: キューに戻る
         delete_confirm: このキューを完全に削除しますか？この操作は取り消せません。
         delete_queue: キューを削除
         depth: 深さ：
