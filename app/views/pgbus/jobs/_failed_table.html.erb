@@ -51,7 +51,7 @@
                 <%= link_to f["id"], pgbus.job_path(f["id"]), class: "text-indigo-600 hover:text-indigo-500", data: { turbo_frame: "_top" } %>
               </td>
               <td data-label="Queue" class="px-4 py-3 text-sm text-gray-700"><%= f["queue_name"] %></td>
-              <td data-label="Error" class="px-4 py-3 text-sm text-red-600 max-w-sm truncate" title="<%= "#{f["error_class"]}: #{f["error_message"]}" %>">
+              <td data-label="Error" class="px-4 py-3 text-sm text-red-600 max-w-sm truncate" title="<%= f["error_class"] %>: <%= f["error_message"] %>">
                 <span class="font-medium"><%= f["error_class"] %></span>: <%= truncate(f["error_message"].to_s, length: 80) %>
               </td>
               <td data-label="Retries" class="px-4 py-3 text-sm text-gray-500"><%= f["retry_count"] %></td>
