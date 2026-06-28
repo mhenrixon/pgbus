@@ -89,6 +89,9 @@ RSpec.describe Pgbus do
     before do
       allow(ActiveJob::Base).to receive(:deserialize).and_return(job_double)
       allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
+      # Make stats observable regardless of global config state — record_stat
+      # returns early unless stats_enabled, so assert on a known-true value.
+      allow(config).to receive(:stats_enabled).and_return(true)
       stub_const("Pgbus::JobStat", Class.new)
       allow(Pgbus::JobStat).to receive(:record!)
     end

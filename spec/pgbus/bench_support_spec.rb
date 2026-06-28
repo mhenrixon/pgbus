@@ -6,46 +6,28 @@ require_relative "../../benchmarks/bench_support"
 RSpec.describe "BenchSupport" do
   describe ".header" do
     it "prints a colored title with underline" do
-      output = capture_stdout { BenchSupport.header("Test Title") }
-      expect(output).to include("Test Title")
-      expect(output).to include("─" * "Test Title".length)
+      expect { BenchSupport.header("Test Title") }
+        .to output(/Test Title.*#{"─" * "Test Title".length}/m).to_stdout
     end
   end
 
   describe ".allocations" do
     it "reports allocated and retained objects" do
-      output = capture_stdout do
-        report = BenchSupport.allocations("test alloc") { "hello" * 10 }
-        expect(report).to be_a(MemoryProfiler::Results)
-      end
-      expect(output).to include("test alloc")
-      expect(output).to match(/\d+ objects/)
-      expect(output).to match(/\d+ bytes/)
-      expect(output).to include("retained:")
+      report = nil
+      expect { report = BenchSupport.allocations("test alloc") { "hello" * 10 } }
+        .to output(/test alloc\s+\d+ objects\s+\d+ bytes \(retained: \d+ objects\)/).to_stdout
+      expect(report).to be_a(MemoryProfiler::Results)
     end
   end
 
   describe ".ips" do
     it "runs benchmark-ips with comparison" do
-      output = capture_stdout do
+      expect do
         BenchSupport.ips(time: 0.1, warmup: 0.05) do |x|
           x.report("fast") { 1 + 1 }
           x.report("slow") { (1..100).to_a }
         end
-      end
-      expect(output).to include("fast")
-      expect(output).to include("slow")
+      end.to output(/fast.*slow/m).to_stdout
     end
-  end
-
-  private
-
-  def capture_stdout
-    original = $stdout
-    $stdout = StringIO.new
-    yield
-    $stdout.string
-  ensure
-    $stdout = original
   end
 end

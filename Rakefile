@@ -12,7 +12,17 @@ RuboCop::RakeTask.new
 
 namespace :bench do
   bench_dir = "benchmarks"
-  unit_benches = %w[serialization_bench client_bench executor_bench].freeze
+  # Benches that need a real PostgreSQL/PGMQ (or boot Puma) — excluded from the
+  # no-DB unit suite that bench:all runs in CI.
+  db_benches = %w[connection_pool_bench integration_bench streams_bench].freeze
+  # The unit suite is every *_bench.rb that doesn't need a database, derived
+  # from the directory so a new unit bench is picked up automatically (kept in
+  # sync with bench:one, which globs the same files).
+  unit_benches = Dir["#{bench_dir}/*_bench.rb"]
+                 .map { |f| File.basename(f, ".rb") }
+                 .reject { |name| db_benches.include?(name) }
+                 .sort
+                 .freeze
 
   desc "Run serialization benchmarks"
   task :serialization do
@@ -55,8 +65,14 @@ namespace :bench do
   desc "Run all unit-level benchmarks, save report to tmp/benchmarks/"
   task :all do
     require "fileutils"
+    require "open3"
+    require "rbconfig"
     FileUtils.mkdir_p("tmp/benchmarks")
 
+    # Run each bench under the SAME Ruby + gemset as this Rake process, not a
+    # bare `ruby` from PATH — otherwise before/after numbers are unreliable and
+    # gem loading can break under a different interpreter.
+    ruby = RbConfig.ruby
     failed = []
 
     File.open("tmp/benchmarks/unit.txt", "w") do |report|
@@ -66,13 +82,13 @@ namespace :bench do
         puts "\e[1;35m#{header}\e[0m"
         report.puts header
 
-        result = `ruby #{file} 2>&1`
+        result, status = Open3.capture2e(ruby, file)
         puts result
         report.puts result.gsub(/\e\[[0-9;]*m/, "")
 
-        unless $?.success? # rubocop:disable Style/SpecialGlobalVars
+        unless status.success?
           failed << file
-          report.puts "!!! FAILED (exit #{$?.exitstatus})" # rubocop:disable Style/SpecialGlobalVars
+          report.puts "!!! FAILED (exit #{status.exitstatus})"
         end
       end
     end
