@@ -1,0 +1,377 @@
+{
+  "metric_keys": [
+    "pgbus_queue_job_count"
+  ],
+  "dashboard": {
+    "title": "Pgbus",
+    "description": "PostgreSQL-native job processing and event bus built on PGMQ.\nMonitor job throughput, queue depth, latency, dead letter queues,\nworker processes, event handlers, and stream broadcasts.\n",
+    "visuals": [
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Job status per queue",
+        "description": "Processed, failed, and dead-lettered jobs per queue.",
+        "line_label": "%queue% - %status%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_queue_job_count",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              },
+              {
+                "key": "status",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Throughput per job class",
+        "description": "Number of jobs executed per job class.",
+        "line_label": "%namespace% - %action%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "transaction_duration",
+            "fields": [
+              {
+                "field": "count"
+              }
+            ],
+            "tags": [
+              {
+                "key": "namespace",
+                "value": "background"
+              },
+              {
+                "key": "action",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Duration per job class",
+        "description": "Mean execution time per job class.",
+        "line_label": "%namespace% - %action%",
+        "format": "duration",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "transaction_duration",
+            "fields": [
+              {
+                "field": "mean"
+              }
+            ],
+            "tags": [
+              {
+                "key": "namespace",
+                "value": "background"
+              },
+              {
+                "key": "action",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Queue depth",
+        "description": "Total messages waiting in each queue.",
+        "line_label": "%hostname% - %queue%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_queue_depth",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              },
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Queue latency",
+        "description": "Age of the oldest message in each queue (milliseconds). High latency means consumers can't keep up.",
+        "line_label": "%hostname% - %queue%",
+        "format": "duration",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_queue_latency",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              },
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Dead letter queue depth",
+        "description": "Messages that exceeded max retries and were routed to the DLQ.",
+        "line_label": "%hostname%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_dlq_depth",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Worker / Process count",
+        "description": "Active pgbus supervisor processes.",
+        "line_label": "%hostname%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_active_processes",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Messages sent / read",
+        "description": "PGMQ message throughput: enqueue and dequeue rates.",
+        "line_label": "%name% - %queue%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_messages_sent",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              }
+            ]
+          },
+          {
+            "name": "pgbus_messages_read",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Event handler status",
+        "description": "Processed and failed event handler invocations.",
+        "line_label": "%handler% - %status%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_event_count",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "handler",
+                "value": "*"
+              },
+              {
+                "key": "status",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Worker recycling",
+        "description": "Worker recycle events by reason (max_jobs, max_memory, max_lifetime).",
+        "line_label": "%reason%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_worker_recycled",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "reason",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Database health",
+        "description": "Dead tuples and oldest transaction age — indicators of MVCC pressure on queue tables.",
+        "line_label": "%name% - %hostname%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_total_dead_tuples",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          },
+          {
+            "name": "pgbus_tables_needing_vacuum",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Stream broadcasts",
+        "description": "Turbo Stream broadcast count and active SSE connections.",
+        "line_label": "%name% - %hostname%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_stream_broadcasts_60m",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          },
+          {
+            "name": "pgbus_stream_active_connections",
+            "fields": [
+              {
+                "field": "gauge"
+              }
+            ],
+            "tags": [
+              {
+                "key": "hostname",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

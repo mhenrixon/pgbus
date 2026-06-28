@@ -66,7 +66,7 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
     require "pgbus/integrations/appsignal/probe"
   end
 
-  it "records queue depth gauges per queue" do
+  it "records queue depth gauges per queue with hostname tag" do
     runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
     runner.call
 
@@ -77,16 +77,39 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
       "pgbus_queue_paused",
       "pgbus_queue_oldest_message_age_seconds"
     )
+
+    depth_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_depth" && g[2][:queue] == "pgbus_default" }
+    expect(depth_gauge[2]).to include(hostname: Socket.gethostname)
   end
 
-  it "records process count" do
+  it "records queue latency gauge per queue" do
     runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
     runner.call
 
-    expect(appsignal_class.gauges).to include(["pgbus_active_processes", 2, {}])
+    latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_default" }
+    expect(latency).not_to be_nil
+    expect(latency[1]).to eq(5000.0)
+    expect(latency[2]).to include(hostname: Socket.gethostname)
   end
 
-  it "records summary gauges" do
+  it "skips queue latency when oldest_msg_age_sec is nil" do
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
+    runner.call
+
+    critical_latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_critical" }
+    expect(critical_latency).to be_nil
+  end
+
+  it "records process count with hostname tag" do
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
+    runner.call
+
+    process_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_active_processes" }
+    expect(process_gauge[1]).to eq(2)
+    expect(process_gauge[2]).to include(hostname: Socket.gethostname)
+  end
+
+  it "records summary gauges with hostname tag" do
     runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
     runner.call
 
@@ -97,6 +120,9 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
       "pgbus_total_dead_tuples",
       "pgbus_oldest_transaction_age_seconds"
     )
+
+    dlq_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_dlq_depth" }
+    expect(dlq_gauge[2]).to include(hostname: Socket.gethostname)
   end
 
   it "records stream gauges when stream stats are available" do
@@ -105,6 +131,9 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
 
     names = appsignal_class.gauges.map(&:first)
     expect(names).to include("pgbus_stream_active_connections", "pgbus_stream_avg_fanout")
+
+    stream_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_stream_active_connections" }
+    expect(stream_gauge[2]).to include(hostname: Socket.gethostname)
   end
 
   it "skips stream gauges when stream stats are unavailable" do

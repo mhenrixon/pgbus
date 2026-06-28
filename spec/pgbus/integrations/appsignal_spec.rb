@@ -107,4 +107,29 @@ RSpec.describe "Pgbus::Integrations::Appsignal" do
     expect(Pgbus::Integrations::Appsignal.install!).to be(false)
     expect(Pgbus::Integrations::Appsignal.installed?).to be(false)
   end
+
+  it "exposes the dashboard definition as a Hash" do
+    definition = Pgbus::Integrations::Appsignal.dashboard_definition
+    expect(definition).to be_a(Hash)
+    expect(definition["metric_keys"]).to include("pgbus_queue_job_count")
+    expect(definition["dashboard"]["title"]).to eq("Pgbus")
+  end
+
+  it "exposes all dashboard definitions from the dashboards directory" do
+    definitions = Pgbus::Integrations::Appsignal.dashboard_definitions
+    expect(definitions).to be_an(Array)
+    expect(definitions.length).to eq(3)
+
+    titles = definitions.map { |d| d["dashboard"]["title"] }
+    expect(titles).to include(
+      "Pgbus — Health",
+      "Pgbus — Throughput & Latency",
+      "Pgbus — Streams"
+    )
+
+    definitions.each do |d|
+      expect(d["metric_keys"]).to be_an(Array)
+      expect(d["dashboard"]["visuals"]).to be_an(Array)
+    end
+  end
 end

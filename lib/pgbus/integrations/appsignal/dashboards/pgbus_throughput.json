@@ -1,81 +1,217 @@
 {
-  "title": "Pgbus — Throughput & Latency",
-  "description": "Job and event throughput, perform-duration percentiles, and PGMQ send/read counts. Drives the most common 'is the worker keeping up?' question.",
-  "graphs": [
-    {
-      "title": "Jobs processed per minute",
-      "description": "Successful, failed, and dead-lettered jobs. A spike in failed without a spike in processed usually means a deploy regression.",
-      "line_label": "%queue %job_class %status",
-      "format": "number",
-      "format_input": null,
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_queue_job_count", "fields": ["COUNTER"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Job perform duration (ms)",
-      "description": "Distribution of how long perform_now takes per job class. P95 and P99 are the lines to watch.",
-      "line_label": "%job_class",
-      "format": "duration",
-      "format_input": "millisecond",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_job_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Events processed per minute",
-      "description": "Event-bus handler invocations grouped by routing key.",
-      "line_label": "%routing_key %handler %status",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_event_count", "fields": ["COUNTER"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Event handler duration (ms)",
-      "line_label": "%handler",
-      "format": "duration",
-      "format_input": "millisecond",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_event_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
-      ]
-    },
-    {
-      "title": "PGMQ messages sent (per minute)",
-      "line_label": "%queue",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_messages_sent", "fields": ["COUNTER"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Send duration (ms)",
-      "line_label": "%queue",
-      "format": "duration",
-      "format_input": "millisecond",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_send_duration_ms", "fields": ["MEAN", "P95", "P99"], "tags": [] }
-      ]
-    },
-    {
-      "title": "PGMQ messages read (per minute)",
-      "description": "Messages fetched from queues by workers. Compare against 'sent' to spot backlog growth.",
-      "line_label": "%queue",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_messages_read", "fields": ["COUNTER"], "tags": [] }
-      ]
-    }
-  ]
+  "metric_keys": [
+    "pgbus_queue_job_count"
+  ],
+  "dashboard": {
+    "title": "Pgbus — Throughput & Latency",
+    "description": "Job and event throughput, perform-duration percentiles, and PGMQ send/read counts.\nDrives the most common 'is the worker keeping up?' question.\n",
+    "visuals": [
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Jobs processed per minute",
+        "description": "Successful, failed, and dead-lettered jobs. A spike in failed without a spike in processed usually means a deploy regression.",
+        "line_label": "%queue% - %job_class% - %status%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_queue_job_count",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              },
+              {
+                "key": "job_class",
+                "value": "*"
+              },
+              {
+                "key": "status",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Job perform duration (ms)",
+        "description": "Distribution of how long perform_now takes per job class. P95 and P99 are the lines to watch.",
+        "line_label": "%job_class%",
+        "format": "duration",
+        "draw_null_as_zero": false,
+        "metrics": [
+          {
+            "name": "pgbus_job_duration_ms",
+            "fields": [
+              {
+                "field": "MEAN"
+              },
+              {
+                "field": "P95"
+              },
+              {
+                "field": "P99"
+              }
+            ],
+            "tags": [
+              {
+                "key": "job_class",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Events processed per minute",
+        "description": "Event-bus handler invocations grouped by routing key.",
+        "line_label": "%routing_key% - %handler% - %status%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_event_count",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "routing_key",
+                "value": "*"
+              },
+              {
+                "key": "handler",
+                "value": "*"
+              },
+              {
+                "key": "status",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Event handler duration (ms)",
+        "line_label": "%handler%",
+        "format": "duration",
+        "draw_null_as_zero": false,
+        "metrics": [
+          {
+            "name": "pgbus_event_duration_ms",
+            "fields": [
+              {
+                "field": "MEAN"
+              },
+              {
+                "field": "P95"
+              },
+              {
+                "field": "P99"
+              }
+            ],
+            "tags": [
+              {
+                "key": "handler",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "PGMQ messages sent (per minute)",
+        "line_label": "%queue%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_messages_sent",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Send duration (ms)",
+        "line_label": "%queue%",
+        "format": "duration",
+        "draw_null_as_zero": false,
+        "metrics": [
+          {
+            "name": "pgbus_send_duration_ms",
+            "fields": [
+              {
+                "field": "MEAN"
+              },
+              {
+                "field": "P95"
+              },
+              {
+                "field": "P99"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "PGMQ messages read (per minute)",
+        "description": "Messages fetched from queues by workers. Compare against 'sent' to spot backlog growth.",
+        "line_label": "%queue%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_messages_read",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "queue",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
