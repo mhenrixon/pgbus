@@ -1,10 +1,64 @@
 # Performance Rules
 
+Pgbus must be fast in the places that run on every job enqueue, dequeue, and
+execute cycle. These rules make performance a standing part of every change.
+See `docs/performance.md` for the harness and current numbers.
+
+## The prime directive
+
+**Measure before you change. Measure after. Report both, honestly.**
+
+A performance claim without a same-machine before/after is not allowed in a PR
+or a commit message. If you didn't baseline, you don't have a delta — say
+"measured after only" or capture the baseline (`/perf` automates this with a
+worktree).
+
+## When performance is in scope
+
+Any change to a **hot path** must come with a bench and a before/after:
+
+| Hot path | File | Bench |
+|----------|------|-------|
+| Message enqueue | `lib/pgbus/client.rb` (`send_message`, `send_batch`) | `client_bench.rb` |
+| Message dequeue | `lib/pgbus/client.rb` (`read_batch`) | `client_bench.rb` |
+| Job execution | `lib/pgbus/active_job/executor.rb` | `executor_bench.rb` |
+| JSON serialization | payload encoding/decoding | `serialization_bench.rb` |
+| Connection pool | `lib/pgbus/execution_pools/` | `connection_pool_bench.rb`, `execution_pool_bench.rb` |
+| SSE streaming | `lib/pgbus/streams/` | `streams_bench.rb` |
+
+A pure docs/test/refactor change with no hot-path edit does not need a bench.
+
+## Always Do
+
+1. **Baseline first** — capture `main` numbers BEFORE editing.
+   Run `rake bench:all` or `rake bench:one[name]` for a focused check.
+2. **Add a bench for a new hot path** — `benchmarks/<name>_bench.rb` using the
+   shared `BenchSupport` harness. `rake bench:all` discovers unit benches automatically.
+3. **Report throughput AND allocations** — i/s + obj/call. Flag any non-zero
+   *retained* per operation (a leak).
+4. **Distinguish method-level from system-level wins** — a 2x faster
+   `send_message` does NOT mean 2x faster job processing (PGMQ round-trip +
+   database dominate); it means less gem overhead per enqueue. Say which.
+5. **Update docs + CHANGELOG** — if representative numbers moved, update
+   `docs/performance.md`; note the change under a `perf:` CHANGELOG entry.
+
+## Never Do
+
+1. **Never claim a speedup without a measured before/after.** No "this should be
+   faster." Prove it or don't say it.
+2. **Never optimize a cold path** the bench shows isn't hot — three clear lines
+   beat a clever micro-optimization that obscures behavior for no measured gain.
+3. **Never break a correctness invariant for speed** — the PGMQ client wrapper,
+   queue prefixing, dead letter routing, and visibility timeout are not
+   negotiable. A faster wrong answer is wrong.
+4. **Never trade carefully-tested behavior for a marginal allocation win.** If
+   the bench doesn't prove it matters and the tests don't still pass, don't ship.
+5. **Never add a hard CI perf gate on a flaky threshold** — the `bench` CI job is
+   run-and-report (uploads an artifact), not a merge blocker. Shared runners are
+   too noisy for a hard cutoff.
+
 ## Context Window Management
 
-**Critical**: Your context window can shrink significantly with many tools enabled.
-
-Guidelines:
 - Keep under 10 MCPs enabled per project
 - Avoid loading large files unnecessarily
 - Use targeted searches over broad exploration
@@ -114,8 +168,16 @@ max_worker_lifetime: 3600
 - More threads = more PGMQ connections needed
 - Monitor with `pool.queue_length` vs `pool.max_length`
 
-## Performance Checklist
+## Performance Checklist (before marking perf work complete)
 
+- [ ] Baseline captured BEFORE the change (same machine, same script)
+- [ ] After numbers captured; before/after in the PR body
+- [ ] A bench exists for every hot path touched
+- [ ] Throughput + allocations reported; retained-per-operation is 0
+- [ ] Method-level vs system-level framing is honest
+- [ ] `docs/performance.md` + CHANGELOG updated if numbers moved
+- [ ] `bundle exec rspec` still green
+- [ ] No correctness invariant traded for speed
 - [ ] LISTEN/NOTIFY enabled for active queues
 - [ ] Batch reads used where possible
 - [ ] Connection pool sized appropriately

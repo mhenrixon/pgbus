@@ -29,6 +29,7 @@ PostgreSQL-native job processing and event bus for Rails, built on PGMQ.
 4. **LISTEN/NOTIFY**: Use `enable_notify_insert` for instant wake-up
 5. **Queue prefix**: All queues through `config.queue_name()`
 6. **Visibility timeout**: Always pass `vt:` parameter on reads
+7. **Performance**: Measure before/after for hot-path changes (`/perf`); see `docs/performance.md`
 
 ## Commands
 
@@ -36,6 +37,11 @@ PostgreSQL-native job processing and event bus for Rails, built on PGMQ.
 bundle exec rspec          # Run tests
 bundle exec rubocop        # Lint
 bundle exec rake           # Both
+bundle exec rake bench     # Unit benchmarks (serialization, client, executor)
+bundle exec rake bench:one[client_bench]  # Single benchmark by name
+bundle exec rake bench:memory             # Detailed memory profiling
+bundle exec rake bench:integration        # Real DB benchmarks (requires PGBUS_DATABASE_URL)
+bundle exec rake bench:streams            # SSE streaming benchmarks (requires PGBUS_DATABASE_URL)
 ```
 
 ## Slash Commands
@@ -48,6 +54,7 @@ bundle exec rake           # Both
 | `/tdd` | Enforce RED → GREEN → REFACTOR cycle |
 | `/security` | Security audit (PGMQ ops, connections, auth, deserialization) |
 | `/architect` | Coordinate multi-layer development |
+| `/perf` | Benchmark current branch against main (before/after with worktree) |
 
 ## Architecture
 
@@ -146,5 +153,8 @@ DLQ queues append `_dlq` suffix.
 ## More Documentation
 
 See `.claude/` directory:
-- `commands/` — Slash command definitions
+- `commands/` — Slash command definitions (including `/perf` for benchmarking)
 - `rules/` — Coding style, git workflow, testing, agents, performance, security
+
+See `docs/` directory:
+- `docs/performance.md` — Hot paths, measuring guide, allocation budgets, CI integration

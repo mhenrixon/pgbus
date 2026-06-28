@@ -57,6 +57,35 @@ module BenchStubs
   end
 end
 
+# Shared harness for consistent benchmark reporting across all benchmarks.
+# Provides throughput (benchmark-ips) + allocation tracking (memory_profiler)
+# in a uniform format that the CI report-capture task can parse.
+module BenchSupport # rubocop:disable Style/OneClassPerFile
+  module_function
+
+  def ips(time: 2, warmup: 1, &)
+    Benchmark.ips do |x|
+      x.config(time: time, warmup: warmup)
+      yield x
+      x.compare!
+    end
+  end
+
+  def allocations(label, &)
+    report = MemoryProfiler.report(&)
+    puts format(
+      "  %-32s %8d objects  %10d bytes (retained: %d objects)",
+      label, report.total_allocated, report.total_allocated_memsize, report.total_retained
+    )
+    report
+  end
+
+  def header(title)
+    puts "\n\e[1;36m#{title}\e[0m"
+    puts "─" * title.length
+  end
+end
+
 # Sample payloads of varying sizes
 SMALL_PAYLOAD = { "job_class" => "SmallJob", "job_id" => SecureRandom.uuid,
                   "queue_name" => "default", "arguments" => [1] }.freeze

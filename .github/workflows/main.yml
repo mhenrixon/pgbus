@@ -50,6 +50,29 @@ jobs:
       - name: Verify gem builds
         run: bundle exec rake build
 
+  bench:
+    runs-on: ubuntu-latest
+    name: Benchmarks (report only)
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: Unit benchmarks
+        continue-on-error: true
+        run: bundle exec rake bench:all
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks
+          path: tmp/benchmarks/*.txt
+          if-no-files-found: warn
+
   test:
     runs-on: ubuntu-latest
     name: Ruby ${{ matrix.ruby }}

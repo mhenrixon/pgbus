@@ -11,6 +11,9 @@ require "rubocop/rake_task"
 RuboCop::RakeTask.new
 
 namespace :bench do
+  bench_dir = "benchmarks"
+  unit_benches = %w[serialization_bench client_bench executor_bench].freeze
+
   desc "Run serialization benchmarks"
   task :serialization do
     ruby "benchmarks/serialization_bench.rb"
@@ -41,11 +44,45 @@ namespace :bench do
     ruby "benchmarks/streams_bench.rb"
   end
 
-  desc "Run all benchmarks (unit-level, no DB required)"
-  task all: %i[serialization client executor]
+  desc "Run a single benchmark: rake bench:one[client_bench]"
+  task :one, [:name] do |_t, args|
+    name = args[:name] or abort "Usage: rake bench:one[serialization_bench|client_bench|...]"
+    available = Dir["#{bench_dir}/*_bench.rb"].map { |f| File.basename(f, ".rb") }
+    abort "No such benchmark: #{name}. Available: #{available.sort.join(", ")}" unless available.include?(name)
+    ruby "#{bench_dir}/#{name}.rb"
+  end
+
+  desc "Run all unit-level benchmarks, save report to tmp/benchmarks/"
+  task :all do
+    require "fileutils"
+    FileUtils.mkdir_p("tmp/benchmarks")
+
+    failed = []
+
+    File.open("tmp/benchmarks/unit.txt", "w") do |report|
+      unit_benches.each do |name|
+        file = "#{bench_dir}/#{name}.rb"
+        header = "\n### #{file} ###"
+        puts "\e[1;35m#{header}\e[0m"
+        report.puts header
+
+        result = `ruby #{file} 2>&1`
+        puts result
+        report.puts result.gsub(/\e\[[0-9;]*m/, "")
+
+        unless $?.success? # rubocop:disable Style/SpecialGlobalVars
+          failed << file
+          report.puts "!!! FAILED (exit #{$?.exitstatus})" # rubocop:disable Style/SpecialGlobalVars
+        end
+      end
+    end
+
+    puts "\nSaved report to tmp/benchmarks/unit.txt"
+    abort "\nBenchmark(s) failed: #{failed.join(", ")}" if failed.any?
+  end
 end
 
-desc "Run all benchmarks"
+desc "Run all benchmarks (alias for bench:all)"
 task bench: "bench:all"
 
 desc "Build gem and verify contents"
