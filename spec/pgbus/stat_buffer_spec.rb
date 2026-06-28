@@ -17,7 +17,7 @@ RSpec.describe Pgbus::StatBuffer do
   end
 
   before do
-    stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+    stub_const("Pgbus::JobStat", Class.new)
     allow(Pgbus::JobStat).to receive_messages(table_exists?: true, latency_columns?: true, insert_all: nil)
   end
 

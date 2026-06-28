@@ -283,7 +283,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
   describe "#cleanup_stats (private)" do
     before do
-      stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+      stub_const("Pgbus::JobStat", Class.new)
       allow(Pgbus::JobStat).to receive(:cleanup!).and_return(10)
     end
 

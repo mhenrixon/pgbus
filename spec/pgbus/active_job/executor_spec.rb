@@ -23,7 +23,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     # By default, no concurrency key in payloads
     allow(Pgbus::Concurrency).to receive(:extract_key).and_return(nil)
     # Stub stat recording
-    stub_const("Pgbus::JobStat", Class.new) unless defined?(Pgbus::JobStat)
+    stub_const("Pgbus::JobStat", Class.new)
     allow(Pgbus::JobStat).to receive_messages(record!: nil, table_exists?: true)
     # Stub failure tracking
     allow(Pgbus::FailedEventRecorder).to receive_messages(record!: nil, clear!: nil)

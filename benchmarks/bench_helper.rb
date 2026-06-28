@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-require "benchmark/ips"
-require "memory_profiler"
+require_relative "bench_support"
 require "json"
 require "securerandom"
 require "concurrent"

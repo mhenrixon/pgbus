@@ -11,6 +11,19 @@ require "rubocop/rake_task"
 RuboCop::RakeTask.new
 
 namespace :bench do
+  bench_dir = "benchmarks"
+  # Benches that need a real PostgreSQL/PGMQ (or boot Puma) — excluded from the
+  # no-DB unit suite that bench:all runs in CI.
+  db_benches = %w[connection_pool_bench integration_bench streams_bench].freeze
+  # The unit suite is every *_bench.rb that doesn't need a database, derived
+  # from the directory so a new unit bench is picked up automatically (kept in
+  # sync with bench:one, which globs the same files).
+  unit_benches = Dir["#{bench_dir}/*_bench.rb"]
+                 .map { |f| File.basename(f, ".rb") }
+                 .reject { |name| db_benches.include?(name) }
+                 .sort
+                 .freeze
+
   desc "Run serialization benchmarks"
   task :serialization do
     ruby "benchmarks/serialization_bench.rb"
@@ -41,11 +54,51 @@ namespace :bench do
     ruby "benchmarks/streams_bench.rb"
   end
 
-  desc "Run all benchmarks (unit-level, no DB required)"
-  task all: %i[serialization client executor]
+  desc "Run a single benchmark: rake bench:one[client_bench]"
+  task :one, [:name] do |_t, args|
+    name = args[:name] or abort "Usage: rake bench:one[serialization_bench|client_bench|...]"
+    available = Dir["#{bench_dir}/*_bench.rb"].map { |f| File.basename(f, ".rb") }
+    abort "No such benchmark: #{name}. Available: #{available.sort.join(", ")}" unless available.include?(name)
+    ruby "#{bench_dir}/#{name}.rb"
+  end
+
+  desc "Run all unit-level benchmarks, save report to tmp/benchmarks/"
+  task :all do
+    require "fileutils"
+    require "open3"
+    require "rbconfig"
+    FileUtils.mkdir_p("tmp/benchmarks")
+
+    # Run each bench under the SAME Ruby + gemset as this Rake process, not a
+    # bare `ruby` from PATH — otherwise before/after numbers are unreliable and
+    # gem loading can break under a different interpreter.
+    ruby = RbConfig.ruby
+    failed = []
+
+    File.open("tmp/benchmarks/unit.txt", "w") do |report|
+      unit_benches.each do |name|
+        file = "#{bench_dir}/#{name}.rb"
+        header = "\n### #{file} ###"
+        puts "\e[1;35m#{header}\e[0m"
+        report.puts header
+
+        result, status = Open3.capture2e(ruby, file)
+        puts result
+        report.puts result.gsub(/\e\[[0-9;]*m/, "")
+
+        unless status.success?
+          failed << file
+          report.puts "!!! FAILED (exit #{status.exitstatus})"
+        end
+      end
+    end
+
+    puts "\nSaved report to tmp/benchmarks/unit.txt"
+    abort "\nBenchmark(s) failed: #{failed.join(", ")}" if failed.any?
+  end
 end
 
-desc "Run all benchmarks"
+desc "Run all benchmarks (alias for bench:all)"
 task bench: "bench:all"
 
 desc "Build gem and verify contents"
