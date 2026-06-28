@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require "pgbus/integrations/appsignal/subscriber"
 require "pgbus/integrations/appsignal/probe"
 
@@ -24,6 +25,9 @@ module Pgbus
     # All metric names are prefixed `pgbus_` so they group cleanly in
     # AppSignal's custom-metrics view.
     module Appsignal
+      DASHBOARD_PATH = File.expand_path("appsignal/dashboard.json", __dir__).freeze
+      DASHBOARDS_DIR = File.expand_path("appsignal/dashboards", __dir__).freeze
+
       module_function
 
       def install! # rubocop:disable Naming/PredicateMethod
@@ -41,11 +45,24 @@ module Pgbus
         @installed == true
       end
 
+      def dashboard_definition
+        @dashboard_definition ||= JSON.parse(File.read(DASHBOARD_PATH))
+      end
+
+      def dashboard_definitions
+        @dashboard_definitions ||=
+          Dir[File.join(DASHBOARDS_DIR, "*.json")].map do |path|
+            JSON.parse(File.read(path))
+          end
+      end
+
       # Test hook: tear everything down so a fresh install! can run.
       def reset!
         Subscriber.reset! if defined?(Subscriber)
         Probe.reset! if defined?(Probe)
         @installed = false
+        @dashboard_definition = nil
+        @dashboard_definitions = nil
       end
     end
   end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "socket"
+
 module Pgbus
   module Integrations
     module Appsignal
@@ -10,6 +12,14 @@ module Pgbus
       # method rescues StandardError and returns a safe default — but we
       # still wrap each section in our own rescue so a probe iteration
       # never raises out into the AppSignal probe runner.
+      #
+      # Tagging policy: most pgbus metrics are cluster-wide (the queue
+      # depth in PostgreSQL is the same regardless of which host reads it),
+      # so cluster-wide gauges are emitted WITHOUT a hostname tag — every
+      # host sends the same value and AppSignal's last-write-wins
+      # semantics keep the dashboard correct. The only gauge that is
+      # genuinely per-host is `active_processes`, which the probe filters
+      # to this host before tagging.
       module Probe
         METRIC_PREFIX = "pgbus_"
         private_constant :METRIC_PREFIX
@@ -43,6 +53,7 @@ module Pgbus
         class Runner
           def initialize(data_source: nil)
             @data_source = data_source
+            @hostname = Socket.gethostname
           end
 
           def call
@@ -68,14 +79,18 @@ module Pgbus
               gauge "queue_visible_depth", q[:queue_visible_length], tags
               gauge "queue_paused", q[:paused] ? 1 : 0, tags
               age = q[:oldest_msg_age_sec]
-              gauge "queue_oldest_message_age_seconds", age, tags if age
+              if age
+                gauge "queue_oldest_message_age_seconds", age, tags
+                gauge "queue_latency", age * 1_000, tags
+              end
             end
           rescue StandardError => e
             log_failure("queue metrics", e)
           end
 
           def track_processes
-            gauge "active_processes", data_source.processes.count
+            local_count = data_source.processes.count { |p| p[:hostname] == @hostname }
+            gauge "active_processes", local_count, { hostname: @hostname }
           rescue StandardError => e
             log_failure("process metrics", e)
           end

@@ -1,65 +1,156 @@
 {
-  "title": "Pgbus — Streams",
-  "description": "Real-time SSE pub/sub. Broadcasts, fanout, active connections, and the outbox/recurring scheduler.",
-  "graphs": [
-    {
-      "title": "Stream broadcasts per minute",
-      "line_label": "%stream %deferred",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_stream_broadcast_count", "fields": ["COUNTER"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Active SSE connections",
-      "description": "Estimated from connect/disconnect events in the last 60 minutes. Use as a rough capacity gauge — exact count requires the SSE process telemetry.",
-      "format": "number",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_stream_active_connections", "fields": ["GAUGE"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Average fanout per broadcast",
-      "description": "Mean number of connections that received each broadcast over the last hour.",
-      "format": "number",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_stream_avg_fanout", "fields": ["GAUGE"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Broadcast payload size (bytes)",
-      "description": "Distribution of payload bytes. Use to spot accidentally-streaming-an-entire-page bugs.",
-      "line_label": "%stream",
-      "format": "size",
-      "format_input": "byte",
-      "kind": "timeseries",
-      "metrics": [
-        { "name": "pgbus_stream_broadcast_bytes", "fields": ["MEAN", "P95"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Outbox publishes per minute",
-      "line_label": "%kind",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_outbox_published", "fields": ["COUNTER"], "tags": [] }
-      ]
-    },
-    {
-      "title": "Recurring tasks enqueued per minute",
-      "line_label": "%task",
-      "format": "number",
-      "kind": "timeseries",
-      "draw_null_as_zero": true,
-      "metrics": [
-        { "name": "pgbus_recurring_enqueued", "fields": ["COUNTER"], "tags": [] }
-      ]
-    }
-  ]
+  "metric_keys": [
+    "pgbus_stream_broadcast_count"
+  ],
+  "dashboard": {
+    "title": "Pgbus — Streams",
+    "description": "Real-time SSE pub/sub. Broadcasts, fanout, active connections,\nand the outbox/recurring scheduler.\n",
+    "visuals": [
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Stream broadcasts per minute",
+        "line_label": "%stream% - %deferred%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_stream_broadcast_count",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "stream",
+                "value": "*"
+              },
+              {
+                "key": "deferred",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Active SSE connections",
+        "description": "Estimated from connect/disconnect events in the last 60 minutes.",
+        "line_label": "Active connections",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_stream_active_connections",
+            "fields": [
+              {
+                "field": "GAUGE"
+              }
+            ],
+            "tags": []
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Average fanout per broadcast",
+        "description": "Mean number of connections that received each broadcast over the last hour.",
+        "line_label": "Avg fanout",
+        "format": "number",
+        "draw_null_as_zero": false,
+        "metrics": [
+          {
+            "name": "pgbus_stream_avg_fanout",
+            "fields": [
+              {
+                "field": "GAUGE"
+              }
+            ],
+            "tags": []
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Broadcast payload size (bytes)",
+        "description": "Distribution of payload bytes. Use to spot accidentally-streaming-an-entire-page bugs.",
+        "line_label": "%stream%",
+        "format": "size",
+        "format_input": "byte",
+        "draw_null_as_zero": false,
+        "metrics": [
+          {
+            "name": "pgbus_stream_broadcast_bytes",
+            "fields": [
+              {
+                "field": "MEAN"
+              },
+              {
+                "field": "P95"
+              }
+            ],
+            "tags": [
+              {
+                "key": "stream",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Outbox publishes per minute",
+        "line_label": "%kind%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_outbox_published",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "kind",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "display": "LINE",
+        "title": "Recurring tasks enqueued per minute",
+        "line_label": "%task%",
+        "format": "number",
+        "draw_null_as_zero": true,
+        "metrics": [
+          {
+            "name": "pgbus_recurring_enqueued",
+            "fields": [
+              {
+                "field": "COUNTER"
+              }
+            ],
+            "tags": [
+              {
+                "key": "task",
+                "value": "*"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

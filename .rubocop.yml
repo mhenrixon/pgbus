@@ -65,6 +65,7 @@ RSpec/DescribeClass:
   Exclude:
     - spec/integration/**/*
     - spec/i18n_spec.rb
+    - spec/pgbus/integrations/appsignal/dashboard_spec.rb
 
 RSpec/AnyInstance:
   Enabled: false
