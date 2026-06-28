@@ -1,12 +1,9 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require_relative "../../benchmarks/bench_support"
 
 RSpec.describe "BenchSupport" do
-  before(:all) do # rubocop:disable RSpec/BeforeAfterAll
-    require_relative "../../benchmarks/bench_helper"
-  end
-
   describe ".header" do
     it "prints a colored title with underline" do
       output = capture_stdout { BenchSupport.header("Test Title") }
