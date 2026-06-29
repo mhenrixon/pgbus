@@ -126,7 +126,7 @@ RSpec.describe Pgbus::Web::PayloadFilter do
       end
 
       it "matches regex patterns" do
-        payload = { "credit_card_number" => "4111111111111111", "amount" => 99 }
+        payload = { "credit_card_number" => "test-card-token", "amount" => 99 }
         result = described_class.filter(payload)
 
         expect(result["credit_card_number"]).to eq("[FILTERED]")
@@ -174,6 +174,16 @@ RSpec.describe Pgbus::Web::PayloadFilter do
       expect(parsed["password"]).to eq("[FILTERED]")
       expect(parsed["name"]).to eq("Alice")
     end
+
+    it "filters top-level array input" do
+      array = [{ "password" => "s3cret", "name" => "Alice" }, { "token" => "abc" }]
+      result = described_class.filter_json(array)
+
+      parsed = JSON.parse(result)
+      expect(parsed[0]["password"]).to eq("[FILTERED]")
+      expect(parsed[0]["name"]).to eq("Alice")
+      expect(parsed[1]["token"]).to eq("[FILTERED]")
+    end
   end
 
   describe "default filter patterns" do
@@ -194,7 +204,8 @@ RSpec.describe Pgbus::Web::PayloadFilter do
   end
 
   describe ".rails_filter_parameters" do
-    it "returns nil when Rails is not defined with filter_parameters" do
+    it "returns nil when Rails constant is absent" do
+      hide_const("Rails") if defined?(Rails)
       expect(described_class.send(:rails_filter_parameters)).to be_nil
     end
   end

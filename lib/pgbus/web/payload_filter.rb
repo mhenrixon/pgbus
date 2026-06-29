@@ -33,7 +33,7 @@ module Pgbus
 
         case value
         when nil then nil
-        when Hash
+        when Hash, Array
           JSON.generate(filter(value))
         when String
           parsed = JSON.parse(value)
