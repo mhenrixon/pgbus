@@ -40,7 +40,7 @@
 
   <div class="rounded-lg bg-white dark:bg-gray-800 shadow ring-1 ring-gray-200 dark:ring-gray-700 p-6 mb-6">
     <h2 class="text-sm font-medium text-gray-500 mb-2"><%= t("pgbus.jobs.show.payload") %></h2>
-    <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(JSON.parse(@job["payload"])) rescue @job["payload"] %></pre>
+    <pre class="text-xs text-gray-600 bg-gray-50 dark:bg-gray-900 rounded p-4 overflow-x-auto"><%= JSON.pretty_generate(pgbus_parse_message(@job["payload"])) rescue @job["payload"] %></pre>
   </div>
 
   <div class="flex space-x-2">

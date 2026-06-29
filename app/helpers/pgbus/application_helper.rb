@@ -109,11 +109,12 @@ module Pgbus
     def pgbus_parse_message(message)
       return {} unless message
 
-      case message
-      when Hash then message
-      when String then JSON.parse(message)
-      else {}
-      end
+      parsed = case message
+               when Hash then message
+               when String then JSON.parse(message)
+               else {}
+               end
+      Pgbus::Web::PayloadFilter.filter(parsed)
     rescue JSON::ParserError
       {}
     end
@@ -121,7 +122,8 @@ module Pgbus
     def pgbus_json_preview(json_string, max_length: 120)
       return "—" unless json_string
 
-      text = json_string.is_a?(String) ? json_string : JSON.generate(json_string)
+      filtered = Pgbus::Web::PayloadFilter.filter_json(json_string)
+      text = filtered.is_a?(String) ? filtered : JSON.generate(filtered)
       text.length > max_length ? "#{text[0...max_length]}..." : text
     end
 

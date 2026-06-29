@@ -109,7 +109,8 @@ module Pgbus
     # Web dashboard
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
                   :insights_default_minutes, :base_controller_class, :return_to_app_url,
-                  :metrics_enabled
+                  :metrics_enabled,
+                  :dashboard_filter_parameters, :dashboard_filter_sensitive
 
     # Streams (turbo-rails replacement, SSE-based)
     attr_accessor :streams_enabled, :streams_path, :streams_queue_prefix, :streams_signed_name_secret,
@@ -220,6 +221,8 @@ module Pgbus
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
       @metrics_enabled = true
+      @dashboard_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
+      @dashboard_filter_sensitive = true
 
       @streams_enabled = true
       @streams_path = nil
