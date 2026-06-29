@@ -3,6 +3,7 @@
 require "spec_helper"
 
 require_relative "../../../app/helpers/pgbus/application_helper"
+require_relative "../../../lib/pgbus/web/payload_filter"
 
 RSpec.describe Pgbus::ApplicationHelper do
   let(:helper) { Class.new { include Pgbus::ApplicationHelper }.new }
@@ -165,6 +166,59 @@ RSpec.describe Pgbus::ApplicationHelper do
 
     it "passes short strings through" do
       expect(helper.pgbus_json_preview("short")).to eq("short")
+    end
+
+    it "filters sensitive keys in JSON string input" do
+      json = '{"password":"s3cret","name":"Alice"}'
+      result = helper.pgbus_json_preview(json)
+      expect(result).to include("[FILTERED]")
+      expect(result).not_to include("s3cret")
+      expect(result).to include("Alice")
+    end
+
+    it "filters sensitive keys in Hash input" do
+      hash = { "password" => "s3cret", "name" => "Alice" }
+      result = helper.pgbus_json_preview(hash)
+      expect(result).to include("[FILTERED]")
+      expect(result).not_to include("s3cret")
+    end
+  end
+
+  describe "#pgbus_parse_message (filtering)" do
+    it "filters sensitive keys in parsed hash" do
+      message = '{"job_class":"MyJob","arguments":[{"password":"s3cret","user":"alice"}]}'
+      result = helper.pgbus_parse_message(message)
+
+      expect(result["job_class"]).to eq("MyJob")
+      expect(result["arguments"].first["password"]).to eq("[FILTERED]")
+      expect(result["arguments"].first["user"]).to eq("alice")
+    end
+
+    it "filters sensitive keys in hash input" do
+      message = { "token" => "abc123", "name" => "visible" }
+      result = helper.pgbus_parse_message(message)
+
+      expect(result["token"]).to eq("[FILTERED]")
+      expect(result["name"]).to eq("visible")
+    end
+
+    it "returns {} for nil without filtering" do
+      expect(helper.pgbus_parse_message(nil)).to eq({})
+    end
+
+    it "returns {} for unparseable JSON" do
+      expect(helper.pgbus_parse_message("not json")).to eq({})
+    end
+
+    context "when filtering is disabled" do
+      before { Pgbus.configuration.dashboard_filter_sensitive = false }
+      after { Pgbus.configuration.dashboard_filter_sensitive = true }
+
+      it "does not filter sensitive keys" do
+        message = { "password" => "s3cret" }
+        result = helper.pgbus_parse_message(message)
+        expect(result["password"]).to eq("s3cret")
+      end
     end
   end
 end
