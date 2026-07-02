@@ -8,6 +8,16 @@ module Pgbus
       FORK_WAIT = 1 # seconds between fork checks
       WATCHDOG_INTERVAL = 10 # seconds between stall checks
 
+      # A child that crashes within this many seconds of forking is treated
+      # as crash-looping and restarted with exponential backoff (base
+      # RESTART_BACKOFF_BASE, doubling per consecutive crash, capped at
+      # RESTART_BACKOFF_MAX). A child that ran at least this long — or that
+      # exited cleanly, like a recycling worker — restarts immediately and
+      # resets its crash streak.
+      RESTART_STABLE_UPTIME = 30
+      RESTART_BACKOFF_BASE = 1
+      RESTART_BACKOFF_MAX = 60
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -15,6 +25,8 @@ module Pgbus
         @forks = {}
         @shutting_down = false
         @last_watchdog_at = monotonic_now
+        @pending_restarts = []
+        @crash_counts = Hash.new(0)
       end
 
       def run
@@ -91,7 +103,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :worker, config: worker_config }
+        @forks[pid] = { type: :worker, config: worker_config, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_worker", queues: queues })
@@ -111,7 +123,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :dispatcher }
+        @forks[pid] = { type: :dispatcher, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked dispatcher pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_dispatcher" })
@@ -140,7 +152,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :scheduler }
+        @forks[pid] = { type: :scheduler, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked scheduler pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_scheduler" })
@@ -204,7 +216,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :consumer, config: consumer_config }
+        @forks[pid] = { type: :consumer, config: consumer_config, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_consumer", topics: topics })
@@ -230,7 +242,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :outbox_poller }
+        @forks[pid] = { type: :outbox_poller, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked outbox poller pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_outbox_poller" })
@@ -242,7 +254,10 @@ module Pgbus
 
           process_signals
           reap_children
-          check_stalled_workers unless @shutting_down
+          unless @shutting_down
+            process_pending_restarts
+            check_stalled_workers
+          end
           interruptible_sleep(FORK_WAIT)
         end
       end
@@ -259,13 +274,45 @@ module Pgbus
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
           else
             Pgbus.logger.warn do
-              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus}), restarting..."
+              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus})"
             end
-            restart_child(info)
+            schedule_restart(info, status)
           end
         rescue Errno::ECHILD
           break
         end
+      end
+
+      # Restart policy: a clean exit (worker recycling) or a crash after a
+      # stable run restarts immediately with a fresh crash streak. A crash
+      # within RESTART_STABLE_UPTIME of forking is a crash loop — the child
+      # is dying on boot (bad config, unreachable DB, raising initializer) —
+      # so back off exponentially instead of fork-crash-forking at full speed.
+      # A child with no spawned_at (never set in practice) restarts
+      # immediately, preserving the pre-backoff behavior.
+      def schedule_restart(info, status)
+        key = [info[:type], info[:config]]
+        uptime = info[:spawned_at] ? monotonic_now - info[:spawned_at] : nil
+
+        if status&.success? || uptime.nil? || uptime >= RESTART_STABLE_UPTIME
+          @crash_counts.delete(key)
+          return restart_child(info)
+        end
+
+        crashes = @crash_counts[key] += 1
+        backoff = [RESTART_BACKOFF_BASE * (2**(crashes - 1)), RESTART_BACKOFF_MAX].min
+        Pgbus.logger.warn do
+          "[Pgbus] Child #{info[:type]} crashed after #{uptime.round(1)}s uptime " \
+            "(crash ##{crashes}) — restarting in #{backoff}s"
+        end
+        @pending_restarts << { info: info, at: monotonic_now + backoff }
+      end
+
+      def process_pending_restarts
+        now = monotonic_now
+        due, pending = @pending_restarts.partition { |r| r[:at] <= now }
+        @pending_restarts = pending
+        due.each { |r| restart_child(r[:info]) }
       end
 
       def restart_child(info)

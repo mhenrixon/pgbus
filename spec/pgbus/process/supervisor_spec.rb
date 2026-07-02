@@ -60,7 +60,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
   describe "reap_children (private)" do
     let(:supervisor) { described_class.new }
-    let(:status_double) { instance_double(Process::Status, exitstatus: 1) }
+    let(:status_double) { instance_double(Process::Status, exitstatus: 1, success?: false) }
 
     before do
       supervisor.instance_variable_set(:@forks, { 3001 => { type: :worker, config: { queues: ["default"] } } })
@@ -83,6 +83,130 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       forks = supervisor.instance_variable_get(:@forks)
       expect(forks).not_to have_key(3001)
+    end
+  end
+
+  # A child that dies right after forking (bad config, unreachable DB,
+  # crashing initializer) must not be re-forked in a tight loop — that
+  # burns CPU and floods logs. Crashes within the stable-uptime window
+  # get an exponentially backed-off restart; stable children and clean
+  # exits (worker recycling) restart immediately.
+  describe "restart backoff for crash-looping children" do
+    let(:supervisor) { described_class.new }
+    let(:crash_status) { instance_double(Process::Status, exitstatus: 1, success?: false) }
+    let(:clean_status) { instance_double(Process::Status, exitstatus: 0, success?: true) }
+    let(:worker_config) { { queues: ["default"], threads: 5 } }
+
+    def now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    before do
+      allow(supervisor).to receive(:fork).and_return(6001)
+      allow(Pgbus.logger).to receive(:warn)
+    end
+
+    it "restarts immediately when the crashed child had a stable uptime" do
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 120 } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
+
+      supervisor.send(:reap_children)
+
+      expect(supervisor).to have_received(:fork)
+    end
+
+    it "restarts immediately on a clean exit even with short uptime (worker recycling)" do
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 5 } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, clean_status], nil)
+
+      supervisor.send(:reap_children)
+
+      expect(supervisor).to have_received(:fork)
+    end
+
+    it "delays the restart when the child crashed shortly after forking" do
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 1 } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
+
+      supervisor.send(:reap_children)
+      supervisor.send(:process_pending_restarts)
+
+      expect(supervisor).not_to have_received(:fork)
+    end
+
+    it "runs the pending restart once its backoff has elapsed" do
+      base = now
+      allow(supervisor).to receive(:monotonic_now).and_return(base)
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
+
+      supervisor.send(:reap_children)
+      expect(supervisor).not_to have_received(:fork)
+
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 61)
+      supervisor.send(:process_pending_restarts)
+
+      expect(supervisor).to have_received(:fork)
+    end
+
+    it "escalates the backoff on consecutive rapid crashes" do
+      messages = []
+      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
+
+      base = now
+      allow(supervisor).to receive(:monotonic_now).and_return(base)
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
+      supervisor.send(:reap_children)
+
+      # First backoff elapses; the child is restarted, then crashes again fast.
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 61)
+      supervisor.send(:process_pending_restarts)
+      allow(Process).to receive(:waitpid2).and_return([6001, crash_status], nil)
+      supervisor.send(:reap_children)
+
+      joined = messages.join("\n")
+      expect(joined).to include("restarting in 1s")
+      expect(joined).to include("restarting in 2s")
+    end
+
+    it "resets the crash streak after a stable run" do
+      messages = []
+      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
+
+      base = now
+      allow(supervisor).to receive(:monotonic_now).and_return(base)
+      supervisor.instance_variable_set(
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
+      )
+      allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
+      supervisor.send(:reap_children)
+
+      # Backoff elapses, child restarts and then runs well past the stable window.
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 61)
+      supervisor.send(:process_pending_restarts)
+
+      # Stable crash: restarts immediately and clears the streak...
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 200)
+      allow(Process).to receive(:waitpid2).and_return([6001, crash_status], nil)
+      supervisor.send(:reap_children)
+
+      # ...so the next rapid crash starts back at the base backoff.
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 201)
+      allow(Process).to receive(:waitpid2).and_return([6001, crash_status], nil)
+      supervisor.send(:reap_children)
+
+      expect(messages.join("\n").scan("restarting in 1s").size).to eq(2)
     end
   end
 
