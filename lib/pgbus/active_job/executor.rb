@@ -296,12 +296,33 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Batch discard signal failed: #{e.message}" }
       end
 
+      # Archiving is idempotent — archiving an already-archived message is a
+      # no-op — so a connection error here is safe to retry once, unlike sends
+      # where a retry could duplicate the message. Without the retry, a job
+      # that succeeded but failed to archive redelivers after VT expiry and
+      # runs twice. If the retry also fails, fall through to the normal
+      # failure path (recorded failure + VT-based redelivery).
       def archive_from(queue_name, msg_id, source_queue: nil)
-        if source_queue
-          client.archive_message(source_queue, msg_id, prefixed: false)
-        else
-          client.archive_message(queue_name, msg_id)
+        attempts = 0
+        begin
+          if source_queue
+            client.archive_message(source_queue, msg_id, prefixed: false)
+          else
+            client.archive_message(queue_name, msg_id)
+          end
+        rescue StandardError => e
+          attempts += 1
+          raise unless attempts == 1 && connection_error?(e)
+
+          Pgbus.logger.warn do
+            "[Pgbus::Executor] Archive failed on connection error, retrying once: #{e.message}"
+          end
+          retry
         end
+      end
+
+      def connection_error?(error)
+        defined?(PGMQ::Errors::ConnectionError) && error.is_a?(PGMQ::Errors::ConnectionError)
       end
 
       def handle_dead_letter(message, queue_name, payload, source_queue: nil)
