@@ -37,6 +37,13 @@ module Pgbus
         available_capacity.positive?
       end
 
+      # True only when every slot is free — all in-flight work has finished.
+      # idle? answers "can this pool accept work?"; quiesced? answers
+      # "has this pool drained?". The worker drain loop needs the latter.
+      def quiesced?
+        available_capacity >= @capacity
+      end
+
       def shutdown
         @pool.shutdown
       end

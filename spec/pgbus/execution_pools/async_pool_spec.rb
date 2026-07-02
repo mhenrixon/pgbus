@@ -96,6 +96,34 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
     end
   end
 
+  # idle? means "has at least one free slot"; quiesced? means "every slot
+  # is free". The worker drain loop must use quiesced? — see thread_pool_spec.
+  describe "#quiesced?" do
+    it "is true when nothing is running" do
+      expect(pool).to be_quiesced
+    end
+
+    it "is false while any fiber is in flight, even with free capacity" do
+      barrier = Concurrent::Event.new
+
+      pool.post { barrier.wait(5) }
+      sleep 0.05
+
+      expect(pool).to be_idle
+      expect(pool).not_to be_quiesced
+      barrier.set
+    end
+
+    it "becomes true again after in-flight fibers complete" do
+      done = Concurrent::Event.new
+      pool.post { done.set }
+      done.wait(5)
+      sleep 0.05
+
+      expect(pool).to be_quiesced
+    end
+  end
+
   describe "#on_state_change callback" do
     it "fires when a fiber completes" do
       callback_called = Concurrent::Event.new

@@ -101,6 +101,39 @@ RSpec.describe Pgbus::Process::Worker do
     end
   end
 
+  # The drain loop must wait for ALL in-flight jobs, not exit as soon as one
+  # pool slot frees up. pool.idle? is true with 4 of 5 slots busy — using it
+  # as the drain condition abandoned in-flight jobs to the 30s shutdown
+  # timeout, killing any job that ran longer.
+  describe "drain behavior during #run" do
+    after { Pgbus.stopping = false }
+
+    it "keeps the loop alive until the pool quiesces, then stops" do
+      quiesced = Concurrent::AtomicBoolean.new(false)
+      allow(pool).to receive(:quiesced?) { quiesced.value }
+      allow(worker).to receive(:start_notify_listener)
+      allow(worker).to receive(:claim_and_execute)
+
+      runner = Thread.new { worker.run }
+      deadline = Time.now + 2
+      sleep 0.01 while worker.stats[:state] != :running && Time.now < deadline
+      expect(worker.stats[:state]).to eq(:running)
+
+      worker.graceful_shutdown
+      sleep 0.3
+
+      # One free slot (idle? true) but work still in flight (quiesced? false):
+      # the worker must keep draining.
+      expect(runner).to be_alive
+
+      quiesced.make_true
+      expect(runner.join(2)).to eq(runner), "worker did not stop after pool quiesced"
+    ensure
+      Pgbus.stopping = false
+      runner&.kill
+    end
+  end
+
   describe "#recycle_needed? (private)" do
     it "returns false when no limits are configured" do
       expect(worker.send(:recycle_needed?)).to be false

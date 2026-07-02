@@ -89,7 +89,10 @@ module Pgbus
           refresh_wildcard_queues
 
           break if @lifecycle.stopped?
-          break if @lifecycle.draining? && @pool.idle?
+          # quiesced? (all slots free), not idle? (any slot free) — exiting
+          # with work still in flight abandons those jobs to the 30s
+          # wait_for_termination timeout in shutdown.
+          break if @lifecycle.draining? && @pool.quiesced?
 
           claim_and_execute if @lifecycle.can_process?
           @stat_buffer&.flush_if_due
