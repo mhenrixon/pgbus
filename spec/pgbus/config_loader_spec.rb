@@ -59,5 +59,24 @@ RSpec.describe Pgbus::ConfigLoader do
         described_class.apply({ "nonexistent_setting" => "value" })
       end.not_to raise_error
     end
+
+    it "logs a warning naming each unknown key" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      described_class.apply({ "pooling_interval" => 0.5, "queue_prefix" => "ok" })
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
+    it "does not warn for valid keys" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      described_class.apply({ "queue_prefix" => "custom", "max_retries" => 3 })
+
+      expect(io.string).not_to include("Unknown configuration key")
+    end
   end
 end

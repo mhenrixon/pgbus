@@ -19,7 +19,11 @@ module Pgbus
       config = Pgbus.configuration
       hash.each do |key, value|
         setter = :"#{key}="
-        config.public_send(setter, value) if config.respond_to?(setter)
+        if config.respond_to?(setter)
+          config.public_send(setter, value)
+        else
+          config.logger.warn { "[Pgbus] Unknown configuration key ignored: #{key.inspect} — check for typos in pgbus.yml" }
+        end
       end
       config
     end
