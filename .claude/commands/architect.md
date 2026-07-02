@@ -1,6 +1,6 @@
 ---
 description: "Coordinates development across pgbus layers. Use when planning multi-layer features, orchestrating implementation order, or designing new subsystems."
-model: claude-opus-4-6
+model: opus
 argument-hint: "feature or task to coordinate"
 ---
 

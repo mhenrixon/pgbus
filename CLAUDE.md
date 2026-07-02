@@ -49,12 +49,15 @@ bundle exec rake bench:streams            # SSE streaming benchmarks (requires P
 | Command | Purpose |
 |---------|---------|
 | `/lfg` | Full autonomous workflow: branch → understand → explore → plan → TDD → verify → PR |
+| `/plan` | Fable-powered planning → GitHub issue or `docs/plans/` markdown (read-only; execute with `/lfg`) |
 | `/github-review-comments` | Process unresolved PR review comments |
 | `/review-pr` | Review a PR for pattern compliance |
 | `/tdd` | Enforce RED → GREEN → REFACTOR cycle |
 | `/security` | Security audit (PGMQ ops, connections, auth, deserialization) |
 | `/architect` | Coordinate multi-layer development |
 | `/perf` | Benchmark current branch against main (before/after with worktree) |
+
+Commands and agents pin a model tier via frontmatter aliases: `sonnet` for pattern-following implementation (the default), `opus` for orchestration, security, and full PR review, `fable` for read-only planning (`/plan`). Use aliases, not full model IDs, so commands track the latest model in each tier. When spawning subagents for mechanical work (file finding, pattern scans), pass a cheaper model explicitly rather than letting them inherit the session model.
 
 ## Architecture
 

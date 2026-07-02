@@ -1,6 +1,6 @@
 ---
 description: "Reviews code for security vulnerabilities. Use when auditing PGMQ operations, connection handling, SQL injection risks, or dashboard authentication."
-model: claude-opus-4-6
+model: opus
 argument-hint: "code, feature, or area to review for security"
 ---
 

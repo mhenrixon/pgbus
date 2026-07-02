@@ -1,5 +1,6 @@
 ---
 description: "Benchmark the current branch against main. Use when a change touches a hot path (client ops, executor, serialization, polling, connection pool) or when asked to measure performance."
+model: sonnet
 argument-hint: "optional: a specific bench name (e.g. client_bench)"
 ---
 
