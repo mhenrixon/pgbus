@@ -103,7 +103,7 @@ module Pgbus
     attr_accessor :zombie_detection
 
     # Job stats
-    attr_accessor :stats_enabled
+    attr_accessor :stats_enabled, :stats_flush_size, :stats_flush_interval
     attr_reader :stats_retention # rubocop:disable Style/AccessorGrouping
 
     # Web dashboard
@@ -231,6 +231,11 @@ module Pgbus
 
       @stats_enabled = true
       @stats_retention = 30 * 24 * 3600 # 30 days
+      # StatBuffer flush thresholds. Buffered stats are lost on SIGKILL, so a
+      # smaller size/interval shrinks the residual loss window at the cost of
+      # more frequent bulk inserts. Defaults mirror StatBuffer's own constants.
+      @stats_flush_size = StatBuffer::DEFAULT_FLUSH_SIZE
+      @stats_flush_interval = StatBuffer::DEFAULT_FLUSH_INTERVAL
 
       @connects_to = nil
 
@@ -424,6 +429,13 @@ module Pgbus
       end
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise ArgumentError, "read_timeout must be a positive number or nil to disable"
+      end
+
+      unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
+        raise ArgumentError, "stats_flush_size must be a positive integer"
+      end
+      unless stats_flush_interval.is_a?(Numeric) && stats_flush_interval.positive?
+        raise ArgumentError, "stats_flush_interval must be a positive number"
       end
 
       unless health_port.nil? || (health_port.is_a?(Integer) && health_port.between?(1, 65_535))

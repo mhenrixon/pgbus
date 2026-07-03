@@ -110,6 +110,33 @@ RSpec.describe Pgbus::Process::Worker do
     end
   end
 
+  describe "stat buffer construction" do
+    it "builds the StatBuffer with the configured flush thresholds" do
+      Pgbus.configuration.stats_flush_size = 250
+      Pgbus.configuration.stats_flush_interval = 2
+
+      allow(Pgbus::StatBuffer).to receive(:new).and_call_original
+      described_class.new(queues: %w[default], threads: 5)
+
+      expect(Pgbus::StatBuffer).to have_received(:new).with(flush_size: 250, flush_interval: 2)
+    ensure
+      Pgbus.configuration.stats_flush_size = Pgbus::StatBuffer::DEFAULT_FLUSH_SIZE
+      Pgbus.configuration.stats_flush_interval = Pgbus::StatBuffer::DEFAULT_FLUSH_INTERVAL
+    end
+
+    it "does not build a StatBuffer when stats are disabled" do
+      Pgbus.configuration.stats_enabled = false
+
+      allow(Pgbus::StatBuffer).to receive(:new)
+      built = described_class.new(queues: %w[default], threads: 5)
+
+      expect(Pgbus::StatBuffer).not_to have_received(:new)
+      expect(built.instance_variable_get(:@stat_buffer)).to be_nil
+    ensure
+      Pgbus.configuration.stats_enabled = true
+    end
+  end
+
   describe "#graceful_shutdown" do
     before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
     after { Pgbus.stopping = false }
@@ -121,6 +148,50 @@ RSpec.describe Pgbus::Process::Worker do
 
     it "sets Pgbus.stopping for ActiveJob::Continuation support" do
       expect { worker.graceful_shutdown }.to change(Pgbus, :stopping).from(false).to(true)
+    end
+
+    it "flushes the stat buffer so entries survive a subsequent SIGKILL" do
+      buffer = instance_double(Pgbus::StatBuffer, flush: nil)
+      worker.instance_variable_set(:@stat_buffer, buffer)
+
+      worker.graceful_shutdown
+
+      expect(buffer).to have_received(:flush)
+    end
+
+    it "does not raise when stats are disabled (nil buffer)" do
+      worker.instance_variable_set(:@stat_buffer, nil)
+
+      expect { worker.graceful_shutdown }.not_to raise_error
+    end
+  end
+
+  describe "#check_recycle (private) drain flush" do
+    before do
+      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
+      worker.config.max_jobs_per_worker = 1
+      worker.instance_variable_get(:@jobs_processed).value = 5
+    end
+
+    after do
+      worker.config.max_jobs_per_worker = nil
+      Pgbus.stopping = false
+    end
+
+    it "flushes the stat buffer when a recycle triggers drain" do
+      buffer = instance_double(Pgbus::StatBuffer, flush: nil)
+      worker.instance_variable_set(:@stat_buffer, buffer)
+
+      worker.send(:check_recycle)
+
+      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:draining)
+      expect(buffer).to have_received(:flush)
+    end
+
+    it "does not raise when recycling with stats disabled (nil buffer)" do
+      worker.instance_variable_set(:@stat_buffer, nil)
+
+      expect { worker.send(:check_recycle) }.not_to raise_error
     end
   end
 

@@ -113,6 +113,11 @@ RSpec.describe Pgbus::Configuration do
       expect(config.stats_retention).to eq(30 * 24 * 3600)
     end
 
+    it "has default stats flush thresholds matching StatBuffer defaults" do
+      expect(config.stats_flush_size).to eq(100)
+      expect(config.stats_flush_interval).to eq(5)
+    end
+
     it "has streams_stats_enabled disabled by default (opt-in)" do
       expect(config.streams_stats_enabled).to be false
     end
@@ -1024,6 +1029,41 @@ RSpec.describe Pgbus::Configuration do
     it "rejects false read_timeout" do
       config.read_timeout = false
       expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+    end
+
+    it "rejects zero stats_flush_size" do
+      config.stats_flush_size = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+    end
+
+    it "rejects negative stats_flush_size" do
+      config.stats_flush_size = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+    end
+
+    it "rejects non-integer stats_flush_size" do
+      config.stats_flush_size = 100.5
+      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+    end
+
+    it "accepts a positive stats_flush_size" do
+      config.stats_flush_size = 500
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects zero stats_flush_interval" do
+      config.stats_flush_interval = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_interval/)
+    end
+
+    it "rejects negative stats_flush_interval" do
+      config.stats_flush_interval = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_interval/)
+    end
+
+    it "accepts a positive stats_flush_interval" do
+      config.stats_flush_interval = 2.5
+      expect { config.validate! }.not_to raise_error
     end
 
     it "rejects invalid priority_levels" do

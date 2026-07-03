@@ -1628,6 +1628,17 @@ rails generate pgbus:add_job_stats --database=pgbus
 
 Stats collection is enabled by default (`config.stats_enabled = true`). Old stats are cleaned up by the dispatcher based on `config.stats_retention` (default: 30 days). If the migration hasn't been run yet, stat recording is silently skipped.
 
+Stats are buffered in memory and bulk-inserted rather than written one row per job. Each worker flushes its buffer when it fills to `config.stats_flush_size` entries (default: `100`), when `config.stats_flush_interval` seconds have elapsed (default: `5`), and immediately when the worker begins draining (graceful `TERM` shutdown or a recycle threshold). Tune the thresholds down for high-throughput deployments that want a tighter loss window, or up to reduce insert frequency:
+
+```ruby
+Pgbus.configure do |c|
+  c.stats_flush_size = 500     # flush after 500 buffered stats
+  c.stats_flush_interval = 2   # ...or every 2 seconds, whichever comes first
+end
+```
+
+**Loss window:** stats are advisory (dashboard/insights only), never job payloads. Buffered entries are flushed on graceful shutdown and drain entry, so a clean stop loses nothing. If the supervisor watchdog `SIGKILL`s a stalled worker — which cannot be trapped — up to `stats_flush_interval` seconds / `stats_flush_size` entries accumulated since the last flush are lost. This affects insights accuracy only; no job is dropped.
+
 ### Database tables
 
 Pgbus uses these tables (created via PGMQ and migrations):
@@ -1732,6 +1743,8 @@ PostgreSQL + PGMQ
 | `web_live_updates` | `true` | Enable Turbo Frames auto-refresh on dashboard |
 | `stats_enabled` | `true` | Record job execution stats for insights dashboard |
 | `stats_retention` | `30.days` | How long to keep job stats. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `stats_flush_size` | `100` | Buffered stat entries per worker before a bulk insert flush. Positive integer. Lower = tighter SIGKILL loss window. |
+| `stats_flush_interval` | `5` | Seconds between periodic stat buffer flushes. Positive number. |
 | `streams_test_mode` | `false` | Return a stub SSE response without hijack or background threads. Auto-enabled by `Pgbus::Testing.fake!`/`.inline!`. See [SSE streams in tests](#sse-streams-in-tests). |
 | `streams_stats_enabled` | `false` | Record stream broadcast/connect/disconnect stats (opt-in, can be high volume) |
 | `streams_path` | `nil` | Custom URL path for the SSE endpoint (nil = auto-detected from engine mount) |

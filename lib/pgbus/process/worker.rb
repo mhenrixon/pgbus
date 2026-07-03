@@ -41,7 +41,13 @@ module Pgbus
         @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
         @started_at = Time.current
         @started_at_monotonic = monotonic_now
-        @stat_buffer = config.stats_enabled ? Pgbus::StatBuffer.new : nil
+        @stat_buffer =
+          if config.stats_enabled
+            Pgbus::StatBuffer.new(
+              flush_size: config.stats_flush_size,
+              flush_interval: config.stats_flush_interval
+            )
+          end
         @executor = Pgbus::ActiveJob::Executor.new(stat_buffer: @stat_buffer)
         @wake_signal = WakeSignal.new
         @pool = ExecutionPools.build(
@@ -142,6 +148,13 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Worker shutting down gracefully..." }
         Pgbus.stopping = true
         @lifecycle.transition_to(:draining)
+        # Flush buffered stats at drain entry so the ≤ stats_flush_interval /
+        # stats_flush_size window isn't lost if the supervisor watchdog SIGKILLs
+        # a stalled worker before the drain-loop shutdown flush runs. Runs on the
+        # main loop thread (signals are dispatched via process_signals, not in
+        # trap context), so the DB write is safe. flush is thread-safe and
+        # no-ops when the buffer is empty.
+        @stat_buffer&.flush
         @wake_signal.notify!
       end
 
@@ -490,6 +503,9 @@ module Pgbus
 
         Pgbus.stopping = true
         @lifecycle.transition_to(:draining)
+        # Flush buffered stats on recycle-triggered drain for the same reason as
+        # graceful_shutdown: shrink the SIGKILL loss window. Same-thread, safe.
+        @stat_buffer&.flush
         Pgbus::Instrumentation.instrument(
           "pgbus.worker.recycle",
           reason: reason,
