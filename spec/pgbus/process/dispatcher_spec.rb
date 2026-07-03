@@ -334,13 +334,32 @@ RSpec.describe Pgbus::Process::Dispatcher do
       prefix = dispatcher.config.streams_queue_prefix
       allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
       allow(connection).to receive(:select_values).and_return(["#{prefix}_room1", "#{prefix}_room2"])
-      allow(dispatcher.config).to receive(:archive_compaction_batch_size).and_return(1000)
       allow(mock_client).to receive(:purge_archive).and_return(0)
     end
 
     it "prunes every stream queue when no shutdown occurs" do
       dispatcher.send(:prune_stream_archives)
 
+      expect(mock_client).to have_received(:purge_archive).twice
+    end
+
+    it "purges with the ARCHIVE_COMPACTION_BATCH_SIZE constant, not a config accessor" do
+      # archive_compaction_batch_size was culled from Configuration into the
+      # ARCHIVE_COMPACTION_BATCH_SIZE constant (ca5d346); prune_stream_archives
+      # must use the constant like compact_archives does. Reading a removed
+      # accessor would raise NoMethodError and silently skip all pruning.
+      dispatcher.send(:prune_stream_archives)
+
+      expect(mock_client).to have_received(:purge_archive)
+        .with(anything, older_than: a_kind_of(Time), batch_size: described_class::ARCHIVE_COMPACTION_BATCH_SIZE)
+        .twice
+    end
+
+    it "does not depend on a config.archive_compaction_batch_size accessor" do
+      # The accessor does not exist on Configuration; guard against its
+      # reintroduction as a dependency.
+      expect(dispatcher.config).not_to respond_to(:archive_compaction_batch_size)
+      expect { dispatcher.send(:prune_stream_archives) }.not_to raise_error
       expect(mock_client).to have_received(:purge_archive).twice
     end
 

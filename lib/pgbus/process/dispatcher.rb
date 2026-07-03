@@ -440,7 +440,7 @@ module Pgbus
         prefix = config.streams_queue_prefix
         return if prefix.nil? || prefix.empty?
 
-        batch_size = config.archive_compaction_batch_size || 1000
+        batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
