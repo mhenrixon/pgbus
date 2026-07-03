@@ -123,6 +123,11 @@ module Pgbus
 
     def configure
       yield configuration
+      # Fail loud at boot on an invalid value rather than leaving it dormant
+      # until a worker path consumes it. Checking the flag after the yield
+      # lets a block opt out for itself via `c.eager_validation = false`.
+      configuration.validate! if configuration.eager_validation
+      configuration
     end
 
     def client

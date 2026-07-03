@@ -103,6 +103,48 @@ RSpec.describe Pgbus::ConfigLoader do
       entry = Pgbus.configuration.event_consumers.first
       expect(entry).to eq(topics: %w[orders.*], threads: 4)
     end
+
+    it "raises ArgumentError naming the offending key for an invalid value" do
+      yaml = <<~YAML
+        test:
+          visibility_timeout: 0
+      YAML
+      expect do
+        with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+      end.to raise_error(ArgumentError, /visibility_timeout/)
+    end
+
+    it "raises for an invalid value in a flat (un-sectioned) file" do
+      yaml = <<~YAML
+        polling_interval: 0
+      YAML
+      expect do
+        with_yaml(yaml) { |path| described_class.load(path, env: "development") }
+      end.to raise_error(ArgumentError, /polling_interval/)
+    end
+
+    it "loads a valid file without raising" do
+      yaml = <<~YAML
+        test:
+          visibility_timeout: 45
+          polling_interval: 0.2
+      YAML
+      expect do
+        with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+      end.not_to raise_error
+      expect(Pgbus.configuration.visibility_timeout).to eq(45)
+    end
+
+    it "does not validate when eager_validation: false is set in the YAML" do
+      yaml = <<~YAML
+        test:
+          eager_validation: false
+          polling_interval: 0
+      YAML
+      expect do
+        with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+      end.not_to raise_error
+    end
   end
 
   describe ".load with env sections" do
@@ -213,6 +255,30 @@ RSpec.describe Pgbus::ConfigLoader do
       described_class.apply({ "queue_prefix" => "custom", "max_retries" => 3 })
 
       expect(io.string).not_to include("Unknown configuration key")
+    end
+
+    it "validates after applying keys and raises on an invalid value" do
+      Pgbus.reset!
+      expect do
+        described_class.apply({ "polling_interval" => 0 })
+      end.to raise_error(ArgumentError, /polling_interval/)
+    end
+
+    it "does not validate when eager_validation is disabled" do
+      Pgbus.reset!
+      expect do
+        described_class.apply({ "eager_validation" => false, "polling_interval" => 0 })
+      end.not_to raise_error
+    end
+
+    it "still warns about unknown keys before validating" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      described_class.apply({ "nonexistent_setting" => "value", "queue_prefix" => "ok" })
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("nonexistent_setting")
     end
   end
 end
