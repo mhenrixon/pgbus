@@ -356,6 +356,33 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
   end
 
+  describe "#running? (public)" do
+    it "is false before start" do
+      expect(listener.running?).to be(false)
+    end
+
+    it "is true while the listener thread is alive" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(listener.running?).to be(true)
+    end
+
+    it "reflects thread death after a fatal run_loop error" do
+      # A connection built at start that dies mid-loop drives run_loop through
+      # its rescue/ensure path, which clears @running. The worker relies on
+      # running? flipping to false to detect a dead listener and restart it.
+      allow_any_instance_of(described_class).to receive(:build_connection)
+        .and_raise(PG::Error.new("boot failed"))
+
+      listener.start
+      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+
+      expect(listener.running?).to be(false)
+    end
+  end
+
   describe "#stop" do
     it "interrupts the blocking wait and clears the LISTEN set" do
       listener.start

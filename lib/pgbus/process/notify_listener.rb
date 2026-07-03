@@ -95,11 +95,14 @@ module Pgbus
         @commands << [:unlisten, physical_queue]
       end
 
-      private
-
+      # Public so the owning worker can detect a listener whose thread died
+      # (run_loop hit a fatal error and cleared @running in its ensure) and
+      # restart it. Guarded by @state_mutex like every other @running access.
       def running?
         @state_mutex.synchronize { @running }
       end
+
+      private
 
       def run_loop
         conn = build_connection
