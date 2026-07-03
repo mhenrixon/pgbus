@@ -132,6 +132,32 @@ RSpec.describe Pgbus::Process::Worker do
       Pgbus.stopping = false
       runner&.kill
     end
+
+    # Waiting for quiesced? must be bounded: a permanently-stuck job (e.g. a
+    # TCP read with no timeout) would otherwise hold the drain loop open
+    # forever — recycling never completes, TERM shutdown of the whole process
+    # tree hangs, and the loop keeps stamping loop_tick so the supervisor
+    # watchdog never intervenes. After DRAIN_TIMEOUT the loop must fall
+    # through to shutdown, whose wait_for_termination(30) bounds the rest.
+    it "exits the drain loop after DRAIN_TIMEOUT even if a job never finishes" do
+      stub_const("Pgbus::Process::Worker::DRAIN_TIMEOUT", 0.2)
+      allow(pool).to receive(:quiesced?).and_return(false)
+      allow(worker).to receive(:start_notify_listener)
+      allow(worker).to receive(:claim_and_execute)
+      allow(Pgbus.logger).to receive(:warn)
+
+      runner = Thread.new { worker.run }
+      deadline = Time.now + 2
+      sleep 0.01 while worker.stats[:state] != :running && Time.now < deadline
+      expect(worker.stats[:state]).to eq(:running)
+
+      worker.graceful_shutdown
+
+      expect(runner.join(3)).to eq(runner), "worker did not stop after the drain deadline"
+    ensure
+      Pgbus.stopping = false
+      runner&.kill
+    end
   end
 
   describe "#recycle_needed? (private)" do
