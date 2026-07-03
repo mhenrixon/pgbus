@@ -323,6 +323,25 @@ module Pgbus
       end
     end
 
+    # Snapshot of the PGMQ connection pool: {size:, available:, pool_timeout:}.
+    #
+    # Reads pgmq-ruby's own pool counters (@pgmq.stats -> {size:, available:})
+    # and adds the configured pool_timeout so alerting has the full picture:
+    # how many connections exist, how many are free right now, and how long a
+    # checkout waits before raising a pool-timeout error. Works on both the
+    # dedicated-pool path and the shared-Proc path (where size is 1).
+    #
+    # Purely observational — wrapped in a rescue that returns {} so a probe or
+    # heartbeat reading the pool can never break job processing. Not routed
+    # through with_stale_connection_retry: reading in-memory counters touches no
+    # socket, and a failing read must degrade to {} rather than retry.
+    def pool_stats
+      @pgmq.stats.merge(pool_timeout: config.pool_timeout)
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus::Client] pool_stats unavailable: #{e.class}: #{e.message}" }
+      {}
+    end
+
     def list_queues
       with_stale_connection_retry do
         synchronized { @pgmq.list_queues }
@@ -1074,7 +1093,7 @@ module Pgbus
         yield
       rescue PGMQ::Errors::ConnectionError => e
         attempts += 1
-        raise unless attempts <= STALE_RETRY_ATTEMPTS && stale_connection_error?(e)
+        raise enrich_pool_timeout_error(e) unless attempts <= STALE_RETRY_ATTEMPTS && stale_connection_error?(e)
 
         # Sleep here — in the rescue, *outside* the yielded block — so the
         # backoff never runs while @pgmq_mutex is held: on the shared-connection
@@ -1095,6 +1114,39 @@ module Pgbus
     def stale_connection_error?(error)
       message = error.message.to_s.downcase
       STALE_CONNECTION_PATTERNS.any? { |pattern| message.include?(pattern) }
+    end
+
+    # Substring pgmq-ruby uses when a pool checkout times out — a
+    # ConnectionPool::TimeoutError re-raised as PGMQ::Errors::ConnectionError
+    # "Connection pool timeout: ..." (see PGMQ::Connection#with_connection).
+    # Deliberately NOT in STALE_CONNECTION_PATTERNS: a saturated pool must not
+    # be retried (that just piles more waiters onto an already-exhausted pool).
+    POOL_TIMEOUT_MARKER = "connection pool timeout"
+    private_constant :POOL_TIMEOUT_MARKER
+
+    def pool_timeout_error?(error)
+      error.message.to_s.downcase.include?(POOL_TIMEOUT_MARKER)
+    end
+
+    # A bare "Connection pool timeout" tells an operator nothing actionable.
+    # For that (and only that) error, return a same-class replacement whose
+    # message carries the live pool state and a concrete next step, so the
+    # first signal of saturation is diagnosable. The class is preserved so
+    # callers rescuing PGMQ::Errors::ConnectionError behave identically. Any
+    # other ConnectionError is returned untouched. Enrichment never raises:
+    # pool_stats already rescues to {}, and a formatting failure falls back to
+    # the original error.
+    def enrich_pool_timeout_error(error)
+      return error unless pool_timeout_error?(error)
+
+      stats = pool_stats
+      detail = stats.empty? ? "" : " (pool #{stats})"
+      error.class.new(
+        "#{error.message}#{detail} — " \
+        "raise Pgbus.configuration.pool_size or reduce worker threads"
+      )
+    rescue StandardError
+      error
     end
 
     def serialize(data)

@@ -577,10 +577,31 @@ module Pgbus
             queues: queues, threads: threads, pid: ::Process.pid,
             execution_mode: @execution_mode, consumer_priority: @consumer_priority
           },
-          on_beat: -> { @rate_counter.snapshot! },
+          on_beat: -> { on_heartbeat },
           loop_tick_supplier: -> { @loop_tick_at.get }
         )
         @heartbeat.start
+      end
+
+      # Runs once per heartbeat interval (not per job), so it's the right place
+      # to snapshot the per-beat rate counters and emit connection-pool
+      # observability without touching any per-job hot path. Pool utilization
+      # goes out as a `pgbus.client.pool` event carrying {size:, available:,
+      # pool_timeout:}. Reading the pool must never crash the beat — pool_stats
+      # already rescues to {}, and this whole method is guarded so a listener or
+      # unexpected error can't take down the heartbeat thread.
+      def on_heartbeat
+        @rate_counter.snapshot!
+        emit_pool_stats
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Worker heartbeat hook error: #{e.class}: #{e.message}" }
+      end
+
+      def emit_pool_stats
+        stats = Pgbus.client.pool_stats
+        return if stats.empty?
+
+        Pgbus::Instrumentation.instrument("pgbus.client.pool", stats)
       end
 
       def shutdown

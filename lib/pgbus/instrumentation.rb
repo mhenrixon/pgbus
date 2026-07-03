@@ -11,6 +11,7 @@ module Pgbus
   #   pgbus.client.send_batch      — batch enqueue
   #   pgbus.client.read_batch      — batch dequeue
   #   pgbus.client.read_message    — single message dequeue
+  #   pgbus.client.pool            — connection pool snapshot (size/available/pool_timeout); emitted per worker heartbeat
   #   pgbus.executor.execute       — full job execution (deserialize + perform + archive)
   #   pgbus.job_completed          — job archived successfully
   #   pgbus.job_failed             — job raised; carries :exception_object

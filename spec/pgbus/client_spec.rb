@@ -456,6 +456,29 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#pool_stats" do
+    it "returns pgmq pool stats merged with the configured pool_timeout" do
+      allow(mock_pgmq).to receive(:stats).and_return({ size: 5, available: 3 })
+
+      expect(client.pool_stats).to eq(size: 5, available: 3, pool_timeout: config.pool_timeout)
+    end
+
+    it "reflects the pgmq pool availability as it changes" do
+      allow(mock_pgmq).to receive(:stats).and_return({ size: 8, available: 0 })
+
+      stats = client.pool_stats
+
+      expect(stats[:size]).to eq(8)
+      expect(stats[:available]).to eq(0)
+    end
+
+    it "returns an empty hash instead of raising when pgmq.stats fails" do
+      allow(mock_pgmq).to receive(:stats).and_raise(StandardError, "boom")
+
+      expect(client.pool_stats).to eq({})
+    end
+  end
+
   describe "#verify_connection!" do
     let(:raw_conn) { double("PG::Connection") }
 
@@ -853,6 +876,49 @@ RSpec.describe Pgbus::Client do
 
         expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
         expect(call_count).to eq(1)
+      end
+
+      context "when a pool-timeout ConnectionError is raised" do
+        before do
+          allow(mock_pgmq).to receive(:stats).and_return({ size: 5, available: 0 })
+          allow(mock_pgmq).to receive(:produce)
+            .and_raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+        end
+
+        it "re-raises the same PGMQ::Errors::ConnectionError class" do
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError)
+        end
+
+        it "appends the pool state to the message" do
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError, /size: 5.*available: 0/m)
+        end
+
+        it "appends an actionable hint to the message" do
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError, /pool_size|worker threads/)
+        end
+
+        it "preserves the original pool-timeout text" do
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError, /Connection pool timeout: waited 5.00s/)
+        end
+
+        it "does not enrich non-pool-timeout connection errors" do
+          allow(mock_pgmq).to receive(:produce)
+            .and_raise(PGMQ::Errors::ConnectionError, "Database connection error: server closed the connection unexpectedly")
+
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError) { |e| expect(e.message).not_to match(/worker threads/) }
+        end
+
+        it "still raises even if pool_stats itself fails" do
+          allow(mock_pgmq).to receive(:stats).and_raise(StandardError, "stats boom")
+
+          expect { client.send_message("default", { "k" => "v" }) }
+            .to raise_error(PGMQ::Errors::ConnectionError, /Connection pool timeout/)
+        end
       end
 
       it "gives up after the maximum retries and re-raises" do

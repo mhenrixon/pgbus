@@ -72,6 +72,44 @@ RSpec.describe Pgbus::Process::Worker do
     end
   end
 
+  describe "heartbeat pool observability" do
+    it "snapshots the rate counter on each beat" do
+      counter = worker.instance_variable_get(:@rate_counter)
+      allow(counter).to receive(:snapshot!)
+
+      worker.send(:on_heartbeat)
+
+      expect(counter).to have_received(:snapshot!)
+    end
+
+    it "emits pgbus.client.pool with the client's pool stats on each beat" do
+      allow(mock_client).to receive(:pool_stats).and_return(size: 5, available: 2, pool_timeout: 5)
+      events = []
+      callback = ->(_name, _start, _finish, _id, payload) { events << payload }
+
+      ActiveSupport::Notifications.subscribed(callback, "pgbus.client.pool") do
+        worker.send(:on_heartbeat)
+      end
+
+      expect(events).to contain_exactly(hash_including(size: 5, available: 2, pool_timeout: 5))
+    end
+
+    it "does not let a pool-stats failure break the beat" do
+      allow(mock_client).to receive(:pool_stats).and_raise(StandardError, "boom")
+
+      expect { worker.send(:on_heartbeat) }.not_to raise_error
+    end
+
+    it "wires on_heartbeat as the heartbeat's on_beat hook" do
+      allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(heartbeat)
+
+      worker.send(:start_heartbeat)
+
+      expect(Pgbus::Process::Heartbeat).to have_received(:new)
+        .with(hash_including(on_beat: an_instance_of(Proc)))
+    end
+  end
+
   describe "#graceful_shutdown" do
     before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
     after { Pgbus.stopping = false }
