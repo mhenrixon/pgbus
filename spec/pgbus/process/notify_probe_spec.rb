@@ -77,12 +77,12 @@ RSpec.describe Pgbus::Process::NotifyProbe do
         described_class.probe_notify_delivery!(conn, logger: logger)
         expect(logger).to have_received(:error) do |&block|
           message = block.call
-          expect(message).to match(/worker_notify_database_url/)
-          expect(message).to match(/worker_notify_host/)
-          expect(message).to match(/worker_notify_port/)
-          expect(message).to match(/streams_database_url/)
-          expect(message).to match(/streams_host/)
-          expect(message).to match(/streams_port/)
+          expect(message).to include("worker_notify_database_url")
+          expect(message).to include("worker_notify_host")
+          expect(message).to include("worker_notify_port")
+          expect(message).to include("streams_database_url")
+          expect(message).to include("streams_host")
+          expect(message).to include("streams_port")
         end
       end
 
