@@ -264,6 +264,11 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "#fetch_messages (private)" do
+    # Pin the worker's monotonic clock so cooldown windows are deterministic.
+    def stub_monotonic(seconds)
+      allow(worker).to receive(:monotonic_now).and_return(seconds.to_f)
+    end
+
     context "with a single queue" do
       it "reads a batch from the single queue" do
         worker.send(:fetch_messages, 5)
@@ -361,10 +366,151 @@ RSpec.describe Pgbus::Process::Worker do
           .and_raise(StandardError, error_message)
       end
 
-      it "recovers by falling back to the default queue" do
+      it "defers falling back to the initial queues until the cooldown elapses (issue #209)" do
+        # First fetch evicts the last queue and stamps the eviction clock; the
+        # restore is deferred until RESTORE_COOLDOWN_BASE seconds have passed.
+        stub_monotonic(0)
         worker.send(:fetch_messages, 5)
-        expect(worker.queues).not_to be_empty
-        expect(worker.queues).to eq([worker.config.default_queue])
+        expect(worker.queues).to be_empty
+        expect(worker.instance_variable_get(:@restore_streak)).to eq(0)
+
+        # After the cooldown the leading restore reinstates the initial queues;
+        # the trailing read still fails and re-evicts, so the restore is observed
+        # via the streak increment rather than the (again empty) queue list.
+        stub_monotonic(Pgbus::Process::Worker::RESTORE_COOLDOWN_BASE)
+        worker.send(:fetch_messages, 5)
+        expect(worker.instance_variable_get(:@restore_streak)).to eq(1)
+      end
+    end
+
+    context "with a cooldown on the evict/restore cycle (issue #209)" do
+      let(:worker) { described_class.new(queues: %w[gone], threads: 5) }
+      let(:prefix) { worker.config.queue_prefix }
+      let(:base) { Pgbus::Process::Worker::RESTORE_COOLDOWN_BASE }
+      let(:max) { Pgbus::Process::Worker::RESTORE_COOLDOWN_MAX }
+      let(:warn_messages) { [] }
+
+      # Every read raises "relation does not exist" so the queue stays
+      # permanently evicted — the pathological case the cooldown protects.
+      before do
+        error_message = "ERROR:  relation \"pgmq.q_#{prefix}_gone\" does not exist"
+        allow(mock_client).to receive(:read_batch).and_raise(StandardError, error_message)
+        allow(Pgbus.logger).to receive(:warn) do |&block|
+          warn_messages << block.call if block
+        end
+      end
+
+      # One loop tick at a pinned time. When the queue is permanently gone a
+      # single fetch may BOTH restore the initial queues (leading restore, if the
+      # cooldown elapsed) AND re-evict them (the trailing read still fails), so
+      # the final queue list can't observe "did a restore fire". The restore
+      # streak is the reliable observable: it increments once per actual restore.
+      def tick(now)
+        stub_monotonic(now)
+        worker.send(:fetch_messages, 5)
+      end
+
+      def streak
+        worker.instance_variable_get(:@restore_streak)
+      end
+
+      it "does not restore before the base cooldown after full eviction" do
+        tick(0) # evicts, arms the window, defers restore
+        expect(worker.queues).to be_empty
+        expect(streak).to eq(0) # no restore has fired
+
+        tick(base - 1)         # still inside the window
+        expect(streak).to eq(0)
+      end
+
+      it "restores once the base cooldown has elapsed" do
+        tick(0)
+        expect(streak).to eq(0)
+
+        tick(base)             # cooldown met → restore fires
+        expect(streak).to eq(1)
+      end
+
+      it "doubles the wait on each consecutive failed restore, capped at the max" do
+        tick(0)                # window opens at t=0, wait=base
+        tick(base)             # restore #1 → streak 1, re-evicts, window at t=base, wait=2*base
+        expect(streak).to eq(1)
+
+        tick(base + (2 * base) - 1) # one second short of 2*base → no restore
+        expect(streak).to eq(1)
+        tick(base + (2 * base))     # 2*base elapsed → restore #2
+        expect(streak).to eq(2)
+
+        # Walk the streak up until the raw exponential would exceed the cap, each
+        # step advancing by exactly the (capped) wait so a restore fires.
+        t = base + (2 * base)
+        t += tick_until_capped(from: t)
+
+        # Now base * 2**streak > max: prove the wait is clamped. Advancing by the
+        # raw exponential would obviously restore; advancing by only `max` (which
+        # is strictly less) must ALSO restore — that's the clamp doing its job.
+        expect(base * (2**streak)).to be > max
+        before = streak
+        t += max
+        tick(t)
+        expect(streak).to eq(before + 1)
+      end
+
+      it "logs one deferral warning per cooldown window, not one per tick" do
+        tick(0) # first window: exactly one deferral warn
+        first_window = warn_messages.count { |m| m.include?("next restore attempt") }
+        expect(first_window).to eq(1)
+
+        # Many more ticks inside the SAME window emit no further deferral warns.
+        9.times { |i| tick((i + 1) * (base / 100.0)) }
+        total = warn_messages.count { |m| m.include?("next restore attempt") }
+        expect(total).to eq(1)
+      end
+
+      it "emits a deferral warning naming the next attempt when a window opens" do
+        tick(0)
+        deferral = warn_messages.find { |m| m.include?("next restore attempt") }
+        expect(deferral).to include("#{base}s")
+      end
+
+      # Advance the clock through capped windows until the raw exponential wait
+      # (base * 2**streak) first exceeds RESTORE_COOLDOWN_MAX. Returns elapsed.
+      def tick_until_capped(from:)
+        elapsed = 0
+        while base * (2**streak) <= max
+          wait = [base * (2**streak), max].min
+          elapsed += wait
+          tick(from + elapsed)
+        end
+        elapsed
+      end
+    end
+
+    context "when a successful fetch resets the restore streak (issue #209)" do
+      let(:worker) { described_class.new(queues: %w[flaky], threads: 5) }
+      let(:prefix) { worker.config.queue_prefix }
+      let(:base) { Pgbus::Process::Worker::RESTORE_COOLDOWN_BASE }
+      let(:message) { build_message_double(msg_id: 1) }
+
+      it "restores promptly after a good fetch instead of on the escalated wait" do
+        error_message = "ERROR:  relation \"pgmq.q_#{prefix}_flaky\" does not exist"
+        reads = 0
+        allow(mock_client).to receive(:read_batch) do
+          reads += 1
+          raise StandardError, error_message if reads == 1 # first fetch: queue gone
+
+          [message] # queue recreated: subsequent fetches succeed
+        end
+
+        # Evict, then restore once so the streak advances to 1.
+        stub_monotonic(0)
+        worker.send(:fetch_messages, 5)
+        expect(worker.queues).to be_empty
+        stub_monotonic(base)
+        worker.send(:fetch_messages, 5) # restore (streak → 1) then a clean read
+
+        expect(worker.queues).to eq(%w[flaky])
+        expect(worker.instance_variable_get(:@restore_streak)).to eq(0)
       end
     end
 
