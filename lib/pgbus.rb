@@ -60,6 +60,7 @@ module Pgbus
         loader.inflector.inflect(
           "pgbus" => "Pgbus",
           "cli" => "CLI",
+          "dlq" => "DLQ",
           "dsl" => "DSL",
           "capsule_dsl" => "CapsuleDSL",
           "mcp" => "MCP"

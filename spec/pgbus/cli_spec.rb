@@ -46,6 +46,18 @@ RSpec.describe Pgbus::CLI do
     it "lists the doctor command in help" do
       expect { described_class.start(["help"]) }.to output(/doctor\s+Run environment diagnostics/).to_stdout
     end
+
+    it "lists the dlq command in help" do
+      expect { described_class.start(["help"]) }.to output(/dlq\s+Inspect and drain dead-letter queues/).to_stdout
+    end
+
+    it "routes 'dlq' to the DLQ subcommand handler" do
+      allow(Pgbus::CLI::DLQ).to receive(:start)
+
+      described_class.start(%w[dlq list])
+
+      expect(Pgbus::CLI::DLQ).to have_received(:start).with(%w[list])
+    end
   end
 
   describe ".start with doctor command" do
