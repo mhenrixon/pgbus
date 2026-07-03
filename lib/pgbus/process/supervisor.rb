@@ -8,6 +8,16 @@ module Pgbus
       FORK_WAIT = 1 # seconds between fork checks
       WATCHDOG_INTERVAL = 10 # seconds between stall checks
 
+      # A child that crashes within this many seconds of forking is treated
+      # as crash-looping and restarted with exponential backoff (base
+      # RESTART_BACKOFF_BASE, doubling per consecutive crash, capped at
+      # RESTART_BACKOFF_MAX). A child that ran at least this long — or that
+      # exited cleanly, like a recycling worker — restarts immediately and
+      # resets its crash streak.
+      RESTART_STABLE_UPTIME = 30
+      RESTART_BACKOFF_BASE = 1
+      RESTART_BACKOFF_MAX = 60
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -15,6 +25,8 @@ module Pgbus
         @forks = {}
         @shutting_down = false
         @last_watchdog_at = monotonic_now
+        @pending_restarts = []
+        @crash_counts = Hash.new(0)
       end
 
       def run
@@ -57,7 +69,12 @@ module Pgbus
         # --dispatcher-only CLI flags). Each role is gated by
         # config.role_enabled?, which returns true unless +config.roles+ has
         # been narrowed.
-        Array(config.workers).each { |worker_config| fork_worker(worker_config) } if config.role_enabled?(:workers)
+        if config.role_enabled?(:workers)
+          # slot is the child's position in the config array — it keys the
+          # crash-streak tracking so identically-configured siblings don't
+          # share (and reset) each other's restart backoff.
+          Array(config.workers).each_with_index { |worker_config, slot| fork_worker(worker_config, slot: slot) }
+        end
 
         fork_dispatcher if config.role_enabled?(:dispatcher)
         boot_scheduler if config.role_enabled?(:scheduler)
@@ -65,7 +82,7 @@ module Pgbus
         boot_outbox_poller if config.role_enabled?(:outbox)
       end
 
-      def fork_worker(worker_config)
+      def fork_worker(worker_config, slot: nil)
         queues = worker_config[:queues] || worker_config["queues"] || [config.default_queue]
         threads = worker_config[:threads] || worker_config["threads"] || 5
         single_active = worker_config[:single_active_consumer] || worker_config["single_active_consumer"] || false
@@ -91,7 +108,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :worker, config: worker_config }
+        @forks[pid] = { type: :worker, config: worker_config, slot: slot, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_worker", queues: queues })
@@ -111,7 +128,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :dispatcher }
+        @forks[pid] = { type: :dispatcher, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked dispatcher pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_dispatcher" })
@@ -140,7 +157,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :scheduler }
+        @forks[pid] = { type: :scheduler, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked scheduler pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_scheduler" })
@@ -182,12 +199,12 @@ module Pgbus
       def boot_consumers
         return unless config.event_consumers
 
-        config.event_consumers.each do |consumer_config|
-          fork_consumer(consumer_config)
+        config.event_consumers.each_with_index do |consumer_config, slot|
+          fork_consumer(consumer_config, slot: slot)
         end
       end
 
-      def fork_consumer(consumer_config)
+      def fork_consumer(consumer_config, slot: nil)
         topics = consumer_config[:topics] || consumer_config["topics"]
         threads = consumer_config[:threads] || consumer_config["threads"] || 3
 
@@ -204,7 +221,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :consumer, config: consumer_config }
+        @forks[pid] = { type: :consumer, config: consumer_config, slot: slot, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_consumer", topics: topics })
@@ -230,7 +247,7 @@ module Pgbus
           return
         end
 
-        @forks[pid] = { type: :outbox_poller }
+        @forks[pid] = { type: :outbox_poller, spawned_at: monotonic_now }
         Pgbus.logger.info { "[Pgbus] Forked outbox poller pid=#{pid}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         ErrorReporter.report(e, { action: "fork_outbox_poller" })
@@ -242,7 +259,10 @@ module Pgbus
 
           process_signals
           reap_children
-          check_stalled_workers unless @shutting_down
+          unless @shutting_down
+            process_pending_restarts
+            check_stalled_workers
+          end
           interruptible_sleep(FORK_WAIT)
         end
       end
@@ -259,25 +279,60 @@ module Pgbus
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
           else
             Pgbus.logger.warn do
-              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus}), restarting..."
+              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus})"
             end
-            restart_child(info)
+            schedule_restart(info, status)
           end
         rescue Errno::ECHILD
           break
         end
       end
 
+      # Restart policy: a clean exit (worker recycling) or a crash after a
+      # stable run restarts immediately with a fresh crash streak. A crash
+      # within RESTART_STABLE_UPTIME of forking is a crash loop — the child
+      # is dying on boot (bad config, unreachable DB, raising initializer) —
+      # so back off exponentially instead of fork-crash-forking at full speed.
+      # A child with no spawned_at (never set in practice) restarts
+      # immediately, preserving the pre-backoff behavior.
+      def schedule_restart(info, status)
+        # Keyed on [type, slot], NOT the config hash — identically-configured
+        # sibling workers would otherwise share one streak, letting one
+        # sibling's clean recycle reset another sibling's crash backoff.
+        key = [info[:type], info[:slot]]
+        uptime = info[:spawned_at] ? monotonic_now - info[:spawned_at] : nil
+
+        if status&.success? || uptime.nil? || uptime >= RESTART_STABLE_UPTIME
+          @crash_counts.delete(key)
+          return restart_child(info)
+        end
+
+        crashes = @crash_counts[key] += 1
+        backoff = [RESTART_BACKOFF_BASE * (2**(crashes - 1)), RESTART_BACKOFF_MAX].min
+        Pgbus.logger.warn do
+          "[Pgbus] Child #{info[:type]} crashed after #{uptime.round(1)}s uptime " \
+            "(crash ##{crashes}) — restarting in #{backoff}s"
+        end
+        @pending_restarts << { info: info, at: monotonic_now + backoff }
+      end
+
+      def process_pending_restarts
+        now = monotonic_now
+        due, pending = @pending_restarts.partition { |r| r[:at] <= now }
+        @pending_restarts = pending
+        due.each { |r| restart_child(r[:info]) }
+      end
+
       def restart_child(info)
         case info[:type]
         when :worker
-          fork_worker(info[:config])
+          fork_worker(info[:config], slot: info[:slot])
         when :dispatcher
           fork_dispatcher
         when :scheduler
           fork_scheduler
         when :consumer
-          fork_consumer(info[:config])
+          fork_consumer(info[:config], slot: info[:slot])
         when :outbox_poller
           fork_outbox_poller
         end

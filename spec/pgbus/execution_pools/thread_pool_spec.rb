@@ -92,6 +92,36 @@ RSpec.describe Pgbus::ExecutionPools::ThreadPool do
     end
   end
 
+  # idle? means "has at least one free slot" (can accept work);
+  # quiesced? means "every slot is free" (all in-flight work finished).
+  # The worker drain loop must use quiesced? — exiting on idle? abandons
+  # in-flight jobs to the shutdown timeout.
+  describe "#quiesced?" do
+    it "is true when nothing is running" do
+      expect(pool).to be_quiesced
+    end
+
+    it "is false while any work is in flight, even with free capacity" do
+      barrier = Concurrent::Event.new
+
+      pool.post { barrier.wait(5) }
+      sleep 0.05
+
+      expect(pool).to be_idle
+      expect(pool).not_to be_quiesced
+      barrier.set
+    end
+
+    it "becomes true again after in-flight work completes" do
+      done = Concurrent::Event.new
+      pool.post { done.set }
+      done.wait(2)
+      sleep 0.05
+
+      expect(pool).to be_quiesced
+    end
+  end
+
   describe "#shutdown" do
     it "finishes in-progress work" do
       result = Concurrent::IVar.new

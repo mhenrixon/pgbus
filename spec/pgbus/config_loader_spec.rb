@@ -40,6 +40,77 @@ RSpec.describe Pgbus::ConfigLoader do
     end
   end
 
+  describe ".load with env sections" do
+    let(:sectioned_content) do
+      <<~YAML
+        development:
+          queue_prefix: pgbus_dev
+        production:
+          queue_prefix: pgbus_prod
+      YAML
+    end
+
+    # When the running env has no section, load falls back to applying the
+    # whole file (flat-config support). The env names themselves must not be
+    # flagged as typos.
+    it "does not warn about env section names when falling back to the whole file" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      with_temp_config(sectioned_content) do |path|
+        described_class.load(path, env: "staging")
+      end
+
+      expect(io.string).not_to include("Unknown configuration key")
+    end
+
+    it "still warns about typos inside a matched env section" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      content = <<~YAML
+        test:
+          pooling_interval: 0.5
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "test")
+      end
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
+    # A flat (un-sectioned) config file has top-level setter keys, not env
+    # names, so parsed.key?(env) is false — but that is not the same as
+    # "sectioned config missing this env." Detecting on Hash-valued top
+    # levels distinguishes the two, so typos in flat configs still warn.
+    it "warns about typos in a flat (un-sectioned) config file" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      content = <<~YAML
+        queue_prefix: my_app
+        pooling_interval: 0.5
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "development")
+      end
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
+    def with_temp_config(content)
+      file = Tempfile.new(["pgbus", ".yml"])
+      file.write(content)
+      file.rewind
+      yield file.path
+    ensure
+      file.close
+      file.unlink
+    end
+  end
+
   describe ".apply" do
     it "sets configuration values from a hash" do
       Pgbus.reset!
@@ -58,6 +129,25 @@ RSpec.describe Pgbus::ConfigLoader do
       expect do
         described_class.apply({ "nonexistent_setting" => "value" })
       end.not_to raise_error
+    end
+
+    it "logs a warning naming each unknown key" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      described_class.apply({ "pooling_interval" => 0.5, "queue_prefix" => "ok" })
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
+    it "does not warn for valid keys" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      described_class.apply({ "queue_prefix" => "custom", "max_retries" => 3 })
+
+      expect(io.string).not_to include("Unknown configuration key")
     end
   end
 end

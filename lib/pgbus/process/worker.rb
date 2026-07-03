@@ -50,6 +50,7 @@ module Pgbus
           on_state_change: -> { @wake_signal.notify! }
         )
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
+        @drain_started_at = nil
         @queue_lock = QueueLock.new if @single_active_consumer
         @notify_listener = nil
       end
@@ -71,6 +72,16 @@ module Pgbus
 
       NOTIFY_FALLBACK_POLL_SECONDS = 15
 
+      # Upper bound on the drain phase. Waiting for quiesced? must be
+      # bounded: a permanently-stuck job would otherwise hold the loop open
+      # forever — recycling never completes, TERM shutdown hangs the whole
+      # process tree, and the loop keeps stamping loop_tick so the
+      # supervisor watchdog never intervenes. After this many seconds the
+      # loop falls through to shutdown, whose wait_for_termination(30)
+      # bounds the remaining in-flight work. Tuned via constant rather than
+      # configuration, matching CircuitBreaker/Dispatcher precedent.
+      DRAIN_TIMEOUT = 30
+
       def run
         setup_signals
         start_heartbeat
@@ -89,7 +100,11 @@ module Pgbus
           refresh_wildcard_queues
 
           break if @lifecycle.stopped?
-          break if @lifecycle.draining? && @pool.idle?
+          # quiesced? (all slots free), not idle? (any slot free) — exiting
+          # with work still in flight abandons those jobs to the 30s
+          # wait_for_termination timeout in shutdown. Bounded by
+          # DRAIN_TIMEOUT so a stuck job can't wedge the loop forever.
+          break if @lifecycle.draining? && (@pool.quiesced? || drain_deadline_exceeded?)
 
           claim_and_execute if @lifecycle.can_process?
           @stat_buffer&.flush_if_due
@@ -363,6 +378,20 @@ module Pgbus
         end
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus] Zombie detection failed: #{e.class}: #{e.message}" }
+      end
+
+      # Lazily stamps the drain start on first call — the predicate is only
+      # reached while draining, so this covers every path into the drain
+      # state (graceful_shutdown, recycling) without hooking each one.
+      def drain_deadline_exceeded?
+        @drain_started_at ||= monotonic_now
+        return false unless monotonic_now - @drain_started_at > DRAIN_TIMEOUT
+
+        Pgbus.logger.warn do
+          "[Pgbus] Worker drain deadline (#{DRAIN_TIMEOUT}s) reached with #{@in_flight.value} job(s) " \
+            "still in flight — proceeding to shutdown"
+        end
+        true
       end
 
       def check_recycle

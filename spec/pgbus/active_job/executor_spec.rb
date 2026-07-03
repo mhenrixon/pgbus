@@ -105,6 +105,67 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    # A job that succeeded but failed to archive redelivers after VT expiry
+    # and runs twice. Archiving is idempotent (archiving an already-archived
+    # message is a no-op), so a connection error on archive is safe to retry
+    # once — unlike sends, where a retry could duplicate the message.
+    context "when archive fails with a connection error after the job succeeded" do
+      let(:message) { build_message_double(msg_id: 9, message: message_json, read_ct: 1) }
+
+      before do
+        stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      end
+
+      it "retries the archive once and returns :success" do
+        calls = 0
+        allow(mock_client).to receive(:archive_message) do
+          calls += 1
+          raise PGMQ::Errors::ConnectionError, "server closed the connection unexpectedly" if calls == 1
+
+          true
+        end
+
+        result = executor.execute(message, queue_name)
+
+        expect(mock_client).to have_received(:archive_message).with(queue_name, 9).twice
+        expect(result).to eq(:success)
+      end
+
+      it "falls through to the failure path when the retry also fails" do
+        allow(mock_client).to receive(:archive_message)
+          .and_raise(PGMQ::Errors::ConnectionError, "server closed the connection unexpectedly")
+
+        result = executor.execute(message, queue_name)
+
+        expect(mock_client).to have_received(:archive_message).twice
+        expect(result).to eq(:failed)
+      end
+
+      it "does not retry archive errors that are not connection errors" do
+        allow(mock_client).to receive(:archive_message).and_raise(StandardError, "boom")
+
+        result = executor.execute(message, queue_name)
+
+        expect(mock_client).to have_received(:archive_message).once
+        expect(result).to eq(:failed)
+      end
+
+      it "retries archive on the source_queue path too" do
+        calls = 0
+        allow(mock_client).to receive(:archive_message) do
+          calls += 1
+          raise PGMQ::Errors::ConnectionError, "connection reset by peer" if calls == 1
+
+          true
+        end
+
+        result = executor.execute(message, queue_name, source_queue: "pgbus_default_p0")
+
+        expect(mock_client).to have_received(:archive_message).with("pgbus_default_p0", 9, prefixed: false).twice
+        expect(result).to eq(:success)
+      end
+    end
+
     # Regression: issue #126. Under `execution_mode: :async` the reactor or a
     # nested Async/Sync block can raise Async::Stop / Async::Cancel, both of
     # which inherit from Exception (NOT StandardError). A `rescue StandardError`
