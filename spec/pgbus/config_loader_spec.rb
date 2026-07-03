@@ -80,6 +80,26 @@ RSpec.describe Pgbus::ConfigLoader do
       expect(io.string).to include("pooling_interval")
     end
 
+    # A flat (un-sectioned) config file has top-level setter keys, not env
+    # names, so parsed.key?(env) is false — but that is not the same as
+    # "sectioned config missing this env." Detecting on Hash-valued top
+    # levels distinguishes the two, so typos in flat configs still warn.
+    it "warns about typos in a flat (un-sectioned) config file" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      content = <<~YAML
+        queue_prefix: my_app
+        pooling_interval: 0.5
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "development")
+      end
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
     def with_temp_config(content)
       file = Tempfile.new(["pgbus", ".yml"])
       file.write(content)

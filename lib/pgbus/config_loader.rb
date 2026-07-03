@@ -11,15 +11,19 @@ module Pgbus
       env ||= (defined?(Rails) && Rails.respond_to?(:env) && Rails.env) || ENV.fetch("PGBUS_ENV", "development")
       raw = File.read(path)
       parsed = YAML.safe_load(ERB.new(raw).result, permitted_classes: [Symbol], aliases: true)
-      if parsed.key?(env)
-        apply(parsed.fetch(env))
+      # Distinguish sectioned (top-level env keys mapping to Hashes) from
+      # flat (top-level setter keys mapping to scalars/arrays). parsed.key?(env)
+      # alone can't tell them apart, so a flat file silently lost its typo
+      # warnings whenever no env section happened to match its keys.
+      if sectioned?(parsed)
+        apply(parsed.fetch(env)) if parsed.key?(env)
       else
-        # No section for this env — treat the file as flat (un-sectioned)
-        # config. Suppress unknown-key warnings here: if the file IS
-        # env-sectioned and this env just isn't in it, every other env name
-        # ("production", "staging", ...) would be flagged as a typo.
-        apply(parsed, warn_unknown: false)
+        apply(parsed)
       end
+    end
+
+    def sectioned?(parsed)
+      parsed.is_a?(Hash) && parsed.any? && parsed.values.all?(Hash)
     end
 
     def apply(hash, warn_unknown: true)
