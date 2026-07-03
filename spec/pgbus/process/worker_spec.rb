@@ -679,7 +679,7 @@ RSpec.describe Pgbus::Process::Worker do
       instance_double(
         Pgbus::Process::NotifyListener,
         start: nil, stop: nil, add_queue: nil, remove_queue: nil,
-        listening_to: []
+        listening_to: [], running?: true
       ).tap { |l| allow(l).to receive(:start).and_return(l) }
     end
 
@@ -746,6 +746,17 @@ RSpec.describe Pgbus::Process::Worker do
         worker.instance_variable_set(:@notify_listener, fake_listener)
         expect(worker.send(:wake_timeout))
           .to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
+      end
+
+      it "returns effective_polling_interval when the listener thread has died" do
+        # A listener whose thread crashed (running? false) will never wake the
+        # loop. Treating it as active would keep the wait at the long NOTIFY
+        # ceiling — the loop would sleep 15s between retries while jobs pile
+        # up. Fall back to the polling interval until it's restarted.
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(fake_listener).to receive(:running?).and_return(false)
+        worker.instance_variable_set(:@notify_listener, fake_listener)
+        expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
       end
     end
 
@@ -833,6 +844,111 @@ RSpec.describe Pgbus::Process::Worker do
         expect { worker.send(:start_notify_listener) }.not_to raise_error
         expect(worker.instance_variable_get(:@notify_listener)).to be_nil
         expect(Pgbus.logger).to have_received(:error)
+      end
+    end
+
+    describe "#ensure_notify_listener" do
+      # The self-healing loop: a listener that never started (nil) or whose
+      # thread died (running? false) must be retried from the worker loop,
+      # throttled by exponential backoff so a persistent outage doesn't spin
+      # start attempts every tick.
+      let(:base) { described_class::NOTIFY_RETRY_BASE_SECONDS }
+
+      before { allow(worker).to receive(:notify_wakeup?).and_return(true) }
+
+      it "is a no-op when notify_wakeup? is off" do
+        allow(worker).to receive(:notify_wakeup?).and_return(false)
+        allow(worker).to receive(:start_notify_listener)
+        worker.send(:ensure_notify_listener)
+        expect(worker).not_to have_received(:start_notify_listener)
+      end
+
+      it "is a no-op while a healthy listener is running" do
+        worker.instance_variable_set(:@notify_listener, fake_listener)
+        allow(worker).to receive(:start_notify_listener)
+        worker.send(:ensure_notify_listener)
+        expect(worker).not_to have_received(:start_notify_listener)
+      end
+
+      it "does not retry before the backoff window elapses" do
+        # Listener is absent and a retry was just scheduled into the future.
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) + base)
+        allow(worker).to receive(:start_notify_listener)
+        worker.send(:ensure_notify_listener)
+        expect(worker).not_to have_received(:start_notify_listener)
+      end
+
+      it "retries start once the backoff window has elapsed" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        allow(worker).to receive(:start_notify_listener) do
+          worker.instance_variable_set(:@notify_listener, fake_listener)
+        end
+
+        worker.send(:ensure_notify_listener)
+        expect(worker).to have_received(:start_notify_listener)
+      end
+
+      it "doubles the backoff each time the restart fails" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        # start leaves @notify_listener nil (failed to start).
+        allow(worker).to receive(:start_notify_listener)
+
+        worker.send(:ensure_notify_listener)
+        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base * 2)
+
+        # Second failed attempt (advance clock past the new window) doubles again.
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.send(:ensure_notify_listener)
+        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base * 4)
+      end
+
+      it "caps the backoff at NOTIFY_RETRY_MAX_SECONDS" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_backoff, described_class::NOTIFY_RETRY_MAX_SECONDS)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        allow(worker).to receive(:start_notify_listener)
+
+        worker.send(:ensure_notify_listener)
+        expect(worker.instance_variable_get(:@notify_retry_backoff))
+          .to eq(described_class::NOTIFY_RETRY_MAX_SECONDS)
+      end
+
+      it "resets the backoff after a successful restart" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_backoff, base * 8)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        allow(worker).to receive(:start_notify_listener) do
+          worker.instance_variable_set(:@notify_listener, fake_listener)
+        end
+
+        worker.send(:ensure_notify_listener)
+        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base)
+      end
+
+      it "stops a dead listener before restarting it" do
+        dead = fake_listener
+        allow(dead).to receive(:running?).and_return(false)
+        worker.instance_variable_set(:@notify_listener, dead)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        allow(worker).to receive(:start_notify_listener)
+
+        worker.send(:ensure_notify_listener)
+        expect(dead).to have_received(:stop)
+      end
+
+      it "reconciles queues after a successful restart (wildcard workers)" do
+        worker.instance_variable_set(:@notify_listener, nil)
+        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        allow(worker).to receive(:start_notify_listener) do
+          worker.instance_variable_set(:@notify_listener, fake_listener)
+        end
+        allow(worker).to receive(:sync_notify_listener_queues)
+
+        worker.send(:ensure_notify_listener)
+        expect(worker).to have_received(:sync_notify_listener_queues)
       end
     end
 

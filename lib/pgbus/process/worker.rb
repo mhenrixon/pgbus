@@ -53,6 +53,8 @@ module Pgbus
         @drain_started_at = nil
         @queue_lock = QueueLock.new if @single_active_consumer
         @notify_listener = nil
+        @notify_retry_at = 0.0
+        @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
       end
 
       def stats
@@ -71,6 +73,15 @@ module Pgbus
       end
 
       NOTIFY_FALLBACK_POLL_SECONDS = 15
+
+      # NotifyListener startup can fail on a transient boot-time condition (DB
+      # restarting, failover, DNS blip) or its thread can die mid-run. Rather
+      # than downgrade to blind polling until process restart, the loop retries
+      # from ensure_notify_listener on an exponential backoff: NOTIFY_RETRY_BASE
+      # doubling up to NOTIFY_RETRY_MAX. Constant-tuned, matching DRAIN_TIMEOUT
+      # and CircuitBreaker/Dispatcher precedent.
+      NOTIFY_RETRY_BASE_SECONDS = 5
+      NOTIFY_RETRY_MAX_SECONDS = 300
 
       # Upper bound on the drain phase. Waiting for quiesced? must be
       # bounded: a permanently-stuck job would otherwise hold the loop open
@@ -98,6 +109,7 @@ module Pgbus
           process_signals
           check_recycle
           refresh_wildcard_queues
+          ensure_notify_listener
 
           break if @lifecycle.stopped?
           # quiesced? (all slots free), not idle? (any slot free) — exiting
@@ -455,7 +467,11 @@ module Pgbus
       end
 
       def wake_timeout
-        return effective_polling_interval unless notify_wakeup? && @notify_listener
+        # A dead listener (running? false) will never wake the loop, so treat
+        # it as absent and keep polling at the short interval until
+        # ensure_notify_listener restarts it. Only a live listener earns the
+        # long NOTIFY-mode ceiling.
+        return effective_polling_interval unless notify_wakeup? && @notify_listener&.running?
 
         [effective_polling_interval, config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
       end
@@ -487,6 +503,42 @@ module Pgbus
         Pgbus.logger.error do
           "[Pgbus] NotifyListener failed to start, falling back to polling: #{e.class}: #{e.message}"
         end
+      end
+
+      # Self-heal a NotifyListener that never started or whose thread died.
+      # Called each loop iteration but gated by a monotonic backoff timestamp
+      # so a persistent outage retries on 5s→…→300s intervals, not every tick
+      # (mirrors refresh_wildcard_queues' throttle). A restarted listener has
+      # its queue subscription reconciled (wildcard workers) and the backoff
+      # reset; a still-failing restart doubles the backoff up to the cap.
+      def ensure_notify_listener
+        return unless notify_wakeup?
+        return if @notify_listener&.running?
+        return if monotonic_now < @notify_retry_at
+
+        stop_dead_notify_listener
+        start_notify_listener
+
+        if @notify_listener&.running?
+          sync_notify_listener_queues
+          @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
+        else
+          @notify_retry_backoff = [@notify_retry_backoff * 2, NOTIFY_RETRY_MAX_SECONDS].min
+        end
+        @notify_retry_at = monotonic_now + @notify_retry_backoff
+      end
+
+      # Stop a listener whose thread died so its dedicated PG connection is
+      # released before start_notify_listener allocates a fresh one. A nil or
+      # still-running listener is left alone (the caller already gated on it).
+      def stop_dead_notify_listener
+        return if @notify_listener.nil?
+
+        @notify_listener.stop
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Failed to stop dead NotifyListener: #{e.class}: #{e.message}" }
+      ensure
+        @notify_listener = nil
       end
 
       def sync_notify_listener_queues
