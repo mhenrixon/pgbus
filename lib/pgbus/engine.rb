@@ -87,6 +87,20 @@ module Pgbus
       end
     end
 
+    # Generic metrics adapter. Opt-in via config.metrics_backend; nil (default)
+    # installs no subscription, so there is zero overhead when unused. Runs
+    # independently of AppSignal — both consume the same pgbus.* events and both
+    # can be active at once.
+    initializer "pgbus.metrics", after: :load_config_initializers do
+      ActiveSupport.on_load(:after_initialize) do
+        next if Pgbus.configuration.metrics_backend.nil?
+
+        backend = Pgbus::Metrics.resolve_backend(Pgbus.configuration.metrics_backend)
+        Pgbus::Metrics::Subscriber.install!(backend: backend)
+        Pgbus.logger.info { "[Pgbus] Metrics subscriber installed (#{backend.class})" }
+      end
+    end
+
     # Install the watermark cache middleware ahead of the app's own
     # middleware so the thread-local cache is cleared between every
     # Rack request. Without this, repeated page renders served by the

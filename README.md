@@ -758,9 +758,58 @@ Three importable AppSignal dashboards ship with the gem:
 
 Import via the AppSignal dashboard UI ("New dashboard" → "Import JSON") or the AppSignal API.
 
+### Metrics adapter (Prometheus / StatsD)
+
+AppSignal is one consumer of pgbus's `ActiveSupport::Notifications` events. For teams on Prometheus, Datadog, or plain StatsD, the built-in **metrics adapter** consumes the same events and forwards them to a backend — no hand-written subscribers. It is **off by default** (`metrics_backend = nil` installs nothing, zero overhead) and runs independently of AppSignal, so both can be active at once.
+
+```ruby
+Pgbus.configure do |c|
+  c.metrics_backend = :prometheus   # in-process registry, scraped via the exporter
+  # or
+  c.metrics_backend = :statsd       # UDP datagrams (DogStatsD dialect)
+  c.statsd_host = "127.0.0.1"       # default
+  c.statsd_port = 8125              # default
+end
+```
+
+You can also assign a custom backend instance — any object subclassing `Pgbus::Metrics::Backend` (implementing `increment`, `gauge`, `histogram`):
+
+```ruby
+c.metrics_backend = MyOpenTelemetryBackend.new
+```
+
+**Metrics emitted** (all `pgbus_`-prefixed, low-cardinality tags only):
+
+| Metric | Type | Tags |
+|--------|------|------|
+| `pgbus_queue_job_count` | counter | `queue`, `job_class`, `status` (`processed`/`failed`/`dead_lettered`) |
+| `pgbus_job_duration_ms` | histogram | `queue`, `job_class` |
+| `pgbus_event_count` | counter | `handler`, `routing_key`, `status` |
+| `pgbus_event_duration_ms` | histogram | `handler`, `routing_key` |
+| `pgbus_messages_sent` / `pgbus_messages_read` | counter | `queue` |
+| `pgbus_stream_broadcast_count` | counter | `stream`, `deferred` |
+| `pgbus_outbox_published` | counter | `kind` |
+| `pgbus_recurring_enqueued` | counter | `task`, `class_name` |
+| `pgbus_worker_recycled` | counter | `reason` |
+
+A backend that raises (registry bug, StatsD socket down) is logged and swallowed — a metrics failure never propagates into the thread that emitted the event.
+
+#### Mounting the Prometheus exporter
+
+The `:prometheus` backend is an in-process registry; expose it for scraping by mounting `Pgbus::Metrics::PrometheusExporter` — a self-contained Rack app that renders text exposition format (v0.0.4):
+
+```ruby
+# config/routes.rb
+mount Pgbus::Metrics::PrometheusExporter.new => "/metrics"
+```
+
+With no argument the exporter reads `config.metrics_backend`, so a single `config.metrics_backend = :prometheus` wires both the subscriber and the exporter to the same registry. The app is plain Rack, so it also runs under any standalone Rack server (e.g. a one-line `config.ru`) — point Prometheus at `GET /metrics`.
+
+> The exporter returns **503** if `metrics_backend` is not a Prometheus backend (e.g. it's `:statsd` or `nil`), since there is no in-process registry to render.
+
 #### Custom subscriptions
 
-The integration is built on `ActiveSupport::Notifications`. If you want to push pgbus telemetry into a different APM (Datadog, New Relic, OpenTelemetry), subscribe directly:
+The metrics adapter above covers Prometheus and StatsD. For anything else (New Relic, OpenTelemetry, a bespoke sink), the events are built on `ActiveSupport::Notifications` — subscribe directly:
 
 ```ruby
 ActiveSupport::Notifications.subscribe(/^pgbus\./) do |name, start, finish, _id, payload|
@@ -1690,6 +1739,9 @@ PostgreSQL + PGMQ
 | `error_reporters` | `[]` | Array of callables invoked on caught exceptions. Each receives `(exception, context_hash)`. |
 | `log_format` | `:text` | Log formatter (`:text` or `:json`). Sets `logger.formatter` automatically. |
 | `metrics_enabled` | `true` | Enable Prometheus-compatible metrics on the dashboard |
+| `metrics_backend` | `nil` | Generic metrics adapter: `nil` (off), `:prometheus`, `:statsd`, or a `Pgbus::Metrics::Backend` instance |
+| `statsd_host` | `"127.0.0.1"` | StatsD UDP host (used when `metrics_backend = :statsd`) |
+| `statsd_port` | `8125` | StatsD UDP port (used when `metrics_backend = :statsd`) |
 
 ## Development
 

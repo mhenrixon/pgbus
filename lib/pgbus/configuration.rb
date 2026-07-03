@@ -143,6 +143,14 @@ module Pgbus
     # Set to false to opt out without uninstalling the appsignal gem.
     attr_accessor :appsignal_enabled, :appsignal_probe_enabled
 
+    # Generic metrics adapter (Pgbus::Metrics). Consumes the same pgbus.*
+    # instrumentation events as AppSignal and forwards them to a backend:
+    #   nil (default) — install nothing, zero overhead
+    #   :prometheus   — in-process registry, scraped via PrometheusExporter
+    #   :statsd       — UDP datagrams to statsd_host:statsd_port
+    #   a Pgbus::Metrics::Backend instance — a custom backend
+    attr_accessor :metrics_backend, :statsd_host, :statsd_port
+
     # When true (default), Pgbus.configure and ConfigLoader.apply run
     # validate! after applying settings, so an invalid value fails loud at
     # boot instead of dormant until a worker path consumes it. Set false to
@@ -306,6 +314,11 @@ module Pgbus
       @appsignal_enabled = true
       @appsignal_probe_enabled = true
 
+      # Generic metrics adapter: off by default (no subscription installed).
+      @metrics_backend = nil
+      @statsd_host = "127.0.0.1"
+      @statsd_port = 8125
+
       @eager_validation = true
     end
 
@@ -440,6 +453,7 @@ module Pgbus
       end
 
       validate_streams!
+      validate_metrics_backend!
 
       self
     end
@@ -487,6 +501,17 @@ module Pgbus
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
       raise ArgumentError, "streams_orphan_threshold must be a positive number or nil to disable"
+    end
+
+    def validate_metrics_backend!
+      value = metrics_backend
+      return if value.nil?
+      return if %i[prometheus statsd].include?(value)
+      return if defined?(Pgbus::Metrics::Backend) && value.is_a?(Pgbus::Metrics::Backend)
+
+      raise ArgumentError,
+            "metrics_backend must be nil, :prometheus, :statsd, or a " \
+            "Pgbus::Metrics::Backend instance (got #{value.inspect})"
     end
 
     # Returns true if the given stream name should be durable based on
