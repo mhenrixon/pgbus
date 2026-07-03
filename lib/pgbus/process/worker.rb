@@ -445,16 +445,9 @@ module Pgbus
         true
       end
 
+      # Instrumentation payload may report a value up to MEMORY_CHECK_TTL seconds old.
       def current_memory_mb
-        if RUBY_PLATFORM.include?("darwin")
-          `ps -o rss= -p #{::Process.pid}`.to_i / 1024
-        else
-          begin
-            File.read("/proc/#{::Process.pid}/statm").split[1].to_i * 4096 / (1024 * 1024)
-          rescue Errno::ENOENT
-            0
-          end
-        end
+        MemoryUsage.current_mb
       end
 
       def notify_wakeup?
