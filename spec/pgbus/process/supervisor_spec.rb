@@ -436,6 +436,46 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect { supervisor.send(:bootstrap_queues) }.not_to raise_error
       expect(Pgbus.logger).to have_received(:error).at_least(:once)
     end
+
+    it "swallows SchemaNotReady so the parent survives a missing schema at boot" do
+      allow(mock_client).to receive(:ensure_all_queues)
+        .and_raise(Pgbus::SchemaNotReady, "PGMQ schema installation failed. Ensure migrations have been run.")
+      allow(Pgbus.logger).to receive(:error)
+
+      expect { supervisor.send(:bootstrap_queues) }.not_to raise_error
+    end
+  end
+
+  describe "bootstrap_queues! (private)" do
+    let(:supervisor) { described_class.new }
+    let(:mock_client) { build_mock_client }
+
+    before do
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive(:ensure_all_queues)
+    end
+
+    it "calls ensure_all_queues on the client" do
+      supervisor.send(:bootstrap_queues!)
+
+      expect(mock_client).to have_received(:ensure_all_queues).once
+    end
+
+    it "logs one actionable error and re-raises on SchemaNotReady" do
+      message = "PGMQ schema installation failed. Ensure the pgbus database exists and migrations have been run."
+      allow(mock_client).to receive(:ensure_all_queues).and_raise(Pgbus::SchemaNotReady, message)
+      allow(Pgbus.logger).to receive(:error)
+
+      expect { supervisor.send(:bootstrap_queues!) }.to raise_error(Pgbus::SchemaNotReady, message)
+      expect(Pgbus.logger).to have_received(:error).once
+    end
+
+    it "reports and swallows a non-schema StandardError, as the lenient variant does" do
+      allow(mock_client).to receive(:ensure_all_queues).and_raise(StandardError, "connection failed")
+      allow(Pgbus.logger).to receive(:error)
+
+      expect { supervisor.send(:bootstrap_queues!) }.not_to raise_error
+    end
   end
 
   describe "pre-fork bootstrap" do

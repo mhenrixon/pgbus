@@ -46,7 +46,7 @@ module Pgbus
         # This avoids the deadlock that occurs when multiple forked children
         # race to call enable_notify_insert (DROP TRIGGER + CREATE TRIGGER)
         # concurrently on the same queue tables. Children still call
-        # bootstrap_queues post-fork but the idempotent check in
+        # bootstrap_queues! post-fork but the idempotent check in
         # notify_trigger_current? makes those calls cheap no-ops.
         bootstrap_queues
 
@@ -115,7 +115,7 @@ module Pgbus
           restore_signals
           setup_child_process
           load_rails_app
-          bootstrap_queues
+          bootstrap_queues!
           worker = Worker.new(
             queues: queues, threads: threads, config: config,
             single_active_consumer: single_active, consumer_priority: priority,
@@ -179,7 +179,7 @@ module Pgbus
           setup_child_process
           load_rails_app
           load_recurring_config
-          bootstrap_queues
+          bootstrap_queues!
           scheduler = Recurring::Scheduler.new(config: config)
           scheduler.run
         end
@@ -492,8 +492,29 @@ module Pgbus
         end
       end
 
+      # Lenient bootstrap for the parent (supervisor.rb#run). A transiently
+      # unavailable DB at boot must not kill the supervisor — children
+      # crash-and-backoff until it recovers — so every StandardError (including
+      # SchemaNotReady) is reported and swallowed.
       def bootstrap_queues
         Pgbus.client.ensure_all_queues
+      rescue StandardError => e
+        ErrorReporter.report(e, { action: "bootstrap_queues" })
+      end
+
+      # Strict bootstrap for forked children (fork_worker, fork_scheduler). A
+      # genuinely missing schema (database absent, migrations not run) surfaces
+      # as Pgbus::SchemaNotReady — log its already-actionable message once and
+      # re-raise so the child exits non-zero. schedule_restart then paces the
+      # crash loop with exponential backoff (up to RESTART_BACKOFF_MAX) instead
+      # of letting children boot and drown in downstream "relation does not
+      # exist" errors. Other StandardErrors stay reported-and-swallowed, exactly
+      # as the lenient variant handles them.
+      def bootstrap_queues!
+        Pgbus.client.ensure_all_queues
+      rescue Pgbus::SchemaNotReady => e
+        Pgbus.logger.error { "[Pgbus] #{e.message}" }
+        raise
       rescue StandardError => e
         ErrorReporter.report(e, { action: "bootstrap_queues" })
       end
