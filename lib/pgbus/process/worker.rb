@@ -51,6 +51,13 @@ module Pgbus
         )
         @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
         @drain_started_at = nil
+        # Evict/restore cooldown state (issue #209). When a permanently-deleted
+        # queue is evicted down to an empty list, restoring the initial queues
+        # immediately re-triggers the same undefined-table error every loop tick.
+        # These back off the restore attempt on an exponential schedule instead.
+        @restore_streak = 0
+        @last_evicted_at = nil
+        @deferral_warned = false
         @queue_lock = QueueLock.new if @single_active_consumer
         @notify_listener = nil
         @notify_retry_at = 0.0
@@ -153,6 +160,15 @@ module Pgbus
       # regex on every queue-missing error in hot fetch/read paths.
       MISSING_QUEUE_REGEX = /pgmq\.q_(\w+)/
 
+      # Exponential backoff bounds for restoring evicted queues (issue #209).
+      # After the worker's queues are fully evicted (queue table permanently
+      # deleted), the first restore waits RESTORE_COOLDOWN_BASE seconds; each
+      # consecutive failed restore doubles the wait up to RESTORE_COOLDOWN_MAX.
+      # A successful fetch resets the streak so a recreated queue restores
+      # promptly. Constant-tuned, matching NOTIFY_RETRY/DRAIN_TIMEOUT precedent.
+      RESTORE_COOLDOWN_BASE = 30
+      RESTORE_COOLDOWN_MAX = 300
+
       private
 
       def claim_and_execute
@@ -200,17 +216,24 @@ module Pgbus
           return []
         end
 
-        if priority_enabled?
-          fetch_prioritized(active_queues, qty)
-        elsif @group_mode
-          fetch_grouped(active_queues, qty)
-        elsif active_queues.size == 1
-          queue = active_queues.first
-          messages = Pgbus.client.read_batch(queue, qty: qty) || []
-          messages.map { |m| [queue, m] }
-        else
-          fetch_multi(active_queues, qty)
-        end
+        results =
+          if priority_enabled?
+            fetch_prioritized(active_queues, qty)
+          elsif @group_mode
+            fetch_grouped(active_queues, qty)
+          elsif active_queues.size == 1
+            queue = active_queues.first
+            messages = Pgbus.client.read_batch(queue, qty: qty) || []
+            messages.map { |m| [queue, m] }
+          else
+            fetch_multi(active_queues, qty)
+          end
+
+        # A read that reached here without an undefined-queue error means the
+        # queue tables exist again; drop the restore backoff so a recreated
+        # queue is reinstated promptly after the next eviction (issue #209).
+        @restore_streak = 0
+        results
       rescue Pgbus::ConnectionCircuitOpenError
         # The client-level connection breaker is open: the database has failed
         # enough consecutive connection attempts that reads now fail fast. Idle
@@ -380,15 +403,54 @@ module Pgbus
           end
         end
         Pgbus.logger.error { "[Pgbus] Queue table missing: #{error.message}" }
-        restore_evicted_queues if @queues.empty? && !@wildcard
+        return unless @queues.empty? && !@wildcard
+
+        # Open (or re-arm) the restore cooldown window: stamp the eviction time so
+        # restore_evicted_queues can measure the backoff, and clear the
+        # per-window deferral-warned flag so the next deferral logs exactly once.
+        @last_evicted_at = monotonic_now
+        @deferral_warned = false
+        restore_evicted_queues
       end
 
+      # Restore the worker's initial queues after a full eviction — but only once
+      # the exponential cooldown has elapsed (issue #209). While the cooldown is
+      # pending, leaves @queues empty (the caller idles via the empty-active_queues
+      # path) and logs a single deferral warn per window rather than one error pair
+      # per loop tick. Each actual restore escalates the streak so a permanently
+      # deleted queue backs off toward RESTORE_COOLDOWN_MAX instead of spinning.
       def restore_evicted_queues
+        return unless restore_cooldown_elapsed?
+
         @queues = @initial_queues.dup
+        @restore_streak += 1
         Pgbus.logger.warn do
           "[Pgbus] Worker queue list was empty after eviction — " \
             "restoring initial queues: #{@queues.join(", ")}"
         end
+      end
+
+      # True once RESTORE_COOLDOWN_BASE * 2**streak seconds (capped at
+      # RESTORE_COOLDOWN_MAX) have passed since the window opened. When still
+      # pending, emits at most one deferral warn per window naming the wait.
+      def restore_cooldown_elapsed?
+        return true if @last_evicted_at.nil?
+
+        wait = restore_cooldown_seconds
+        return true if monotonic_now - @last_evicted_at >= wait
+
+        unless @deferral_warned
+          @deferral_warned = true
+          Pgbus.logger.warn do
+            "[Pgbus] All queues evicted; deferring restore — next restore attempt in #{wait}s " \
+              "(streak=#{@restore_streak})"
+          end
+        end
+        false
+      end
+
+      def restore_cooldown_seconds
+        [RESTORE_COOLDOWN_BASE * (2**@restore_streak), RESTORE_COOLDOWN_MAX].min
       end
 
       def detect_zombie(queue_name, message)
