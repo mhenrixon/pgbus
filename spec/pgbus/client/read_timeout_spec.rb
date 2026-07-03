@@ -25,6 +25,9 @@ RSpec.describe Pgbus::Client do
       stub_const("PGMQ::Client", Class.new { def initialize(*args, **kwargs); end })
       stub_const("PGMQ::Errors", Module.new)
       stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError))
+      # pg is loaded via pgmq-ruby in production; stub the one method the
+      # read-bounds gate consults so client construction works with mocked PGMQ.
+      stub_pg_library_version
     end
 
     after do
@@ -32,23 +35,31 @@ RSpec.describe Pgbus::Client do
     end
 
     describe "#with_read_timeout" do
-      context "when read_timeout is set" do
-        before { config.read_timeout = 1 }
+      # The primary read bounds are libpq-native (statement_timeout +
+      # tcp_user_timeout), baked into the connection. The Ruby Timeout is a
+      # narrow fallback used ONLY on a dedicated connection where libpq can't
+      # bound the socket (non-Linux / libpq < 12). To exercise it deterministically
+      # regardless of the host, force @libpq_read_bounds_effective false.
+      context "when libpq cannot bound the socket (Ruby Timeout fallback active)" do
+        before do
+          config.read_timeout = 1
+          client.instance_variable_set(:@libpq_read_bounds_effective, false)
+        end
 
         it "raises ReadTimeoutError when read_batch exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read_batch) { sleep 5 }
+          allow(mock_pgmq).to receive(:read_batch) { sleep 10 }
 
           expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
 
         it "raises ReadTimeoutError when read_multi exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read_multi) { sleep 5 }
+          allow(mock_pgmq).to receive(:read_multi) { sleep 10 }
 
           expect { client.read_multi(%w[default], qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
 
         it "raises ReadTimeoutError when read_message exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read) { sleep 5 }
+          allow(mock_pgmq).to receive(:read) { sleep 10 }
 
           expect { client.read_message("default") }.to raise_error(Pgbus::ReadTimeoutError)
         end
@@ -57,6 +68,32 @@ RSpec.describe Pgbus::Client do
           allow(mock_pgmq).to receive(:read_batch).and_return([])
 
           expect(client.read_batch("default", qty: 5)).to eq([])
+        end
+      end
+
+      # On a dedicated connection where libpq's bounds are effective (Linux,
+      # read_timeout set, libpq >= 12), Ruby Timeout is never wired in — reads
+      # rely purely on statement_timeout + tcp_user_timeout.
+      context "when libpq bounds are effective (no Ruby Timeout)" do
+        before do
+          config.read_timeout = 1
+          client.instance_variable_set(:@libpq_read_bounds_effective, true)
+        end
+
+        it "does NOT wrap the read in Ruby Timeout" do
+          allow(mock_pgmq).to receive(:read_batch).and_return([])
+          allow(Timeout).to receive(:timeout).and_call_original
+
+          client.read_batch("default", qty: 5)
+
+          expect(Timeout).not_to have_received(:timeout)
+        end
+
+        it "still maps a server-side statement_timeout cancellation to ReadTimeoutError" do
+          allow(mock_pgmq).to receive(:read_batch)
+            .and_raise(PGMQ::Errors::ConnectionError, "canceling statement due to statement timeout")
+
+          expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
       end
 
@@ -70,11 +107,11 @@ RSpec.describe Pgbus::Client do
         end
       end
 
-      # On the shared-connection path a single mutex serializes all reads.
-      # The timeout clock must start only after the mutex is acquired, so a
-      # thread queued behind a slow read is not charged for the wait. Here a
-      # fast read whose mutex wait exceeds the timeout must still succeed.
-      context "when a read waits on the client mutex (shared connection)" do
+      # The shared-AR (Proc) path never uses Ruby Timeout — pgbus doesn't own the
+      # connection, and Thread#raise on a socket ActiveRecord also queries is the
+      # most dangerous place for it. Reads are a bare pass-through; the operator
+      # bounds them via libpq timeouts in database.yml.
+      context "when on the shared-connection (Proc) path" do
         subject(:shared_client) do
           allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
           c = described_class.new(shared_config)
@@ -95,27 +132,17 @@ RSpec.describe Pgbus::Client do
           expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
         end
 
-        it "does not raise ReadTimeoutError for time spent waiting on the mutex" do
-          mutex = shared_client.instance_variable_get(:@pgmq_mutex)
+        it "never treats the Proc path as libpq-bounded" do
+          expect(shared_client.send(:libpq_read_bounds_effective?)).to be(false)
+        end
+
+        it "does not wrap reads in Ruby Timeout (bare pass-through)" do
           allow(mock_pgmq).to receive(:read_batch).and_return([])
+          allow(Timeout).to receive(:timeout).and_call_original
 
-          # Hold the mutex longer than the timeout, then release. The read's
-          # own work is instant, so it must complete without a timeout error.
-          # Handshake via a Queue so we know the holder is inside the
-          # synchronized block before issuing the read — a plain sleep is
-          # racy on slow CI runners.
-          locked = Queue.new
-          holder = Thread.new do
-            mutex.synchronize do
-              locked << true
-              sleep 1.5
-            end
-          end
+          shared_client.read_batch("default", qty: 5)
 
-          locked.pop
-          expect { shared_client.read_batch("default", qty: 5) }.not_to raise_error
-        ensure
-          holder&.join
+          expect(Timeout).not_to have_received(:timeout)
         end
       end
     end

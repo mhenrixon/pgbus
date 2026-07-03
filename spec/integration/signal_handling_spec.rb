@@ -9,6 +9,12 @@ require_relative "../integration_helper"
 # in the connection URL — done in connection_url below and in
 # integration_helper.rb for the parent's AR connection. With that
 # flag, these tests run on both Linux (CI) and darwin.
+
+# Each Timeout.timeout below bounds a Process.waitpid2 on a forked CHILD
+# process — no pooled PG::Connection is in the timed block, so the Thread#raise
+# hazard Pgbus/NoRubyTimeout guards against does not apply. Each use carries its
+# own tightly-scoped rubocop:disable so a future Timeout.timeout added elsewhere
+# in this file is still flagged.
 RSpec.describe "Signal handling (integration)", :integration do
   let(:client) { Pgbus.client }
 
@@ -96,7 +102,7 @@ RSpec.describe "Signal handling (integration)", :integration do
 
       # Worker should exit cleanly within the shutdown timeout
       result = nil
-      Timeout.timeout(15) do
+      Timeout.timeout(15) do # rubocop:disable Pgbus/NoRubyTimeout -- bounds waitpid2 on a child, not a PG connection
         _, status = Process.waitpid2(worker_pid)
         result = status
       end
@@ -153,7 +159,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       Process.kill("QUIT", worker_pid)
 
       result = nil
-      Timeout.timeout(10) do
+      Timeout.timeout(10) do # rubocop:disable Pgbus/NoRubyTimeout -- bounds waitpid2 on a child, not a PG connection
         _, status = Process.waitpid2(worker_pid)
         result = status
       end
@@ -263,7 +269,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       # Supervisor should exit cleanly after draining children.
       # Use a generous timeout — CI runners can be slow to schedule processes.
       result = nil
-      Timeout.timeout(30) do
+      Timeout.timeout(30) do # rubocop:disable Pgbus/NoRubyTimeout -- bounds waitpid2 on a child, not a PG connection
         _, status = Process.waitpid2(supervisor_pid)
         result = status
       end
@@ -342,7 +348,7 @@ RSpec.describe "Signal handling (integration)", :integration do
       # Send SIGTERM while job is in-flight (worker is sleeping 1s)
       Process.kill("TERM", worker_pid)
 
-      Timeout.timeout(15) do
+      Timeout.timeout(15) do # rubocop:disable Pgbus/NoRubyTimeout -- bounds waitpid2 on a child, not a PG connection
         Process.waitpid2(worker_pid)
       end
       read_pipe.close

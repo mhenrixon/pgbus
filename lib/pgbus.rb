@@ -84,6 +84,12 @@ module Pgbus
         # root and tries to autoload Puma::Plugin, which collides with the real
         # Puma::Plugin class defined by the puma gem itself.
         loader.ignore("#{__dir__}/puma")
+        # lib/rubocop holds pgbus's custom RuboCop cops (Pgbus/NoRubyTimeout).
+        # They're loaded by RuboCop via .rubocop.yml's `require:`, not by the
+        # gem at runtime. Without this ignore, Zeitwerk scans lib/rubocop under
+        # the pgbus root and tries to autoload a `Rubocop` constant, colliding
+        # with the rubocop gem's real `RuboCop`.
+        loader.ignore("#{__dir__}/rubocop")
         loader
       end
     end

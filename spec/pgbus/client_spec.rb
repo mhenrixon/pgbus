@@ -1442,8 +1442,10 @@ RSpec.describe Pgbus::Client do
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       described_class.new(url_config)
 
+      # Connection bounds (statement_timeout + keepalives) are asserted in detail
+      # in the "libpq connection bounds" describe below; here we only pin pool sizing.
       expect(PGMQ::Client).to have_received(:new).with(
-        "postgres://localhost/pgbus_test",
+        a_string_starting_with("postgres://localhost/pgbus_test?"),
         pool_size: 5,
         pool_timeout: url_config.pool_timeout
       )
@@ -1461,7 +1463,7 @@ RSpec.describe Pgbus::Client do
       described_class.new(url_config)
 
       expect(PGMQ::Client).to have_received(:new).with(
-        { host: "localhost", dbname: "pgbus_test" },
+        hash_including(host: "localhost", dbname: "pgbus_test"),
         pool_size: 3,
         pool_timeout: url_config.pool_timeout
       )
@@ -1595,6 +1597,288 @@ RSpec.describe Pgbus::Client do
         # After OPEN_THRESHOLD connection errors the breaker is open: the next
         # read fails fast with the circuit error instead of re-hitting pgmq.
         expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ConnectionCircuitOpenError)
+      end
+    end
+  end
+
+  describe "libpq connection bounds (issue #198)" do
+    before do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      # PG (the pg gem) is loaded via pgmq-ruby in production; these unit specs
+      # mock PGMQ, so stub the one PG method the read-bounds gate consults.
+      stub_pg_library_version
+    end
+
+    def build_client(config)
+      c = described_class.new(config)
+      c.instance_variable_set(:@schema_ensured, true)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    context "when connection_options is a Hash" do
+      it "merges statement_timeout, keepalives, and tcp_user_timeout sized from read_timeout" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+          c.read_timeout = 10
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        # statement_timeout = read_timeout; tcp_user_timeout = read_timeout + slack (5s).
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(
+            host: "localhost",
+            dbname: "pgbus_test",
+            options: "-c statement_timeout=10000",
+            keepalives: 1,
+            tcp_user_timeout: 15_000
+          ),
+          anything
+        )
+      end
+
+      it "preserves a caller-supplied :options instead of clobbering it" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", options: "-c search_path=myapp" }
+          c.read_timeout = 10
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(options: "-c search_path=myapp -c statement_timeout=10000"),
+          anything
+        )
+      end
+    end
+
+    context "when libpq is older than 12 (rejects the tcp_user_timeout keyword)" do
+      before { allow(PG).to receive(:library_version).and_return(110_000) }
+
+      it "keeps statement_timeout but omits keepalives / tcp_user_timeout (Hash)" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(options: "-c statement_timeout=5000"),
+          anything
+        )
+        expect(PGMQ::Client).not_to have_received(:new).with(
+          hash_including(:tcp_user_timeout),
+          anything
+        )
+      end
+
+      it "keeps statement_timeout but omits the socket keywords (URI)" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test?options=-c%20statement_timeout%3D5000",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a URI string without a query" do
+      it "appends keepalives + tcp_user_timeout and the URL-encoded statement_timeout with ?" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test?keepalives=1&keepalives_idle=30" \
+          "&keepalives_interval=10&keepalives_count=3&tcp_user_timeout=10000" \
+          "&options=-c%20statement_timeout%3D5000",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a URI string with an existing query" do
+      it "appends with & so the existing query is preserved" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgresql://localhost/pgbus_test?sslmode=require"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          a_string_starting_with("postgresql://localhost/pgbus_test?sslmode=require&keepalives=1")
+            .and(ending_with("&options=-c%20statement_timeout%3D5000")),
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a key=value conninfo string" do
+      it "appends space-separated keepalives + tcp_user_timeout and a quoted options clause" do
+        conninfo_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "host=localhost dbname=pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(conninfo_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "host=localhost dbname=pgbus_test keepalives=1 keepalives_idle=30 " \
+          "keepalives_interval=10 keepalives_count=3 tcp_user_timeout=10000 " \
+          "options='-c statement_timeout=5000'",
+          anything
+        )
+      end
+    end
+
+    context "when read_timeout is nil" do
+      it "passes connection options through unchanged (bounding disabled)" do
+        no_timeout_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = nil
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(no_timeout_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a Proc (shared AR connection)" do
+      it "passes the Proc through unchanged — pgbus does not own that connection" do
+        lambda_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = nil
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        ar_connection = double("AR::ConnectionAdapter", raw_connection: double("PG::Connection"))
+        ar_base = double("AR::Base", connection: ar_connection)
+        allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+        stub_const("ActiveRecord::Base", ar_base)
+
+        build_client(lambda_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(an_instance_of(Proc), anything)
+      end
+
+      it "logs a one-time hint to configure libpq timeouts in database.yml" do
+        lambda_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = nil
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        ar_connection = double("AR::ConnectionAdapter", raw_connection: double("PG::Connection"))
+        ar_base = double("AR::Base", connection: ar_connection)
+        allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+        stub_const("ActiveRecord::Base", ar_base)
+
+        # The Proc-fallback path also logs its own warn, so capture all warns and
+        # assert that at least one carries the database.yml hint.
+        warnings = []
+        logger = double("Pgbus.logger")
+        allow(logger).to receive(:warn) { |&block| warnings << block.call if block }
+        allow(Pgbus).to receive(:logger).and_return(logger)
+
+        build_client(lambda_config)
+
+        expect(warnings).to include(a_string_matching(/database\.yml/))
+      end
+    end
+
+    describe "#libpq_read_bounds_effective? (whether Ruby Timeout is needed)" do
+      def bounds_effective_for(config)
+        build_client(config).send(:libpq_read_bounds_effective?)
+      end
+
+      let(:dedicated_config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+      end
+
+      it "is true on a dedicated connection when the platform + libpq support tcp_user_timeout" do
+        skip "host libpq/socket lacks TCP_USER_TIMEOUT" unless Socket.const_defined?(:TCP_USER_TIMEOUT) &&
+                                                               PG.library_version >= 120_000
+
+        expect(bounds_effective_for(dedicated_config)).to be(true)
+      end
+
+      it "is false when TCP_USER_TIMEOUT is unavailable (non-Linux hosts)" do
+        hide_const("Socket::TCP_USER_TIMEOUT") if Socket.const_defined?(:TCP_USER_TIMEOUT)
+
+        expect(bounds_effective_for(dedicated_config)).to be(false)
+      end
+
+      it "is false when read_timeout is nil (no libpq bound is installed)" do
+        dedicated_config.read_timeout = nil
+
+        expect(bounds_effective_for(dedicated_config)).to be(false)
+      end
+
+      it "is false when libpq is older than 12 (rejects tcp_user_timeout keyword)" do
+        allow(PG).to receive(:library_version).and_return(110_000)
+
+        expect(bounds_effective_for(dedicated_config)).to be(false)
+      end
+    end
+
+    describe "server-side cancellation mapping" do
+      let(:timeout_msg) { "PG::QueryCanceled: ERROR: canceling statement due to statement timeout" }
+
+      it "maps a statement-timeout ConnectionError on read_batch to ReadTimeoutError" do
+        allow(mock_pgmq).to receive(:read_batch)
+          .and_raise(PGMQ::Errors::ConnectionError, timeout_msg)
+
+        expect { client.read_batch("default", qty: 5) }
+          .to raise_error(Pgbus::ReadTimeoutError, /statement timeout/)
+      end
+
+      it "maps a statement-timeout ConnectionError on read_message to ReadTimeoutError" do
+        allow(mock_pgmq).to receive(:read)
+          .and_raise(PGMQ::Errors::ConnectionError, timeout_msg)
+
+        expect { client.read_message("default") }
+          .to raise_error(Pgbus::ReadTimeoutError)
+      end
+
+      it "does not map a non-timeout ConnectionError" do
+        allow(mock_pgmq).to receive(:read_batch)
+          .and_raise(PGMQ::Errors::ConnectionError, "no connection to the server")
+
+        expect { client.read_batch("default", qty: 5) }
+          .to raise_error(PGMQ::Errors::ConnectionError)
       end
     end
   end

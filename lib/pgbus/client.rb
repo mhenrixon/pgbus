@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "socket"
 require "timeout"
 require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
@@ -53,6 +54,14 @@ module Pgbus
         # Use the resolved pool size (auto-tuned from worker thread counts
         # unless explicitly set) and let pgmq-ruby's connection_pool handle
         # concurrency internally (no mutex needed).
+        #
+        # Bound reads with libpq-native mechanisms baked into the connection
+        # options (issue #198): a server-side statement_timeout for a slow query,
+        # plus client-side tcp_user_timeout + keepalives for a dead/hung socket.
+        # Both raise clean PG errors — no Ruby Timeout, no Thread#raise. Only
+        # safe on this dedicated-connection branch — never on the shared-AR Proc
+        # path, where statement_timeout would leak into application queries.
+        conn_opts = apply_connection_bounds(conn_opts)
         @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.resolved_pool_size, pool_timeout: config.pool_timeout)
         @pgmq_mutex = nil
       end
@@ -65,6 +74,13 @@ module Pgbus
         on_open: method(:log_circuit_open),
         on_close: method(:log_circuit_close)
       )
+      # Snapshot whether libpq's baked-in read bounds fully cover a hung socket
+      # on this host/connection, so the read path can skip the Ruby Timeout
+      # last resort. Computed once: @shared_connection, config.read_timeout
+      # (which apply_connection_bounds also snapshots), the platform, and the
+      # linked libpq version are all fixed for a Client's lifetime.
+      @libpq_read_bounds_effective = libpq_read_bounds_effective?
+      warn_shared_connection_read_bounds
     end
 
     # Actively open a database connection and run `SELECT 1` so a bad
@@ -775,28 +791,259 @@ module Pgbus
     # connection was dead *before* pgmq-ruby tried to use it, so no SQL was
     # ever sent. Mid-flight errors like "server closed the connection" are
     # excluded from the pattern list for this reason.
-    # Bound a read at config.read_timeout so a dead socket raises
-    # Pgbus::ReadTimeoutError instead of blocking the worker loop forever.
+
+    # Seconds by which the outer bounds (client-side tcp_user_timeout and the
+    # Ruby Timeout last resort) exceed the server-side statement_timeout. Sizing
+    # the outer bounds a little higher lets a live-but-slow server's clean
+    # statement_timeout cancel win the race, so the outer bounds fire only when
+    # the peer is genuinely gone. See apply_connection_bounds and with_read_timeout.
+    READ_TIMEOUT_SLACK = 5
+    private_constant :READ_TIMEOUT_SLACK
+
+    # Bound a read and surface a timeout as Pgbus::ReadTimeoutError. Prefer
+    # libpq-native bounds baked into the connection; the Ruby Timeout is a
+    # narrow, last-resort fallback used only where libpq cannot bound a hung
+    # socket. In order, cleanest to last-resort:
     #
-    # MUST wrap only the bare `@pgmq.read*` call, sitting *inside* both
-    # `synchronized` and `with_stale_connection_retry`:
+    #   1. statement_timeout (server GUC, baked into the connection) — a slow
+    #      query is cancelled by Postgres → PG::QueryCanceled, which pgmq-ruby
+    #      wraps as PGMQ::Errors::ConnectionError ("canceling statement due to
+    #      statement timeout"); mapping_statement_timeout re-raises it as
+    #      Pgbus::ReadTimeoutError. The clean path for a live-but-slow server.
+    #   2. tcp_user_timeout / keepalives (client-side libpq, baked into the
+    #      connection) — a dead/hung socket makes libpq raise PG::ConnectionBad
+    #      synchronously, which pgmq-ruby recognises and reconnects. NO
+    #      Thread#raise, no buffer corruption. Linux + libpq >= 12 only.
+    #
+    # When @libpq_read_bounds_effective (the common production case: Linux,
+    # dedicated connection, read_timeout set, libpq >= 12) BOTH bounds are in
+    # force and Ruby Timeout is never wired in — pure libpq.
+    #
+    #   3. Ruby Timeout.timeout — the LAST resort, reached ONLY on a *dedicated*
+    #      connection where libpq's socket bound is a no-op: non-Linux hosts
+    #      (macOS/BSD/Windows) or a libpq < 12. It interrupts via Thread#raise —
+    #      the mechanism issue #198 flags as unsafe — so it is slack-delayed and
+    #      used only when there is no libpq alternative on that host.
+    #
+    #      The shared-AR Proc path deliberately gets NEITHER a baked-in bound NOR
+    #      this Ruby Timeout: we don't own that socket, and Thread#raise on a
+    #      connection ActiveRecord also queries is the most dangerous place to use
+    #      it. Instead the operator configures libpq timeouts in database.yml
+    #      (statement_timeout via `variables:`, plus tcp_user_timeout/keepalives),
+    #      which AR passes straight through to the connection. #initialize logs a
+    #      one-time hint when read_timeout is set on a Proc connection.
+    #
+    #      KNOWN LIMITATION: when (3) fires on a genuinely hung socket, libpq may
+    #      leave the pooled PG::Connection reporting CONNECTION_OK while it will
+    #      in fact re-hang on reuse, and pgmq-ruby's health check won't discard
+    #      it (it isn't CONNECTION_BAD). The proper fix is a public pool-reload on
+    #      pgmq-ruby (follow-up, cf. mensfeld/pgmq-ruby#94); until then it's
+    #      documented and confined to the non-Linux dedicated path.
+    #
+    # MUST wrap only the bare `@pgmq.read*` call, inside both `synchronized` and
+    # `with_stale_connection_retry`, so the Timeout clock starts only after the
+    # mutex is acquired (a thread queued behind another read is not charged for
+    # the wait) and each stale-retry attempt gets its own full budget:
     #
     #   with_stale_connection_retry { synchronized { with_read_timeout { @pgmq.read* } } }
-    #
-    # Two reasons for this nesting:
-    #   1. On the shared-connection path @pgmq_mutex serializes all reads.
-    #      The timeout clock must start only after the mutex is acquired,
-    #      otherwise a thread queued behind another read is charged for the
-    #      wait and raises a false ReadTimeoutError for a socket it never
-    #      touched.
-    #   2. with_stale_connection_retry can retry once; with the timeout
-    #      inside, each socket attempt gets its own full timeout budget
-    #      rather than sharing one across both attempts.
-    def with_read_timeout(&)
-      timeout = config.read_timeout
-      return yield unless timeout&.positive?
+    def with_read_timeout(&block)
+      # libpq covers everything (Linux, dedicated conn, read_timeout, libpq>=12),
+      # OR this is the Proc path where we defer to AR/database.yml — either way,
+      # no Ruby Timeout. Only the dedicated-but-libpq-can't-bound-the-socket case
+      # (non-Linux / libpq<12) falls through to the Timeout fallback below.
+      return mapping_statement_timeout(&block) if @libpq_read_bounds_effective || @shared_connection
 
-      Timeout.timeout(timeout, Pgbus::ReadTimeoutError, &)
+      timeout = config.read_timeout
+      return mapping_statement_timeout(&block) unless timeout&.positive?
+
+      # rubocop:disable Pgbus/NoRubyTimeout -- deliberate last-resort bound; see above
+      Timeout.timeout(timeout + READ_TIMEOUT_SLACK, Pgbus::ReadTimeoutError) do
+        mapping_statement_timeout(&block)
+      end
+      # rubocop:enable Pgbus/NoRubyTimeout
+    end
+
+    # True when libpq's connection-baked read bounds (statement_timeout +
+    # tcp_user_timeout + keepalives) fully cover both a slow query AND a
+    # dead/hung socket, so with_read_timeout can skip the Ruby Timeout entirely.
+    # Requires ALL of:
+    #   * a dedicated connection — the shared-AR Proc path has no baked-in bounds
+    #     (we don't own that socket; statement_timeout would leak into app queries)
+    #   * read_timeout set — apply_connection_bounds no-ops on nil, so skipping
+    #     Timeout with no bound installed would leave a read unbounded forever
+    #   * TCP_USER_TIMEOUT available — macOS/BSD/Windows no-op it, and keepalives
+    #     alone can't bound a stall mid-reply (data sent, never ACKed)
+    #   * libpq >= 12 — older libpq rejects the tcp_user_timeout conninfo keyword
+    #     outright (it fails the whole connection), so we must not have baked it in
+    def libpq_read_bounds_effective?
+      return false if @shared_connection
+      return false unless config.read_timeout&.positive?
+      return false unless Socket.const_defined?(:TCP_USER_TIMEOUT)
+
+      PG.library_version >= 120_000
+    end
+
+    # On the shared-AR (Proc) path pgbus doesn't own the connection, so it bakes
+    # in no read bounds and deliberately does NOT wrap reads in Ruby Timeout
+    # (Thread#raise on a socket ActiveRecord also uses is the most dangerous
+    # place for it). When read_timeout is set the operator likely expects reads
+    # to be bounded, so point them at the libpq timeouts AR passes through from
+    # database.yml — the same bounds pgbus's dedicated path installs itself.
+    def warn_shared_connection_read_bounds
+      return unless @shared_connection && config.read_timeout&.positive?
+
+      Pgbus.logger.warn do
+        "[Pgbus::Client] read_timeout is set but pgbus is sharing ActiveRecord's " \
+          "connection, so it can't bound reads itself. Configure libpq timeouts on " \
+          "the pgbus connection in database.yml instead: `variables: { statement_timeout: <ms> }` " \
+          "plus `tcp_user_timeout: <ms>` and `keepalives: 1` (Linux). Use a dedicated " \
+          "database_url/connection_params for pgbus to have it apply these automatically."
+      end
+    end
+
+    # Substring pgmq-ruby surfaces (wrapped as PGMQ::Errors::ConnectionError)
+    # when Postgres cancels a query that overran statement_timeout. Detected in
+    # the read paths and re-raised as Pgbus::ReadTimeoutError so the server-side
+    # bound preserves the same public contract the Ruby Timeout gave callers.
+    STATEMENT_TIMEOUT_PATTERN = "canceling statement due to statement timeout"
+    private_constant :STATEMENT_TIMEOUT_PATTERN
+
+    def statement_timeout_error?(error)
+      error.message.to_s.downcase.include?(STATEMENT_TIMEOUT_PATTERN)
+    end
+
+    # Run a read block, re-raising a server-side statement_timeout cancellation
+    # as Pgbus::ReadTimeoutError. Wraps the read call sites so the public
+    # contract (ReadTimeoutError on a timed-out read) holds whether the bound
+    # fired server-side (the normal case) or via the Ruby Timeout fallback.
+    def mapping_statement_timeout
+      yield
+    rescue PGMQ::Errors::ConnectionError => e
+      raise Pgbus::ReadTimeoutError, e.message if statement_timeout_error?(e)
+
+      raise
+    end
+
+    # Idle seconds before libpq starts probing a quiet connection with TCP
+    # keepalives, and the interval/count of those probes. Sized to detect a
+    # dead peer (or a NAT/LB that silently dropped an idle flow) well inside a
+    # typical cloud idle-drop window (~350–600s). Pool and LISTEN connections
+    # sit idle between reads, so keepalives are what catch a peer that vanished
+    # while nothing was in flight. Client-side libpq keywords — never sent in
+    # the startup packet, so a pooler (PgBouncer) can't reject them.
+    KEEPALIVE_IDLE_SECONDS = 30
+    KEEPALIVE_INTERVAL_SECONDS = 10
+    KEEPALIVE_COUNT = 3
+    private_constant :KEEPALIVE_IDLE_SECONDS, :KEEPALIVE_INTERVAL_SECONDS, :KEEPALIVE_COUNT
+
+    # Bake libpq-native read/connection bounds into the connection options of a
+    # dedicated pgmq-ruby connection (issue #198). Two independent libpq
+    # mechanisms, deliberately NOT Ruby's Timeout — Timeout interrupts via
+    # Thread#raise, which can fire mid-libpq call and corrupt the pooled
+    # PG::Connection's result buffer:
+    #
+    #   1. statement_timeout (server GUC, via `options=-c`) — bounds a query the
+    #      server is actively running. Postgres cancels it and sends back
+    #      PG::QueryCanceled, which the read paths map to Pgbus::ReadTimeoutError.
+    #      This is the bound for a live-but-slow server.
+    #   2. tcp_user_timeout + keepalives (client-side libpq conninfo keywords) —
+    #      bound a dead/hung socket the server never answers on, where
+    #      statement_timeout structurally cannot fire (no live server to cancel).
+    #      libpq forces the socket closed and raises PG::ConnectionBad /
+    #      PG::UnableToSend synchronously on the calling thread — a clean error
+    #      through the normal pgmq path, no Thread#raise, no buffer corruption.
+    #      tcp_user_timeout catches death mid-read (data sent, never ACKed);
+    #      keepalives catch death on an idle connection.
+    #
+    # tcp_user_timeout is sized at read_timeout + a small slack so statement_timeout
+    # (the clean server-side cancel) wins whenever the server is still answering;
+    # the socket bound only fires when the peer is genuinely gone.
+    #
+    # Called only on the dedicated-connection branch (String URL / Hash params).
+    # Never on the shared-AR Proc path — statement_timeout is connection-wide and
+    # would leak into application queries, and the socket there is AR's to own.
+    #
+    # NOTE: statement_timeout is connection-wide, so writes on these connections
+    # gain the same bound. Acceptable — an enqueue that can't complete within
+    # read_timeout is already failing — and keeps a single server-side mechanism.
+    #
+    # Returns conn_opts unchanged when read_timeout is nil (bounding disabled).
+    def apply_connection_bounds(conn_opts)
+      timeout = config.read_timeout
+      return conn_opts unless timeout&.positive?
+
+      statement_ms = (timeout * 1000).to_i
+      # Socket-death bound sits just above the server-side query bound so a live
+      # server's clean statement_timeout cancel always wins the race.
+      socket_ms = ((timeout + READ_TIMEOUT_SLACK) * 1000).to_i
+      # tcp_user_timeout is a libpq 12+ conninfo keyword; libpq < 12 rejects it
+      # outright and fails the whole connection. So only bake in the socket-level
+      # keywords when the linked libpq understands them — statement_timeout (a
+      # server GUC via `options`) is always safe. Older libpq keeps just the
+      # query bound; the Ruby Timeout fallback covers the socket there.
+      with_socket = libpq_supports_socket_bounds?
+
+      case conn_opts
+      when Hash
+        merge_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket: with_socket)
+      when String
+        append_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket: with_socket)
+      else
+        conn_opts
+      end
+    end
+
+    # Whether the linked libpq accepts the tcp_user_timeout / keepalives conninfo
+    # keywords. Added in libpq 12; an older libpq raises "invalid connection
+    # option" and fails the connection, so we must not emit them there.
+    def libpq_supports_socket_bounds?
+      defined?(PG) && PG.respond_to?(:library_version) && PG.library_version >= 120_000
+    end
+
+    # Hash form maps 1:1 to libpq keywords, so no escaping/encoding is needed.
+    # The GUC stays nested in `options`; the socket keywords are top-level.
+    # Preserve any caller-supplied `:options` (e.g. `-c search_path=…`) by
+    # appending our `-c statement_timeout=…` rather than overwriting it.
+    def merge_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket:)
+      options = [conn_opts[:options], "-c statement_timeout=#{statement_ms}"].compact.join(" ")
+      merged = conn_opts.merge(options: options)
+      return merged unless with_socket
+
+      merged.merge(
+        keepalives: 1,
+        keepalives_idle: KEEPALIVE_IDLE_SECONDS,
+        keepalives_interval: KEEPALIVE_INTERVAL_SECONDS,
+        keepalives_count: KEEPALIVE_COUNT,
+        tcp_user_timeout: socket_ms
+      )
+    end
+
+    # libpq accepts two connection-string forms. URI form (postgres:// or
+    # postgresql://) carries keywords as URL-encoded query params — the GUC in
+    # `options` must percent-encode its space (%20) and `=` (%3D). key=value
+    # conninfo form carries them space-separated, with the GUC single-quoted so
+    # the outer parser keeps `-c statement_timeout=…` as one value.
+    def append_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket:)
+      if conn_opts.start_with?("postgres://", "postgresql://")
+        separator = conn_opts.include?("?") ? "&" : "?"
+        socket = if with_socket
+                   "keepalives=1&keepalives_idle=#{KEEPALIVE_IDLE_SECONDS}" \
+                     "&keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS}" \
+                     "&keepalives_count=#{KEEPALIVE_COUNT}&tcp_user_timeout=#{socket_ms}&"
+                 else
+                   ""
+                 end
+        "#{conn_opts}#{separator}#{socket}options=-c%20statement_timeout%3D#{statement_ms}"
+      else
+        socket = if with_socket
+                   "keepalives=1 keepalives_idle=#{KEEPALIVE_IDLE_SECONDS} " \
+                     "keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS} " \
+                     "keepalives_count=#{KEEPALIVE_COUNT} tcp_user_timeout=#{socket_ms} "
+                 else
+                   ""
+                 end
+        "#{conn_opts} #{socket}options='-c statement_timeout=#{statement_ms}'"
+      end
     end
 
     # Gate a read through the in-memory connection-health circuit breaker.
