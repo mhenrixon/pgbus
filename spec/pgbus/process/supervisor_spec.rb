@@ -608,6 +608,18 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect(banner).to include("pgmq_version=unknown")
     end
 
+    # Distinct from the raising case above: PGMQ is reachable but nothing is
+    # tracked yet, so pgmq_schema_version returns nil. Locks in the `|| "unknown"`
+    # branch separately from the rescue branch.
+    it "renders the pgmq version as 'unknown' when the lookup returns nil (not installed)" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("pgmq_version=unknown")
+    end
+
     it "reflects a narrowed roles list" do
       config.database_url = "postgres://u:sekret@db:5432/app"
       config.roles = [:workers]

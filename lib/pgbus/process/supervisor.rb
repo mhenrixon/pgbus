@@ -137,7 +137,8 @@ module Pgbus
       # (missing table, DB down) so a boot log never fails on diagnostics.
       def installed_pgmq_version
         Pgbus.client.pgmq_schema_version || "unknown"
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] boot: pgmq_schema_version lookup failed: #{e.class}: #{e.message}" }
         "unknown"
       end
 
@@ -148,7 +149,8 @@ module Pgbus
       def redacted_connection_target
         target = config.database_url ? parse_url_target(config.database_url) : parse_hash_target(banner_connection_hash)
         target || "unknown"
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] boot: connection target redaction failed: #{e.class}: #{e.message}" }
         "unknown"
       end
 
@@ -185,7 +187,8 @@ module Pgbus
       # single field to "unknown" so one broken resolver can't blank the banner.
       def banner_field
         yield
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] boot: banner field failed: #{e.class}: #{e.message}" }
         "unknown"
       end
 
