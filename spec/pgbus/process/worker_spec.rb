@@ -187,6 +187,25 @@ RSpec.describe Pgbus::Process::Worker do
         expect(worker.send(:recycle_needed?)).to be true
       end
     end
+
+    context "when max_memory_mb is exceeded" do
+      before do
+        worker.config.max_memory_mb = 256
+        Pgbus::Process::MemoryUsage.reset!
+      end
+
+      after { Pgbus::Process::MemoryUsage.reset! }
+
+      it "returns true when memory exceeds the limit" do
+        allow(Pgbus::Process::MemoryUsage).to receive(:current_mb).and_return(512)
+        expect(worker.send(:recycle_needed?)).to be true
+      end
+
+      it "returns false when memory is within the limit" do
+        allow(Pgbus::Process::MemoryUsage).to receive(:current_mb).and_return(128)
+        expect(worker.send(:recycle_needed?)).to be false
+      end
+    end
   end
 
   describe "#fetch_messages (private)" do
