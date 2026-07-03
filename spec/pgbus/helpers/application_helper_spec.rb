@@ -84,6 +84,31 @@ RSpec.describe Pgbus::ApplicationHelper do
     end
   end
 
+  describe "#pgbus_display_metadata" do
+    it "returns an empty hash for non-hash input" do
+      expect(helper.pgbus_display_metadata(nil)).to eq({})
+      expect(helper.pgbus_display_metadata("nope")).to eq({})
+    end
+
+    it "strips the throughput and internal keys, keeping the rest" do
+      metadata = {
+        "queues" => %w[default], "threads" => 5, "pid" => 1234,
+        "rates" => { "processed" => 1.0 }, "jobs_processed" => 10,
+        "jobs_failed" => 1, "in_flight" => 2, "loop_tick_at" => 123.4
+      }
+
+      result = helper.pgbus_display_metadata(metadata)
+
+      expect(result).to eq("queues" => %w[default], "threads" => 5, "pid" => 1234)
+    end
+
+    it "handles symbol keys for the internal names" do
+      metadata = { queues: %w[default], rates: { "processed" => 1.0 }, in_flight: 3 }
+
+      expect(helper.pgbus_display_metadata(metadata)).to eq(queues: %w[default])
+    end
+  end
+
   describe "#pgbus_duration" do
     it "returns dash for nil" do
       expect(helper.pgbus_duration(nil)).to eq("—")
