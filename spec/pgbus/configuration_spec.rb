@@ -18,6 +18,14 @@ RSpec.describe Pgbus::Configuration do
       expect(config.pool_size).to be_nil
     end
 
+    it "leaves health_port unset by default (standalone health server disabled)" do
+      expect(config.health_port).to be_nil
+    end
+
+    it "binds the health server to localhost by default" do
+      expect(config.health_bind).to eq("127.0.0.1")
+    end
+
     it "has default visibility timeout" do
       expect(config.visibility_timeout).to eq(30)
     end
@@ -942,6 +950,26 @@ RSpec.describe Pgbus::Configuration do
     it "rejects invalid prefetch_limit" do
       config.prefetch_limit = 0
       expect { config.validate! }.to raise_error(ArgumentError, /prefetch_limit/)
+    end
+
+    it "accepts nil health_port (standalone server disabled)" do
+      config.health_port = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a valid health_port" do
+      config.health_port = 9394
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a non-integer health_port" do
+      config.health_port = "9394"
+      expect { config.validate! }.to raise_error(ArgumentError, /health_port/)
+    end
+
+    it "rejects an out-of-range health_port" do
+      config.health_port = 70_000
+      expect { config.validate! }.to raise_error(ArgumentError, /health_port/)
     end
 
     it "accepts valid prefetch_limit" do

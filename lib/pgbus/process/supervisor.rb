@@ -34,6 +34,7 @@ module Pgbus
       def run
         setup_signals
         start_heartbeat
+        start_health_server
 
         Pgbus.logger.info { "[Pgbus] Supervisor starting pid=#{::Process.pid}" }
 
@@ -655,6 +656,18 @@ module Pgbus
         @heartbeat.start
       end
 
+      # Serve /livez and /readyz over a plain TCP server when health_port is
+      # configured. This gives orchestrators (Kubernetes) an HTTP probe surface
+      # on the supervisor itself — the process that forks and watches workers —
+      # without booting Rails or the dashboard. Disabled (nil) by default;
+      # host apps that already run Puma can mount Pgbus::Web::HealthApp instead.
+      def start_health_server
+        return unless config.health_port
+
+        @health_server = Pgbus::Web::HealthServer.new(port: config.health_port, bind: config.health_bind)
+        @health_server.start
+      end
+
       def monotonic_now
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
@@ -692,6 +705,7 @@ module Pgbus
         # supervisor never leaks FDs across a restart of itself.
         @forks.each_value { |info| close_pipe(info[:liveness_reader]) }
 
+        @health_server&.stop
         @heartbeat&.stop
         restore_signals
         Pgbus.logger.info { "[Pgbus] Supervisor stopped" }

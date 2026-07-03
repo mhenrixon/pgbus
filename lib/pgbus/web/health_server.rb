@@ -1,0 +1,144 @@
+# frozen_string_literal: true
+
+require "socket"
+
+module Pgbus
+  module Web
+    # Standalone HTTP health server for the supervisor process. When
+    # `config.health_port` is set, Supervisor#run starts one of these so a
+    # Kubernetes kubelet can probe the supervisor directly — the process that
+    # forks and watches workers — without the supervisor having to boot Rails,
+    # Puma, or the dashboard.
+    #
+    # It is intentionally tiny: one accept-loop thread over a TCPServer that
+    # reads only the HTTP request line (`GET /readyz HTTP/1.1`), synthesizes a
+    # minimal Rack env, and hands it to {HealthApp#call}. All routing and the
+    # OK/DEGRADED/STALLED → status mapping live in HealthApp, so the mounted-in-
+    # Rails path and this standalone path share exactly one implementation.
+    #
+    # This is a health probe surface, not a general HTTP server: it speaks just
+    # enough HTTP/1.0 to answer a kubelet. It only parses the request line
+    # (method + path), ignores headers and body, and closes the connection
+    # after each response (no keep-alive).
+    class HealthServer
+      # Cap the request line so a client can't stream unbounded data at the
+      # probe port. A real probe request line is well under 100 bytes.
+      MAX_REQUEST_LINE = 8_192
+      private_constant :MAX_REQUEST_LINE
+
+      STATUS_TEXT = {
+        200 => "OK", 404 => "Not Found", 405 => "Method Not Allowed", 503 => "Service Unavailable"
+      }.freeze
+      private_constant :STATUS_TEXT
+
+      # @return [Integer, nil] the bound port. Equals the configured port, or
+      #   the OS-assigned port when the configured port was 0 (used in tests).
+      #   nil before #start.
+      attr_reader :port
+
+      def initialize(port:, bind: "127.0.0.1", app: nil, logger: nil)
+        @configured_port = port
+        @bind = bind
+        @app = app || HealthApp.new
+        @logger = logger
+        @server = nil
+        @thread = nil
+        @port = nil
+      end
+
+      # Bind the port and start the accept loop. Idempotent: a second call
+      # while running is a no-op (so a supervisor restart path can't double-bind).
+      def start
+        return if @server
+
+        @server = TCPServer.new(@bind, @configured_port)
+        @port = @server.addr[1]
+        @thread = Thread.new { accept_loop }
+        logger.info { "[Pgbus::Web::HealthServer] listening on #{@bind}:#{@port} (/livez, /readyz)" }
+      end
+
+      # Close the listening socket (unblocking the accept loop, which then
+      # exits) and join the thread. Safe to call when never started or twice.
+      def stop
+        server = @server
+        @server = nil
+        close_socket(server)
+        @thread&.join(2)
+        @thread = nil
+        @port = nil
+      end
+
+      private
+
+      # accept blocks until stop closes the socket, which raises here and ends
+      # the loop. Any per-connection error is logged and swallowed so one bad
+      # client can never take the probe surface down.
+      def accept_loop
+        loop do
+          server = @server
+          break unless server
+
+          client =
+            begin
+              server.accept
+            rescue IOError, Errno::EBADF, Errno::EINVAL
+              break # socket closed by #stop
+            end
+
+          handle_client(client)
+        end
+      end
+
+      def handle_client(client)
+        method, path = read_request_line(client)
+        return unless method
+
+        status, headers, body = @app.call(rack_env(method, path))
+        write_response(client, status, headers, body)
+      rescue StandardError => e
+        logger.warn { "[Pgbus::Web::HealthServer] connection error: #{e.class}: #{e.message}" }
+      ensure
+        close_socket(client)
+      end
+
+      # Read and parse only the first line: "METHOD PATH HTTP/x.y". Returns
+      # [method, path] or [nil, nil] when the line is missing/garbage so the
+      # caller drops the connection without dispatching.
+      def read_request_line(client)
+        line = client.gets("\r\n", MAX_REQUEST_LINE)
+        return [nil, nil] if line.nil?
+
+        method, path, = line.strip.split(" ", 3)
+        return [nil, nil] if method.nil? || path.nil?
+
+        [method, path]
+      end
+
+      # Minimal Rack env — HealthApp reads only REQUEST_METHOD and PATH_INFO.
+      # Strip any query string from the path so PATH_INFO stays a bare path.
+      def rack_env(method, path)
+        { "REQUEST_METHOD" => method, "PATH_INFO" => path.split("?", 2).first }
+      end
+
+      def write_response(client, status, headers, body)
+        reason = STATUS_TEXT.fetch(status, "OK")
+        payload = Array(body).join
+        lines = ["HTTP/1.0 #{status} #{reason}"]
+        headers.each { |k, v| lines << "#{k}: #{v}" }
+        lines << "Content-Length: #{payload.bytesize}"
+        lines << "Connection: close"
+        client.write("#{lines.join("\r\n")}\r\n\r\n#{payload}")
+      end
+
+      def close_socket(socket)
+        socket&.close
+      rescue IOError, Errno::EBADF
+        nil
+      end
+
+      def logger
+        @logger || Pgbus.logger
+      end
+    end
+  end
+end
