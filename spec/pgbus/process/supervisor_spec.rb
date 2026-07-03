@@ -548,6 +548,162 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  describe "boot diagnostics banner (private)" do
+    let(:supervisor) { described_class.new(config: config) }
+    let(:config) { Pgbus::Configuration.new }
+    let(:messages) { [] }
+
+    before do
+      allow(Pgbus.logger).to receive(:info) { |&blk| messages << blk.call if blk }
+    end
+
+    # Capture only the banner text: every banner line is prefixed "[Pgbus] boot:".
+    def banner
+      messages.select { |m| m.to_s.start_with?("[Pgbus] boot:") }.join("\n")
+    end
+
+    it "logs one banner block with version, pool size, pgmq mode, notify flags, and roles" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return("1.5.0")
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("pgbus #{Pgbus::VERSION}")
+      expect(banner).to include("pool=#{config.resolved_pool_size}")
+      expect(banner).to include("pgmq_schema_mode=auto")
+      expect(banner).to include("pgmq_version=1.5.0")
+      expect(banner).to include("listen_notify=true")
+      expect(banner).to include("worker_notify_wakeup=true")
+    end
+
+    it "renders the connection target as host + dbname without the password" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("db")
+      expect(banner).to include("app")
+      expect(banner).not_to include("sekret")
+    end
+
+    it "redacts the password from a connection_params hash" do
+      config.connection_params = { host: "pghost", dbname: "myapp", user: "u", password: "sekret" }
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("pghost")
+      expect(banner).to include("myapp")
+      expect(banner).not_to include("sekret")
+    end
+
+    it "degrades the pgmq version to 'unknown' when the lookup raises, without aborting" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_raise(StandardError, "pg down")
+
+      expect { supervisor.send(:log_boot_banner) }.not_to raise_error
+      expect(banner).to include("pgmq_version=unknown")
+    end
+
+    it "reflects a narrowed roles list" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      config.roles = [:workers]
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("workers")
+      expect(banner).not_to match(/roles=.*dispatcher/)
+    end
+
+    it "lists worker capsules with queues, threads, and execution mode" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      config.workers = [
+        { name: "critical", queues: %w[critical], threads: 5 },
+        { name: "default", queues: %w[default low], threads: 3 }
+      ]
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("critical")
+      expect(banner).to include("queues=critical")
+      expect(banner).to include("threads=5")
+      expect(banner).to include("queues=default,low")
+      expect(banner).to include("threads=3")
+    end
+
+    it "names an unnamed capsule 'anonymous'" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      config.workers = [{ queues: %w[default], threads: 5 }]
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("anonymous")
+    end
+
+    it "lists event consumers with topics and threads" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      config.event_consumers = [{ topics: %w[orders.# payments.#], threads: 4 }]
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return(nil)
+
+      supervisor.send(:log_boot_banner)
+
+      expect(banner).to include("orders.#,payments.#")
+      expect(banner).to include("threads=4")
+    end
+
+    it "renders under the JSON log formatter without raising" do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      config.log_format = :json
+      allow(Pgbus.client).to receive(:pgmq_schema_version).and_return("1.5.0")
+
+      formatted = []
+      formatter = config.logger.formatter
+      allow(Pgbus.logger).to receive(:info) do |&blk|
+        line = blk.call
+        formatted << formatter.call("INFO", Time.now, nil, line)
+      end
+
+      expect { supervisor.send(:log_boot_banner) }.not_to raise_error
+      json_lines = formatted.select { |l| l.include?("boot:") }
+      expect(json_lines).not_to be_empty
+      json_lines.each { |l| expect { JSON.parse(l) }.not_to raise_error }
+      expect(formatted.join).not_to include("sekret")
+    end
+  end
+
+  describe "banner is emitted during #run" do
+    let(:supervisor) { described_class.new(config: config) }
+    let(:config) { Pgbus::Configuration.new }
+    let(:mock_client) { build_mock_client }
+
+    before do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive_messages(
+        verify_connection!: true, ensure_all_queues: nil, pgmq_schema_version: "1.5.0"
+      )
+    end
+
+    it "logs the banner after start_heartbeat and before bootstrap_queues" do
+      call_order = []
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat) { call_order << :heartbeat }
+      allow(supervisor).to receive(:log_boot_banner) { call_order << :banner }
+      allow(supervisor).to receive(:bootstrap_queues) { call_order << :bootstrap }
+      allow(supervisor).to receive(:boot_processes)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+
+      supervisor.run
+
+      expect(call_order).to eq(%i[heartbeat banner bootstrap])
+    end
+  end
+
   describe "recurring_tasks_configured? (private)" do
     let(:supervisor) { described_class.new }
 

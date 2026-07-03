@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "uri"
+
 module Pgbus
   module Process
     class Supervisor
@@ -35,6 +37,11 @@ module Pgbus
 
         Pgbus.logger.info { "[Pgbus] Supervisor starting pid=#{::Process.pid}" }
 
+        # Emit a one-block boot diagnostics banner so operators can read the
+        # resolved deployment config (connection target, pool, notify flags,
+        # roles, capsules) straight from the log instead of attaching a console.
+        log_boot_banner
+
         # Fail fast on a bad database_url / connection_params. PGMQ's pool is
         # lazy, so an unreachable DB would otherwise only surface once forked
         # children crash-loop against it. verify_connection! raises
@@ -69,6 +76,118 @@ module Pgbus
       end
 
       private
+
+      # Log a single boot diagnostics banner: the settings that actually
+      # determine whether this deployment works. One consecutive block of
+      # "[Pgbus] boot:"-prefixed info lines so it reads cleanly under both the
+      # text and JSON log formatters. Every DB-dependent field is wrapped so a
+      # transient failure degrades that field to "unknown" — the banner must
+      # never abort boot.
+      ROLE_FLAGS = %i[workers dispatcher scheduler consumers outbox].freeze
+      private_constant :ROLE_FLAGS
+
+      def log_boot_banner
+        Pgbus.logger.info { "[Pgbus] boot: pgbus #{Pgbus::VERSION} pid=#{::Process.pid}" }
+        Pgbus.logger.info do
+          "[Pgbus] boot: connection=#{redacted_connection_target} pool=#{banner_field { config.resolved_pool_size }}"
+        end
+        Pgbus.logger.info do
+          "[Pgbus] boot: pgmq_schema_mode=#{config.pgmq_schema_mode} pgmq_version=#{installed_pgmq_version}"
+        end
+        Pgbus.logger.info do
+          "[Pgbus] boot: listen_notify=#{config.listen_notify} worker_notify_wakeup=#{config.worker_notify_wakeup?}"
+        end
+        Pgbus.logger.info { "[Pgbus] boot: roles=#{enabled_roles.join(",")}" }
+        log_capsule_banner
+        log_consumer_banner
+      end
+
+      def log_capsule_banner
+        return unless config.role_enabled?(:workers)
+
+        Array(config.workers).each do |worker_config|
+          name = worker_config[:name] || worker_config["name"] || "anonymous"
+          queues = worker_config[:queues] || worker_config["queues"] || [config.default_queue]
+          threads = worker_config[:threads] || worker_config["threads"] || 5
+          mode = banner_field { config.execution_mode_for(worker_config) }
+          Pgbus.logger.info do
+            "[Pgbus] boot: capsule=#{name} queues=#{Array(queues).join(",")} threads=#{threads} mode=#{mode}"
+          end
+        end
+      end
+
+      def log_consumer_banner
+        return unless config.role_enabled?(:consumers)
+
+        Array(config.event_consumers).each do |consumer_config|
+          topics = consumer_config[:topics] || consumer_config["topics"] || []
+          threads = consumer_config[:threads] || consumer_config["threads"] || 3
+          Pgbus.logger.info do
+            "[Pgbus] boot: consumer topics=#{Array(topics).join(",")} threads=#{threads}"
+          end
+        end
+      end
+
+      # The set of roles that will actually boot, honoring config.roles.
+      def enabled_roles
+        ROLE_FLAGS.select { |role| config.role_enabled?(role) }
+      end
+
+      # Best-effort PGMQ version from the tracking table. "unknown" on any error
+      # (missing table, DB down) so a boot log never fails on diagnostics.
+      def installed_pgmq_version
+        Pgbus.client.pgmq_schema_version || "unknown"
+      rescue StandardError
+        "unknown"
+      end
+
+      # Reduce the configured connection to "host/dbname" with the password
+      # never printed, across all three connection_options forms: a URL string,
+      # a libpq keyword hash, or the AR-derived hash. Falls back to "unknown"
+      # rather than leaking anything if the shape is unexpected.
+      def redacted_connection_target
+        target = config.database_url ? parse_url_target(config.database_url) : parse_hash_target(banner_connection_hash)
+        target || "unknown"
+      rescue StandardError
+        "unknown"
+      end
+
+      # connection_options returns the URL string when database_url is set, a
+      # Hash for connection_params or AR-derived config, or a Proc fallback. We
+      # only reach here for the non-URL cases, so a non-Hash (Proc) yields nil.
+      def banner_connection_hash
+        opts = config.connection_options
+        opts.is_a?(Hash) ? opts : nil
+      end
+
+      def parse_url_target(url)
+        uri = URI.parse(url)
+        host = uri.host
+        dbname = uri.path.to_s.sub(%r{\A/}, "")
+        return nil if host.nil? && dbname.empty?
+
+        [host, dbname].reject { |s| s.nil? || s.empty? }.join("/")
+      rescue URI::InvalidURIError
+        nil
+      end
+
+      def parse_hash_target(hash)
+        return nil unless hash.is_a?(Hash)
+
+        host = hash[:host] || hash["host"]
+        dbname = hash[:dbname] || hash["dbname"] || hash[:database] || hash["database"]
+        return nil if host.nil? && dbname.nil?
+
+        [host, dbname].compact.join("/")
+      end
+
+      # Evaluate a banner field that touches config/DB; any failure degrades the
+      # single field to "unknown" so one broken resolver can't blank the banner.
+      def banner_field
+        yield
+      rescue StandardError
+        "unknown"
+      end
 
       def boot_processes
         # Boot workers (workers may be nil for scheduler-only or
