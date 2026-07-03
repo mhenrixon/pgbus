@@ -109,7 +109,7 @@ module Pgbus
     def apply_capsule_filter(name)
       capsule = Pgbus.configuration.capsule_named(name)
       unless capsule
-        available = (Pgbus.configuration.workers || []).filter_map { |c| c[:name] || c["name"] }
+        available = (Pgbus.configuration.workers || []).filter_map { |c| c[:name] }
         raise ArgumentError,
               "no capsule named #{name.inspect} (available: #{available.join(", ")})"
       end

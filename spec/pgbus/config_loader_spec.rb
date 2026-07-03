@@ -7,6 +7,17 @@ require "tempfile"
 RSpec.describe Pgbus::ConfigLoader do
   after { Pgbus.reset! }
 
+  def with_yaml(content)
+    file = Tempfile.new(["pgbus", ".yml"])
+    file.write(content)
+    file.rewind
+    Pgbus.reset!
+    yield file.path
+  ensure
+    file.close
+    file.unlink
+  end
+
   describe ".load" do
     let(:config_content) do
       <<~YAML
@@ -37,6 +48,60 @@ RSpec.describe Pgbus::ConfigLoader do
     ensure
       Tmpfile.close
       Tmpfile.unlink
+    end
+
+    it "normalizes YAML workers to symbol keys" do
+      yaml = <<~YAML
+        test:
+          workers:
+            - queues:
+                - critical
+              threads: 2
+              single_active_consumer: true
+              group_mode: fifo
+      YAML
+      with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+
+      entry = Pgbus.configuration.workers.first
+      expect(entry).to eq(
+        queues: %w[critical],
+        threads: 2,
+        single_active_consumer: true,
+        group_mode: "fifo"
+      )
+    end
+
+    it "boots the loaded workers with correct queues, threads, and modes" do
+      yaml = <<~YAML
+        test:
+          pool_size: null
+          workers:
+            - queues:
+                - critical
+              threads: 4
+      YAML
+      with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+
+      entry = Pgbus.configuration.workers.first
+      expect(entry[:queues]).to eq(%w[critical])
+      expect(entry[:threads]).to eq(4)
+      expect(Pgbus.configuration.execution_mode_for(entry)).to eq(:threads)
+      expect { Pgbus.configuration.validate! }.not_to raise_error
+      expect(Pgbus.configuration.resolved_pool_size).to eq(6)
+    end
+
+    it "normalizes YAML event_consumers to symbol keys" do
+      yaml = <<~YAML
+        test:
+          event_consumers:
+            - topics:
+                - orders.*
+              threads: 4
+      YAML
+      with_yaml(yaml) { |path| described_class.load(path, env: "test") }
+
+      entry = Pgbus.configuration.event_consumers.first
+      expect(entry).to eq(topics: %w[orders.*], threads: 4)
     end
   end
 

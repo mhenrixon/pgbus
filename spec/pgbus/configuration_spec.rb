@@ -161,10 +161,6 @@ RSpec.describe Pgbus::Configuration do
       config.execution_mode = :async
       expect(config.execution_mode_for({})).to eq(:async)
     end
-
-    it "accepts string keys" do
-      expect(config.execution_mode_for("execution_mode" => "async")).to eq(:async)
-    end
   end
 
   describe "#queue_name" do
@@ -397,6 +393,61 @@ RSpec.describe Pgbus::Configuration do
       end
     end
 
+    context "when given an Array with string keys (YAML form)" do
+      it "symbolizes every top-level option key" do
+        config.workers = [{
+          "queues" => %w[critical],
+          "threads" => 2,
+          "single_active_consumer" => true,
+          "consumer_priority" => 1,
+          "group_mode" => "fifo",
+          "execution_mode" => "async",
+          "name" => "critical"
+        }]
+
+        entry = config.workers.first
+        expect(entry).to eq(
+          queues: %w[critical],
+          threads: 2,
+          single_active_consumer: true,
+          consumer_priority: 1,
+          group_mode: "fifo",
+          execution_mode: "async",
+          name: "critical"
+        )
+      end
+
+      it "makes string-keyed options readable via symbols" do
+        config.workers = [{ "queues" => %w[critical], "threads" => 2, "single_active_consumer" => true }]
+        entry = config.workers.first
+        expect(entry[:queues]).to eq(%w[critical])
+        expect(entry[:threads]).to eq(2)
+        expect(entry[:single_active_consumer]).to be(true)
+      end
+
+      it "leaves symbol-keyed entries unchanged" do
+        config.workers = [{ queues: %w[default], threads: 5 }]
+        expect(config.workers).to eq([{ queues: %w[default], threads: 5 }])
+      end
+
+      it "normalizes a mix of string- and symbol-keyed entries" do
+        config.workers = [
+          { "queues" => %w[critical], "threads" => 2 },
+          { queues: %w[default], threads: 5 }
+        ]
+        expect(config.workers).to eq([
+                                       { queues: %w[critical], threads: 2 },
+                                       { queues: %w[default], threads: 5 }
+                                     ])
+      end
+
+      it "raises ArgumentError when an entry is not a Hash" do
+        expect { config.workers = [%w[not a hash]] }.to raise_error(
+          ArgumentError, /worker entry must be a Hash/
+        )
+      end
+    end
+
     context "when given a String (new DSL form)" do
       it "parses the wildcard form to an anonymous capsule (no :name)" do
         # Wildcards never get auto-named — see the long comment on
@@ -456,6 +507,32 @@ RSpec.describe Pgbus::Configuration do
       it "raises ArgumentError for a Hash" do
         expect { config.workers = { queues: %w[default] } }.to raise_error(ArgumentError, /String.*Array|Array.*String/)
       end
+    end
+  end
+
+  describe "#event_consumers=" do
+    it "symbolizes string-keyed entries" do
+      config.event_consumers = [{ "topics" => %w[orders.*], "threads" => 4 }]
+      entry = config.event_consumers.first
+      expect(entry).to eq(topics: %w[orders.*], threads: 4)
+      expect(entry[:topics]).to eq(%w[orders.*])
+      expect(entry[:threads]).to eq(4)
+    end
+
+    it "leaves symbol-keyed entries unchanged" do
+      config.event_consumers = [{ topics: %w[orders.#], threads: 3 }]
+      expect(config.event_consumers).to eq([{ topics: %w[orders.#], threads: 3 }])
+    end
+
+    it "passes nil through" do
+      config.event_consumers = nil
+      expect(config.event_consumers).to be_nil
+    end
+
+    it "raises ArgumentError when an entry is not a Hash" do
+      expect { config.event_consumers = ["not a hash"] }.to raise_error(
+        ArgumentError, /event_consumer entry must be a Hash/
+      )
     end
   end
 

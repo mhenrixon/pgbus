@@ -90,12 +90,12 @@ module Pgbus
       end
 
       def fork_worker(worker_config, slot: nil)
-        queues = worker_config[:queues] || worker_config["queues"] || [config.default_queue]
-        threads = worker_config[:threads] || worker_config["threads"] || 5
-        single_active = worker_config[:single_active_consumer] || worker_config["single_active_consumer"] || false
-        priority = worker_config[:consumer_priority] || worker_config["consumer_priority"] || 0
+        queues = worker_config[:queues] || [config.default_queue]
+        threads = worker_config[:threads] || 5
+        single_active = worker_config[:single_active_consumer] || false
+        priority = worker_config[:consumer_priority] || 0
         exec_mode = config.execution_mode_for(worker_config)
-        grp_mode = worker_config[:group_mode] || worker_config["group_mode"] || config.group_mode
+        grp_mode = worker_config[:group_mode] || config.group_mode
 
         # OS-level liveness channel: the child writes a byte each loop
         # iteration, the parent drains the reader in monitor_loop. This lets
@@ -237,8 +237,8 @@ module Pgbus
       end
 
       def fork_consumer(consumer_config, slot: nil)
-        topics = consumer_config[:topics] || consumer_config["topics"]
-        threads = consumer_config[:threads] || consumer_config["threads"] || 3
+        topics = consumer_config[:topics]
+        threads = consumer_config[:threads] || 3
 
         pid = fork do
           restore_signals

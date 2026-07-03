@@ -198,7 +198,7 @@ module Pgbus
     end
 
     def capsule_summary
-      Array(@config.workers).map { |w| w[:name] || w["name"] || (w[:queues] || w["queues"] || []).join("+") }.join(", ")
+      Array(@config.workers).map { |w| w[:name] || (w[:queues] || []).join("+") }.join(", ")
     end
 
     # Redact the password from a libpq URL/URI while keeping host/db visible so

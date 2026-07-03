@@ -86,7 +86,7 @@ module Pgbus
     attr_reader :pgmq_schema_mode
 
     # Event consumers
-    attr_accessor :event_consumers
+    attr_reader :event_consumers
 
     # Recurring jobs
     attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
@@ -311,7 +311,7 @@ module Pgbus
     # Returns the execution mode for a specific worker config hash,
     # falling back to the global execution_mode setting.
     def execution_mode_for(worker_config)
-      mode = worker_config[:execution_mode] || worker_config["execution_mode"] || execution_mode
+      mode = worker_config[:execution_mode] || execution_mode
       ExecutionPools.normalize_mode(mode)
     end
 
@@ -397,11 +397,11 @@ module Pgbus
       ExecutionPools.normalize_mode(execution_mode)
 
       Array(workers).each do |w|
-        threads = w[:threads] || w["threads"] || 5
+        threads = w[:threads] || 5
         raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
 
         # Validate per-worker execution_mode override if present
-        mode = w[:execution_mode] || w["execution_mode"]
+        mode = w[:execution_mode]
         ExecutionPools.normalize_mode(mode) if mode
       end
 
@@ -552,11 +552,27 @@ module Pgbus
                    parsed = CapsuleDSL.parse(value)
                    assign_auto_names(parsed)
                  when Array
-                   value
+                   value.map { |entry| normalize_entry(entry, group: "worker") }
                  else
                    raise ArgumentError,
                          "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
                  end
+    end
+
+    # Event consumer configs arrive with symbol keys (Ruby DSL) or string keys
+    # (YAML via ConfigLoader). Normalize once here so every read site uses
+    # symbol access only. nil passes through (no consumers configured).
+    def event_consumers=(value)
+      @event_consumers =
+        case value
+        when nil
+          nil
+        when Array
+          value.map { |entry| normalize_entry(entry, group: "event_consumer") }
+        else
+          raise ArgumentError,
+                "event_consumers must be an Array or nil — got #{value.class}"
+        end
     end
 
     # Define a named capsule and append it to the workers list.
@@ -850,11 +866,20 @@ module Pgbus
       numeric
     end
 
-    # Read a capsule's name from either symbol or string key, normalized
-    # to a string for comparison. Returns nil for unnamed (legacy) entries.
+    # Symbolize the top-level keys of a worker/consumer config entry so every
+    # downstream read site can use symbol access only. YAML (via ConfigLoader)
+    # yields string keys; the Ruby DSL and +capsule+ builder yield symbols.
+    # Entries are flat hashes with array/scalar values — no deep recursion.
+    def normalize_entry(entry, group:)
+      raise ArgumentError, "#{group} entry must be a Hash, got #{entry.class}: #{entry.inspect}" unless entry.is_a?(Hash)
+
+      entry.transform_keys(&:to_sym)
+    end
+
+    # Read a capsule's name (symbol key after normalization), as a string for
+    # comparison. Returns nil for unnamed (legacy) entries.
     def capsule_name(entry)
-      raw = entry[:name] || entry["name"]
-      raw&.to_s
+      entry[:name]&.to_s
     end
 
     # Auto-assign :name to parsed capsules where the first queue token would
@@ -887,7 +912,7 @@ module Pgbus
       existing_named = (@workers || []).select { |c| capsule_name(c) }
       return if existing_named.empty?
 
-      existing_queues = existing_named.flat_map { |c| c[:queues] || c["queues"] || [] }
+      existing_queues = existing_named.flat_map { |c| c[:queues] || [] }
       return if existing_queues.empty?
 
       if existing_queues.include?(CapsuleDSL::WILDCARD)
@@ -915,7 +940,7 @@ module Pgbus
       return 0 unless entries
 
       entries.sum do |entry|
-        threads = entry[:threads] || entry["threads"] || default_threads
+        threads = entry[:threads] || default_threads
         unless threads.is_a?(Integer) && threads.positive?
           raise ArgumentError,
                 "#{group} threads must be a positive integer, got #{threads.inspect}"
