@@ -586,6 +586,45 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#physical_queue_names" do
+    it "returns the single prefixed name when priority is disabled" do
+      expect(client.physical_queue_names("jobs")).to eq(["pgbus_test_jobs"])
+    end
+
+    context "when priority levels are configured" do
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.queue_prefix = "pgbus_test"
+          c.priority_levels = 3
+        end
+      end
+
+      it "expands to the _pN sub-queue names bootstrap actually creates" do
+        expect(client.physical_queue_names("jobs"))
+          .to eq(%w[pgbus_test_jobs_p0 pgbus_test_jobs_p1 pgbus_test_jobs_p2])
+      end
+    end
+  end
+
+  describe "#pgmq_installed?" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before { allow(client).to receive(:with_raw_connection).and_yield(raw_conn) }
+
+    it "returns true when the pgmq.meta table exists" do
+      allow(raw_conn).to receive(:exec).with(/pgmq.*meta/).and_return(double(ntuples: 1))
+
+      expect(client.pgmq_installed?).to be(true)
+    end
+
+    it "returns false when the pgmq schema is absent" do
+      allow(raw_conn).to receive(:exec).with(/pgmq.*meta/).and_return(double(ntuples: 0))
+
+      expect(client.pgmq_installed?).to be(false)
+    end
+  end
+
   describe "#pgmq_schema_version" do
     let(:raw_conn) { double("PG::Connection") }
 

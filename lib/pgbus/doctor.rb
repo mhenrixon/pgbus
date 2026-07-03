@@ -102,13 +102,24 @@ module Pgbus
     end
 
     # 3. PGMQ schema presence + installed-vs-vendored version.
+    #
+    # A nil version does NOT automatically mean "not installed": PGMQ installed
+    # via the extension, or before pgbus added version tracking, leaves the
+    # pgmq schema fully working with no row in pgbus_pgmq_schema_versions. So we
+    # distinguish, mirroring `pgbus:pgmq:status`: schema absent → fail; schema
+    # present but untracked → warn; tracked but behind → warn; current → ok.
     def check_pgmq_schema
       installed = @client.pgmq_schema_version
       latest = Pgbus::PgmqSchema.latest_version
 
       if installed.nil?
-        return Check.new(name: "PGMQ schema", status: :fail,
-                         detail: "not installed — run `rails generate pgbus:install`")
+        unless @client.pgmq_installed?
+          return Check.new(name: "PGMQ schema", status: :fail,
+                           detail: "not installed — run `rails generate pgbus:install`")
+        end
+
+        return Check.new(name: "PGMQ schema", status: :warn,
+                         detail: "installed but no version tracking — run `rails generate pgbus:upgrade_pgmq`")
       end
 
       if Gem::Version.new(installed) < Gem::Version.new(latest)
@@ -121,9 +132,13 @@ module Pgbus
       Check.new(name: "PGMQ schema", status: :fail, detail: "#{e.class}: #{e.message}")
     end
 
-    # 4. Queue existence — every configured queue must have a PGMQ table.
+    # 4. Queue existence — every configured queue must have its PGMQ table(s).
+    # Resolve each logical queue to the PHYSICAL names bootstrap creates (via the
+    # client's queue strategy) so a priority queue's _p0.._pN sub-tables are what
+    # we diff against list_queues — not the bare prefixed name priority mode
+    # never creates.
     def check_queues
-      configured = @client.configured_queues.map { |q| @config.queue_name(q) }
+      configured = @client.configured_queues.flat_map { |q| @client.physical_queue_names(q) }
       existing = existing_queue_names
       missing = configured - existing
 
@@ -194,20 +209,31 @@ module Pgbus
       redact_url(@config.database_url)
     end
 
+    # connection_params is a free-form libpq keyword hash, so redact every key
+    # whose name looks secret (password, sslpassword, ...) — not just :password —
+    # rather than assuming a fixed shape. Preserves symbol/string key form.
+    SECRET_KEY_PATTERN = /pass|secret|token/i
+    private_constant :SECRET_KEY_PATTERN
+
     def redacted_connection_params
       params = @config.connection_params
       return nil unless params.is_a?(Hash)
 
-      params.merge(params.key?(:password) ? { password: "[REDACTED]" } : {})
-            .merge(params.key?("password") ? { "password" => "[REDACTED]" } : {})
+      params.each_with_object({}) do |(key, value), out|
+        out[key] = key.to_s.match?(SECRET_KEY_PATTERN) ? "[REDACTED]" : value
+      end
     end
 
     # Replace the password in a userinfo authority (scheme://user:pass@host) or a
     # key=value conninfo string (password=secret). Falls back to a blanket
     # redaction label if parsing fails, never leaking the original.
+    #
+    # The userinfo password can itself contain '@' and ':' (common in generated
+    # secrets), so match it greedily up to the LAST '@' before the authority's
+    # host — a lazy `[^@]+` would stop at the first '@' and leak the remainder.
     def redact_url(url)
-      redacted = url.sub(%r{(://[^:/@]+:)[^@/]+(@)}, '\1[REDACTED]\2')
-      redacted.gsub(/password=('[^']*'|[^\s'"]+)/i, "password=[REDACTED]")
+      redacted = url.sub(%r{(://[^:/@]+:).+(@[^@/]*(?:[/?]|\z))}, '\1[REDACTED]\2')
+      redacted.gsub(/(\bpassword=)('[^']*'|[^\s'"]+)/i, '\1[REDACTED]')
     rescue StandardError
       "[REDACTED]"
     end

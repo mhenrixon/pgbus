@@ -19,11 +19,15 @@ RSpec.describe Pgbus::Doctor do
     build_mock_client.tap do |c|
       allow(c).to receive_messages(
         ping: true,
+        pgmq_installed?: true,
         pgmq_schema_version: Pgbus::PgmqSchema.latest_version,
         configured_queues: %w[default],
         list_queues: [{ queue_name: "pgbus_default" }],
         notify_enabled?: true
       )
+      # Mirror the real Client: resolve a logical name to its physical PGMQ
+      # table name(s). Default (non-priority) maps 1:1 with the prefix.
+      allow(c).to receive(:physical_queue_names) { |name| ["pgbus_#{name}"] }
     end
   end
 
@@ -61,8 +65,8 @@ RSpec.describe Pgbus::Doctor do
       names = doctor.run.map { |c| c[:name].downcase }.join(" ")
       expect(names).to match(/database|connect/)
       expect(names).to match(/pgmq|schema/)
-      expect(names).to match(/queue/)
-      expect(names).to match(/notify/)
+      expect(names).to include("queue")
+      expect(names).to include("notify")
       expect(names).to match(/process|liveness|health/)
     end
   end
@@ -94,7 +98,7 @@ RSpec.describe Pgbus::Doctor do
 
       check = config_check(doctor.run)
       expect(check[:status]).to eq(:fail)
-      expect(check[:detail]).to match(/pool_timeout/)
+      expect(check[:detail]).to include("pool_timeout")
     end
   end
 
@@ -105,7 +109,7 @@ RSpec.describe Pgbus::Doctor do
 
       check = db_check(doctor.run)
       expect(check[:status]).to eq(:fail)
-      expect(check[:detail]).to match(/could not connect to server/)
+      expect(check[:detail]).to include("could not connect to server")
       expect(doctor.success?).to be(false)
     end
   end
@@ -119,11 +123,22 @@ RSpec.describe Pgbus::Doctor do
       expect(check[:detail]).to match(/upgrade|update/i)
     end
 
-    it "fails when PGMQ is not installed (nil version)" do
-      allow(client).to receive(:pgmq_schema_version).and_return(nil)
+    it "fails when the PGMQ schema is genuinely absent (no meta table)" do
+      allow(client).to receive_messages(pgmq_schema_version: nil, pgmq_installed?: false)
 
       check = pgmq_check(doctor.run)
       expect(check[:status]).to eq(:fail)
+      expect(check[:detail]).to match(/not installed/i)
+    end
+
+    it "warns (not fails) when PGMQ is installed but has no version tracking row" do
+      # Extension install / an install predating version tracking: pgmq.meta
+      # exists and works, but pgbus_pgmq_schema_versions was never populated.
+      allow(client).to receive_messages(pgmq_schema_version: nil, pgmq_installed?: true)
+
+      check = pgmq_check(doctor.run)
+      expect(check[:status]).to eq(:warn)
+      expect(check[:detail]).to match(/tracking|upgrade_pgmq/i)
     end
   end
 
@@ -139,6 +154,19 @@ RSpec.describe Pgbus::Doctor do
     it "accepts list_queues rows that respond to queue_name" do
       row = double("QueueRow", queue_name: "pgbus_default")
       allow(client).to receive_messages(configured_queues: %w[default], list_queues: [row])
+
+      expect(queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "resolves priority sub-queues so a priority deployment is not falsely failed" do
+      # Priority mode creates _p0.._pN physical tables, never the bare name.
+      allow(client).to receive(:physical_queue_names)
+        .with("default").and_return(%w[pgbus_default_p0 pgbus_default_p1 pgbus_default_p2])
+      allow(client).to receive_messages(
+        configured_queues: %w[default],
+        list_queues: [{ queue_name: "pgbus_default_p0" }, { queue_name: "pgbus_default_p1" },
+                      { queue_name: "pgbus_default_p2" }]
+      )
 
       expect(queue_check(doctor.run)[:status]).to eq(:ok)
     end
@@ -172,7 +200,7 @@ RSpec.describe Pgbus::Doctor do
 
       check = process_check(doctor.run)
       expect(check[:status]).to eq(:fail)
-      expect(check[:detail]).to match(/worker wedged/)
+      expect(check[:detail]).to include("worker wedged")
       expect(doctor.success?).to be(false)
     end
 
@@ -189,7 +217,7 @@ RSpec.describe Pgbus::Doctor do
 
       check = process_check(doctor.run)
       expect(check[:status]).to eq(:fail)
-      expect(check[:detail]).to match(/boom/)
+      expect(check[:detail]).to include("boom")
     end
   end
 
@@ -201,8 +229,8 @@ RSpec.describe Pgbus::Doctor do
 
     it "includes a configuration summary" do
       report = doctor.report
-      expect(report).to match(/queue_prefix/)
-      expect(report).to match(/pgmq_schema_mode/)
+      expect(report).to include("queue_prefix")
+      expect(report).to include("pgmq_schema_mode")
     end
 
     it "redacts the password in the database_url" do
@@ -216,12 +244,34 @@ RSpec.describe Pgbus::Doctor do
       expect(doctor.config_summary[:database_url]).to include("localhost")
     end
 
+    it "redacts a password that itself contains an @ (regex must not stop at the first @)" do
+      config.database_url = "postgres://user:p@ss:w0rd@localhost:5432/pgbus_test"
+
+      redacted = doctor.config_summary[:database_url]
+      expect(redacted).not_to include("p@ss:w0rd")
+      expect(redacted).to include("localhost")
+    end
+
+    it "redacts a password= parameter in a conninfo-style database_url" do
+      config.database_url = "host=localhost dbname=pgbus password=topsecret sslmode=require"
+
+      expect(doctor.config_summary[:database_url]).not_to include("topsecret")
+    end
+
     it "redacts the password from connection_params hash form" do
       config.database_url = nil
       config.connection_params = { host: "localhost", dbname: "pgbus", password: "hunter2" }
 
       summary = doctor.config_summary
       expect(summary[:connection_params].to_s).not_to include("hunter2")
+    end
+
+    it "redacts other secret-bearing connection_params keys (sslpassword)" do
+      config.database_url = nil
+      config.connection_params = { host: "localhost", sslpassword: "keysecret", passfile: "/etc/pgpass" }
+
+      summary = doctor.config_summary
+      expect(summary[:connection_params].to_s).not_to include("keysecret")
     end
 
     it "exposes resolved runtime knobs" do
