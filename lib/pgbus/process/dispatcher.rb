@@ -43,6 +43,33 @@ module Pgbus
         def skipped? = status == :skipped
       end
 
+      # Accumulates the per-item outcomes of a task that loops over queues.
+      # A task should only be considered failed when it attempted work and
+      # *every* attempt failed — a partial failure (some items succeed) must
+      # not trip maintenance backoff. #result returns the first error in the
+      # total-failure case and nil otherwise, matching the "return e on
+      # failure" contract run_if_due expects.
+      class LoopOutcome
+        def initialize
+          @successes = 0
+          @failures = 0
+          @first_error = nil
+        end
+
+        def record_success
+          @successes += 1
+        end
+
+        def record_failure(error)
+          @failures += 1
+          @first_error = error if @first_error.nil?
+        end
+
+        def result
+          @first_error if @failures.positive? && @successes.zero?
+        end
+      end
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -371,15 +398,19 @@ module Pgbus
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
+        outcome = LoopOutcome.new
         queue_names.each do |full_name|
           next unless full_name.start_with?("#{prefix}_")
 
           stripped = full_name.delete_prefix("#{prefix}_")
           deleted = Pgbus.client.purge_archive(stripped, older_than: cutoff, batch_size: batch_size)
           Pgbus.logger.debug { "[Pgbus] Compacted #{deleted} archive entries from #{full_name}" } if deleted.positive?
+          outcome.record_success
         rescue StandardError => e
           Pgbus.logger.warn { "[Pgbus] Archive compaction failed for #{full_name}: #{e.message}" }
+          outcome.record_failure(e)
         end
+        outcome.result
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Archive compaction failed: #{e.message}" }
         e
@@ -399,6 +430,7 @@ module Pgbus
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
+        outcome = LoopOutcome.new
         queue_names.each do |full_name|
           next unless full_name.start_with?("#{prefix}_")
 
@@ -413,9 +445,12 @@ module Pgbus
               "[Pgbus] Compacted #{deleted} stream archive entries from #{full_name}"
             end
           end
+          outcome.record_success
         rescue StandardError => e
           Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed for #{full_name}: #{e.message}" }
+          outcome.record_failure(e)
         end
+        outcome.result
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed: #{e.message}" }
         e
@@ -446,6 +481,7 @@ module Pgbus
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
         dropped = 0
+        outcome = LoopOutcome.new
         queue_names.each do |full_name|
           next unless full_name.start_with?("#{prefix}_")
 
@@ -460,11 +496,14 @@ module Pgbus
           Pgbus.client.drop_queue(full_name, prefixed: false)
           dropped += 1
           Pgbus.logger.info { "[Pgbus] Dropped orphan stream queue: #{full_name}" }
+          outcome.record_success
         rescue StandardError => e
           Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed for #{full_name}: #{e.message}" }
+          outcome.record_failure(e)
         end
 
         Pgbus.logger.debug { "[Pgbus] Orphan stream sweep complete: dropped #{dropped} queue(s)" } if dropped.positive?
+        outcome.result
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed: #{e.message}" }
         e

@@ -12,6 +12,33 @@ RSpec.describe Pgbus::Process::Dispatcher do
     allow(Pgbus).to receive(:client).and_return(mock_client)
   end
 
+  describe described_class::LoopOutcome do
+    subject(:outcome) { described_class.new }
+
+    it "returns nil when nothing was attempted" do
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns nil when every item succeeded" do
+      outcome.record_success
+      outcome.record_success
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns nil on a partial failure (at least one success)" do
+      outcome.record_success
+      outcome.record_failure(StandardError.new("boom"))
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns the first error when every attempt failed" do
+      first = StandardError.new("first")
+      outcome.record_failure(first)
+      outcome.record_failure(StandardError.new("second"))
+      expect(outcome.result).to be(first)
+    end
+  end
+
   describe "constants" do
     it "has a cleanup interval of 1 hour" do
       expect(described_class::CLEANUP_INTERVAL).to eq(3600)
@@ -242,6 +269,26 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       expect(call_count).to eq(2)
     end
+
+    it "returns the first error when every queue fails (surfaces total outage)" do
+      allow(mock_client).to receive(:purge_archive).and_raise(StandardError, "db down")
+
+      result = dispatcher.send(:compact_archives)
+
+      expect(result).to be_a(StandardError)
+    end
+
+    it "does not surface a failure when at least one queue succeeds (partial)" do
+      allow(mock_client).to receive(:purge_archive) do |queue_name, **_opts|
+        raise StandardError, "fail" if queue_name == "default"
+
+        3
+      end
+
+      result = dispatcher.send(:compact_archives)
+
+      expect(result).not_to be_a(StandardError)
+    end
   end
 
   describe "#run_maintenance includes archive compaction" do
@@ -400,6 +447,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(Pgbus).to receive(:logger).and_return(logger)
       allow(dispatcher).to receive(:monotonic_now) { clock }
       allow(dispatcher.config).to receive(:streams_orphan_sweep_interval).and_return(3600)
+      allow(Pgbus::ErrorReporter).to receive(:report)
     end
 
     # Make every task due as of the current stubbed clock.
@@ -437,7 +485,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "reports every task error individually on the first failing cycle" do
       force_all_due
       stub_tasks
-      allow(Pgbus::ErrorReporter).to receive(:report)
 
       run_cycle
 
@@ -446,8 +493,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "enters backoff after two consecutive all-failed cycles with a single summary warn" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
-
       force_all_due
       stub_tasks
       run_cycle # streak -> 1, per-task reports
@@ -462,8 +507,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "suppresses per-task ErrorReporter calls once in backoff" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
-
       force_all_due
       stub_tasks
       run_cycle # first failing cycle: tasks.size reports
@@ -475,8 +518,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "skips all maintenance while inside the backoff window" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
-
       force_all_due
       stub_tasks
       run_cycle
@@ -494,7 +535,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "does not enter backoff on a partial failure (some tasks succeed)" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
       succeeding = :reap_stale_processes
 
       force_all_due
@@ -508,8 +548,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "resets the streak and restores cadence when a task succeeds" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
-
       force_all_due
       stub_tasks
       run_cycle # streak -> 1
@@ -524,8 +562,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "exits backoff as soon as a maintenance task succeeds again" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
-
       force_all_due
       stub_tasks
       run_cycle
@@ -542,7 +578,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "doubles the backoff window per consecutive failed cycle" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
       stub_tasks
       base = described_class::MAINTENANCE_BACKOFF_BASE
 
@@ -561,7 +596,6 @@ RSpec.describe Pgbus::Process::Dispatcher do
     end
 
     it "caps the backoff window at MAINTENANCE_BACKOFF_MAX" do
-      allow(Pgbus::ErrorReporter).to receive(:report)
       stub_tasks
       max = described_class::MAINTENANCE_BACKOFF_MAX
 
@@ -599,13 +633,11 @@ RSpec.describe Pgbus::Process::Dispatcher do
       end
 
       it "enters backoff during a real outage where the task rescues fire" do
-        allow(Pgbus::ErrorReporter).to receive(:report)
         # Drive genuine task bodies (task methods are NOT stubbed). Make their
         # underlying dependencies raise so each task's own rescue returns the
-        # exception to run_if_due. Only the three tasks below are due; the
-        # rest stay skipped, so this proves the swallow-and-return-e path
+        # exception to run_if_due. Only the three tasks below are forced due;
+        # the rest stay skipped, so this proves the swallow-and-return-e path
         # surfaces failure without depending on every task's guard clauses.
-        allow(dispatcher.config).to receive(:streams_orphan_sweep_interval).and_return(nil)
         allow(Pgbus::ProcessedEvent).to receive(:expired).and_raise(StandardError, "db down")
         allow(Pgbus::ProcessEntry).to receive(:stale).and_raise(StandardError, "db down")
         allow(Pgbus::Batch).to receive(:cleanup).and_raise(StandardError, "db down")
