@@ -199,6 +199,23 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "#recycle_needed? (private)" do
+    # worker.config is the globally-memoized Pgbus.configuration, so the recycle
+    # limits set in the contexts below leak across examples — and across spec
+    # files — unless reset. Without this, a stray max_worker_lifetime/max_memory
+    # left set by an earlier example makes "returns false" tests trip on the
+    # wrong reason under some random orderings (seen only on CI Ruby 3.3).
+    before do
+      worker.config.max_jobs_per_worker = nil
+      worker.config.max_memory_mb = nil
+      worker.config.max_worker_lifetime = nil
+    end
+
+    after do
+      worker.config.max_jobs_per_worker = nil
+      worker.config.max_memory_mb = nil
+      worker.config.max_worker_lifetime = nil
+    end
+
     it "returns false when no limits are configured" do
       expect(worker.send(:recycle_needed?)).to be false
     end
