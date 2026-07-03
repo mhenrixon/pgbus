@@ -40,6 +40,57 @@ RSpec.describe Pgbus::ConfigLoader do
     end
   end
 
+  describe ".load with env sections" do
+    let(:sectioned_content) do
+      <<~YAML
+        development:
+          queue_prefix: pgbus_dev
+        production:
+          queue_prefix: pgbus_prod
+      YAML
+    end
+
+    # When the running env has no section, load falls back to applying the
+    # whole file (flat-config support). The env names themselves must not be
+    # flagged as typos.
+    it "does not warn about env section names when falling back to the whole file" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      with_temp_config(sectioned_content) do |path|
+        described_class.load(path, env: "staging")
+      end
+
+      expect(io.string).not_to include("Unknown configuration key")
+    end
+
+    it "still warns about typos inside a matched env section" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      content = <<~YAML
+        test:
+          pooling_interval: 0.5
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "test")
+      end
+
+      expect(io.string).to include("Unknown configuration key")
+      expect(io.string).to include("pooling_interval")
+    end
+
+    def with_temp_config(content)
+      file = Tempfile.new(["pgbus", ".yml"])
+      file.write(content)
+      file.rewind
+      yield file.path
+    ensure
+      file.close
+      file.unlink
+    end
+  end
+
   describe ".apply" do
     it "sets configuration values from a hash" do
       Pgbus.reset!
