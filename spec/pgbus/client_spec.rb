@@ -456,6 +456,85 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#verify_connection!" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
+    end
+
+    context "when the connection is healthy" do
+      before do
+        allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn)
+        allow(raw_conn).to receive(:exec).with("SELECT 1").and_return(double("PG::Result"))
+      end
+
+      it "runs SELECT 1 through a pooled connection" do
+        client.verify_connection!
+
+        expect(raw_conn).to have_received(:exec).with("SELECT 1")
+      end
+
+      it "returns a truthy value" do
+        expect(client.verify_connection!).to be_truthy
+      end
+    end
+
+    context "when pgmq raises a ConnectionError" do
+      before do
+        allow(mock_pgmq).to receive(:with_connection)
+          .and_raise(PGMQ::Errors::ConnectionError, "could not connect to server")
+      end
+
+      it "raises Pgbus::ConfigurationError" do
+        expect { client.verify_connection! }.to raise_error(Pgbus::ConfigurationError)
+      end
+
+      it "includes the underlying error message" do
+        expect { client.verify_connection! }
+          .to raise_error(Pgbus::ConfigurationError, /could not connect to server/)
+      end
+
+      it "names the database_url config source" do
+        expect { client.verify_connection! }
+          .to raise_error(Pgbus::ConfigurationError, /database_url/)
+      end
+    end
+
+    context "when a raw PG::Error surfaces" do
+      before do
+        allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn)
+        allow(raw_conn).to receive(:exec).with("SELECT 1")
+                                         .and_raise(PG::Error, "server closed the connection unexpectedly")
+      end
+
+      it "raises Pgbus::ConfigurationError carrying the PG message" do
+        expect { client.verify_connection! }
+          .to raise_error(Pgbus::ConfigurationError, /server closed the connection unexpectedly/)
+      end
+    end
+
+    context "when configured with connection_params" do
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+          c.queue_prefix = "pgbus_test"
+        end
+      end
+
+      before do
+        allow(mock_pgmq).to receive(:with_connection)
+          .and_raise(PGMQ::Errors::ConnectionError, "boom")
+      end
+
+      it "names the connection_params config source" do
+        expect { client.verify_connection! }
+          .to raise_error(Pgbus::ConfigurationError, /connection_params/)
+      end
+    end
+  end
+
   describe "#list_queues" do
     it "delegates to pgmq.list_queues" do
       client.list_queues

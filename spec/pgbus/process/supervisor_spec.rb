@@ -349,6 +349,7 @@ RSpec.describe Pgbus::Process::Supervisor do
     before do
       allow(Pgbus).to receive(:client).and_return(mock_client)
       allow(mock_client).to receive(:ensure_all_queues)
+      allow(mock_client).to receive(:verify_connection!).and_return(true)
     end
 
     it "calls bootstrap_queues before boot_processes" do
@@ -363,6 +364,38 @@ RSpec.describe Pgbus::Process::Supervisor do
       supervisor.run
 
       expect(call_order).to eq(%i[bootstrap boot])
+    end
+
+    it "verifies the database connection once before bootstrapping queues" do
+      call_order = []
+      allow(mock_client).to receive(:verify_connection!) { call_order << :verify }
+      allow(supervisor).to receive(:bootstrap_queues) { call_order << :bootstrap }
+      allow(supervisor).to receive(:boot_processes) { call_order << :boot }
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+
+      supervisor.run
+
+      expect(call_order).to eq(%i[verify bootstrap boot])
+      expect(mock_client).to have_received(:verify_connection!).once
+    end
+
+    it "propagates a ConfigurationError from verification without booting children" do
+      allow(mock_client).to receive(:verify_connection!)
+        .and_raise(Pgbus::ConfigurationError, "Database connection failed via database_url: nope")
+      allow(supervisor).to receive(:bootstrap_queues)
+      allow(supervisor).to receive(:boot_processes)
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+
+      expect { supervisor.run }.to raise_error(Pgbus::ConfigurationError, /database_url/)
+
+      expect(supervisor).not_to have_received(:bootstrap_queues)
+      expect(supervisor).not_to have_received(:boot_processes)
     end
 
     it "rescues bootstrap errors in the parent without aborting" do

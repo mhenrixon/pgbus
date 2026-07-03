@@ -62,6 +62,25 @@ module Pgbus
       @schema_ensured = false
     end
 
+    # Actively open a database connection and run `SELECT 1` so a bad
+    # database_url / connection_params surfaces at boot instead of on the
+    # first operation. PGMQ::Client's pool is lazy — nothing touches the
+    # database at init — so without this the supervisor forks children that
+    # crash-loop against an unreachable DB. Called from Supervisor#run before
+    # any queue bootstrap or forking.
+    #
+    # Raises Pgbus::ConfigurationError (not a transient PGMQ error) because a
+    # failure here means the operator's connection config is wrong: the message
+    # carries the underlying error plus which config source was in use.
+    def verify_connection!
+      synchronized do
+        @pgmq.with_connection { |conn| conn.exec("SELECT 1") }
+      end
+      true
+    rescue PGMQ::Errors::ConnectionError, PG::Error => e
+      raise ConfigurationError, "Database connection failed via #{connection_source}: #{e.message}"
+    end
+
     def ensure_queue(name)
       ensure_pgmq_schema
       @queue_strategy.physical_queue_names(name).each { |pq| ensure_single_queue(pq) }
@@ -462,6 +481,19 @@ module Pgbus
     end
 
     private
+
+    # Human-readable label for which config knob supplied the connection
+    # options, mirroring Configuration#connection_options' precedence. Used in
+    # verify_connection!'s error so the operator knows which setting to fix.
+    def connection_source
+      if config.database_url
+        "database_url"
+      elsif config.connection_params
+        "connection_params"
+      else
+        "ActiveRecord-derived connection"
+      end
+    end
 
     # Accept either a logical name ("default") or an already-prefixed
     # physical name ("pgbus_default") and return the physical name.

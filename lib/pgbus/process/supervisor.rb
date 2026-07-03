@@ -35,6 +35,13 @@ module Pgbus
 
         Pgbus.logger.info { "[Pgbus] Supervisor starting pid=#{::Process.pid}" }
 
+        # Fail fast on a bad database_url / connection_params. PGMQ's pool is
+        # lazy, so an unreachable DB would otherwise only surface once forked
+        # children crash-loop against it. verify_connection! raises
+        # Pgbus::ConfigurationError with an actionable message; we let it
+        # propagate so the supervisor exits instead of forking anything.
+        Pgbus.client.verify_connection!
+
         # Bootstrap queues once in the parent process before forking children.
         # This avoids the deadlock that occurs when multiple forked children
         # race to call enable_notify_insert (DROP TRIGGER + CREATE TRIGGER)
