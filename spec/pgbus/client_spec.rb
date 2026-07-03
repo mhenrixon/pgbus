@@ -535,6 +535,96 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#notify_trigger_current? (via ensure_queue)" do
+    # The class-level subject stubs notify_trigger_current? so most specs skip
+    # its raw SQL. Here we exercise the real method to prove it routes through
+    # the pooled PGMQ connection instead of opening a fresh PG.connect.
+    let(:conn) { double("PG::Connection") }
+    let(:result) { double("PG::Result", ntuples: 0) }
+
+    before do
+      config.listen_notify = true
+      allow(client).to receive(:notify_trigger_current?).and_call_original
+      allow(conn).to receive(:exec_params).and_return(result)
+    end
+
+    it "checks the trigger through the pooled @pgmq.with_connection, not a fresh PG.connect" do
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:with_connection)
+    end
+
+    it "never opens a raw PG.connect connection during an N-queue bootstrap" do
+      stub_const("PG", Module.new) unless defined?(PG)
+      allow(PG).to receive(:connect)
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+      allow(client).to receive(:with_raw_connection).and_call_original
+
+      client.ensure_all_queues
+
+      expect(PG).not_to have_received(:connect)
+      expect(client).not_to have_received(:with_raw_connection)
+    end
+
+    it "passes the physical queue name and throttle interval to exec_params" do
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+
+      client.ensure_queue("jobs")
+
+      expect(conn).to have_received(:exec_params).with(
+        a_string_matching(/pg_trigger/),
+        ["pgbus_test_jobs", Pgbus::Client::NOTIFY_THROTTLE_MS]
+      )
+    end
+
+    it "skips enable_notify_insert when the pooled check finds a current trigger" do
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+      allow(conn).to receive(:exec_params).and_return(double("PG::Result", ntuples: 1))
+
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).not_to have_received(:enable_notify_insert)
+    end
+
+    it "falls back to false (and enables notify) when the pooled connection raises" do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      allow(mock_pgmq).to receive(:with_connection)
+        .and_raise(PGMQ::Errors::ConnectionError, "schema not ready")
+
+      expect { client.ensure_queue("jobs") }.not_to raise_error
+      expect(mock_pgmq).to have_received(:enable_notify_insert)
+    end
+
+    context "with the shared-connection Proc path (pool_size=1)" do
+      # Force the Proc branch of Client#initialize (@shared_connection = true,
+      # @pgmq_mutex = Mutex.new, pgmq pool_size=1) so we prove the trigger check
+      # does not deadlock on a nested checkout against a single-slot pool.
+      subject(:shared_client) do
+        allow(config).to receive(:connection_options).and_return(-> { conn })
+        allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+        c = described_class.new(config)
+        c.instance_variable_set(:@schema_ensured, true)
+        allow(c).to receive(:tune_autovacuum)
+        c
+      end
+
+      before { allow(mock_pgmq).to receive(:with_connection).and_yield(conn) }
+
+      it "uses a Mutex to serialize the single-slot pool" do
+        expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+      end
+
+      it "completes the trigger check without a nested pool checkout / deadlock" do
+        # create() and the trigger check are sequential checkouts, not nested:
+        # @pgmq.create returns before notify_trigger_current? checks out again.
+        expect { shared_client.ensure_queue("jobs") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:with_connection)
+      end
+    end
+  end
+
   describe "#list_queues" do
     it "delegates to pgmq.list_queues" do
       client.list_queues
