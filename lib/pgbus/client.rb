@@ -5,6 +5,7 @@ require "timeout"
 require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
 require_relative "client/notify_stream"
+require_relative "client/connection_health"
 
 module Pgbus
   class Client
@@ -12,7 +13,7 @@ module Pgbus
     include EnsureStreamQueue
     include NotifyStream
 
-    attr_reader :pgmq, :config
+    attr_reader :pgmq, :config, :connection_health
 
     PGMQ_REQUIRE_MUTEX = Mutex.new
     private_constant :PGMQ_REQUIRE_MUTEX
@@ -60,6 +61,10 @@ module Pgbus
       @stream_indexes_created = Concurrent::Map.new
       @queue_strategy = QueueFactory.for(config)
       @schema_ensured = false
+      @connection_health = ConnectionHealth.new(
+        on_open: method(:log_circuit_open),
+        on_close: method(:log_circuit_close)
+      )
     end
 
     # Actively open a database connection and run `SELECT 1` so a bad
@@ -128,18 +133,22 @@ module Pgbus
 
     def read_message(queue_name, vt: nil)
       full_name = config.queue_name(queue_name)
-      Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
-        with_stale_connection_retry do
-          synchronized { with_read_timeout { @pgmq.read(full_name, vt: vt || config.visibility_timeout) } }
+      guarded_read do
+        Instrumentation.instrument("pgbus.client.read_message", queue: full_name) do
+          with_stale_connection_retry do
+            synchronized { with_read_timeout { @pgmq.read(full_name, vt: vt || config.visibility_timeout) } }
+          end
         end
       end
     end
 
     def read_batch(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { with_read_timeout { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+      guarded_read do
+        Instrumentation.instrument("pgbus.client.read_batch", queue: full_name, qty: qty) do
+          with_stale_connection_retry do
+            synchronized { with_read_timeout { @pgmq.read_batch(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+          end
         end
       end
     end
@@ -147,42 +156,51 @@ module Pgbus
     # Read from priority sub-queues, highest priority (p0) first.
     # Returns [priority_queue_name, messages] pairs.
     def read_batch_prioritized(queue_name, qty:, vt: nil)
+      # Non-priority fast path delegates to read_batch, which is already gated
+      # by the connection-health breaker — no extra guard needed here.
       unless @queue_strategy.priority?
         return (read_batch(queue_name, qty: qty, vt: vt) || []).map do |m|
           [config.queue_name(queue_name), m]
         end
       end
 
-      remaining = qty
-      results = []
+      # The priority loop issues its own reads, so gate the whole loop: an open
+      # breaker fails fast before any sub-queue is touched, and the loop as a
+      # unit records one success/failure with the latch.
+      guarded_read do
+        remaining = qty
+        results = []
 
-      config.priority_queue_names(queue_name).each do |pq_name|
-        break if remaining <= 0
+        config.priority_queue_names(queue_name).each do |pq_name|
+          break if remaining <= 0
 
-        msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
-          with_stale_connection_retry do
-            synchronized { with_read_timeout { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) } }
-          end
-        end || []
+          msgs = Instrumentation.instrument("pgbus.client.read_batch", queue: pq_name, qty: remaining) do
+            with_stale_connection_retry do
+              synchronized { with_read_timeout { @pgmq.read_batch(pq_name, vt: vt || config.visibility_timeout, qty: remaining) } }
+            end
+          end || []
 
-        msgs.each { |m| results << [pq_name, m] }
-        remaining -= msgs.size
+          msgs.each { |m| results << [pq_name, m] }
+          remaining -= msgs.size
+        end
+
+        results
       end
-
-      results
     end
 
     def read_with_poll(queue_name, qty:, vt: nil, max_poll_seconds: 5, poll_interval_ms: 100)
       full_name = config.queue_name(queue_name)
-      with_stale_connection_retry do
-        synchronized do
-          @pgmq.read_with_poll(
-            full_name,
-            vt: vt || config.visibility_timeout,
-            qty: qty,
-            max_poll_seconds: max_poll_seconds,
-            poll_interval_ms: poll_interval_ms
-          )
+      guarded_read do
+        with_stale_connection_retry do
+          synchronized do
+            @pgmq.read_with_poll(
+              full_name,
+              vt: vt || config.visibility_timeout,
+              qty: qty,
+              max_poll_seconds: max_poll_seconds,
+              poll_interval_ms: poll_interval_ms
+            )
+          end
         end
       end
     end
@@ -197,11 +215,13 @@ module Pgbus
     # otherwise the pool can overflow on multi-queue reads (issue #123).
     def read_multi(queue_names, qty:, vt: nil, limit: nil)
       full_names = queue_names.map { |q| config.queue_name(q) }
-      Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty, limit: limit) do
-        with_stale_connection_retry do
-          synchronized do
-            with_read_timeout do
-              @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+      guarded_read do
+        Instrumentation.instrument("pgbus.client.read_multi", queues: full_names, qty: qty, limit: limit) do
+          with_stale_connection_retry do
+            synchronized do
+              with_read_timeout do
+                @pgmq.read_multi(full_names, vt: vt || config.visibility_timeout, qty: qty, limit: limit)
+              end
             end
           end
         end
@@ -377,26 +397,32 @@ module Pgbus
 
     def read_grouped(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      Instrumentation.instrument("pgbus.client.read_grouped", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { with_read_timeout { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+      guarded_read do
+        Instrumentation.instrument("pgbus.client.read_grouped", queue: full_name, qty: qty) do
+          with_stale_connection_retry do
+            synchronized { with_read_timeout { @pgmq.read_grouped(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+          end
         end
       end
     end
 
     def read_grouped_rr(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      Instrumentation.instrument("pgbus.client.read_grouped_rr", queue: full_name, qty: qty) do
-        with_stale_connection_retry do
-          synchronized { with_read_timeout { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+      guarded_read do
+        Instrumentation.instrument("pgbus.client.read_grouped_rr", queue: full_name, qty: qty) do
+          with_stale_connection_retry do
+            synchronized { with_read_timeout { @pgmq.read_grouped_rr(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+          end
         end
       end
     end
 
     def read_grouped_head(queue_name, qty:, vt: nil)
       full_name = config.queue_name(queue_name)
-      with_stale_connection_retry do
-        synchronized { with_read_timeout { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+      guarded_read do
+        with_stale_connection_retry do
+          synchronized { with_read_timeout { @pgmq.read_grouped_head(full_name, vt: vt || config.visibility_timeout, qty: qty) } }
+        end
       end
     end
 
@@ -771,6 +797,28 @@ module Pgbus
       return yield unless timeout&.positive?
 
       Timeout.timeout(timeout, Pgbus::ReadTimeoutError, &)
+    end
+
+    # Gate a read through the in-memory connection-health circuit breaker.
+    # When the breaker is open the block never runs — Pgbus::ConnectionCircuitOpenError
+    # is raised before any pool checkout, sparing a dead database from the whole
+    # fleet re-polling and the error tracker from per-poll noise. A completed
+    # read records success (closing/resetting the breaker); a
+    # PGMQ::Errors::ConnectionError records a failure (and still propagates).
+    # Writes are intentionally NOT gated — callers must see enqueue failures.
+    def guarded_read(&)
+      @connection_health.run_guarded(&)
+    end
+
+    def log_circuit_open(backoff)
+      Pgbus.logger.warn do
+        "[Pgbus::Client] Connection circuit opened after #{ConnectionHealth::OPEN_THRESHOLD}+ " \
+          "consecutive connection failures — reads fail fast for ~#{backoff}s"
+      end
+    end
+
+    def log_circuit_close
+      Pgbus.logger.info { "[Pgbus::Client] Connection circuit closed — database reachable again" }
     end
 
     def with_stale_connection_retry

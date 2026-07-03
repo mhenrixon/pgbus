@@ -21,6 +21,7 @@ RSpec.describe Pgbus::Client do
       c.instance_variable_set(:@queues_created, all_queues_created)
       c.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
       c.instance_variable_set(:@schema_ensured, true)
+      c.instance_variable_set(:@connection_health, Pgbus::Client::ConnectionHealth.new)
     end
   end
 
