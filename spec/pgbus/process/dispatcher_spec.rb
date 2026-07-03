@@ -12,6 +12,33 @@ RSpec.describe Pgbus::Process::Dispatcher do
     allow(Pgbus).to receive(:client).and_return(mock_client)
   end
 
+  describe described_class::LoopOutcome do
+    subject(:outcome) { described_class.new }
+
+    it "returns nil when nothing was attempted" do
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns nil when every item succeeded" do
+      outcome.record_success
+      outcome.record_success
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns nil on a partial failure (at least one success)" do
+      outcome.record_success
+      outcome.record_failure(StandardError.new("boom"))
+      expect(outcome.result).to be_nil
+    end
+
+    it "returns the first error when every attempt failed" do
+      first = StandardError.new("first")
+      outcome.record_failure(first)
+      outcome.record_failure(StandardError.new("second"))
+      expect(outcome.result).to be(first)
+    end
+  end
+
   describe "constants" do
     it "has a cleanup interval of 1 hour" do
       expect(described_class::CLEANUP_INTERVAL).to eq(3600)
@@ -242,6 +269,26 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       expect(call_count).to eq(2)
     end
+
+    it "returns the first error when every queue fails (surfaces total outage)" do
+      allow(mock_client).to receive(:purge_archive).and_raise(StandardError, "db down")
+
+      result = dispatcher.send(:compact_archives)
+
+      expect(result).to be_a(StandardError)
+    end
+
+    it "does not surface a failure when at least one queue succeeds (partial)" do
+      allow(mock_client).to receive(:purge_archive) do |queue_name, **_opts|
+        raise StandardError, "fail" if queue_name == "default"
+
+        3
+      end
+
+      result = dispatcher.send(:compact_archives)
+
+      expect(result).not_to be_a(StandardError)
+    end
   end
 
   describe "#run_maintenance includes archive compaction" do
@@ -362,6 +409,251 @@ RSpec.describe Pgbus::Process::Dispatcher do
       dispatcher.send(:start_heartbeat)
       expect(Pgbus::Process::Heartbeat).to have_received(:new).with(kind: "dispatcher", metadata: { pid: Process.pid })
       expect(heartbeat).to have_received(:start)
+    end
+  end
+
+  describe "maintenance backoff during systemic outages" do
+    # Drive run_maintenance with every task due and force each task to either
+    # raise (outage) or succeed. monotonic_now is stubbed so backoff windows
+    # are deterministic. All task methods are stubbed; the real run_if_due
+    # runs, so its :success/:failed/:skipped result and the streak/backoff
+    # logic in run_maintenance are exercised end to end.
+    let(:logger) { instance_double(Logger, info: nil, debug: nil, warn: nil, error: nil) }
+
+    # Maps each maintenance timestamp ivar to its task method, matching
+    # run_maintenance. Keeping this in the spec lets us force every task due
+    # and control which succeed or fail.
+    let(:tasks) do
+      {
+        "@last_cleanup_at": :cleanup_processed_events,
+        "@last_reap_at": :reap_stale_processes,
+        "@last_concurrency_at": :cleanup_concurrency,
+        "@last_batch_cleanup_at": :cleanup_batches,
+        "@last_recurring_cleanup_at": :cleanup_recurring_executions,
+        "@last_archive_compaction_at": :compact_archives,
+        "@last_stream_archive_compaction_at": :prune_stream_archives,
+        "@last_outbox_cleanup_at": :cleanup_outbox,
+        "@last_job_lock_cleanup_at": :cleanup_job_locks,
+        "@last_stats_cleanup_at": :cleanup_stats,
+        "@last_orphan_stream_sweep_at": :sweep_orphan_streams,
+        "@last_table_maintenance_at": :run_table_maintenance
+      }
+    end
+
+    let(:task_methods) { tasks.values }
+    let(:clock) { 1_000_000.0 }
+
+    before do
+      allow(Pgbus).to receive(:logger).and_return(logger)
+      allow(dispatcher).to receive(:monotonic_now) { clock }
+      allow(dispatcher.config).to receive(:streams_orphan_sweep_interval).and_return(3600)
+      allow(Pgbus::ErrorReporter).to receive(:report)
+    end
+
+    # Make every task due as of the current stubbed clock.
+    def force_all_due
+      force_due(tasks.keys)
+    end
+
+    # Make only the listed timestamp ivars due as of the current stubbed clock.
+    def force_due(ivars)
+      ivars.each { |ivar| dispatcher.instance_variable_set(ivar, clock - 1_000_000) }
+    end
+
+    # Reset every timestamp ivar to now, so no task is due until forced.
+    # (initialize runs before monotonic_now is stubbed, so the ivars start at
+    # the real monotonic clock — normalize them here.)
+    def reset_all_not_due
+      tasks.each_key { |ivar| dispatcher.instance_variable_set(ivar, clock) }
+    end
+
+    # Stub every task method: fail the named tasks (default: all), succeed the rest.
+    def stub_tasks(failing: task_methods)
+      task_methods.each do |method|
+        if failing.include?(method)
+          allow(dispatcher).to receive(method).and_raise(StandardError, "db down: #{method}")
+        else
+          allow(dispatcher).to receive(method)
+        end
+      end
+    end
+
+    def run_cycle(now: clock)
+      dispatcher.send(:run_maintenance, now)
+    end
+
+    it "reports every task error individually on the first failing cycle" do
+      force_all_due
+      stub_tasks
+
+      run_cycle
+
+      expect(Pgbus::ErrorReporter).to have_received(:report).exactly(tasks.size).times
+      expect(logger).not_to have_received(:warn).with(a_string_matching(/backoff/i))
+    end
+
+    it "enters backoff after two consecutive all-failed cycles with a single summary warn" do
+      force_all_due
+      stub_tasks
+      run_cycle # streak -> 1, per-task reports
+
+      # Second all-failed cycle: streak -> 2, enter backoff, one summary warn,
+      # per-task reports suppressed.
+      force_all_due
+      run_cycle
+
+      expect(logger).to have_received(:warn).once
+      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(2)
+    end
+
+    it "suppresses per-task ErrorReporter calls once in backoff" do
+      force_all_due
+      stub_tasks
+      run_cycle # first failing cycle: tasks.size reports
+
+      force_all_due
+      run_cycle # enters backoff: no per-task reports, summary warn only
+
+      expect(Pgbus::ErrorReporter).to have_received(:report).exactly(tasks.size).times
+    end
+
+    it "skips all maintenance while inside the backoff window" do
+      force_all_due
+      stub_tasks
+      run_cycle
+      force_all_due
+      run_cycle # now in backoff until clock + BACKOFF_BASE
+
+      force_all_due
+      run_cycle(now: clock + 1) # still inside backoff window
+
+      # The third cycle is inside the backoff window, so no task runs again:
+      # each task was invoked exactly twice (the two pre-backoff cycles).
+      task_methods.each do |method|
+        expect(dispatcher).to have_received(method).exactly(2).times
+      end
+    end
+
+    it "does not enter backoff on a partial failure (some tasks succeed)" do
+      succeeding = :reap_stale_processes
+
+      force_all_due
+      stub_tasks(failing: task_methods - [succeeding])
+      run_cycle
+      force_all_due
+      run_cycle
+
+      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it "resets the streak and restores cadence when a task succeeds" do
+      force_all_due
+      stub_tasks
+      run_cycle # streak -> 1
+
+      # Recovery cycle: all tasks succeed.
+      task_methods.each { |method| allow(dispatcher).to receive(method) }
+      force_all_due
+      run_cycle
+
+      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
+      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to be_nil
+    end
+
+    it "exits backoff as soon as a maintenance task succeeds again" do
+      force_all_due
+      stub_tasks
+      run_cycle
+      force_all_due
+      run_cycle # in backoff
+
+      backoff_end = dispatcher.instance_variable_get(:@maintenance_backoff_until)
+      task_methods.each { |method| allow(dispatcher).to receive(method) } # all succeed
+      force_all_due
+      run_cycle(now: backoff_end + 1)
+
+      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
+      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to be_nil
+    end
+
+    it "doubles the backoff window per consecutive failed cycle" do
+      stub_tasks
+      base = described_class::MAINTENANCE_BACKOFF_BASE
+
+      # Cycle 1: streak 1 (no backoff). Cycle 2: streak 2 -> base * 2**0.
+      force_all_due
+      run_cycle(now: clock)
+      force_all_due
+      run_cycle(now: clock)
+      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(clock + base)
+
+      # Next failing cycle after window: streak 3 -> base * 2**1.
+      later = clock + base + 1
+      force_all_due
+      run_cycle(now: later)
+      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(later + (base * 2))
+    end
+
+    it "caps the backoff window at MAINTENANCE_BACKOFF_MAX" do
+      stub_tasks
+      max = described_class::MAINTENANCE_BACKOFF_MAX
+
+      now = clock
+      window = nil
+      # Drive many consecutive failing cycles, each starting just after the
+      # previous window ends. Capture the last window (deadline - cycle start).
+      20.times do
+        force_all_due
+        run_cycle(now: now)
+        deadline = dispatcher.instance_variable_get(:@maintenance_backoff_until)
+        window = deadline - now if deadline
+        now = (deadline || now) + 1
+      end
+
+      expect(window).to eq(max)
+    end
+
+    context "when a task swallows its own error and returns the exception" do
+      # Most task methods rescue StandardError internally (to log a
+      # descriptive warning) and hand the exception back to run_if_due via
+      # `return e`. run_if_due must treat that as a failure just like a raise,
+      # otherwise a real outage (where those rescues fire) would never trip
+      # backoff.
+      it "normalizes a returned StandardError to a :failed result" do
+        dispatcher.instance_variable_set(:@last_cleanup_at, clock - 1_000_000)
+        result = dispatcher.send(:run_if_due, clock, :@last_cleanup_at, described_class::CLEANUP_INTERVAL) do
+          StandardError.new("db down")
+        end
+
+        expect(result.status).to eq(:failed)
+        expect(result.error).to be_a(StandardError)
+        # Timestamp must NOT advance on failure, so the next tick retries.
+        expect(dispatcher.instance_variable_get(:@last_cleanup_at)).to eq(clock - 1_000_000)
+      end
+
+      it "enters backoff during a real outage where the task rescues fire" do
+        # Drive genuine task bodies (task methods are NOT stubbed). Make their
+        # underlying dependencies raise so each task's own rescue returns the
+        # exception to run_if_due. Only the three tasks below are forced due;
+        # the rest stay skipped, so this proves the swallow-and-return-e path
+        # surfaces failure without depending on every task's guard clauses.
+        allow(Pgbus::ProcessedEvent).to receive(:expired).and_raise(StandardError, "db down")
+        allow(Pgbus::ProcessEntry).to receive(:stale).and_raise(StandardError, "db down")
+        allow(Pgbus::Batch).to receive(:cleanup).and_raise(StandardError, "db down")
+
+        due = %i[@last_cleanup_at @last_reap_at @last_batch_cleanup_at]
+        reset_all_not_due
+
+        force_due(due)
+        run_cycle # first failing cycle: per-task reports, streak -> 1
+        reset_all_not_due
+        force_due(due)
+        run_cycle # second failing cycle: streak -> 2, enter backoff
+
+        expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(2)
+        expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(clock + described_class::MAINTENANCE_BACKOFF_BASE)
+      end
     end
   end
 end
