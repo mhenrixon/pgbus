@@ -70,6 +70,9 @@ RSpec.describe Pgbus::Client::NotifyStream do
     context "with stale pgmq connection recovery" do
       before do
         stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+        # Stale retries now back off between attempts; stub the delay so the
+        # suite doesn't actually sleep.
+        allow(client).to receive(:sleep)
       end
 
       let(:ssl_eof_msg) { "Database connection error: PQconsumeInput() SSL error: unexpected eof while reading" }
@@ -99,7 +102,7 @@ RSpec.describe Pgbus::Client::NotifyStream do
         end.to raise_error(PGMQ::Errors::ConnectionError, /pool timeout/)
       end
 
-      it "gives up after one retry (double failure) and re-raises" do
+      it "gives up after the maximum retries (persistent failure) and re-raises" do
         call_count = 0
         allow(mock_pgmq).to receive(:with_connection) do |&_block|
           call_count += 1
@@ -110,7 +113,10 @@ RSpec.describe Pgbus::Client::NotifyStream do
           client.notify_stream("chat", { "html" => "X" })
         end.to raise_error(PGMQ::Errors::ConnectionError)
 
-        expect(call_count).to eq(2)
+        # Initial attempt + 2 retries = 3 calls.
+        expect(call_count).to eq(3)
+        expect(client).to have_received(:sleep).with(0.1).ordered
+        expect(client).to have_received(:sleep).with(0.5).ordered
       end
 
       it "logs a warning on the retry path" do

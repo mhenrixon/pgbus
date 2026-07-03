@@ -817,6 +817,10 @@ RSpec.describe Pgbus::Client do
   describe "stale pgmq connection recovery" do
     before do
       stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      # Stale retries now back off between attempts. Stub the delay so the
+      # suite doesn't actually sleep; individual tests that assert the backoff
+      # sequence override this with a spy.
+      allow(client).to receive(:sleep)
     end
 
     describe "#send_message" do
@@ -851,7 +855,7 @@ RSpec.describe Pgbus::Client do
         expect(call_count).to eq(1)
       end
 
-      it "gives up after one retry and re-raises" do
+      it "gives up after the maximum retries and re-raises" do
         call_count = 0
         allow(mock_pgmq).to receive(:produce) do
           call_count += 1
@@ -859,7 +863,113 @@ RSpec.describe Pgbus::Client do
         end
 
         expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError)
-        expect(call_count).to eq(2)
+        # Initial attempt + STALE_RETRY_ATTEMPTS (2) retries = 3 calls.
+        expect(call_count).to eq(3)
+      end
+
+      it "retries twice with increasing backoff then succeeds" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count <= 2
+
+          1
+        end
+
+        expect(client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(call_count).to eq(3)
+        expect(client).to have_received(:sleep).with(0.1).ordered
+        expect(client).to have_received(:sleep).with(0.5).ordered
+      end
+
+      it "logs one warning per retry with the attempt count" do
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count <= 2
+
+          1
+        end
+        # Capture the lazily-evaluated warn block bodies so we can assert the
+        # attempt-count text this change interpolates.
+        warnings = []
+        allow(Pgbus.logger).to receive(:warn) { |&blk| warnings << blk.call }
+
+        client.send_message("default", { "k" => "v" })
+
+        expect(warnings).to contain_exactly(
+          a_string_matching(%r{attempt 1/2}),
+          a_string_matching(%r{attempt 2/2})
+        )
+      end
+
+      it "does not sleep on the success path" do
+        allow(mock_pgmq).to receive(:produce).and_return(1)
+
+        client.send_message("default", { "k" => "v" })
+
+        expect(client).not_to have_received(:sleep)
+      end
+
+      it "does not sleep when a non-stale ConnectionError raises" do
+        allow(mock_pgmq).to receive(:produce)
+          .and_raise(PGMQ::Errors::ConnectionError, "Connection pool timeout: waited 5.00s")
+
+        expect { client.send_message("default", { "k" => "v" }) }.to raise_error(PGMQ::Errors::ConnectionError)
+        expect(client).not_to have_received(:sleep)
+      end
+    end
+
+    # The backoff sleep MUST NOT run while @pgmq_mutex is held, or a stalled
+    # retry would block every other operation on the shared-connection path for
+    # the full delay. The retry wrapper sits *outside* `synchronized`, so the
+    # exception unwinds out of the mutex before the rescue sleeps — this guards
+    # against a regression that relocates the sleep inside `synchronized`.
+    describe "backoff does not hold the connection mutex (shared-connection path)" do
+      subject(:shared_client) do
+        allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+        c = described_class.new(shared_config)
+        c.instance_variable_set(:@schema_ensured, true)
+        allow(c).to receive(:notify_trigger_current?).and_return(false)
+        c
+      end
+
+      let(:shared_config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = nil
+          c.pool_size = 5
+          c.queue_prefix = "pgbus_test"
+        end
+      end
+
+      before do
+        raw_conn = double("PG::Connection")
+        ar_connection = double("AR::ConnectionAdapter", raw_connection: raw_conn)
+        ar_base = double("AR::Base", connection: ar_connection)
+        allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+        stub_const("ActiveRecord::Base", ar_base)
+      end
+
+      it "runs the shared-connection path (mutex is a real Mutex)" do
+        expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+      end
+
+      it "does not hold @pgmq_mutex while sleeping between retries" do
+        mutex = shared_client.instance_variable_get(:@pgmq_mutex)
+        locked_during_sleep = []
+        allow(shared_client).to receive(:sleep) { locked_during_sleep << mutex.locked? }
+
+        call_count = 0
+        allow(mock_pgmq).to receive(:produce) do
+          call_count += 1
+          raise(PGMQ::Errors::ConnectionError, "Database connection error: PQsocket() can't get socket descriptor") if call_count <= 2
+
+          1
+        end
+
+        expect(shared_client.send_message("default", { "k" => "v" })).to eq(1)
+        expect(locked_during_sleep).to eq([false, false])
       end
     end
 
