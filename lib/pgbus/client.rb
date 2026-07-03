@@ -703,8 +703,17 @@ module Pgbus
     # expected throttle interval. When it does, we can skip the destructive
     # DROP TRIGGER + CREATE TRIGGER cycle that causes deadlocks when multiple
     # forked processes race during bootstrap.
+    #
+    # Routes through the pooled @pgmq.with_connection (health-checked, reused)
+    # rather than opening a fresh PG.connect per queue: on the String/Hash path
+    # with_raw_connection did a full TCP/TLS/auth setup for every queue at every
+    # supervisor boot — and again in each forked child — churning short-lived
+    # connections through the pooler. The checkout here is a sequential sibling
+    # of the @pgmq.create call above it (create's own checkout has already been
+    # returned), so there is no nested checkout: safe even on the shared-Proc
+    # pool_size=1 path.
     def notify_trigger_current?(full_name, throttle_ms)
-      with_raw_connection do |conn|
+      @pgmq.with_connection do |conn|
         result = conn.exec_params(<<~SQL, [full_name, throttle_ms])
           SELECT 1
           FROM pg_trigger t
