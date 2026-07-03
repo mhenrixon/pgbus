@@ -981,8 +981,11 @@ RSpec.describe Pgbus::Client do
         end
 
         it "appends the pool state to the message" do
+          # Hash#inspect renders differently across Ruby versions ({size: 5}
+          # on 3.4+, {:size=>5} on 3.3), so assert on the keys and values
+          # without depending on the punctuation between them.
           expect { client.send_message("default", { "k" => "v" }) }
-            .to raise_error(PGMQ::Errors::ConnectionError, /size: 5.*available: 0/m)
+            .to raise_error(PGMQ::Errors::ConnectionError, /size.*5.*available.*0/m)
         end
 
         it "appends an actionable hint to the message" do
@@ -1000,7 +1003,7 @@ RSpec.describe Pgbus::Client do
             .and_raise(PGMQ::Errors::ConnectionError, "Database connection error: server closed the connection unexpectedly")
 
           expect { client.send_message("default", { "k" => "v" }) }
-            .to raise_error(PGMQ::Errors::ConnectionError) { |e| expect(e.message).not_to match(/worker threads/) }
+            .to raise_error(PGMQ::Errors::ConnectionError) { |e| expect(e.message).not_to include("worker threads") }
         end
 
         it "still raises even if pool_stats itself fails" do
