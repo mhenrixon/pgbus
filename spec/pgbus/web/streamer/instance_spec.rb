@@ -103,6 +103,10 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       end
     end
 
+    # Neutralize the self-probe by default (it owns a real LISTEN/NOTIFY dance
+    # covered by notify_probe_spec); probe-specific examples below re-stub it.
+    before { allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true) }
+
     it "uses streams_connection_options so the listener can be pointed at a different port" do
       require "pg"
       captured = nil
@@ -114,6 +118,35 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
 
       expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app")
+    end
+
+    it "runs the LISTEN/NOTIFY self-probe on the freshly built connection" do
+      require "pg"
+      allow(PG).to receive(:connect).and_return(fake_pg_module_conn)
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+
+      expect(Pgbus::Process::NotifyProbe).to have_received(:probe_notify_delivery!)
+        .with(fake_pg_module_conn, logger: instance_of(Logger))
+    end
+
+    it "still builds the streamer when the probe fails (graceful degradation)" do
+      require "pg"
+      allow(PG).to receive(:connect).and_return(fake_pg_module_conn)
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(false)
+
+      expect do
+        described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+      end.not_to raise_error
+    end
+
+    it "does not probe an injected pg_connection (probe is for self-built connections)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      described_class.new(client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL))
+
+      expect(Pgbus::Process::NotifyProbe).not_to have_received(:probe_notify_delivery!)
     end
   end
 

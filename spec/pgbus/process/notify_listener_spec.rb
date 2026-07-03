@@ -17,6 +17,10 @@ RSpec.describe Pgbus::Process::NotifyListener do
     stub_const("PG", Module.new) unless defined?(PG)
     stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
     allow_any_instance_of(described_class).to receive(:build_connection).and_return(fake_pg)
+    # The self-probe owns its own connection dance and is covered by
+    # notify_probe_spec. Neutralize it by default so it doesn't consume events
+    # from the fake connection's queue; the probe-specific describe re-stubs it.
+    allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
   end
 
   let(:fake_pg) do
@@ -230,6 +234,54 @@ RSpec.describe Pgbus::Process::NotifyListener do
           "pgmq.q_pgbus_low.INSERT"
         )
       end
+    end
+  end
+
+  describe "LISTEN/NOTIFY self-probe at start" do
+    it "runs the probe once against the initial connection" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(Pgbus::Process::NotifyProbe).to have_received(:probe_notify_delivery!).once
+      expect(Pgbus::Process::NotifyProbe).to have_received(:probe_notify_delivery!).with(fake_pg, logger: logger)
+    end
+
+    it "still starts and LISTENs when the probe fails (graceful degradation)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(false)
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(listener.listening_to).to contain_exactly(
+        "pgmq.q_pgbus_default.INSERT",
+        "pgmq.q_pgbus_low.INSERT"
+      )
+    end
+
+    it "does not re-probe on reconnect (probe is start-only)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      second_pg = fake_pg.class.new
+      call_count = 0
+      allow_any_instance_of(described_class).to receive(:build_connection) do
+        call_count += 1
+        call_count == 1 ? fake_pg : second_pg
+      end
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      second_pg.push_timeout
+      wait_until { second_pg.executed.count { |s| s.start_with?("LISTEN") } >= 2 }
+
+      # Probe ran for the initial connection only, not the reconnect.
+      expect(Pgbus::Process::NotifyProbe).to have_received(:probe_notify_delivery!).once
     end
   end
 

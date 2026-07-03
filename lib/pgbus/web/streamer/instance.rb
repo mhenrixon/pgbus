@@ -147,8 +147,8 @@ module Pgbus
           require "pg" unless defined?(::PG::Connection)
           opts = @config.streams_connection_options
           case opts
-          when String then ::PG.connect(opts)
-          when Hash   then ::PG.connect(**opts)
+          when String then probe(::PG.connect(opts))
+          when Hash   then probe(::PG.connect(**opts))
           when Proc
             # The Proc branch in connection_options typically returns
             # ActiveRecord::Base.connection.raw_connection — a pooled
@@ -166,6 +166,16 @@ module Pgbus
             raise Pgbus::ConfigurationError,
                   "Cannot build streamer PG connection from #{opts.class}"
           end
+        end
+
+        # One-shot LISTEN/NOTIFY delivery self-probe on the freshly built
+        # connection. A transaction-mode pooler or replica that silently breaks
+        # NOTIFY is surfaced with an actionable error (naming the streams_*
+        # overrides); the streamer still starts and degrades to slow SSE
+        # updates rather than crashing. Returns the connection unchanged.
+        def probe(pg_connection)
+          Pgbus::Process::NotifyProbe.probe_notify_delivery!(pg_connection, logger: @logger)
+          pg_connection
         end
       end
     end
