@@ -155,6 +155,35 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       expect(Pgbus::Process::NotifyProbe).not_to have_received(:probe_notify_delivery!)
     end
 
+    it "wires a connection_factory into the Listener that builds a fresh raw connection" do
+      require "pg"
+      connects = 0
+      allow(PG).to receive(:connect) do |**_kwargs|
+        connects += 1
+        fake_pg_module_conn
+      end
+
+      instance = described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+
+      factory = instance.listener.instance_variable_get(:@connection_factory)
+      expect(factory).to respond_to(:call)
+
+      # Calling the factory builds another raw connection (no probe/validate:
+      # the reconnect loop owns those). One connect for the initial build, one
+      # for the factory invocation here.
+      connects_before = connects
+      factory.call
+      expect(connects).to eq(connects_before + 1)
+    end
+
+    it "passes no factory when a pg_connection is injected (reset fallback)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      instance = described_class.new(client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL))
+
+      expect(instance.listener.instance_variable_get(:@connection_factory)).to be_nil
+    end
+
     context "when the freshly built connection lands on a read-only replica" do
       before do
         require "pg"
