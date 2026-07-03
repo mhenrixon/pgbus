@@ -114,7 +114,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       supervisor.send(:reap_children)
 
-      expect(supervisor).to have_received(:fork)
+      expect(supervisor).to have_received(:fork).once
     end
 
     it "restarts immediately on a clean exit even with short uptime (worker recycling)" do
@@ -125,17 +125,85 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       supervisor.send(:reap_children)
 
-      expect(supervisor).to have_received(:fork)
+      expect(supervisor).to have_received(:fork).once
     end
 
     it "delays the restart when the child crashed shortly after forking" do
+      base = now
+      allow(supervisor).to receive(:monotonic_now).and_return(base)
       supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 1 } }
+        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base - 1 } }
       )
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
 
       supervisor.send(:reap_children)
       supervisor.send(:process_pending_restarts)
+
+      expect(supervisor).not_to have_received(:fork)
+    end
+
+    it "keeps separate crash streaks for identically-configured sibling workers" do
+      messages = []
+      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
+      allow(supervisor).to receive(:fork).and_return(6001, 6002, 6003)
+
+      base = now
+      allow(supervisor).to receive(:monotonic_now).and_return(base)
+      supervisor.instance_variable_set(:@forks, sibling_forks(base))
+
+      reap(3002, crash_status) # slot 1 crashes fast — crash #1, 1s backoff
+      reap(3001, clean_status) # slot 0 recycles cleanly — must NOT reset slot 1's streak
+
+      # Slot 1's restart fires, then it crashes fast again — crash #2, 2s backoff.
+      allow(supervisor).to receive(:monotonic_now).and_return(base + 61)
+      supervisor.send(:process_pending_restarts)
+      restarted_pid = supervisor.instance_variable_get(:@forks).find { |_, i| i[:slot] == 1 }.first
+      reap(restarted_pid, crash_status)
+
+      expect(messages.join("\n")).to include("restarting in 2s")
+    end
+
+    def sibling_forks(base)
+      { 3001 => { type: :worker, config: worker_config, slot: 0, spawned_at: base },
+        3002 => { type: :worker, config: worker_config, slot: 1, spawned_at: base } }
+    end
+
+    def reap(pid, status)
+      allow(Process).to receive(:waitpid2).and_return([pid, status], nil)
+      supervisor.send(:reap_children)
+    end
+
+    it "fires due pending restarts from the monitor loop" do
+      allow(supervisor).to receive(:fork).and_return(7001)
+      allow(Process).to receive(:waitpid2).and_return(nil)
+      supervisor.instance_variable_set(
+        :@pending_restarts, [{ info: { type: :dispatcher }, at: now - 1 }]
+      )
+      # Stop the loop after one pass.
+      allow(supervisor).to receive(:interruptible_sleep) do
+        supervisor.instance_variable_set(:@shutting_down, true)
+        supervisor.instance_variable_set(:@forks, {})
+      end
+      allow(supervisor).to receive(:check_stalled_workers)
+
+      supervisor.send(:monitor_loop)
+
+      expect(supervisor).to have_received(:fork).once
+    end
+
+    it "does not fire pending restarts once shutting down" do
+      allow(supervisor).to receive(:fork)
+      supervisor.instance_variable_set(:@shutting_down, true)
+      supervisor.instance_variable_set(
+        :@forks, { 8001 => { type: :worker, config: worker_config, spawned_at: now } }
+      )
+      supervisor.instance_variable_set(
+        :@pending_restarts, [{ info: { type: :dispatcher }, at: now - 1 }]
+      )
+      allow(Process).to receive(:waitpid2).and_return([8001, crash_status], nil)
+      allow(supervisor).to receive(:interruptible_sleep)
+
+      supervisor.send(:monitor_loop)
 
       expect(supervisor).not_to have_received(:fork)
     end
