@@ -22,6 +22,13 @@ RSpec.describe Pgbus::Client do
       c.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
       c.instance_variable_set(:@schema_ensured, true)
       c.instance_variable_set(:@connection_health, Pgbus::Client::ConnectionHealth.new)
+      # Model the production read hot path: a dedicated connection on Linux with
+      # libpq >= 12, where Client#initialize sets @libpq_read_bounds_effective
+      # true so reads skip the Ruby Timeout fallback and go through the cheap
+      # libpq-bounded path. The Timeout fallback is a rare non-Linux branch, not
+      # what the per-call allocation budget is meant to protect.
+      c.instance_variable_set(:@shared_connection, false)
+      c.instance_variable_set(:@libpq_read_bounds_effective, true)
     end
   end
 
