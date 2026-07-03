@@ -9,26 +9,57 @@ module Pgbus
 
       attr_reader :topics, :threads, :config, :execution_mode
 
+      # Mirrors Worker::NOTIFY_FALLBACK_POLL_SECONDS. When a live NotifyListener
+      # drives wake-up latency, the empty-read wait is a safety net rather than
+      # the steady-state cadence, so it rises to this ceiling: one missed NOTIFY
+      # costs bounded latency, never a stuck queue.
+      NOTIFY_FALLBACK_POLL_SECONDS = 15
+
+      # NotifyListener startup can fail on a transient boot-time condition (DB
+      # restarting, failover, DNS blip) or its thread can die mid-run. The loop
+      # retries from ensure_notify_listener on an exponential backoff:
+      # NOTIFY_RETRY_BASE doubling up to NOTIFY_RETRY_MAX. Matches Worker.
+      NOTIFY_RETRY_BASE_SECONDS = 5
+      NOTIFY_RETRY_MAX_SECONDS = 300
+
       def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads)
         @topics = Array(topics)
         @threads = threads
         @config = config
         @execution_mode = ExecutionPools.normalize_mode(execution_mode)
         @shutting_down = false
-        @pool = ExecutionPools.build(mode: @execution_mode, capacity: threads)
+        @recycling = false
+        @jobs_processed = Concurrent::AtomicFixnum.new(0)
+        @started_at_monotonic = monotonic_now
+        @wake_signal = WakeSignal.new
+        @pool = ExecutionPools.build(
+          mode: @execution_mode,
+          capacity: threads,
+          on_state_change: -> { @wake_signal.notify! }
+        )
         @registry = EventBus::Registry.instance
+        @notify_listener = nil
+        @notify_retry_at = 0.0
+        @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
       end
 
       def run
         setup_signals
         start_heartbeat
         setup_subscriptions
-        Pgbus.logger.info { "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads}" }
+        start_notify_listener
+        Pgbus.logger.info do
+          "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads} " \
+            "notify_wakeup=#{notify_wakeup?} pid=#{::Process.pid}"
+        end
 
         loop do
+          process_signals
+          check_recycle
+          ensure_notify_listener
+
           break if @shutting_down
 
-          process_signals
           consume
         end
 
@@ -37,10 +68,12 @@ module Pgbus
 
       def graceful_shutdown
         @shutting_down = true
+        @wake_signal.notify!
       end
 
       def immediate_shutdown
         @shutting_down = true
+        @wake_signal.notify!
         @pool.kill
       end
 
@@ -55,7 +88,7 @@ module Pgbus
 
       def consume
         idle = @pool.available_capacity
-        return interruptible_sleep(config.polling_interval) if idle <= 0
+        return @wake_signal.wait(timeout: wake_timeout) if idle <= 0
 
         tagged_messages = if @queue_names.size == 1
                             queue = @queue_names.first
@@ -65,7 +98,7 @@ module Pgbus
                           end
 
         if tagged_messages.empty?
-          interruptible_sleep(config.polling_interval)
+          @wake_signal.wait(timeout: wake_timeout)
           return
         end
 
@@ -96,6 +129,13 @@ module Pgbus
         # Message stays in queue; VT will expire and it becomes available again.
         # read_ct tracks delivery attempts — when it exceeds max_retries,
         # the next read will route to DLQ above.
+      ensure
+        # Count every message the consumer handles — success, DLQ-routed, AND
+        # rescued failure — mirroring Worker#process_message, which increments
+        # unconditionally. Counting only successes would let max_jobs recycling
+        # never trip on a poison/all-failing queue: the exact unbounded-memory
+        # scenario recycling exists to bound.
+        @jobs_processed.increment
       end
 
       # `qty` is the total pool capacity. pgmq-ruby treats `qty:` as per-queue,
@@ -119,6 +159,137 @@ module Pgbus
           subscription_pattern.start_with?(topic_filter.delete_suffix(".#"))
       end
 
+      # Signal the loop to exit cleanly once a recycle limit is hit. The clean
+      # exit gets an immediate supervisor restart (supervisor.rb:305-307), so a
+      # fresh fork replaces this one before its memory grows unbounded — the
+      # same fix Worker#check_recycle provides. Guarded by @recycling so the
+      # per-iteration call instruments and logs exactly once.
+      def check_recycle
+        return if @recycling
+
+        reason = recycle_reason
+        return unless reason
+
+        @recycling = true
+        @shutting_down = true
+        Pgbus::Instrumentation.instrument(
+          "pgbus.consumer.recycle",
+          reason: reason,
+          jobs_processed: @jobs_processed.value,
+          memory_mb: current_memory_mb,
+          lifetime_seconds: monotonic_now - @started_at_monotonic
+        )
+        @wake_signal.notify!
+      end
+
+      def recycle_reason
+        return :max_jobs if exceeded_max_jobs?
+        return :max_memory if exceeded_max_memory?
+        return :max_lifetime if exceeded_max_lifetime?
+
+        nil
+      end
+
+      def recycle_needed?
+        !recycle_reason.nil?
+      end
+
+      def exceeded_max_jobs?
+        return false unless config.max_jobs_per_worker && @jobs_processed.value >= config.max_jobs_per_worker
+
+        Pgbus.logger.info { "[Pgbus] Consumer recycling: max_jobs reached (#{@jobs_processed.value})" }
+        true
+      end
+
+      def exceeded_max_memory?
+        return false unless config.max_memory_mb && current_memory_mb > config.max_memory_mb
+
+        Pgbus.logger.info do
+          "[Pgbus] Consumer recycling: memory limit (#{current_memory_mb}MB > #{config.max_memory_mb}MB)"
+        end
+        true
+      end
+
+      def exceeded_max_lifetime?
+        return false unless config.max_worker_lifetime && (monotonic_now - @started_at_monotonic) > config.max_worker_lifetime
+
+        Pgbus.logger.info { "[Pgbus] Consumer recycling: lifetime exceeded" }
+        true
+      end
+
+      # Instrumentation payload may report a value up to MEMORY_CHECK_TTL seconds old.
+      def current_memory_mb
+        MemoryUsage.current_mb
+      end
+
+      def notify_wakeup?
+        config.respond_to?(:worker_notify_wakeup?) && config.worker_notify_wakeup?
+      end
+
+      def wake_timeout
+        # A dead listener (running? false) will never wake the loop, so treat it
+        # as absent and keep polling at the short interval until
+        # ensure_notify_listener restarts it. Only a live listener earns the
+        # long NOTIFY-mode ceiling.
+        return config.polling_interval unless notify_wakeup? && @notify_listener&.running?
+
+        [config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def start_notify_listener
+        return unless notify_wakeup?
+
+        @notify_listener = NotifyListener.new(
+          physical_queues: physical_queue_names,
+          on_wake: -> { @wake_signal.notify! },
+          connection_options: config.worker_notify_connection_options,
+          health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
+          logger: Pgbus.logger
+        ).start
+      rescue StandardError => e
+        @notify_listener = nil
+        Pgbus.logger.error do
+          "[Pgbus] Consumer NotifyListener failed to start, falling back to polling: #{e.class}: #{e.message}"
+        end
+      end
+
+      # Self-heal a NotifyListener that never started or whose thread died.
+      # Called each loop iteration but gated by a monotonic backoff timestamp so
+      # a persistent outage retries on 5s→…→300s intervals, not every tick
+      # (mirrors Worker#ensure_notify_listener).
+      def ensure_notify_listener
+        return unless notify_wakeup?
+        return if @notify_listener&.running?
+        return if monotonic_now < @notify_retry_at
+
+        stop_dead_notify_listener
+        start_notify_listener
+
+        @notify_retry_backoff = if @notify_listener&.running?
+                                  NOTIFY_RETRY_BASE_SECONDS
+                                else
+                                  [@notify_retry_backoff * 2, NOTIFY_RETRY_MAX_SECONDS].min
+                                end
+        @notify_retry_at = monotonic_now + @notify_retry_backoff
+      end
+
+      # Stop a listener whose thread died so its dedicated PG connection is
+      # released before start_notify_listener allocates a fresh one.
+      def stop_dead_notify_listener
+        return if @notify_listener.nil?
+
+        @notify_listener.stop
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Consumer failed to stop dead NotifyListener: #{e.class}: #{e.message}" }
+      ensure
+        @notify_listener = nil
+      end
+
+      def physical_queue_names
+        prefix = "#{config.queue_prefix}_"
+        @queue_names.map { |q| "#{prefix}#{q}" }
+      end
+
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "consumer",
@@ -128,11 +299,16 @@ module Pgbus
       end
 
       def shutdown
+        @notify_listener&.stop
         @pool.shutdown
         @pool.wait_for_termination(30)
         @heartbeat&.stop
         restore_signals
-        Pgbus.logger.info { "[Pgbus] Consumer stopped" }
+        Pgbus.logger.info { "[Pgbus] Consumer stopped. Processed: #{@jobs_processed.value}" }
+      end
+
+      def monotonic_now
+        ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
     end
   end
