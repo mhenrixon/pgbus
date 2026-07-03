@@ -42,6 +42,36 @@ RSpec.describe Pgbus::CLI do
       expect(Pgbus::MCP).to have_received(:load!)
       expect(Pgbus::MCP::Runner).to have_received(:run)
     end
+
+    it "lists the doctor command in help" do
+      expect { described_class.start(["help"]) }.to output(/doctor\s+Run environment diagnostics/).to_stdout
+    end
+  end
+
+  describe ".start with doctor command" do
+    let(:doctor) { instance_double(Pgbus::Doctor, report: "Pgbus Doctor\n✓ ok") }
+
+    before { allow(Pgbus::Doctor).to receive(:new).and_return(doctor) }
+
+    it "prints the doctor report" do
+      allow(doctor).to receive(:success?).and_return(true)
+
+      expect { described_class.start(["doctor"]) }.to output(/Pgbus Doctor/).to_stdout
+    end
+
+    it "exits 0 when all checks pass" do
+      allow(doctor).to receive(:success?).and_return(true)
+
+      expect { described_class.start(["doctor"]) }.not_to raise_error
+    end
+
+    it "exits 1 when any check fails" do
+      allow(doctor).to receive(:success?).and_return(false)
+
+      expect do
+        capture_stdout { described_class.start(["doctor"]) }
+      end.to raise_error(SystemExit) { |e| expect(e.status).to eq(1) }
+    end
   end
 
   describe ".start with start command" do
