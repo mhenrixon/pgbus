@@ -21,6 +21,29 @@ RSpec.describe Pgbus::StatBuffer do
     allow(Pgbus::JobStat).to receive_messages(table_exists?: true, latency_columns?: true, insert_all: nil)
   end
 
+  describe "#initialize" do
+    it "defaults to the module flush thresholds" do
+      default = described_class.new
+      expect(default.flush_size).to eq(described_class::DEFAULT_FLUSH_SIZE)
+      expect(default.flush_interval).to eq(described_class::DEFAULT_FLUSH_INTERVAL)
+    end
+
+    it "honors custom flush_size and flush_interval" do
+      custom = described_class.new(flush_size: 500, flush_interval: 2)
+      expect(custom.flush_size).to eq(500)
+      expect(custom.flush_interval).to eq(2)
+    end
+
+    it "auto-flushes at the custom flush_size, not the default" do
+      custom = described_class.new(flush_size: 2, flush_interval: 60)
+
+      2.times { custom.push(stat_attrs) }
+
+      expect(Pgbus::JobStat).to have_received(:insert_all)
+      expect(custom.size).to eq(0)
+    end
+  end
+
   describe "#push" do
     it "accumulates entries in the buffer" do
       buffer.push(stat_attrs)
