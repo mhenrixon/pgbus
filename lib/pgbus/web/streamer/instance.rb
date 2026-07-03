@@ -147,8 +147,8 @@ module Pgbus
           require "pg" unless defined?(::PG::Connection)
           opts = @config.streams_connection_options
           case opts
-          when String then probe(::PG.connect(opts))
-          when Hash   then probe(::PG.connect(**opts))
+          when String then probe(validate_primary(::PG.connect(opts)))
+          when Hash   then probe(validate_primary(::PG.connect(**opts)))
           when Proc
             # The Proc branch in connection_options typically returns
             # ActiveRecord::Base.connection.raw_connection — a pooled
@@ -166,6 +166,31 @@ module Pgbus
             raise Pgbus::ConfigurationError,
                   "Cannot build streamer PG connection from #{opts.class}"
           end
+        end
+
+        # Reject a connection that landed on a read-only replica before the
+        # streamer wires it into a Listener. After a failover, stale DNS can
+        # point this fresh PG.connect at the demoted master; NOTIFY fires only
+        # on the primary, so the streamer would sit deaf. Unlike the reconnect
+        # loop (which retries), this runs once at Instance construction (Puma
+        # worker boot), so a replica here is a fatal misconfiguration: re-raise
+        # as a ConfigurationError naming the direct-connection overrides.
+        def validate_primary(pg_connection)
+          Pgbus::Process::PrimaryValidator.validate_primary!(pg_connection)
+        rescue Pgbus::Process::ReplicaConnectionError => e
+          close_quietly(pg_connection)
+          raise Pgbus::ConfigurationError,
+                "Streamer LISTEN connection landed on a read-only replica " \
+                "(#{e.message}). NOTIFY fires only on the primary, so the " \
+                "streamer would never wake. Point the streamer at a DIRECT " \
+                "primary via streams_database_url (or streams_host / " \
+                "streams_port)."
+        end
+
+        def close_quietly(pg_connection)
+          pg_connection.close if pg_connection.respond_to?(:close)
+        rescue StandardError
+          nil
         end
 
         # One-shot LISTEN/NOTIFY delivery self-probe on the freshly built

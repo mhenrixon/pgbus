@@ -105,7 +105,13 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
     # Neutralize the self-probe by default (it owns a real LISTEN/NOTIFY dance
     # covered by notify_probe_spec); probe-specific examples below re-stub it.
-    before { allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true) }
+    before do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+      # build_pg_connection validates the freshly built connection is a primary.
+      # Neutralize the validator by default (fake connections aren't real);
+      # the replica-rejection examples below re-stub it to raise.
+      allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!) { |conn| conn }
+    end
 
     it "uses streams_connection_options so the listener can be pointed at a different port" do
       require "pg"
@@ -147,6 +153,33 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       described_class.new(client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL))
 
       expect(Pgbus::Process::NotifyProbe).not_to have_received(:probe_notify_delivery!)
+    end
+
+    context "when the freshly built connection lands on a read-only replica" do
+      before do
+        require "pg"
+        allow(PG).to receive(:connect).and_return(fake_pg_module_conn)
+        allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!)
+          .and_raise(Pgbus::Process::ReplicaConnectionError.new("on a replica"))
+      end
+
+      it "raises a ConfigurationError naming the streams_* override keys" do
+        error = nil
+        begin
+          described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+        rescue Pgbus::ConfigurationError => e
+          error = e
+        end
+
+        expect(error).to be_a(Pgbus::ConfigurationError)
+        expect(error.message).to include("streams_database_url", "streams_host", "streams_port")
+      end
+
+      it "names the read-only replica condition in the message" do
+        expect do
+          described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
+        end.to raise_error(Pgbus::ConfigurationError, /replica/i)
+      end
     end
   end
 

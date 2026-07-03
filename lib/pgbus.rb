@@ -20,6 +20,23 @@ module Pgbus
   class SchemaNotReady < Error; end
   class ReadTimeoutError < Error; end
 
+  module Process
+    # A LISTEN connection landed on a read-only replica (pg_is_in_recovery() =>
+    # t). After a failover, stale DNS can point a fresh connection at the
+    # demoted master; NOTIFY fires only on the primary, so such a connection
+    # connects "successfully" but never wakes. Raised by
+    # Process::PrimaryValidator so the listener rejects it and retries with
+    # backoff (re-resolving DNS each attempt).
+    #
+    # Defined here rather than in process/primary_validator.rb because Zeitwerk
+    # requires each managed file to define exactly the constant matching its
+    # path — a second class in that file would break eager_load. lib/pgbus.rb
+    # is the (require-loaded) gem entry point, so it can define the error and
+    # explicitly namespace Process without conflicting with Zeitwerk's
+    # management of the lib/pgbus/process/ directory.
+    class ReplicaConnectionError < Error; end
+  end
+
   class << self
     # Process-global flag set by Worker#graceful_shutdown so the adapter
     # can report stopping? to ActiveJob::Continuation (Rails 8.1+).

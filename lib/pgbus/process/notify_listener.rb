@@ -103,6 +103,13 @@ module Pgbus
 
       def run_loop
         conn = build_connection
+        # Reject a connection that landed on a read-only replica before doing
+        # anything else. After a failover, stale DNS can point this fresh
+        # connection at the demoted master; NOTIFY fires only on the primary,
+        # so we'd sit deaf forever. A replica here raises ReplicaConnectionError
+        # and the rescue below runs the fatal/ensure path (worker-level startup
+        # retry is a separate concern); a reconnect converges on the primary.
+        PrimaryValidator.validate_primary!(conn)
         # One-shot delivery self-probe on the initial connection only. A pooler
         # or replica that silently breaks LISTEN/NOTIFY is surfaced here with an
         # actionable error; the listener still runs and degrades to polling.
@@ -205,12 +212,16 @@ module Pgbus
           new_conn = nil
           begin
             new_conn = build_connection
+            # Reject a replica before re-LISTENing. A fresh PG.connect re-resolves
+            # DNS, so backing off and retrying converges on the promoted master
+            # once DNS catches up after a failover.
+            PrimaryValidator.validate_primary!(new_conn)
             channels.each { |channel| new_conn.exec(%(LISTEN "#{channel}")) }
-          rescue PG::Error => e
-            # build_connection may have succeeded before a later LISTEN raised.
-            # Without this close, the partially-built conn is orphaned and the
-            # next retry just allocates another one — leaking PG connections on
-            # repeated failures.
+          rescue PG::Error, ReplicaConnectionError => e
+            # build_connection may have succeeded before a later LISTEN raised,
+            # or validate_primary! rejected a replica. Without this close, the
+            # partially-built conn is orphaned and the next retry just allocates
+            # another one — leaking PG connections on repeated failures.
             close_quietly(new_conn)
             @logger.error { "[Pgbus::NotifyListener] reconnect failed: #{e.class}: #{e.message}" }
             sleep RECONNECT_BACKOFF_SECONDS
