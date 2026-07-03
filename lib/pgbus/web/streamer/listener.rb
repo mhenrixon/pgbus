@@ -199,6 +199,14 @@ module Pgbus
 
         def reconnect!
           @conn.reset
+          # Reject a connection that came back on a read-only replica before
+          # re-LISTENing. After a failover, conn.reset can re-resolve stale DNS
+          # to the demoted master; NOTIFY fires only on the primary, so
+          # re-LISTENing there would register channels that never wake. A
+          # replica raises ReplicaConnectionError into the rescue below, which
+          # sleeps 0.5s; the next cycle resets again and converges on the
+          # promoted primary once DNS catches up.
+          Pgbus::Process::PrimaryValidator.validate_primary!(@conn)
           # Don't clear @listening_to until the new set is built. If a
           # mid-loop LISTEN raises, we keep the original set so the
           # next reconnect cycle still knows which channels need to
@@ -211,7 +219,7 @@ module Pgbus
             new_listening.add(channel)
           end
           @listening_to = new_listening
-        rescue PG::Error => e
+        rescue PG::Error, Pgbus::Process::ReplicaConnectionError => e
           @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
           sleep 0.5
         end

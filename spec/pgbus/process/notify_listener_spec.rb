@@ -21,6 +21,11 @@ RSpec.describe Pgbus::Process::NotifyListener do
     # notify_probe_spec. Neutralize it by default so it doesn't consume events
     # from the fake connection's queue; the probe-specific describe re-stubs it.
     allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+    # PrimaryValidator runs SELECT pg_is_in_recovery() on every built connection.
+    # The default fake_pg's #exec returns nil, so neutralize the validator by
+    # default (it passes the connection through). The replica-rejection describe
+    # re-stubs it to raise ReplicaConnectionError.
+    allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!) { |conn| conn }
   end
 
   let(:fake_pg) do
@@ -234,6 +239,72 @@ RSpec.describe Pgbus::Process::NotifyListener do
           "pgmq.q_pgbus_low.INSERT"
         )
       end
+    end
+  end
+
+  describe "replica rejection (failover self-healing)" do
+    context "when a reconnect lands on a replica then converges on the primary" do
+      let(:replica_pg) { fake_pg.class.new }
+      let(:primary_pg) { fake_pg.class.new }
+
+      before do
+        # Initial conn (fake_pg) is a primary; the first reconnect attempt lands
+        # on a replica; the second reconnect attempt lands on the primary.
+        call_sequence = [fake_pg, replica_pg, primary_pg]
+        allow_any_instance_of(described_class).to receive(:build_connection) { call_sequence.shift }
+        # validate_primary! passes fake_pg and primary_pg through, but raises
+        # for replica_pg — mirroring pg_is_in_recovery() => t on the demoted host.
+        allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!) do |conn|
+          raise Pgbus::Process::ReplicaConnectionError, "on a replica" if conn.equal?(replica_pg)
+
+          conn
+        end
+        stub_const("Pgbus::Process::NotifyListener::RECONNECT_BACKOFF_SECONDS", 0.01)
+
+        listener.start
+        fake_pg.push_timeout
+        wait_until { listener.listening_to.size == 2 }
+
+        fake_pg.push_error(PG::Error.new("connection reset"))
+        primary_pg.push_timeout
+        wait_until { primary_pg.executed.count { |s| s.start_with?("LISTEN") } >= 2 }
+      end
+
+      it "closes the replica connection before retrying" do
+        expect(replica_pg).to be_closed
+      end
+
+      it "re-LISTENs every channel on the promoted primary" do
+        expect(listener.listening_to).to contain_exactly(
+          "pgmq.q_pgbus_default.INSERT",
+          "pgmq.q_pgbus_low.INSERT"
+        )
+        expect(primary_pg.executed).to include(
+          %(LISTEN "pgmq.q_pgbus_default.INSERT"),
+          %(LISTEN "pgmq.q_pgbus_low.INSERT")
+        )
+      end
+    end
+
+    it "validates the initial connection is a primary at start" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(Pgbus::Process::PrimaryValidator).to have_received(:validate_primary!).with(fake_pg)
+    end
+
+    it "does not run the delivery probe when the initial connection is a replica" do
+      allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!)
+        .and_raise(Pgbus::Process::ReplicaConnectionError.new("on a replica"))
+
+      listener.start
+      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+
+      # The replica is rejected before the delivery probe runs (probe is only
+      # meaningful on a primary), and the thread exits via the fatal/ensure path.
+      expect(Pgbus::Process::NotifyProbe).not_to have_received(:probe_notify_delivery!)
+      expect(listener.instance_variable_get(:@running)).to be(false)
     end
   end
 
