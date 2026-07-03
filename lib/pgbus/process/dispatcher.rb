@@ -24,6 +24,25 @@ module Pgbus
       # too-small value just delays cleanup, never breaks anything.
       ARCHIVE_COMPACTION_BATCH_SIZE = 1000
 
+      # Maintenance backoff during systemic outages. When every attempted
+      # maintenance task fails for two consecutive cycles (e.g. the database
+      # is down), skip maintenance entirely for an exponentially growing
+      # window instead of retrying ~12 tasks every dispatch interval and
+      # flooding logs and error trackers. The window doubles per consecutive
+      # failed cycle and is capped. Constants (not config) per the precedent
+      # above: the values rarely need tuning and only affect noise, never
+      # correctness. Backoff exits the moment any task succeeds again.
+      MAINTENANCE_BACKOFF_BASE = 30    # seconds; first backoff window
+      MAINTENANCE_BACKOFF_MAX = 600    # seconds; window ceiling (10 minutes)
+
+      # Outcome of a single maintenance task in a cycle. Lets run_maintenance
+      # distinguish success/failed/skipped and, on failure, carry the error
+      # and task name for reporting or summarizing.
+      MaintenanceResult = ::Struct.new(:status, :task, :error) do
+        def success? = status == :success
+        def skipped? = status == :skipped
+      end
+
       attr_reader :config
 
       def initialize(config: Pgbus.configuration)
@@ -41,6 +60,8 @@ module Pgbus
         @last_stats_cleanup_at = monotonic_now
         @last_orphan_stream_sweep_at = monotonic_now
         @last_table_maintenance_at = monotonic_now
+        @maintenance_failure_streak = 0
+        @maintenance_backoff_until = nil
       end
 
       def run
@@ -75,33 +96,120 @@ module Pgbus
 
       private
 
-      def run_maintenance
-        now = monotonic_now
+      def run_maintenance(now = monotonic_now)
+        return if in_backoff?(now)
 
-        run_if_due(now, :@last_cleanup_at, CLEANUP_INTERVAL) { cleanup_processed_events }
-        run_if_due(now, :@last_reap_at, REAP_INTERVAL) { reap_stale_processes }
-        run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
-        run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
-        run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
-        run_if_due(now, :@last_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { compact_archives }
-        run_if_due(now, :@last_stream_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { prune_stream_archives }
-        run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
-        run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
-        run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
-        sweep_interval = config.streams_orphan_sweep_interval
-        run_if_due(now, :@last_orphan_stream_sweep_at, sweep_interval) { sweep_orphan_streams } if sweep_interval
-        run_if_due(now, :@last_table_maintenance_at, TABLE_MAINTENANCE_INTERVAL) { run_table_maintenance }
+        results = run_maintenance_tasks(now)
+        update_maintenance_backoff(now, results)
       end
 
-      # Only update the timestamp when the block succeeds.
-      # On failure, the next tick retries instead of waiting the full interval.
-      def run_if_due(now, ivar, interval)
-        return unless now - instance_variable_get(ivar) >= interval
+      # Runs every due maintenance task and returns their results. Each entry
+      # is a MaintenanceResult carrying the outcome (:success/:failed/:skipped)
+      # and, on failure, the exception and task name so run_maintenance can
+      # decide whether to report per-task or summarize.
+      def run_maintenance_tasks(now)
+        results = []
+        results << run_if_due(now, :@last_cleanup_at, CLEANUP_INTERVAL) { cleanup_processed_events }
+        results << run_if_due(now, :@last_reap_at, REAP_INTERVAL) { reap_stale_processes }
+        results << run_if_due(now, :@last_concurrency_at, CONCURRENCY_INTERVAL) { cleanup_concurrency }
+        results << run_if_due(now, :@last_batch_cleanup_at, BATCH_CLEANUP_INTERVAL) { cleanup_batches }
+        results << run_if_due(now, :@last_recurring_cleanup_at, RECURRING_CLEANUP_INTERVAL) { cleanup_recurring_executions }
+        results << run_if_due(now, :@last_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { compact_archives }
+        results << run_if_due(now, :@last_stream_archive_compaction_at, ARCHIVE_COMPACTION_INTERVAL) { prune_stream_archives }
+        results << run_if_due(now, :@last_outbox_cleanup_at, OUTBOX_CLEANUP_INTERVAL) { cleanup_outbox }
+        results << run_if_due(now, :@last_job_lock_cleanup_at, JOB_LOCK_CLEANUP_INTERVAL) { cleanup_job_locks }
+        results << run_if_due(now, :@last_stats_cleanup_at, STATS_CLEANUP_INTERVAL) { cleanup_stats }
+        sweep_interval = config.streams_orphan_sweep_interval
+        results << run_if_due(now, :@last_orphan_stream_sweep_at, sweep_interval) { sweep_orphan_streams } if sweep_interval
+        results << run_if_due(now, :@last_table_maintenance_at, TABLE_MAINTENANCE_INTERVAL) { run_table_maintenance }
+        results
+      end
 
-        yield
+      # Runs the block when the interval has elapsed and reports the outcome.
+      # Only updates the timestamp when the block succeeds — on failure the
+      # next tick retries instead of waiting the full interval. Errors are NOT
+      # reported here; run_maintenance decides whether to report per-task or
+      # summarize into a single backoff warning.
+      #
+      # A task fails one of two ways: it raises (a few tasks let errors
+      # propagate), or its own rescue returns the exception (most tasks catch
+      # StandardError to log a descriptive warning, then hand the error back
+      # here via `return e` so the cycle can still see the failure). Both are
+      # normalized to a :failed result carrying the exception.
+      def run_if_due(now, ivar, interval)
+        return MaintenanceResult.new(:skipped, task_name(ivar), nil) unless now - instance_variable_get(ivar) >= interval
+
+        outcome = yield
+        return MaintenanceResult.new(:failed, task_name(ivar), outcome) if outcome.is_a?(StandardError)
+
         instance_variable_set(ivar, now)
+        MaintenanceResult.new(:success, task_name(ivar), nil)
       rescue StandardError => e
-        ErrorReporter.report(e, { action: "dispatcher_maintenance", task: ivar.to_s.delete_prefix("@last_").delete_suffix("_at") })
+        MaintenanceResult.new(:failed, task_name(ivar), e)
+      end
+
+      def task_name(ivar)
+        ivar.to_s.delete_prefix("@last_").delete_suffix("_at")
+      end
+
+      def in_backoff?(now)
+        @maintenance_backoff_until && now < @maintenance_backoff_until
+      end
+
+      # Given this cycle's results, advance or reset the failure streak and
+      # the backoff window. Any success restores normal cadence. An all-failed
+      # cycle (at least one task attempted, none succeeded) advances the
+      # streak; the first such cycle reports every error individually, and the
+      # cycle that reaches the streak threshold enters backoff with a single
+      # summary warning instead.
+      def update_maintenance_backoff(now, results)
+        attempted = results.reject(&:skipped?)
+        return if attempted.empty?
+
+        if attempted.any?(&:success?)
+          reset_maintenance_backoff
+          return
+        end
+
+        enter_or_advance_backoff(now, attempted)
+      end
+
+      def reset_maintenance_backoff
+        @maintenance_failure_streak = 0
+        @maintenance_backoff_until = nil
+      end
+
+      def enter_or_advance_backoff(now, failures)
+        first_failing_cycle = @maintenance_failure_streak.zero?
+        @maintenance_failure_streak += 1
+
+        if first_failing_cycle
+          report_maintenance_failures(failures)
+        elsif @maintenance_failure_streak >= 2
+          begin_backoff(now, failures)
+        end
+      end
+
+      def report_maintenance_failures(failures)
+        failures.each do |result|
+          ErrorReporter.report(result.error, { action: "dispatcher_maintenance", task: result.task })
+        end
+      end
+
+      def begin_backoff(now, failures)
+        delay = backoff_delay(@maintenance_failure_streak)
+        @maintenance_backoff_until = now + delay
+        first = failures.first
+        Pgbus.logger.warn do
+          "[Pgbus] Dispatcher maintenance backoff: #{failures.size} task(s) failing " \
+            "(#{first.error.class}: #{first.error.message}); skipping maintenance for #{delay}s"
+        end
+      end
+
+      # Exponential window: BASE * 2**(streak - 2), capped at MAX. Streak 2 is
+      # the first backoff (2**0 == 1 == BASE), streak 3 doubles it, and so on.
+      def backoff_delay(streak)
+        [MAINTENANCE_BACKOFF_BASE * (2**(streak - 2)), MAINTENANCE_BACKOFF_MAX].min
       end
 
       def cleanup_processed_events
@@ -112,6 +220,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
+        e
       end
 
       def reap_stale_processes
@@ -120,6 +229,7 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
+        e
       end
 
       def cleanup_concurrency
@@ -132,6 +242,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Expired #{orphaned} orphaned blocked executions" } if orphaned.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Concurrency cleanup failed: #{e.message}" }
+        e
       end
 
       def release_blocked_for_key(key)
@@ -146,6 +257,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
+        e
       end
 
       def cleanup_stats
@@ -176,6 +288,7 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Table maintenance completed: #{maintained} table(s) vacuumed" } if maintained.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Table maintenance failed: #{e.message}" }
+        e
       end
 
       def cleanup_job_locks
@@ -186,6 +299,9 @@ module Pgbus
         # that fail and retry can hold locks for hours.
         reaped = reap_orphaned_uniqueness_keys
         Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Job lock cleanup failed: #{e.message}" }
+        e
       end
 
       def reap_orphaned_uniqueness_keys
@@ -208,9 +324,6 @@ module Pgbus
         return 0 if orphaned.empty?
 
         UniquenessKey.where(lock_key: orphaned.map(&:lock_key)).delete_all
-      rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Uniqueness key cleanup failed: #{e.message}" }
-        0
       end
 
       # Returns true if the message referenced by this lock is definitely gone
@@ -244,6 +357,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} published outbox entries" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
+        e
       end
 
       def compact_archives
@@ -268,6 +382,7 @@ module Pgbus
         end
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Archive compaction failed: #{e.message}" }
+        e
       end
 
       # Prunes per-stream archive tables. Unlike compact_archives (which
@@ -303,6 +418,7 @@ module Pgbus
         end
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed: #{e.message}" }
+        e
       end
 
       def retention_for_stream_queue(full_name)
@@ -351,6 +467,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Orphan stream sweep complete: dropped #{dropped} queue(s)" } if dropped.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed: #{e.message}" }
+        e
       end
 
       def cleanup_recurring_executions
@@ -361,6 +478,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old recurring executions" } if deleted.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Recurring execution cleanup failed: #{e.message}" }
+        e
       end
 
       def monotonic_now
