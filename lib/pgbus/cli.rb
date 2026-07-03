@@ -18,6 +18,8 @@ module Pgbus
         list_queues
       when "mcp"
         start_mcp_server
+      when "doctor"
+        run_doctor
       when "version"
         puts "pgbus #{Pgbus::VERSION}"
       when "help", "--help", "-h"
@@ -141,6 +143,15 @@ module Pgbus
       Pgbus::MCP::Runner.run
     end
 
+    # Runs the deployment preflight diagnostics and prints the report. Exits 1
+    # on any failed check so it can gate a deploy or CI run; exits 0 when all
+    # checks pass (warnings do not fail). Doctor itself never raises.
+    def run_doctor
+      doctor = Pgbus::Doctor.new
+      puts doctor.report
+      exit 1 unless doctor.success?
+    end
+
     def list_queues
       Pgbus.client.list_queues
       metrics = Pgbus.client.metrics
@@ -164,6 +175,8 @@ module Pgbus
           status   Show running Pgbus processes
           queues   List queues with metrics
           mcp      Start the read-only MCP diagnostic server over stdio
+          doctor   Run environment diagnostics (config, DB, PGMQ, queues,
+                   LISTEN/NOTIFY, process liveness); exits 1 on any failure
           version  Show version
           help     Show this help
 

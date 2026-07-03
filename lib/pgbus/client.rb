@@ -102,6 +102,83 @@ module Pgbus
       raise ConfigurationError, "Database connection failed via #{connection_source}: #{e.message}"
     end
 
+    # Lightweight liveness probe used by the doctor: open a raw connection and
+    # run `SELECT 1`. Unlike verify_connection! (which wraps failures as
+    # ConfigurationError for the supervisor boot path), ping lets the raw
+    # PG/PGMQ error propagate so the caller can render the underlying reason.
+    # Returns true on success; a bad connection raises rather than returning
+    # false — the caller renders the underlying reason — so this is a probe,
+    # not a boolean predicate, hence no `?` suffix.
+    def ping # rubocop:disable Naming/PredicateMethod
+      with_raw_connection { |conn| conn.exec("SELECT 1") }
+      true
+    end
+
+    # The logical queue names pgbus expects to exist based on the configuration
+    # (default queue + worker capsules + recurring tasks). Public wrapper around
+    # collect_configured_queues so the doctor can diff configured-vs-existing
+    # queues without reaching into PGMQ or config internals directly.
+    def configured_queues
+      collect_configured_queues
+    end
+
+    # Whether the given logical queue currently has a live PGMQ insert-NOTIFY
+    # trigger with pgbus's throttle interval on every physical table it maps to.
+    # Uses the same physical-name resolution as bootstrap (@queue_strategy), so
+    # a priority queue's _p0.._pN sub-tables — where the trigger actually lives —
+    # are all checked, not the bare prefixed name that priority mode never
+    # creates. Returns false when any physical table lacks the trigger or the
+    # check can't run.
+    def notify_enabled?(queue_name)
+      names = @queue_strategy.physical_queue_names(queue_name)
+      names.all? { |physical| notify_trigger_current?(physical, NOTIFY_THROTTLE_MS) }
+    end
+
+    # The physical PGMQ queue table names a logical queue maps to — one for a
+    # standard queue, or the _p0.._pN sub-queues when priority is enabled. This
+    # is the SAME resolution the bootstrap path uses (@queue_strategy), so a
+    # caller diffing configured-vs-existing queues compares the exact names PGMQ
+    # actually holds rather than the bare prefixed name.
+    def physical_queue_names(logical_name)
+      @queue_strategy.physical_queue_names(logical_name)
+    end
+
+    # Whether the PGMQ schema itself is present (the pgmq.meta table exists),
+    # independent of pgbus's own version-tracking table. Lets a caller tell
+    # "PGMQ installed via the extension / before version tracking" (schema
+    # present, no tracking row) apart from "PGMQ not installed at all".
+    def pgmq_installed?
+      with_raw_connection do |conn|
+        result = conn.exec(
+          "SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1"
+        )
+        result.ntuples.positive?
+      end
+    end
+
+    # The most recently recorded installed PGMQ schema version string (e.g.
+    # "1.5.0"), read from the pgbus_pgmq_schema_versions tracking table. Returns
+    # nil when nothing is tracked yet or the table does not exist — the same
+    # logic the `pgbus:pgmq:status` rake task uses, kept here so the doctor and
+    # the rake task share one raw-SQL path (never SQL outside the Client).
+    def pgmq_schema_version
+      with_raw_connection do |conn|
+        result = conn.exec(
+          "SELECT version FROM pgbus_pgmq_schema_versions ORDER BY installed_at DESC LIMIT 1"
+        )
+        row = result.first
+        row && row["version"]
+      end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      nil
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      nil
+    end
+
     def ensure_queue(name)
       ensure_pgmq_schema
       @queue_strategy.physical_queue_names(name).each { |pq| ensure_single_queue(pq) }

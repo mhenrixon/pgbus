@@ -558,6 +558,132 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#ping" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    it "runs SELECT 1 through with_raw_connection and returns true" do
+      allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
+      allow(raw_conn).to receive(:exec).with("SELECT 1").and_return(double("PG::Result"))
+
+      expect(client.ping).to be(true)
+      expect(raw_conn).to have_received(:exec).with("SELECT 1")
+    end
+
+    it "propagates a connection error to the caller" do
+      stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
+      allow(client).to receive(:with_raw_connection)
+        .and_raise(PG::Error, "could not connect to server")
+
+      expect { client.ping }.to raise_error(PG::Error, /could not connect to server/)
+    end
+  end
+
+  describe "#configured_queues" do
+    it "returns the logical queues derived from the configuration" do
+      config.instance_variable_set(:@workers, [{ queues: %w[critical mailers], threads: 2 }])
+
+      expect(client.configured_queues).to contain_exactly("default", "critical", "mailers")
+    end
+  end
+
+  describe "#physical_queue_names" do
+    it "returns the single prefixed name when priority is disabled" do
+      expect(client.physical_queue_names("jobs")).to eq(["pgbus_test_jobs"])
+    end
+
+    context "when priority levels are configured" do
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.queue_prefix = "pgbus_test"
+          c.priority_levels = 3
+        end
+      end
+
+      it "expands to the _pN sub-queue names bootstrap actually creates" do
+        expect(client.physical_queue_names("jobs"))
+          .to eq(%w[pgbus_test_jobs_p0 pgbus_test_jobs_p1 pgbus_test_jobs_p2])
+      end
+    end
+  end
+
+  describe "#pgmq_installed?" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before { allow(client).to receive(:with_raw_connection).and_yield(raw_conn) }
+
+    it "returns true when the pgmq.meta table exists" do
+      allow(raw_conn).to receive(:exec).with(/pgmq.*meta/).and_return(double(ntuples: 1))
+
+      expect(client.pgmq_installed?).to be(true)
+    end
+
+    it "returns false when the pgmq schema is absent" do
+      allow(raw_conn).to receive(:exec).with(/pgmq.*meta/).and_return(double(ntuples: 0))
+
+      expect(client.pgmq_installed?).to be(false)
+    end
+  end
+
+  describe "#pgmq_schema_version" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before { allow(client).to receive(:with_raw_connection).and_yield(raw_conn) }
+
+    it "returns the latest installed version from the tracking table" do
+      allow(raw_conn).to receive(:exec)
+        .with(/pgbus_pgmq_schema_versions/)
+        .and_return([{ "version" => "1.5.0" }])
+
+      expect(client.pgmq_schema_version).to eq("1.5.0")
+    end
+
+    it "returns nil when the tracking table is empty" do
+      allow(raw_conn).to receive(:exec)
+        .with(/pgbus_pgmq_schema_versions/)
+        .and_return([])
+
+      expect(client.pgmq_schema_version).to be_nil
+    end
+
+    it "returns nil when the tracking table does not exist" do
+      stub_const("PG::UndefinedTable", Class.new(StandardError)) unless defined?(PG::UndefinedTable)
+      allow(raw_conn).to receive(:exec)
+        .with(/pgbus_pgmq_schema_versions/)
+        .and_raise(PG::UndefinedTable, "relation \"pgbus_pgmq_schema_versions\" does not exist")
+
+      expect(client.pgmq_schema_version).to be_nil
+    end
+  end
+
+  describe "#notify_enabled?" do
+    let(:conn) { double("PG::Connection") }
+
+    before do
+      # The class-level subject stubs notify_trigger_current? — call the real
+      # method here so we exercise the prefix + pooled-check wiring.
+      allow(client).to receive(:notify_trigger_current?).and_call_original
+    end
+
+    it "returns true when the prefixed queue has a current NOTIFY trigger" do
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+      allow(conn).to receive(:exec_params).and_return(double("PG::Result", ntuples: 1))
+
+      expect(client.notify_enabled?("jobs")).to be(true)
+      expect(conn).to have_received(:exec_params).with(
+        a_string_matching(/pg_trigger/),
+        ["pgbus_test_jobs", Pgbus::Client::NOTIFY_THROTTLE_MS]
+      )
+    end
+
+    it "returns false when no current trigger exists" do
+      allow(mock_pgmq).to receive(:with_connection).and_yield(conn)
+      allow(conn).to receive(:exec_params).and_return(double("PG::Result", ntuples: 0))
+
+      expect(client.notify_enabled?("jobs")).to be(false)
+    end
+  end
+
   describe "#notify_trigger_current? (via ensure_queue)" do
     # The class-level subject stubs notify_trigger_current? so most specs skip
     # its raw SQL. Here we exercise the real method to prove it routes through
