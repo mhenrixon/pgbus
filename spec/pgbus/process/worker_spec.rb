@@ -1059,4 +1059,58 @@ RSpec.describe Pgbus::Process::Worker do
       end
     end
   end
+
+  describe "#stamp_loop_tick liveness pipe" do
+    let(:reader_writer) { IO.pipe }
+    let(:reader) { reader_writer[0] }
+    let(:writer) { reader_writer[1] }
+
+    after do
+      reader.close unless reader.closed?
+      writer.close unless writer.closed?
+    end
+
+    it "writes a liveness byte to the pipe when a liveness_pipe is given" do
+      w = described_class.new(queues: %w[default], threads: 5, liveness_pipe: writer)
+
+      w.send(:stamp_loop_tick)
+
+      expect(reader.read_nonblock(16)).to eq("\0")
+    end
+
+    it "still advances the DB loop-tick timestamp when a pipe is present" do
+      w = described_class.new(queues: %w[default], threads: 5, liveness_pipe: writer)
+
+      w.send(:stamp_loop_tick)
+
+      expect(w.instance_variable_get(:@loop_tick_at).get).to be_a(Float)
+    end
+
+    it "does not write to a pipe and behaves as today when no liveness_pipe is given" do
+      w = described_class.new(queues: %w[default], threads: 5)
+
+      expect { w.send(:stamp_loop_tick) }.not_to raise_error
+      expect(w.instance_variable_get(:@loop_tick_at).get).to be_a(Float)
+    end
+
+    it "does not raise when the pipe is full (write dropped, worker still alive)" do
+      w = described_class.new(queues: %w[default], threads: 5, liveness_pipe: writer)
+      # Fill the OS pipe buffer so the next write_nonblock cannot proceed.
+      filler = "x" * 65_536
+      begin
+        writer.write_nonblock(filler)
+      rescue IO::WaitWritable
+        # already full
+      end
+
+      expect { w.send(:stamp_loop_tick) }.not_to raise_error
+    end
+
+    it "does not raise when the reader end is already closed" do
+      w = described_class.new(queues: %w[default], threads: 5, liveness_pipe: writer)
+      reader.close
+
+      expect { w.send(:stamp_loop_tick) }.not_to raise_error
+    end
+  end
 end

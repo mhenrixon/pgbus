@@ -97,7 +97,21 @@ module Pgbus
         exec_mode = config.execution_mode_for(worker_config)
         grp_mode = worker_config[:group_mode] || worker_config["group_mode"] || config.group_mode
 
+        # OS-level liveness channel: the child writes a byte each loop
+        # iteration, the parent drains the reader in monitor_loop. This lets
+        # the watchdog detect a wedged worker without the database.
+        liveness_reader, liveness_writer = IO.pipe
+
         pid = fork do
+          # Child owns the writer end. A fork copies the whole parent FD
+          # table, so this child also inherits every earlier sibling's
+          # liveness reader (they live in @forks). Close them — otherwise each
+          # new worker accumulates N-1 stale reader FDs. (Sibling *writers*
+          # are never inherited: the parent closes each writer below before
+          # forking the next worker, so a dead sibling's pipe still reaches
+          # EOF correctly.) Finally close this fork's own reader copy.
+          close_inherited_liveness_readers
+          liveness_reader.close
           restore_signals
           setup_child_process
           load_rails_app
@@ -105,19 +119,30 @@ module Pgbus
           worker = Worker.new(
             queues: queues, threads: threads, config: config,
             single_active_consumer: single_active, consumer_priority: priority,
-            execution_mode: exec_mode, group_mode: grp_mode
+            execution_mode: exec_mode, group_mode: grp_mode,
+            liveness_pipe: liveness_writer
           )
           worker.run
         end
 
         unless pid
+          close_pipe(liveness_reader)
+          close_pipe(liveness_writer)
           Pgbus.logger.error { "[Pgbus] Failed to fork worker for queues=#{queues.join(",")}" }
           return
         end
 
-        @forks[pid] = { type: :worker, config: worker_config, slot: slot, spawned_at: monotonic_now }
+        # Parent keeps the reader, discards its writer copy so the pipe reaches
+        # EOF once the (sole remaining) child writer closes.
+        close_pipe(liveness_writer)
+        @forks[pid] = {
+          type: :worker, config: worker_config, slot: slot, spawned_at: monotonic_now,
+          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false
+        }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
+        close_pipe(liveness_reader)
+        close_pipe(liveness_writer)
         ErrorReporter.report(e, { action: "fork_worker", queues: queues })
       end
 
@@ -266,6 +291,7 @@ module Pgbus
 
           process_signals
           reap_children
+          drain_liveness_pipes
           unless @shutting_down
             process_pending_restarts
             check_stalled_workers
@@ -281,6 +307,11 @@ module Pgbus
 
           info = @forks.delete(pid)
           next unless info
+
+          # Close the liveness reader as the fork leaves @forks so a crash-loop
+          # (restart deferred up to RESTART_BACKOFF_MAX) can't leak an FD per
+          # crash. Scrub the key so the closed IO never rides into a restart.
+          close_pipe(info.delete(:liveness_reader))
 
           if @shutting_down
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
@@ -356,30 +387,91 @@ module Pgbus
         worker_pids = @forks.select { |_, info| info[:type] == :worker }.keys
         return if worker_pids.empty?
 
-        rows = ProcessEntry.where(kind: "worker", pid: worker_pids).to_a
-        rows.each do |entry|
+        db_ages = db_loop_tick_ages(worker_pids)
+
+        worker_pids.each do |pid|
+          info = @forks[pid]
+          next unless info
+
+          kill_stalled_worker(pid, threshold) if worker_stalled?(info, db_ages[pid], now, threshold)
+        end
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Supervisor watchdog check failed: #{e.message}" }
+      end
+
+      # Read each worker's loop_tick_at from the process table and return a
+      # {pid => wall-clock age in seconds} map. Isolated in its own rescue so a
+      # database outage degrades to the OS-pipe fallback instead of skipping
+      # the whole watchdog — the exact failure this pipe channel exists to fix.
+      def db_loop_tick_ages(worker_pids)
+        ages = {}
+        ProcessEntry.where(kind: "worker", pid: worker_pids).to_a.each do |entry|
           meta = entry.metadata
           next unless meta.is_a?(Hash)
 
           loop_tick = meta["loop_tick_at"]
-          next unless loop_tick
+          ages[entry.pid] = Time.current.to_f - loop_tick.to_f if loop_tick
+        end
+        ages
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Supervisor watchdog DB read failed, using pipe fallback: #{e.message}" }
+        ages
+      end
 
-          age = Time.current.to_f - loop_tick.to_f
-          next unless age > threshold
+      # A worker is stalled only when EVERY liveness channel that has spoken
+      # agrees it is stale (min-age / fresh-wins): a fresh DB row OR a fresh
+      # pipe tick proves the loop is advancing. If no channel has any signal
+      # (a slow-booting worker with no DB row and an unarmed pipe), we do not
+      # kill — mirroring the pre-existing "no loop_tick_at → skip" tolerance.
+      def worker_stalled?(info, db_age, now, threshold)
+        pipe_age = (now - info[:last_pipe_tick_at] if info[:pipe_seen] && info[:last_pipe_tick_at])
+        ages = [db_age, pipe_age].compact
+        return false if ages.empty?
 
-          pid = entry.pid
-          Pgbus.logger.error do
-            "[Pgbus] Supervisor watchdog: worker pid=#{pid} claim loop stalled " \
-              "(loop_tick_at age=#{age.round(1)}s > threshold=#{threshold}s), sending SIGKILL"
-          end
+        ages.min > threshold
+      end
+
+      def kill_stalled_worker(pid, threshold)
+        Pgbus.logger.error do
+          "[Pgbus] Supervisor watchdog: worker pid=#{pid} claim loop stalled " \
+            "(no liveness within threshold=#{threshold}s), sending SIGKILL"
+        end
+        ::Process.kill("KILL", pid)
+      rescue Errno::ESRCH
+        # already gone
+      end
+
+      # Drain each worker's liveness pipe. Any readable byte means the worker's
+      # loop advanced since the last drain, so we stamp arrival on the parent's
+      # own monotonic clock (never a worker timestamp — that would cross the
+      # fork's incomparable CLOCK_MONOTONIC) and arm pipe_seen. Bounded to a
+      # few reads per reader so a fast-writing worker can't wedge the 1s loop;
+      # "any bytes ⇒ alive" needs no full drain. Per-reader rescue so one
+      # closed reader (racing reap/shutdown) can't skip the rest.
+      def drain_liveness_pipes
+        now = monotonic_now
+        @forks.each_value do |info|
+          reader = info[:liveness_reader]
+          next unless reader
+
+          read_any = false
           begin
-            ::Process.kill("KILL", pid)
-          rescue Errno::ESRCH
-            # already gone
+            2.times do
+              reader.read_nonblock(4096)
+              read_any = true
+            end
+          rescue IO::WaitReadable, EOFError
+            # empty / drained, or writer closed (worker exiting — reap handles it)
+          rescue IOError, Errno::EBADF
+            # reader closed by a racing reap/shutdown this tick
+            next
+          end
+
+          if read_any
+            info[:last_pipe_tick_at] = now
+            info[:pipe_seen] = true
           end
         end
-      rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Supervisor watchdog check failed: #{e.message}" }
       end
 
       def signal_children(sig)
@@ -424,6 +516,23 @@ module Pgbus
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
 
+      # Close a pipe IO idempotently. nil (non-worker forks, already-scrubbed
+      # entries) and already-closed IOs are no-ops; a rare EBADF/IOError from a
+      # racing close is swallowed. FD management is single-threaded (main loop
+      # only), so the closed? check-then-close needs no lock.
+      def close_pipe(io)
+        io.close if io && !io.closed?
+      rescue IOError, Errno::EBADF
+        nil
+      end
+
+      # Close every sibling liveness reader this fork inherited from the
+      # parent's FD table. Called only inside a just-forked child, before it
+      # becomes a Worker, so the worker never holds its siblings' pipe ends.
+      def close_inherited_liveness_readers
+        @forks.each_value { |info| close_pipe(info[:liveness_reader]) }
+      end
+
       def shutdown
         # Wait for all children with timeout
         deadline = Time.now + 30
@@ -435,6 +544,10 @@ module Pgbus
 
         # Force kill any remaining
         signal_children("KILL") unless @forks.empty?
+
+        # Close any liveness readers still open on un-reaped children so the
+        # supervisor never leaks FDs across a restart of itself.
+        @forks.each_value { |info| close_pipe(info[:liveness_reader]) }
 
         @heartbeat&.stop
         restore_signals
