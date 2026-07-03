@@ -142,6 +142,10 @@ RSpec.describe Pgbus::Configuration do
     it "has default read_timeout of 30 seconds" do
       expect(config.read_timeout).to eq(30)
     end
+
+    it "enables eager_validation by default" do
+      expect(config.eager_validation).to be(true)
+    end
   end
 
   describe "#execution_mode_for" do
@@ -1491,6 +1495,60 @@ RSpec.describe Pgbus::Configuration do
           "postgres://stream@direct.example:5432/app"
         )
       end
+    end
+  end
+
+  describe "Pgbus.configure eager validation" do
+    after { Pgbus.reset! }
+
+    it "raises ArgumentError when an invalid value is set in the block" do
+      expect do
+        Pgbus.configure { |c| c.visibility_timeout = 0 }
+      end.to raise_error(ArgumentError, /visibility_timeout/)
+    end
+
+    it "raises for a value that only validate! catches (not caught by the setter)" do
+      expect do
+        Pgbus.configure { |c| c.polling_interval = 0 }
+      end.to raise_error(ArgumentError, /polling_interval/)
+    end
+
+    it "passes for a valid configure block" do
+      expect do
+        Pgbus.configure { |c| c.queue_prefix = "custom" }
+      end.not_to raise_error
+      expect(Pgbus.configuration.queue_prefix).to eq("custom")
+    end
+
+    it "succeeds across two sequential valid configure blocks" do
+      expect do
+        Pgbus.configure { |c| c.queue_prefix = "custom" }
+        Pgbus.configure { |c| c.default_queue = "critical" }
+      end.not_to raise_error
+      expect(Pgbus.configuration.queue_prefix).to eq("custom")
+      expect(Pgbus.configuration.default_queue).to eq("critical")
+    end
+
+    it "suppresses validation when eager_validation is disabled inside the block" do
+      expect do
+        Pgbus.configure do |c|
+          c.eager_validation = false
+          c.polling_interval = 0
+        end
+      end.not_to raise_error
+    end
+
+    it "suppresses validation when eager_validation is disabled beforehand" do
+      Pgbus.configuration.eager_validation = false
+      expect do
+        Pgbus.configure { |c| c.polling_interval = 0 }
+      end.not_to raise_error
+    end
+
+    it "still allows explicit validate! after opting out" do
+      Pgbus.configuration.eager_validation = false
+      Pgbus.configure { |c| c.polling_interval = 0 }
+      expect { Pgbus.configuration.validate! }.to raise_error(ArgumentError, /polling_interval/)
     end
   end
 end

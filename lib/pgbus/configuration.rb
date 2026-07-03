@@ -136,6 +136,13 @@ module Pgbus
     # Set to false to opt out without uninstalling the appsignal gem.
     attr_accessor :appsignal_enabled, :appsignal_probe_enabled
 
+    # When true (default), Pgbus.configure and ConfigLoader.apply run
+    # validate! after applying settings, so an invalid value fails loud at
+    # boot instead of dormant until a worker path consumes it. Set false to
+    # opt out (exotic setups that intentionally hold a transiently-invalid
+    # config); explicit validate! still works.
+    attr_accessor :eager_validation
+
     def initialize
       @database_url = nil
       @connection_params = nil
@@ -287,6 +294,8 @@ module Pgbus
       # the same process, so the operator can disable it independently.
       @appsignal_enabled = true
       @appsignal_probe_enabled = true
+
+      @eager_validation = true
     end
 
     def queue_name(name)

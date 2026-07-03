@@ -36,6 +36,10 @@ module Pgbus
           config.logger.warn { "[Pgbus] Unknown configuration key ignored: #{key.inspect} — check for typos in pgbus.yml" }
         end
       end
+      # Validate eagerly so a bad YAML value aborts boot with an ArgumentError
+      # naming the offending key, instead of failing later in a worker path.
+      # Honors an `eager_validation: false` key in the same hash (applied above).
+      config.validate! if config.eager_validation
       config
     end
   end
