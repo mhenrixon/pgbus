@@ -718,6 +718,63 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  describe "standalone health server" do
+    let(:supervisor) { described_class.new(config: config) }
+    let(:config) { Pgbus::Configuration.new }
+    let(:mock_client) { build_mock_client }
+    let(:health_server) { instance_double(Pgbus::Web::HealthServer, start: nil, stop: nil) }
+
+    before do
+      config.database_url = "postgres://u:sekret@db:5432/app"
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive_messages(
+        verify_connection!: true, ensure_all_queues: nil, pgmq_schema_version: "1.5.0"
+      )
+      allow(Pgbus::Web::HealthServer).to receive(:new).and_return(health_server)
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:log_boot_banner)
+      allow(supervisor).to receive(:boot_processes)
+      allow(supervisor).to receive(:monitor_loop)
+    end
+
+    it "does not build a health server when health_port is nil" do
+      config.health_port = nil
+
+      supervisor.run
+
+      expect(Pgbus::Web::HealthServer).not_to have_received(:new)
+    end
+
+    it "starts a health server with the configured port and bind when health_port is set" do
+      config.health_port = 9394
+      config.health_bind = "0.0.0.0"
+
+      supervisor.run
+
+      expect(Pgbus::Web::HealthServer).to have_received(:new).with(port: 9394, bind: "0.0.0.0")
+      expect(health_server).to have_received(:start)
+    end
+
+    it "starts the health server after the heartbeat" do
+      config.health_port = 9394
+      call_order = []
+      allow(supervisor).to receive(:start_heartbeat) { call_order << :heartbeat }
+      allow(health_server).to receive(:start) { call_order << :health }
+
+      supervisor.run
+
+      expect(call_order).to eq(%i[heartbeat health])
+    end
+
+    it "stops the health server on shutdown" do
+      config.health_port = 9394
+
+      supervisor.run
+
+      expect(health_server).to have_received(:stop)
+    end
+  end
+
   describe "recurring_tasks_configured? (private)" do
     let(:supervisor) { described_class.new }
 

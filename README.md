@@ -36,6 +36,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
   - [Error reporting](#error-reporting)
   - [Structured logging](#structured-logging)
   - [Queue health monitoring](#queue-health-monitoring)
+  - [Health endpoints (liveness / readiness)](#health-endpoints-liveness--readiness)
 - [Real-time broadcasts](#real-time-broadcasts-turbo-streams-replacement)
 - [Testing](#testing)
   - [RSpec setup](#rspec-setup)
@@ -951,6 +952,56 @@ For the **HTTP** transport, point the client at the mounted URL with a streamabl
     }
   }
 }
+```
+
+### Health endpoints (liveness / readiness)
+
+For orchestrators like Kubernetes, Pgbus exposes two HTTP probes: `/livez` (is the serving process up?) and `/readyz` (are queues draining, or is a worker silently wedged?). `/readyz` runs the same `OK` / `DEGRADED` / `STALLED` verdict as the MCP `pgbus_health` tool — `STALLED` (visible backlog while workers heart-beat but don't claim) fails readiness.
+
+| Path | Method | 200 | 503 | Touches DB |
+|---|---|---|---|---|
+| `/livez` | GET | always (`ok`) | never | no |
+| `/readyz` | GET | verdict `OK` or `DEGRADED` | verdict `STALLED`, or DB unreachable (`{"status":"ERROR"}`) | yes |
+
+Unknown paths return `404`; non-`GET` methods return `405`. The `/readyz` body is the verdict JSON, so a probe failure is self-describing in the pod's event log.
+
+#### Mount in your Rails app
+
+`Pgbus::Web::HealthApp` is a plain Rack app — mount it wherever your web pods already serve HTTP. It needs no auth (it exposes only aggregate health, never payloads) but keep it on an internal network:
+
+```ruby
+# config/routes.rb
+mount Pgbus::Web::HealthApp.new => "/pgbus/health"
+```
+
+```yaml
+# kubelet probes (Deployment spec)
+livenessProbe:
+  httpGet: { path: /pgbus/health/livez, port: 3000 }
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /pgbus/health/readyz, port: 3000 }
+  periodSeconds: 10
+  failureThreshold: 3
+```
+
+#### Standalone from the supervisor
+
+Worker pods run `bin/pgbus` (the supervisor), not Puma — so there is no Rails server to mount into. Set `health_port` and the supervisor serves both paths itself over a tiny TCP server (no Rails, no dashboard), letting a kubelet probe the process that actually forks and watches workers:
+
+```ruby
+Pgbus.configure do |c|
+  c.health_port = 9394        # nil (default) = disabled
+  c.health_bind = "0.0.0.0"   # default "127.0.0.1"
+end
+```
+
+```yaml
+# probe the supervisor pod directly
+livenessProbe:
+  httpGet: { path: /livez, port: 9394 }
+readinessProbe:
+  httpGet: { path: /readyz, port: 9394 }
 ```
 
 ## Real-time broadcasts (turbo-streams replacement)

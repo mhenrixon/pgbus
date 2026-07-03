@@ -112,6 +112,13 @@ module Pgbus
                   :metrics_enabled,
                   :dashboard_filter_parameters, :dashboard_filter_sensitive
 
+    # HTTP health endpoints (liveness/readiness for orchestrators like
+    # Kubernetes). `health_port` nil (default) leaves the standalone server in
+    # the supervisor disabled — mount Pgbus::Web::HealthApp in the host Rails
+    # app instead. When set, Supervisor#run serves /livez and /readyz over a
+    # plain TCPServer bound to `health_bind` (default localhost).
+    attr_accessor :health_port, :health_bind
+
     # Streams (turbo-rails replacement, SSE-based)
     attr_accessor :streams_enabled, :streams_path, :streams_queue_prefix, :streams_signed_name_secret,
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
@@ -230,6 +237,10 @@ module Pgbus
       @metrics_enabled = true
       @dashboard_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
       @dashboard_filter_sensitive = true
+
+      # HTTP health endpoints — nil port disables the standalone server.
+      @health_port = nil
+      @health_bind = "127.0.0.1"
 
       @streams_enabled = true
       @streams_path = nil
@@ -400,6 +411,10 @@ module Pgbus
       end
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise ArgumentError, "read_timeout must be a positive number or nil to disable"
+      end
+
+      unless health_port.nil? || (health_port.is_a?(Integer) && health_port.between?(1, 65_535))
+        raise ArgumentError, "health_port must be an integer between 1 and 65535 or nil to disable"
       end
 
       # Validate global execution_mode
