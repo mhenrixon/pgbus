@@ -60,11 +60,19 @@ module Pgbus
 
     def evict(key)
       @cache.delete(key)
+      # Concurrent::Array#delete is O(n), but this only runs on expiry and n is
+      # bounded by @max_size, so it stays cheap. Without it, @insertion_order
+      # leaks and stale duplicates can evict live keys in evict_oldest.
+      @insertion_order.delete(key)
     end
 
     def evict_oldest
       while @cache.size >= @max_size && !@insertion_order.empty?
         oldest_key = @insertion_order.shift
+        # Skip residual order entries for keys already gone from @cache so a
+        # stale duplicate never evicts a freshly re-marked (live) key.
+        next unless @cache.key?(oldest_key)
+
         @cache.delete(oldest_key)
       end
     end
