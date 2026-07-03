@@ -1607,8 +1607,7 @@ RSpec.describe Pgbus::Client do
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       # PG (the pg gem) is loaded via pgmq-ruby in production; these unit specs
       # mock PGMQ, so stub the one PG method the read-bounds gate consults.
-      stub_const("PG", Module.new) unless defined?(PG)
-      allow(PG).to receive(:library_version).and_return(180_000)
+      stub_pg_library_version
     end
 
     def build_client(config)
@@ -1638,6 +1637,61 @@ RSpec.describe Pgbus::Client do
             keepalives: 1,
             tcp_user_timeout: 15_000
           ),
+          anything
+        )
+      end
+
+      it "preserves a caller-supplied :options instead of clobbering it" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", options: "-c search_path=myapp" }
+          c.read_timeout = 10
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(options: "-c search_path=myapp -c statement_timeout=10000"),
+          anything
+        )
+      end
+    end
+
+    context "when libpq is older than 12 (rejects the tcp_user_timeout keyword)" do
+      before { allow(PG).to receive(:library_version).and_return(110_000) }
+
+      it "keeps statement_timeout but omits keepalives / tcp_user_timeout (Hash)" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(options: "-c statement_timeout=5000"),
+          anything
+        )
+        expect(PGMQ::Client).not_to have_received(:new).with(
+          hash_including(:tcp_user_timeout),
+          anything
+        )
+      end
+
+      it "keeps statement_timeout but omits the socket keywords (URI)" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test?options=-c%20statement_timeout%3D5000",
           anything
         )
       end

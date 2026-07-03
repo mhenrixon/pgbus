@@ -27,8 +27,7 @@ RSpec.describe Pgbus::Client do
       stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError))
       # pg is loaded via pgmq-ruby in production; stub the one method the
       # read-bounds gate consults so client construction works with mocked PGMQ.
-      stub_const("PG", Module.new) unless defined?(PG)
-      allow(PG).to receive(:library_version).and_return(180_000)
+      stub_pg_library_version
     end
 
     after do

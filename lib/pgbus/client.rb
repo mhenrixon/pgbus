@@ -976,22 +976,40 @@ module Pgbus
       # Socket-death bound sits just above the server-side query bound so a live
       # server's clean statement_timeout cancel always wins the race.
       socket_ms = ((timeout + READ_TIMEOUT_SLACK) * 1000).to_i
+      # tcp_user_timeout is a libpq 12+ conninfo keyword; libpq < 12 rejects it
+      # outright and fails the whole connection. So only bake in the socket-level
+      # keywords when the linked libpq understands them — statement_timeout (a
+      # server GUC via `options`) is always safe. Older libpq keeps just the
+      # query bound; the Ruby Timeout fallback covers the socket there.
+      with_socket = libpq_supports_socket_bounds?
 
       case conn_opts
       when Hash
-        merge_connection_bounds(conn_opts, statement_ms, socket_ms)
+        merge_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket: with_socket)
       when String
-        append_connection_bounds(conn_opts, statement_ms, socket_ms)
+        append_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket: with_socket)
       else
         conn_opts
       end
     end
 
+    # Whether the linked libpq accepts the tcp_user_timeout / keepalives conninfo
+    # keywords. Added in libpq 12; an older libpq raises "invalid connection
+    # option" and fails the connection, so we must not emit them there.
+    def libpq_supports_socket_bounds?
+      defined?(PG) && PG.respond_to?(:library_version) && PG.library_version >= 120_000
+    end
+
     # Hash form maps 1:1 to libpq keywords, so no escaping/encoding is needed.
     # The GUC stays nested in `options`; the socket keywords are top-level.
-    def merge_connection_bounds(conn_opts, statement_ms, socket_ms)
-      conn_opts.merge(
-        options: "-c statement_timeout=#{statement_ms}",
+    # Preserve any caller-supplied `:options` (e.g. `-c search_path=…`) by
+    # appending our `-c statement_timeout=…` rather than overwriting it.
+    def merge_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket:)
+      options = [conn_opts[:options], "-c statement_timeout=#{statement_ms}"].compact.join(" ")
+      merged = conn_opts.merge(options: options)
+      return merged unless with_socket
+
+      merged.merge(
         keepalives: 1,
         keepalives_idle: KEEPALIVE_IDLE_SECONDS,
         keepalives_interval: KEEPALIVE_INTERVAL_SECONDS,
@@ -1005,18 +1023,26 @@ module Pgbus
     # `options` must percent-encode its space (%20) and `=` (%3D). key=value
     # conninfo form carries them space-separated, with the GUC single-quoted so
     # the outer parser keeps `-c statement_timeout=…` as one value.
-    def append_connection_bounds(conn_opts, statement_ms, socket_ms)
+    def append_connection_bounds(conn_opts, statement_ms, socket_ms, with_socket:)
       if conn_opts.start_with?("postgres://", "postgresql://")
         separator = conn_opts.include?("?") ? "&" : "?"
-        socket = "keepalives=1&keepalives_idle=#{KEEPALIVE_IDLE_SECONDS}" \
-                 "&keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS}" \
-                 "&keepalives_count=#{KEEPALIVE_COUNT}&tcp_user_timeout=#{socket_ms}"
-        "#{conn_opts}#{separator}#{socket}&options=-c%20statement_timeout%3D#{statement_ms}"
+        socket = if with_socket
+                   "keepalives=1&keepalives_idle=#{KEEPALIVE_IDLE_SECONDS}" \
+                     "&keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS}" \
+                     "&keepalives_count=#{KEEPALIVE_COUNT}&tcp_user_timeout=#{socket_ms}&"
+                 else
+                   ""
+                 end
+        "#{conn_opts}#{separator}#{socket}options=-c%20statement_timeout%3D#{statement_ms}"
       else
-        socket = "keepalives=1 keepalives_idle=#{KEEPALIVE_IDLE_SECONDS} " \
-                 "keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS} " \
-                 "keepalives_count=#{KEEPALIVE_COUNT} tcp_user_timeout=#{socket_ms}"
-        "#{conn_opts} #{socket} options='-c statement_timeout=#{statement_ms}'"
+        socket = if with_socket
+                   "keepalives=1 keepalives_idle=#{KEEPALIVE_IDLE_SECONDS} " \
+                     "keepalives_interval=#{KEEPALIVE_INTERVAL_SECONDS} " \
+                     "keepalives_count=#{KEEPALIVE_COUNT} tcp_user_timeout=#{socket_ms} "
+                 else
+                   ""
+                 end
+        "#{conn_opts} #{socket}options='-c statement_timeout=#{statement_ms}'"
       end
     end
 
