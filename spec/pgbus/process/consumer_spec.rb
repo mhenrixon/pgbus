@@ -374,6 +374,127 @@ RSpec.describe Pgbus::Process::Consumer do
     end
   end
 
+  describe "#ensure_notify_listener (private)" do
+    # The self-healing loop: a listener that never started (nil) or whose thread
+    # died (running? false) must be retried from the consumer loop, throttled by
+    # exponential backoff so a persistent outage doesn't spin start attempts
+    # every tick. Mirrors Worker#ensure_notify_listener coverage.
+    let(:consumer) { described_class.new(topics: ["orders.#"]) }
+    let(:base) { described_class::NOTIFY_RETRY_BASE_SECONDS }
+
+    before do
+      consumer.instance_variable_set(:@queue_names, ["orders"])
+      allow(consumer).to receive(:notify_wakeup?).and_return(true)
+    end
+
+    it "is a no-op when notify_wakeup? is off" do
+      allow(consumer).to receive(:notify_wakeup?).and_return(false)
+      allow(consumer).to receive(:start_notify_listener)
+      consumer.send(:ensure_notify_listener)
+      expect(consumer).not_to have_received(:start_notify_listener)
+    end
+
+    it "is a no-op while a healthy listener is running" do
+      consumer.instance_variable_set(:@notify_listener, fake_listener)
+      allow(consumer).to receive(:start_notify_listener)
+      consumer.send(:ensure_notify_listener)
+      expect(consumer).not_to have_received(:start_notify_listener)
+    end
+
+    it "does not retry before the backoff window elapses" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) + base)
+      allow(consumer).to receive(:start_notify_listener)
+      consumer.send(:ensure_notify_listener)
+      expect(consumer).not_to have_received(:start_notify_listener)
+    end
+
+    it "retries start once the backoff window has elapsed" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      allow(consumer).to receive(:start_notify_listener) do
+        consumer.instance_variable_set(:@notify_listener, fake_listener)
+      end
+
+      consumer.send(:ensure_notify_listener)
+      expect(consumer).to have_received(:start_notify_listener)
+    end
+
+    it "doubles the backoff each time the restart fails" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      allow(consumer).to receive(:start_notify_listener) # leaves @notify_listener nil
+
+      consumer.send(:ensure_notify_listener)
+      expect(consumer.instance_variable_get(:@notify_retry_backoff)).to eq(base * 2)
+
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      consumer.send(:ensure_notify_listener)
+      expect(consumer.instance_variable_get(:@notify_retry_backoff)).to eq(base * 4)
+    end
+
+    it "caps the backoff at NOTIFY_RETRY_MAX_SECONDS" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      consumer.instance_variable_set(:@notify_retry_backoff, described_class::NOTIFY_RETRY_MAX_SECONDS)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      allow(consumer).to receive(:start_notify_listener)
+
+      consumer.send(:ensure_notify_listener)
+      expect(consumer.instance_variable_get(:@notify_retry_backoff))
+        .to eq(described_class::NOTIFY_RETRY_MAX_SECONDS)
+    end
+
+    it "resets the backoff after a successful restart" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      consumer.instance_variable_set(:@notify_retry_backoff, base * 8)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      allow(consumer).to receive(:start_notify_listener) do
+        consumer.instance_variable_set(:@notify_listener, fake_listener)
+      end
+
+      consumer.send(:ensure_notify_listener)
+      expect(consumer.instance_variable_get(:@notify_retry_backoff)).to eq(base)
+    end
+
+    it "stops a dead listener before restarting it" do
+      dead = fake_listener
+      allow(dead).to receive(:running?).and_return(false)
+      consumer.instance_variable_set(:@notify_listener, dead)
+      consumer.instance_variable_set(:@notify_retry_at, consumer.send(:monotonic_now) - 1)
+      allow(consumer).to receive(:start_notify_listener)
+
+      consumer.send(:ensure_notify_listener)
+      expect(dead).to have_received(:stop)
+    end
+  end
+
+  describe "#stop_dead_notify_listener (private)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"]) }
+
+    it "is a no-op and leaves @notify_listener nil when none is attached" do
+      consumer.instance_variable_set(:@notify_listener, nil)
+      expect { consumer.send(:stop_dead_notify_listener) }.not_to raise_error
+      expect(consumer.instance_variable_get(:@notify_listener)).to be_nil
+    end
+
+    it "stops the listener and clears the reference" do
+      consumer.instance_variable_set(:@notify_listener, fake_listener)
+      consumer.send(:stop_dead_notify_listener)
+      expect(fake_listener).to have_received(:stop)
+      expect(consumer.instance_variable_get(:@notify_listener)).to be_nil
+    end
+
+    it "logs, swallows a stop error, and still clears the reference so the loop can't wedge" do
+      allow(fake_listener).to receive(:stop).and_raise(StandardError, "listener gone")
+      allow(Pgbus.logger).to receive(:warn)
+      consumer.instance_variable_set(:@notify_listener, fake_listener)
+
+      expect { consumer.send(:stop_dead_notify_listener) }.not_to raise_error
+      expect(Pgbus.logger).to have_received(:warn)
+      expect(consumer.instance_variable_get(:@notify_listener)).to be_nil
+    end
+  end
+
   describe "wake-on-notify integration" do
     let(:consumer) { described_class.new(topics: ["orders.#"]) }
     let(:wake_signal) { consumer.instance_variable_get(:@wake_signal) }
