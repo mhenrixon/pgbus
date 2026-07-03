@@ -66,6 +66,14 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
     end.new
   end
 
+  let(:fake_client) do
+    Class.new do
+      def pool_stats
+        { size: 8, available: 3, pool_timeout: 5 }
+      end
+    end.new
+  end
+
   before do
     stub_const("Appsignal", appsignal_class)
     require "pgbus/integrations/appsignal/probe"
@@ -159,6 +167,35 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
 
     names = appsignal_class.gauges.map(&:first)
     expect(names).not_to include("pgbus_stream_active_connections")
+  end
+
+  it "records pool_size and pool_available gauges scoped to the current host" do
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source, client: fake_client)
+    runner.call
+
+    size_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_pool_size" }
+    available_gauge = appsignal_class.gauges.find { |g| g[0] == "pgbus_pool_available" }
+
+    expect(size_gauge[1]).to eq(8)
+    expect(size_gauge[2]).to eq(hostname: Socket.gethostname)
+    expect(available_gauge[1]).to eq(3)
+    expect(available_gauge[2]).to eq(hostname: Socket.gethostname)
+  end
+
+  it "skips pool gauges when pool_stats is empty" do
+    empty_client = Class.new { def pool_stats = {} }.new
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source, client: empty_client)
+    runner.call
+
+    names = appsignal_class.gauges.map(&:first)
+    expect(names).not_to include("pgbus_pool_size", "pgbus_pool_available")
+  end
+
+  it "is resilient to a failing pool_stats read" do
+    flaky_client = Class.new { def pool_stats = raise("boom") }.new
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source, client: flaky_client)
+
+    expect { runner.call }.not_to raise_error
   end
 
   it "is resilient to data source errors" do

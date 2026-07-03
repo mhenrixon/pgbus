@@ -51,8 +51,9 @@ module Pgbus
 
         # The actual probe object; AppSignal calls #call once per minute.
         class Runner
-          def initialize(data_source: nil)
+          def initialize(data_source: nil, client: nil)
             @data_source = data_source
+            @client = client
             @hostname = Socket.gethostname
           end
 
@@ -63,6 +64,7 @@ module Pgbus
             track_processes
             track_summary
             track_streams
+            track_pool
           end
 
           private
@@ -70,6 +72,10 @@ module Pgbus
           def data_source
             @data_source ||=
               (::Pgbus::Web::DataSource.new if defined?(::Pgbus::Web::DataSource))
+          end
+
+          def client
+            @client ||= (::Pgbus.client if defined?(::Pgbus) && ::Pgbus.respond_to?(:client))
           end
 
           def track_queues
@@ -108,6 +114,22 @@ module Pgbus
             gauge "oldest_transaction_age_seconds", stats[:oldest_transaction_age_sec]
           rescue StandardError => e
             log_failure("summary metrics", e)
+          end
+
+          # The PGMQ connection pool is per-process (each host owns its own
+          # pool), so — unlike the cluster-wide queue/summary gauges — these
+          # are tagged with the hostname, same policy as active_processes.
+          # pool_stats already rescues to {} internally; the outer rescue here
+          # keeps a probe iteration alive if the client itself is unavailable.
+          def track_pool
+            stats = client&.pool_stats || {}
+            return if stats.empty?
+
+            tags = { hostname: @hostname }
+            gauge "pool_size", stats[:size], tags
+            gauge "pool_available", stats[:available], tags
+          rescue StandardError => e
+            log_failure("pool metrics", e)
           end
 
           def track_streams

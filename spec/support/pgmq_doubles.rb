@@ -32,6 +32,7 @@ module PgmqDoubles
         list_notify_insert_throttles: [],
         convert_archive_partitioned: nil,
         tune_autovacuum: nil,
+        stats: { size: 5, available: 5 },
         close: nil
       )
       # Batch operations echo back the ids to mirror pgmq-ruby behavior
@@ -61,6 +62,7 @@ module PgmqDoubles
         set_visibility_timeout: nil,
         move_to_dead_letter: nil,
         metrics: nil,
+        pool_stats: { size: 5, available: 5, pool_timeout: 5 },
         list_queues: [],
         purge_queue: nil,
         drop_queue: true,
