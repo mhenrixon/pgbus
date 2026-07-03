@@ -11,7 +11,7 @@ module Pgbus
 
       def initialize(queues:, threads: 5, config: Pgbus.configuration,
                      single_active_consumer: false, consumer_priority: 0,
-                     execution_mode: :threads, group_mode: nil)
+                     execution_mode: :threads, group_mode: nil, liveness_pipe: nil)
         @queues = Array(queues)
         @initial_queues = @queues.dup.freeze
         @wildcard = @queues.include?("*")
@@ -55,6 +55,11 @@ module Pgbus
         @notify_listener = nil
         @notify_retry_at = 0.0
         @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
+        # OS-level liveness channel to the supervisor watchdog. Optional: nil
+        # unless the supervisor forked us with one. Written from stamp_loop_tick
+        # so the watchdog can detect a wedged worker even when the database (and
+        # thus the Heartbeat's loop_tick_at) is unavailable.
+        @liveness_pipe = liveness_pipe
       end
 
       def stats
@@ -624,8 +629,23 @@ module Pgbus
       # Wall clock is required because the supervisor watchdog reads
       # this value from a different process (cross-fork) and the
       # dashboard reads it from a different host.
+      #
+      # Also pokes the OS-level liveness pipe (when the supervisor forked us
+      # with one) so the watchdog has a database-independent signal. The write
+      # is non-blocking and never raises in the hot path: exception: false
+      # returns :wait_writable on a full pipe (which itself proves recent,
+      # undrained ticks — liveness — so a dropped write is fine), and the
+      # rescue covers the reader-gone / fd-closed cases so a dead pipe can
+      # never crash the worker loop. The payload is a content-free byte: the
+      # supervisor treats "any bytes readable" as liveness and stamps arrival
+      # time on its own monotonic clock, so no timestamp crosses the fork.
       def stamp_loop_tick
         @loop_tick_at.set(Time.now.to_f)
+        return unless @liveness_pipe
+
+        @liveness_pipe.write_nonblock("\0", exception: false)
+      rescue Errno::EPIPE, IOError, Errno::EBADF
+        nil
       end
     end
   end

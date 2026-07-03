@@ -318,6 +318,102 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  describe "worker liveness pipe (private)" do
+    let(:supervisor) { described_class.new }
+    let(:worker_config) { { queues: ["default"], threads: 5 } }
+
+    # With fork stubbed to return a pid, the child block never runs, so the
+    # parent path (create pipe, close writer, store reader) is exercised.
+    before do
+      allow(supervisor).to receive(:fork).and_return(7001)
+    end
+
+    describe "fork_worker" do
+      it "stores a liveness_reader IO for the forked worker" do
+        supervisor.send(:fork_worker, worker_config, slot: 0)
+
+        info = supervisor.instance_variable_get(:@forks)[7001]
+        expect(info[:liveness_reader]).to be_a(IO)
+        expect(info[:liveness_reader]).not_to be_closed
+      end
+
+      it "seeds last_pipe_tick_at (monotonic) and leaves pipe_seen unarmed" do
+        supervisor.send(:fork_worker, worker_config, slot: 0)
+
+        info = supervisor.instance_variable_get(:@forks)[7001]
+        expect(info[:last_pipe_tick_at]).to be_a(Float)
+        expect(info[:pipe_seen]).to be(false)
+      end
+
+      it "closes both pipe ends and stores no reader when the fork fails (nil pid)" do
+        allow(supervisor).to receive(:fork).and_return(nil)
+        created = []
+        allow(IO).to receive(:pipe).and_wrap_original do |orig|
+          pair = orig.call
+          created.concat(pair)
+          pair
+        end
+
+        supervisor.send(:fork_worker, worker_config, slot: 0)
+
+        expect(supervisor.instance_variable_get(:@forks)).not_to have_key(7001)
+        expect(created).to all(be_closed)
+      end
+
+      it "closes both pipe ends when the fork raises Errno::EAGAIN" do
+        allow(supervisor).to receive(:fork).and_raise(Errno::EAGAIN)
+        created = []
+        allow(IO).to receive(:pipe).and_wrap_original do |orig|
+          pair = orig.call
+          created.concat(pair)
+          pair
+        end
+
+        expect { supervisor.send(:fork_worker, worker_config, slot: 0) }.not_to raise_error
+        expect(created).to all(be_closed)
+      end
+    end
+
+    describe "reap_children closes the liveness reader" do
+      let(:status_double) { instance_double(Process::Status, exitstatus: 0, success?: true) }
+
+      it "closes the reader and drops the fork on reap" do
+        reader, writer = IO.pipe
+        writer.close
+        supervisor.instance_variable_set(:@forks, {
+                                           3001 => { type: :worker, config: worker_config,
+                                                     spawned_at: 0.0, liveness_reader: reader,
+                                                     last_pipe_tick_at: 0.0, pipe_seen: true }
+                                         })
+        supervisor.instance_variable_set(:@shutting_down, true)
+        allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, status_double], nil)
+
+        supervisor.send(:reap_children)
+
+        expect(reader).to be_closed
+        expect(supervisor.instance_variable_get(:@forks)).not_to have_key(3001)
+      end
+    end
+
+    describe "shutdown closes remaining liveness readers" do
+      it "closes any un-reaped worker readers" do
+        reader, writer = IO.pipe
+        writer.close
+        supervisor.instance_variable_set(:@forks, {
+                                           3001 => { type: :worker, config: worker_config,
+                                                     liveness_reader: reader }
+                                         })
+        allow(supervisor).to receive(:reap_children)
+        allow(supervisor).to receive(:interruptible_sleep)
+        allow(Process).to receive(:kill)
+
+        supervisor.send(:shutdown)
+
+        expect(reader).to be_closed
+      end
+    end
+  end
+
   describe "bootstrap_queues (private)" do
     let(:supervisor) { described_class.new }
     let(:mock_client) { build_mock_client }
