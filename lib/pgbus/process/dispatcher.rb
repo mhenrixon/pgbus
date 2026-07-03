@@ -310,12 +310,25 @@ module Pgbus
         maintained = TableMaintenance.run_maintenance(
           raw_conn,
           threshold: TableMaintenance::BLOAT_THRESHOLD,
-          reindex: true
+          reindex: true,
+          stop_check: -> { @shutting_down }
         )
         Pgbus.logger.info { "[Pgbus] Table maintenance completed: #{maintained} table(s) vacuumed" } if maintained.positive?
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Table maintenance failed: #{e.message}" }
         e
+      end
+
+      # Polled at the top of each per-queue maintenance loop. Returns true when
+      # a shutdown has begun, logging one summary line so the interruption is
+      # visible. `index` is how many queues were already processed, so the
+      # message reads "after N of M". An interrupted (early-returned) task
+      # counts as success in run_if_due and simply runs again next interval.
+      def interrupted?(label, index, total)
+        return false unless @shutting_down
+
+        Pgbus.logger.info { "[Pgbus] #{label} interrupted by shutdown after #{index} of #{total}" }
+        true
       end
 
       def cleanup_job_locks
@@ -399,7 +412,8 @@ module Pgbus
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
         outcome = LoopOutcome.new
-        queue_names.each do |full_name|
+        queue_names.each_with_index do |full_name, index|
+          break if interrupted?("Archive compaction", index, queue_names.size)
           next unless full_name.start_with?("#{prefix}_")
 
           stripped = full_name.delete_prefix("#{prefix}_")
@@ -426,12 +440,13 @@ module Pgbus
         prefix = config.streams_queue_prefix
         return if prefix.nil? || prefix.empty?
 
-        batch_size = config.archive_compaction_batch_size || 1000
+        batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
 
         outcome = LoopOutcome.new
-        queue_names.each do |full_name|
+        queue_names.each_with_index do |full_name, index|
+          break if interrupted?("Stream archive compaction", index, queue_names.size)
           next unless full_name.start_with?("#{prefix}_")
 
           retention = retention_for_stream_queue(full_name)
@@ -482,7 +497,8 @@ module Pgbus
 
         dropped = 0
         outcome = LoopOutcome.new
-        queue_names.each do |full_name|
+        queue_names.each_with_index do |full_name, index|
+          break if interrupted?("Orphan stream sweep", index, queue_names.size)
           next unless full_name.start_with?("#{prefix}_")
 
           row = conn.select_one(<<~SQL, "Pgbus Orphan Check")

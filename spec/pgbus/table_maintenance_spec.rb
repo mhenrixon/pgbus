@@ -160,6 +160,76 @@ RSpec.describe Pgbus::TableMaintenance do
       maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: true)
       expect(maintained).to eq(1)
     end
+
+    context "with a stop_check callable" do
+      let(:two_candidates) do
+        [
+          { "schemaname" => "pgmq", "relname" => "q_first",
+            "n_dead_tup" => 500, "n_live_tup" => 1000 },
+          { "schemaname" => "pgmq", "relname" => "q_second",
+            "n_dead_tup" => 500, "n_live_tup" => 1000 }
+        ]
+      end
+
+      it "stops before the next table when stop_check returns true" do
+        vacuumed = []
+        allow(conn).to receive(:exec) do |sql|
+          next two_candidates if sql.include?("pg_stat_user_tables")
+
+          vacuumed << sql if sql.include?("VACUUM")
+        end
+
+        # Stop after the first candidate is maintained.
+        calls = 0
+        stop_check = lambda do
+          calls += 1
+          calls > 1
+        end
+
+        maintained = described_class.run_maintenance(conn, threshold: 0.1, reindex: false, stop_check: stop_check)
+
+        expect(maintained).to eq(1)
+        expect(vacuumed.size).to eq(1)
+        expect(vacuumed.first).to include("q_first")
+      end
+
+      it "logs a single summary line when interrupted" do
+        allow(conn).to receive(:exec) do |sql|
+          next two_candidates if sql.include?("pg_stat_user_tables")
+        end
+        logged = []
+        logger = instance_double(Logger, warn: nil, error: nil, debug: nil)
+        allow(logger).to receive(:info) { |&block| logged << block.call }
+        allow(Pgbus).to receive(:logger).and_return(logger)
+
+        calls = 0
+        stop_check = lambda do
+          calls += 1
+          calls > 1
+        end
+
+        described_class.run_maintenance(conn, threshold: 0.1, reindex: false, stop_check: stop_check)
+
+        summaries = logged.grep(/interrupted by shutdown after 1 of 2/)
+        expect(summaries.size).to eq(1)
+      end
+
+      it "maintains every table when stop_check never fires" do
+        vacuumed = []
+        allow(conn).to receive(:exec) do |sql|
+          next two_candidates if sql.include?("pg_stat_user_tables")
+
+          vacuumed << sql if sql.include?("VACUUM")
+        end
+
+        maintained = described_class.run_maintenance(
+          conn, threshold: 0.1, reindex: false, stop_check: -> { false }
+        )
+
+        expect(maintained).to eq(2)
+        expect(vacuumed.size).to eq(2)
+      end
+    end
   end
 
   describe "FILLFACTOR" do

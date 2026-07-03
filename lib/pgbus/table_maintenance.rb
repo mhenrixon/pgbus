@@ -80,12 +80,23 @@ module Pgbus
         "REINDEX TABLE CONCURRENTLY \"#{schema}\".\"#{relname}\""
       end
 
-      def run_maintenance(conn, threshold: BLOAT_THRESHOLD, reindex: true)
+      # stop_check is polled before each candidate; when it returns true the
+      # loop stops before touching the next table so a mid-pass shutdown does
+      # not block on VACUUM/REINDEX of the remaining tables. The default never
+      # stops, so callers that don't pass it are unaffected.
+      def run_maintenance(conn, threshold: BLOAT_THRESHOLD, reindex: true, stop_check: -> { false })
         candidates = vacuum_candidates(conn, threshold: threshold)
         return 0 if candidates.empty?
 
         maintained = 0
-        candidates.each do |candidate|
+        candidates.each_with_index do |candidate, index|
+          if stop_check.call
+            Pgbus.logger.info do
+              "[Pgbus::TableMaintenance] Maintenance interrupted by shutdown after #{index} of #{candidates.size}"
+            end
+            break
+          end
+
           table = candidate[:table]
           Pgbus.logger.info do
             "[Pgbus::TableMaintenance] Vacuuming #{table} " \

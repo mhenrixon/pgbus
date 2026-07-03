@@ -12,6 +12,17 @@ RSpec.describe Pgbus::Process::Dispatcher do
     allow(Pgbus).to receive(:client).and_return(mock_client)
   end
 
+  # Stubs Pgbus.logger to capture the resolved text of every info-level block,
+  # so a single summary line can be asserted precisely (info fires several
+  # times per pass; a plain have_received matcher checks only the first call).
+  def capture_info_logs
+    logged = []
+    logger = instance_double(Logger, warn: nil, error: nil, debug: nil)
+    allow(logger).to receive(:info) { |&block| logged << block.call if block }
+    allow(Pgbus).to receive(:logger).and_return(logger)
+    logged
+  end
+
   describe described_class::LoopOutcome do
     subject(:outcome) { described_class.new }
 
@@ -289,6 +300,136 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       expect(result).not_to be_a(StandardError)
     end
+
+    it "stops before the next queue when shutdown begins mid-loop" do
+      allow(mock_client).to receive(:purge_archive) do |_queue_name, **_opts|
+        dispatcher.graceful_shutdown
+        1
+      end
+
+      dispatcher.send(:compact_archives)
+
+      expect(mock_client).to have_received(:purge_archive).once
+      expect(mock_client).to have_received(:purge_archive).with("default", older_than: a_kind_of(Time), batch_size: 1000)
+      expect(mock_client).not_to have_received(:purge_archive).with("events", any_args)
+    end
+
+    it "logs a single summary line when interrupted mid-loop" do
+      logged = capture_info_logs
+      allow(mock_client).to receive(:purge_archive) do |_queue_name, **_opts|
+        dispatcher.graceful_shutdown
+        0
+      end
+
+      dispatcher.send(:compact_archives)
+
+      expect(logged.grep(/Archive compaction interrupted by shutdown after 1 of 2/).size).to eq(1)
+    end
+  end
+
+  describe "#prune_stream_archives (private)" do
+    let(:connection) { double("connection") }
+
+    before do
+      prefix = dispatcher.config.streams_queue_prefix
+      allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
+      allow(connection).to receive(:select_values).and_return(["#{prefix}_room1", "#{prefix}_room2"])
+      allow(mock_client).to receive(:purge_archive).and_return(0)
+    end
+
+    it "prunes every stream queue when no shutdown occurs" do
+      dispatcher.send(:prune_stream_archives)
+
+      expect(mock_client).to have_received(:purge_archive).twice
+    end
+
+    it "purges with the ARCHIVE_COMPACTION_BATCH_SIZE constant, not a config accessor" do
+      # archive_compaction_batch_size was culled from Configuration into the
+      # ARCHIVE_COMPACTION_BATCH_SIZE constant (ca5d346); prune_stream_archives
+      # must use the constant like compact_archives does. Reading a removed
+      # accessor would raise NoMethodError and silently skip all pruning.
+      dispatcher.send(:prune_stream_archives)
+
+      expect(mock_client).to have_received(:purge_archive)
+        .with(anything, older_than: a_kind_of(Time), batch_size: described_class::ARCHIVE_COMPACTION_BATCH_SIZE)
+        .twice
+    end
+
+    it "does not depend on a config.archive_compaction_batch_size accessor" do
+      # The accessor does not exist on Configuration; guard against its
+      # reintroduction as a dependency.
+      expect(dispatcher.config).not_to respond_to(:archive_compaction_batch_size)
+      expect { dispatcher.send(:prune_stream_archives) }.not_to raise_error
+      expect(mock_client).to have_received(:purge_archive).twice
+    end
+
+    it "stops before the next stream queue when shutdown begins mid-loop" do
+      allow(mock_client).to receive(:purge_archive) do |_queue_name, **_opts|
+        dispatcher.graceful_shutdown
+        1
+      end
+
+      dispatcher.send(:prune_stream_archives)
+
+      expect(mock_client).to have_received(:purge_archive).once
+    end
+
+    it "logs a single summary line when interrupted mid-loop" do
+      logged = capture_info_logs
+      allow(mock_client).to receive(:purge_archive) do |_queue_name, **_opts|
+        dispatcher.graceful_shutdown
+        0
+      end
+
+      dispatcher.send(:prune_stream_archives)
+
+      expect(logged.grep(/Stream archive compaction interrupted by shutdown after 1 of 2/).size).to eq(1)
+    end
+  end
+
+  describe "#sweep_orphan_streams (private)" do
+    let(:connection) { double("connection") }
+
+    before do
+      prefix = dispatcher.config.streams_queue_prefix
+      allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
+      # Every queue reads as empty, so both are drop candidates.
+      allow(connection).to receive_messages(
+        select_values: ["#{prefix}_room1", "#{prefix}_room2"],
+        select_one: { "queue_length" => 0 }
+      )
+      allow(mock_client).to receive(:drop_queue).and_return(true)
+    end
+
+    it "drops every empty orphan queue when no shutdown occurs" do
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).to have_received(:drop_queue).twice
+    end
+
+    it "stops before checking the next queue when shutdown begins mid-loop" do
+      allow(mock_client).to receive(:drop_queue) do |*_args, **_opts|
+        dispatcher.graceful_shutdown
+        true
+      end
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).to have_received(:drop_queue).once
+      expect(connection).to have_received(:select_one).once
+    end
+
+    it "logs a single summary line when interrupted mid-loop" do
+      logged = capture_info_logs
+      allow(mock_client).to receive(:drop_queue) do |*_args, **_opts|
+        dispatcher.graceful_shutdown
+        true
+      end
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(logged.grep(/Orphan stream sweep interrupted by shutdown after 1 of 2/).size).to eq(1)
+    end
   end
 
   describe "#run_maintenance includes archive compaction" do
@@ -373,13 +514,29 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect(Pgbus::TableMaintenance).to have_received(:run_maintenance).with(
         raw_conn,
         threshold: Pgbus::TableMaintenance::BLOAT_THRESHOLD,
-        reindex: true
+        reindex: true,
+        stop_check: a_kind_of(Proc)
       )
     end
 
     it "rescues errors gracefully" do
       allow(ActiveRecord::Base).to receive(:connection).and_raise(StandardError, "db error")
       expect { dispatcher.send(:run_table_maintenance) }.not_to raise_error
+    end
+
+    it "passes a stop_check that reflects the shutdown flag" do
+      captured = nil
+      allow(Pgbus::TableMaintenance).to receive(:run_maintenance) do |_conn, **opts|
+        captured = opts[:stop_check]
+        0
+      end
+
+      dispatcher.send(:run_table_maintenance)
+
+      expect(captured).to respond_to(:call)
+      expect(captured.call).to be false
+      dispatcher.graceful_shutdown
+      expect(captured.call).to be true
     end
   end
 
