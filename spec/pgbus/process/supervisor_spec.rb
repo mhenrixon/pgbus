@@ -484,8 +484,10 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     before do
       allow(Pgbus).to receive(:client).and_return(mock_client)
-      allow(mock_client).to receive(:ensure_all_queues)
-      allow(mock_client).to receive(:verify_connection!).and_return(true)
+      # run now emits log_boot_banner, which reads the installed PGMQ version.
+      allow(mock_client).to receive_messages(
+        ensure_all_queues: nil, verify_connection!: true, pgmq_schema_version: "1.5.0"
+      )
     end
 
     it "calls bootstrap_queues before boot_processes" do
