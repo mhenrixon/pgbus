@@ -206,6 +206,15 @@ module Pgbus
         else
           fetch_multi(active_queues, qty)
         end
+      rescue Pgbus::ConnectionCircuitOpenError
+        # The client-level connection breaker is open: the database has failed
+        # enough consecutive connection attempts that reads now fail fast. Idle
+        # this poll without an ErrorReporter call — the whole point of the
+        # breaker is to stop every worker flooding the error tracker for the
+        # duration of a database outage. The open/close transitions are logged
+        # once by the client (Client#log_circuit_open / #log_circuit_close),
+        # not per poll here.
+        []
       rescue StandardError => e
         if undefined_queue_table_error?(e)
           evict_missing_queues(e)

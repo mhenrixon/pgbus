@@ -20,6 +20,14 @@ module Pgbus
   class SchemaNotReady < Error; end
   class ReadTimeoutError < Error; end
 
+  # Raised by Client read paths when the in-memory connection-health circuit
+  # breaker (Client::ConnectionHealth) is open: the database has failed enough
+  # consecutive connection attempts that reads now fail fast without a pool
+  # checkout, sparing a dead database from the whole fleet re-polling and the
+  # error tracker from per-poll noise. Workers rescue this and idle until the
+  # breaker's backoff window admits a probe. See issue #197.
+  class ConnectionCircuitOpenError < Error; end
+
   module Process
     # A LISTEN connection landed on a read-only replica (pg_is_in_recovery() =>
     # t). After a failover, stale DNS can point a fresh connection at the

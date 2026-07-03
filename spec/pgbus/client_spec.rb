@@ -1522,4 +1522,80 @@ RSpec.describe Pgbus::Client do
       expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
     end
   end
+
+  describe "connection-health circuit breaker (issue #197)" do
+    before do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+    end
+
+    # Force the client's in-memory breaker into the open state so reads fail
+    # fast. The latch itself is unit-tested in connection_health_spec; here we
+    # only assert the Client wiring (which paths are gated, which aren't).
+    def open_breaker!
+      health = client.connection_health
+      Pgbus::Client::ConnectionHealth::OPEN_THRESHOLD.times do
+        health.run_guarded { raise PGMQ::Errors::ConnectionError, "no connection to the server" }
+      rescue PGMQ::Errors::ConnectionError
+        nil
+      end
+      expect(health).to be_open
+    end
+
+    context "when the breaker is open" do
+      before { open_breaker! }
+
+      %i[read_message read_batch read_multi read_grouped read_grouped_rr read_grouped_head].each do |method|
+        it "fails #{method} fast without touching the pool" do
+          call =
+            case method
+            when :read_message then -> { client.read_message("default") }
+            when :read_multi then -> { client.read_multi(%w[default], qty: 5) }
+            else -> { client.public_send(method, "default", qty: 5) }
+            end
+
+          expect { call.call }.to raise_error(Pgbus::ConnectionCircuitOpenError)
+          expect(mock_pgmq).not_to have_received(method == :read_message ? :read : method)
+        end
+      end
+
+      it "fails read_batch_prioritized fast (non-priority delegates to read_batch)" do
+        expect { client.read_batch_prioritized("default", qty: 5) }
+          .to raise_error(Pgbus::ConnectionCircuitOpenError)
+      end
+
+      it "does NOT short-circuit send_message (enqueues must surface failures)" do
+        expect { client.send_message("default", { "k" => "v" }) }.not_to raise_error
+        expect(mock_pgmq).to have_received(:produce)
+      end
+
+      it "does NOT short-circuit send_batch" do
+        expect { client.send_batch("default", [{ "k" => "v" }]) }.not_to raise_error
+        expect(mock_pgmq).to have_received(:produce_batch)
+      end
+    end
+
+    context "when the breaker is closed (healthy)" do
+      it "passes reads through to pgmq" do
+        allow(mock_pgmq).to receive(:read_batch).and_return([])
+
+        expect(client.read_batch("default", qty: 5)).to eq([])
+        expect(mock_pgmq).to have_received(:read_batch)
+      end
+    end
+
+    context "when a read raises a ConnectionError" do
+      it "records the failure and re-raises (does not swallow)" do
+        allow(mock_pgmq).to receive(:read_batch)
+          .and_raise(PGMQ::Errors::ConnectionError, "no connection to the server")
+
+        Pgbus::Client::ConnectionHealth::OPEN_THRESHOLD.times do
+          expect { client.read_batch("default", qty: 5) }.to raise_error(PGMQ::Errors::ConnectionError)
+        end
+
+        # After OPEN_THRESHOLD connection errors the breaker is open: the next
+        # read fails fast with the circuit error instead of re-hitting pgmq.
+        expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ConnectionCircuitOpenError)
+      end
+    end
+  end
 end

@@ -258,6 +258,22 @@ RSpec.describe Pgbus::Process::Worker do
       end
     end
 
+    context "when the client connection breaker is open (issue #197)" do
+      before do
+        allow(mock_client).to receive(:read_batch).and_raise(Pgbus::ConnectionCircuitOpenError)
+        allow(Pgbus::ErrorReporter).to receive(:report)
+      end
+
+      it "returns an empty array" do
+        expect(worker.send(:fetch_messages, 5)).to eq([])
+      end
+
+      it "does not flood the error tracker while the breaker is open" do
+        3.times { worker.send(:fetch_messages, 5) }
+        expect(Pgbus::ErrorReporter).not_to have_received(:report)
+      end
+    end
+
     context "when a queue table is missing (deleted queue)" do
       let(:prefix) { worker.config.queue_prefix }
       let(:error_message) do
