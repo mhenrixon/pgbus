@@ -32,23 +32,26 @@ RSpec.describe Pgbus::Client do
     end
 
     describe "#with_read_timeout" do
+      # The Ruby Timeout is only an outer fallback now (the primary bound is a
+      # server-side statement_timeout), firing at read_timeout + slack (~5s).
+      # Sleeps here must exceed that combined bound to exercise the fallback.
       context "when read_timeout is set" do
         before { config.read_timeout = 1 }
 
         it "raises ReadTimeoutError when read_batch exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read_batch) { sleep 5 }
+          allow(mock_pgmq).to receive(:read_batch) { sleep 10 }
 
           expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
 
         it "raises ReadTimeoutError when read_multi exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read_multi) { sleep 5 }
+          allow(mock_pgmq).to receive(:read_multi) { sleep 10 }
 
           expect { client.read_multi(%w[default], qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
         end
 
         it "raises ReadTimeoutError when read_message exceeds the timeout" do
-          allow(mock_pgmq).to receive(:read) { sleep 5 }
+          allow(mock_pgmq).to receive(:read) { sleep 10 }
 
           expect { client.read_message("default") }.to raise_error(Pgbus::ReadTimeoutError)
         end

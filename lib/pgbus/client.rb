@@ -53,6 +53,12 @@ module Pgbus
         # Use the resolved pool size (auto-tuned from worker thread counts
         # unless explicitly set) and let pgmq-ruby's connection_pool handle
         # concurrency internally (no mutex needed).
+        #
+        # Bound reads server-side by baking a statement_timeout into the libpq
+        # connection options (issue #198). Only safe on this dedicated-connection
+        # branch — never on the shared-AR Proc path, where it would leak into
+        # application queries.
+        conn_opts = apply_statement_timeout(conn_opts)
         @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.resolved_pool_size, pool_timeout: config.pool_timeout)
         @pgmq_mutex = nil
       end
@@ -775,8 +781,26 @@ module Pgbus
     # connection was dead *before* pgmq-ruby tried to use it, so no SQL was
     # ever sent. Mid-flight errors like "server closed the connection" are
     # excluded from the pattern list for this reason.
-    # Bound a read at config.read_timeout so a dead socket raises
-    # Pgbus::ReadTimeoutError instead of blocking the worker loop forever.
+
+    # Seconds of slack added on top of config.read_timeout before the Ruby
+    # Timeout fires. The primary bound is a server-side statement_timeout baked
+    # into the libpq connection options (see apply_statement_timeout); this Ruby
+    # Timeout is only an outer last resort for a socket so dead the server never
+    # answers (statement_timeout can't fire on a connection that never responds).
+    # The slack ensures statement_timeout — the safe, clean cancellation — wins
+    # the race in the normal case, so Timeout#raise almost never fires.
+    READ_TIMEOUT_SLACK = 5
+    private_constant :READ_TIMEOUT_SLACK
+
+    # Outer last-resort bound on a read. The real bound is the server-side
+    # statement_timeout; this only catches a socket so dead the server can't
+    # even cancel the statement. Fires at read_timeout + READ_TIMEOUT_SLACK so
+    # statement_timeout wins the race whenever the server is still answering.
+    #
+    # Also maps the server-side cancellation to the public contract: when
+    # statement_timeout fires, pgmq-ruby wraps PG::QueryCanceled as
+    # PGMQ::Errors::ConnectionError; we re-raise it as Pgbus::ReadTimeoutError
+    # so callers see the same error regardless of which bound tripped.
     #
     # MUST wrap only the bare `@pgmq.read*` call, sitting *inside* both
     # `synchronized` and `with_stale_connection_retry`:
@@ -792,11 +816,81 @@ module Pgbus
     #   2. with_stale_connection_retry can retry once; with the timeout
     #      inside, each socket attempt gets its own full timeout budget
     #      rather than sharing one across both attempts.
-    def with_read_timeout(&)
+    def with_read_timeout(&block)
       timeout = config.read_timeout
-      return yield unless timeout&.positive?
+      return mapping_statement_timeout(&block) unless timeout&.positive?
 
-      Timeout.timeout(timeout, Pgbus::ReadTimeoutError, &)
+      Timeout.timeout(timeout + READ_TIMEOUT_SLACK, Pgbus::ReadTimeoutError) do
+        mapping_statement_timeout(&block)
+      end
+    end
+
+    # Substring pgmq-ruby surfaces (wrapped as PGMQ::Errors::ConnectionError)
+    # when Postgres cancels a query that overran statement_timeout. Detected in
+    # the read paths and re-raised as Pgbus::ReadTimeoutError so the server-side
+    # bound preserves the same public contract the Ruby Timeout gave callers.
+    STATEMENT_TIMEOUT_PATTERN = "canceling statement due to statement timeout"
+    private_constant :STATEMENT_TIMEOUT_PATTERN
+
+    def statement_timeout_error?(error)
+      error.message.to_s.downcase.include?(STATEMENT_TIMEOUT_PATTERN)
+    end
+
+    # Run a read block, re-raising a server-side statement_timeout cancellation
+    # as Pgbus::ReadTimeoutError. Wraps the read call sites so the public
+    # contract (ReadTimeoutError on a timed-out read) holds whether the bound
+    # fired server-side (the normal case) or via the Ruby Timeout fallback.
+    def mapping_statement_timeout
+      yield
+    rescue PGMQ::Errors::ConnectionError => e
+      raise Pgbus::ReadTimeoutError, e.message if statement_timeout_error?(e)
+
+      raise
+    end
+
+    # Bake a Postgres statement_timeout into the libpq connection options so
+    # every query on a dedicated pgmq-ruby connection is bounded server-side.
+    # This replaces the old Ruby Timeout as the primary read bound: Timeout
+    # interrupts via Thread#raise, which can fire mid-libpq call and leave the
+    # pooled PG::Connection with a half-read result buffer, corrupting later
+    # reads on that connection (issue #198).
+    #
+    # Called only on the dedicated-connection branch (String URL / Hash params).
+    # Never on the shared-AR Proc path — the timeout is connection-wide and
+    # would leak into application queries there.
+    #
+    # NOTE: statement_timeout is connection-wide, so writes on these connections
+    # gain the same bound. This is acceptable — an enqueue that can't complete
+    # within read_timeout is already a failing enqueue — and keeps a single
+    # server-side mechanism instead of two.
+    #
+    # Returns conn_opts unchanged when read_timeout is nil (bounding disabled).
+    def apply_statement_timeout(conn_opts)
+      timeout = config.read_timeout
+      return conn_opts unless timeout&.positive?
+
+      timeout_ms = (timeout * 1000).to_i
+
+      case conn_opts
+      when Hash
+        conn_opts.merge(options: "-c statement_timeout=#{timeout_ms}")
+      when String
+        append_statement_timeout_to_string(conn_opts, timeout_ms)
+      else
+        conn_opts
+      end
+    end
+
+    # libpq accepts two connection-string forms. URI form (postgres:// or
+    # postgresql://) carries options as a URL-encoded query parameter; key=value
+    # conninfo form carries them as a space-separated `options='...'` clause.
+    def append_statement_timeout_to_string(conn_opts, timeout_ms)
+      if conn_opts.start_with?("postgres://", "postgresql://")
+        separator = conn_opts.include?("?") ? "&" : "?"
+        "#{conn_opts}#{separator}options=-c%20statement_timeout%3D#{timeout_ms}"
+      else
+        "#{conn_opts} options='-c statement_timeout=#{timeout_ms}'"
+      end
     end
 
     # Gate a read through the in-memory connection-health circuit breaker.

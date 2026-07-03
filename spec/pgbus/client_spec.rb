@@ -1442,8 +1442,9 @@ RSpec.describe Pgbus::Client do
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       described_class.new(url_config)
 
+      # read_timeout defaults to 30s, so the URL gains a statement_timeout of 30000ms.
       expect(PGMQ::Client).to have_received(:new).with(
-        "postgres://localhost/pgbus_test",
+        "postgres://localhost/pgbus_test?options=-c%20statement_timeout%3D30000",
         pool_size: 5,
         pool_timeout: url_config.pool_timeout
       )
@@ -1460,8 +1461,9 @@ RSpec.describe Pgbus::Client do
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       described_class.new(url_config)
 
+      # read_timeout defaults to 30s, so the Hash gains options with statement_timeout.
       expect(PGMQ::Client).to have_received(:new).with(
-        { host: "localhost", dbname: "pgbus_test" },
+        { host: "localhost", dbname: "pgbus_test", options: "-c statement_timeout=30000" },
         pool_size: 3,
         pool_timeout: url_config.pool_timeout
       )
@@ -1595,6 +1597,154 @@ RSpec.describe Pgbus::Client do
         # After OPEN_THRESHOLD connection errors the breaker is open: the next
         # read fails fast with the circuit error instead of re-hitting pgmq.
         expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ConnectionCircuitOpenError)
+      end
+    end
+  end
+
+  describe "statement_timeout bounding (issue #198)" do
+    before do
+      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+    end
+
+    def build_client(config)
+      c = described_class.new(config)
+      c.instance_variable_set(:@schema_ensured, true)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    context "when connection_options is a Hash" do
+      it "merges options with statement_timeout sized from read_timeout" do
+        hash_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = { host: "localhost", dbname: "pgbus_test" }
+          c.read_timeout = 10
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(hash_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          hash_including(options: "-c statement_timeout=10000"),
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a URI string without a query" do
+      it "appends options with ? and URL-encodes the statement_timeout" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test?options=-c%20statement_timeout%3D5000",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a URI string with an existing query" do
+      it "appends options with & so the existing query is preserved" do
+        url_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgresql://localhost/pgbus_test?sslmode=require"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(url_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgresql://localhost/pgbus_test?sslmode=require&options=-c%20statement_timeout%3D5000",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a key=value conninfo string" do
+      it "appends a space-separated options='...' clause" do
+        conninfo_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "host=localhost dbname=pgbus_test"
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(conninfo_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "host=localhost dbname=pgbus_test options='-c statement_timeout=5000'",
+          anything
+        )
+      end
+    end
+
+    context "when read_timeout is nil" do
+      it "passes connection options through unchanged" do
+        no_timeout_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.read_timeout = nil
+          c.queue_prefix = "pgbus_test"
+        end
+
+        build_client(no_timeout_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(
+          "postgres://localhost/pgbus_test",
+          anything
+        )
+      end
+    end
+
+    context "when connection_options is a Proc (shared AR connection)" do
+      it "passes the Proc through unchanged — statement_timeout would leak into app queries" do
+        lambda_config = Pgbus::Configuration.new.tap do |c|
+          c.database_url = nil
+          c.connection_params = nil
+          c.read_timeout = 5
+          c.queue_prefix = "pgbus_test"
+        end
+
+        ar_connection = double("AR::ConnectionAdapter", raw_connection: double("PG::Connection"))
+        ar_base = double("AR::Base", connection: ar_connection)
+        allow(ar_base).to receive(:connection_db_config).and_raise(StandardError, "no config")
+        stub_const("ActiveRecord::Base", ar_base)
+
+        build_client(lambda_config)
+
+        expect(PGMQ::Client).to have_received(:new).with(an_instance_of(Proc), anything)
+      end
+    end
+
+    describe "server-side cancellation mapping" do
+      let(:timeout_msg) { "PG::QueryCanceled: ERROR: canceling statement due to statement timeout" }
+
+      it "maps a statement-timeout ConnectionError on read_batch to ReadTimeoutError" do
+        allow(mock_pgmq).to receive(:read_batch)
+          .and_raise(PGMQ::Errors::ConnectionError, timeout_msg)
+
+        expect { client.read_batch("default", qty: 5) }
+          .to raise_error(Pgbus::ReadTimeoutError, /statement timeout/)
+      end
+
+      it "maps a statement-timeout ConnectionError on read_message to ReadTimeoutError" do
+        allow(mock_pgmq).to receive(:read)
+          .and_raise(PGMQ::Errors::ConnectionError, timeout_msg)
+
+        expect { client.read_message("default") }
+          .to raise_error(Pgbus::ReadTimeoutError)
+      end
+
+      it "does not map a non-timeout ConnectionError" do
+        allow(mock_pgmq).to receive(:read_batch)
+          .and_raise(PGMQ::Errors::ConnectionError, "no connection to the server")
+
+        expect { client.read_batch("default", qty: 5) }
+          .to raise_error(PGMQ::Errors::ConnectionError)
       end
     end
   end
