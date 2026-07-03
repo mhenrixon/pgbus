@@ -38,13 +38,21 @@ module Pgbus
         CHANNEL_PREFIX = "pgmq.q_"
         CHANNEL_SUFFIX = ".INSERT"
 
+        RECONNECT_BACKOFF_SECONDS = 0.5
+
         attr_reader :listening_to
 
-        def initialize(pg_connection:, dispatch_queue:, health_check_ms:, logger: Pgbus.logger)
+        # @param connection_factory [#call, nil] builds a FRESH PG connection on
+        #   each reconnect attempt (the Instance passes -> { build_pg_connection }).
+        #   When nil (tests injecting only pg_connection:), reconnect falls back to
+        #   the legacy single-shot @conn.reset.
+        def initialize(pg_connection:, dispatch_queue:, health_check_ms:,
+                       logger: Pgbus.logger, connection_factory: nil)
           @conn = pg_connection
           @dispatch_queue = dispatch_queue
           @health_check_ms = health_check_ms
           @logger = logger
+          @connection_factory = connection_factory
           @listening_to = Set.new
           @commands = Queue.new
           @running = false
@@ -197,21 +205,58 @@ module Pgbus
           @conn.exec("SELECT 1")
         end
 
+        # Retry reconnect until we succeed (fresh conn + every channel
+        # re-LISTENed) or #stop flips @running to false. Mirrors
+        # NotifyListener#reconnect!: a single failed attempt never returns with
+        # a dead connection while running, so ensure_listening acks can't
+        # succeed vacuously against a broken LISTEN socket and strand SSE
+        # clients. When no connection_factory was injected (tests passing only
+        # pg_connection:), fall back to the legacy single-shot conn.reset.
         def reconnect!
+          return reconnect_via_reset unless @connection_factory
+
+          # Snapshot the canonical subscription set BEFORE tearing down the old
+          # connection. We rebuild @listening_to from this and only publish it
+          # once every channel has been re-LISTENed on the new conn, so a
+          # mid-loop LISTEN failure never loses channels.
+          channels = @listening_to.to_a
+          loop do
+            return unless @running
+
+            close_quietly(@conn)
+            @conn = nil
+            new_conn = nil
+            begin
+              new_conn = @connection_factory.call
+              # Reject a replica before re-LISTENing. A fresh connect re-resolves
+              # DNS, so backing off and retrying converges on the promoted primary
+              # once DNS catches up after a failover. NOTIFY fires only on the
+              # primary; re-LISTENing on a replica registers channels that never wake.
+              Pgbus::Process::PrimaryValidator.validate_primary!(new_conn)
+              channels.each { |channel| new_conn.exec(%(LISTEN "#{channel}")) }
+            rescue PG::Error, Pgbus::Process::ReplicaConnectionError => e
+              # The factory may have returned a live conn before a later LISTEN
+              # raised (or validate_primary! rejected a replica). Close the
+              # partial conn so repeated failures don't leak PG connections.
+              close_quietly(new_conn)
+              @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
+              sleep RECONNECT_BACKOFF_SECONDS
+              next
+            end
+
+            @conn = new_conn
+            @listening_to = Set.new(channels)
+            return
+          end
+        end
+
+        # Legacy fallback for tests that inject only pg_connection: (no factory).
+        # A single conn.reset attempt; on failure it logs and backs off, leaving
+        # recovery to the next run_loop cycle. Kept for backwards compatibility
+        # with test wiring; production always injects a connection_factory.
+        def reconnect_via_reset
           @conn.reset
-          # Reject a connection that came back on a read-only replica before
-          # re-LISTENing. After a failover, conn.reset can re-resolve stale DNS
-          # to the demoted master; NOTIFY fires only on the primary, so
-          # re-LISTENing there would register channels that never wake. A
-          # replica raises ReplicaConnectionError into the rescue below, which
-          # sleeps 0.5s; the next cycle resets again and converges on the
-          # promoted primary once DNS catches up.
           Pgbus::Process::PrimaryValidator.validate_primary!(@conn)
-          # Don't clear @listening_to until the new set is built. If a
-          # mid-loop LISTEN raises, we keep the original set so the
-          # next reconnect cycle still knows which channels need to
-          # come back. The previous version cleared first and lost
-          # any channels not yet retried on a transient error.
           to_relisten = @listening_to.to_a
           new_listening = Set.new
           to_relisten.each do |channel|
@@ -221,12 +266,22 @@ module Pgbus
           @listening_to = new_listening
         rescue PG::Error, Pgbus::Process::ReplicaConnectionError => e
           @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
-          sleep 0.5
+          sleep RECONNECT_BACKOFF_SECONDS
+        end
+
+        # Close a PG connection we're discarding (the old conn at the top of a
+        # reconnect cycle, or a half-built one whose LISTEN raised). Best-effort.
+        def close_quietly(conn)
+          conn&.close if conn.respond_to?(:close)
+        rescue StandardError
+          nil
         end
 
         def safe_unlisten_all
           @listening_to.each do |channel|
-            @conn.exec(%(UNLISTEN "#{channel}"))
+            # @conn may be nil if #stop interrupted the reconnect loop between
+            # closing the old connection and publishing a new one.
+            @conn&.exec(%(UNLISTEN "#{channel}"))
           rescue PG::Error
             # connection may be dead; nothing we can do
           end

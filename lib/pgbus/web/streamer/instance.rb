@@ -42,7 +42,13 @@ module Pgbus
             pg_connection: @pg_connection,
             dispatch_queue: @dispatch_queue,
             health_check_ms: @config.streams_listen_health_check_ms,
-            logger: @logger
+            logger: @logger,
+            # On reconnect the Listener rebuilds its OWN connection via this
+            # factory (fresh connect re-resolves DNS, converges on the promoted
+            # primary after a failover) instead of resetting a possibly-dead
+            # socket. Skipped for an injected pg_connection: (unit tests) — a
+            # nil factory falls back to conn.reset.
+            connection_factory: pg_connection ? nil : -> { build_raw_pg_connection }
           )
           @dispatcher = StreamEventDispatcher.new(
             client: @client,
@@ -143,12 +149,25 @@ module Pgbus
           end
         end
 
+        # Build the INITIAL LISTEN connection: raw connect, reject a replica
+        # fatally (a misconfiguration at boot), then run the one-shot delivery
+        # self-probe. The reconnect path uses build_raw_pg_connection directly
+        # (validation retries there, probe is skipped) — see the factory wired
+        # into Listener.new above.
         def build_pg_connection
+          probe(validate_primary(build_raw_pg_connection))
+        end
+
+        # Raw PG.connect with no validation or probe. This is what the Listener's
+        # connection_factory calls on every reconnect attempt: the reconnect loop
+        # runs its own PrimaryValidator (retrying on a replica) and skips the
+        # probe to stay cheap, mirroring Pgbus::Process::NotifyListener.
+        def build_raw_pg_connection
           require "pg" unless defined?(::PG::Connection)
           opts = @config.streams_connection_options
           case opts
-          when String then probe(validate_primary(::PG.connect(opts)))
-          when Hash   then probe(validate_primary(::PG.connect(**opts)))
+          when String then ::PG.connect(opts)
+          when Hash   then ::PG.connect(**opts)
           when Proc
             # The Proc branch in connection_options typically returns
             # ActiveRecord::Base.connection.raw_connection — a pooled

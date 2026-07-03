@@ -32,17 +32,23 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
   # blocking semantics without needing a real Postgres.
   let(:fake_pg) do
     Class.new do
-      attr_reader :executed, :reset_count
+      attr_reader :executed, :reset_count, :close_count
 
       def initialize
         @executed = []
         @events = Queue.new
         @reset_count = 0
+        @close_count = 0
         @closed = false
+        @raise_on_next_listen = false
       end
 
       def exec(sql)
         @executed << sql
+        if sql.start_with?("LISTEN") && @raise_on_next_listen
+          @raise_on_next_listen = false
+          raise PG::Error, "listen failed mid-rebuild"
+        end
         nil
       end
 
@@ -69,10 +75,12 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
         @reset_count += 1
       end
 
-      # Called by Listener#stop. Pushes a :close event to unblock any
-      # thread currently sitting inside wait_for_notify.
+      # Called by Listener#stop and by the factory reconnect loop when it
+      # discards the old/partial connection. Pushes a :close event to
+      # unblock any thread currently sitting inside wait_for_notify.
       def close
         @closed = true
+        @close_count += 1
         @events << [:close]
       end
 
@@ -86,6 +94,12 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
       def push_error(error)
         @events << [:raise, error]
+      end
+
+      # Arm the connection so its next LISTEN raises PG::Error once — used to
+      # simulate a partially-built reconnect connection.
+      def fail_next_listen!
+        @raise_on_next_listen = true
       end
     end.new
   end
@@ -284,6 +298,149 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
         "pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT"
       )
       raising_listener.stop
+    end
+  end
+
+  describe "reconnect via connection_factory (NotifyListener loop)" do
+    subject(:listener) do
+      described_class.new(
+        pg_connection: fake_pg,
+        dispatch_queue: dispatch_queue,
+        health_check_ms: 50,
+        logger: logger,
+        connection_factory: -> { factory_conns.shift }
+      )
+    end
+
+    let(:factory_conns) { [] }
+
+    # A connection whose LISTEN always raises — used to prove the reconnect
+    # loop spins on failure and only exits when stop() flips @running.
+    let(:always_failing_conn) do
+      Class.new do
+        attr_reader :close_count
+
+        def initialize = (@close_count = 0)
+
+        def exec(sql)
+          raise PG::Error, "always fails" if sql.start_with?("LISTEN")
+
+          nil
+        end
+
+        def reset = nil
+        def close = (@close_count += 1)
+      end
+    end
+
+    before { stub_const("#{described_class}::RECONNECT_BACKOFF_SECONDS", 0.01) }
+
+    it "rebuilds via the factory and re-LISTENs every channel on the fresh connection" do
+      new_pg = fake_pg.class.new
+      factory_conns << new_pg
+
+      listener.start
+      listener.ensure_listening("chat")
+      listener.ensure_listening("presence")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      new_pg.push_timeout
+
+      wait_until do
+        new_pg.executed.count { |s| s.start_with?("LISTEN") } >= 2
+      end
+
+      expect(new_pg.executed).to include(
+        %(LISTEN "pgmq.q_chat.INSERT"),
+        %(LISTEN "pgmq.q_presence.INSERT")
+      )
+      # The original connection must NOT have been reset — a fresh connect
+      # was used instead (the whole point of the factory path).
+      expect(fake_pg.reset_count).to eq(0)
+      expect(listener.listening_to).to contain_exactly(
+        "pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT"
+      )
+    end
+
+    it "retries with a fresh factory connection until one succeeds" do
+      # The first factory connection fails its first LISTEN (partially built);
+      # the loop closes it, backs off, and rebuilds from the successor.
+      first = fake_pg.class.new
+      second = fake_pg.class.new
+      first.fail_next_listen! if first.respond_to?(:fail_next_listen!)
+      factory_conns.push(first, second)
+
+      listener.start
+      listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      second.push_timeout
+
+      wait_until do
+        second.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 1
+      end
+
+      expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
+    end
+
+    it "closes the partially-built connection before retrying (no leak)" do
+      half_built = fake_pg.class.new
+      good = fake_pg.class.new
+      half_built.fail_next_listen!
+      factory_conns.push(half_built, good)
+
+      listener.start
+      listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      good.push_timeout
+
+      wait_until { half_built.close_count >= 1 }
+      expect(half_built.close_count).to be >= 1
+    end
+
+    it "exits the reconnect loop promptly when stop is called mid-retry" do
+      # The factory returns a brand-new failing connection on every call, so the
+      # reconnect loop never runs dry and would spin forever unless stop() breaks
+      # it. We prove stop returns and the thread joins within the timeout.
+      infinite_listener = described_class.new(
+        pg_connection: fake_pg, dispatch_queue: dispatch_queue, health_check_ms: 50,
+        logger: logger, connection_factory: -> { always_failing_conn.new }
+      )
+      infinite_listener.start
+      infinite_listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { infinite_listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      sleep 0.05 # let the loop spin through several failing attempts
+      thread = infinite_listener.instance_variable_get(:@thread)
+      infinite_listener.stop
+      expect(thread.alive?).to be false
+    end
+  end
+
+  describe "reconnect fallback without a factory (uses conn.reset)" do
+    it "still resets the original connection when no factory is provided" do
+      listener.start
+      listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      wait_until { fake_pg.reset_count >= 1 }
+      fake_pg.push_timeout
+
+      wait_until do
+        fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 2
+      end
+      expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
     end
   end
 
