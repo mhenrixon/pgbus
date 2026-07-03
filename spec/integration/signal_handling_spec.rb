@@ -9,6 +9,13 @@ require_relative "../integration_helper"
 # in the connection URL — done in connection_url below and in
 # integration_helper.rb for the parent's AR connection. With that
 # flag, these tests run on both Linux (CI) and darwin.
+
+# rubocop:disable Pgbus/NoRubyTimeout
+# Every Timeout.timeout here bounds a Process.waitpid2 on a forked CHILD
+# process — there is no pooled PG::Connection in the timed block, so the
+# Thread#raise hazard the cop guards against does not apply. This is the
+# correct idiom for bounding how long a signal-handling test waits for a
+# child to exit; a hung child must fail the test, not block CI forever.
 RSpec.describe "Signal handling (integration)", :integration do
   let(:client) { Pgbus.client }
 
@@ -356,3 +363,4 @@ RSpec.describe "Signal handling (integration)", :integration do
     end
   end
 end
+# rubocop:enable Pgbus/NoRubyTimeout

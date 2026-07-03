@@ -1,10 +1,19 @@
 plugins:
   - rubocop-rspec
 
+require:
+  - ./lib/rubocop/pgbus
+
 AllCops:
   TargetRubyVersion: 3.3
   NewCops: enable
   SuggestExtensions: false
+
+# Custom cop: Timeout.timeout uses Thread#raise and can corrupt a pooled
+# connection mid-call. Banned everywhere; no autocorrect. The one deliberate
+# last-resort use in lib/pgbus/client.rb is annotated with rubocop:disable.
+Pgbus/NoRubyTimeout:
+  Enabled: true
 
 Style/StringLiterals:
   EnforcedStyle: double_quotes
