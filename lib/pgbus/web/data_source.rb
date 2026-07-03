@@ -1234,16 +1234,32 @@ module Pgbus
 
       def derive_process_status(stale, metadata, kind)
         return :stale if stale
-        return :healthy unless kind == "worker" && metadata.is_a?(Hash)
+        return :healthy unless metadata.is_a?(Hash)
+
+        threshold = stall_threshold_for(kind)
+        return :healthy unless threshold
 
         loop_tick = metadata["loop_tick_at"]
         return :healthy unless loop_tick
 
-        threshold = Pgbus.configuration.stall_threshold
-        return :healthy unless threshold&.positive?
-
         age = Time.now.to_f - loop_tick.to_f
         age > threshold ? :stalled : :healthy
+      end
+
+      # Kind-aware stall threshold. Workers run a tight loop, so the base
+      # stall_threshold applies directly. The dispatcher and scheduler sleep
+      # between iterations, so their beacon is naturally up to one sleep
+      # interval stale even when healthy — widen the window by that interval to
+      # avoid false stalls. Kinds with no loop beacon (nil) are never stalled.
+      def stall_threshold_for(kind)
+        base = Pgbus.configuration.stall_threshold
+        return nil unless base&.positive?
+
+        case kind
+        when "worker" then base
+        when "dispatcher" then base + Pgbus.configuration.dispatch_interval
+        when "scheduler" then base + Pgbus.configuration.recurring_schedule_interval
+        end
       end
 
       def format_batch(record)

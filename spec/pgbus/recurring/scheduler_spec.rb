@@ -135,4 +135,46 @@ RSpec.describe Pgbus::Recurring::Scheduler do
       expect(status[:last_run_at]).to be_nil
     end
   end
+
+  describe "#start_heartbeat (private)" do
+    let(:heartbeat) { instance_double(Pgbus::Process::Heartbeat, start: true, stop: true) }
+
+    before { allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(heartbeat) }
+
+    it "creates and starts a heartbeat with a loop_tick_supplier" do
+      scheduler = described_class.new(config: config)
+      scheduler.send(:start_heartbeat)
+
+      expect(Pgbus::Process::Heartbeat).to have_received(:new).with(
+        kind: "scheduler",
+        metadata: { pid: Process.pid, tasks: 1 },
+        loop_tick_supplier: kind_of(Proc)
+      )
+      expect(heartbeat).to have_received(:start)
+    end
+
+    it "supplies the latest stamped loop tick to the heartbeat" do
+      supplier = nil
+      allow(Pgbus::Process::Heartbeat).to receive(:new) do |**kwargs|
+        supplier = kwargs[:loop_tick_supplier]
+        heartbeat
+      end
+
+      scheduler = described_class.new(config: config)
+      scheduler.send(:start_heartbeat)
+      expect(supplier.call).to be_nil
+
+      scheduler.send(:stamp_loop_tick)
+      expect(supplier.call).to be_within(1).of(Time.now.to_f)
+    end
+  end
+
+  describe "#stamp_loop_tick (private)" do
+    it "advances the beacon on each call" do
+      scheduler = described_class.new(config: config)
+      scheduler.send(:stamp_loop_tick)
+      beacon = scheduler.instance_variable_get(:@loop_tick_at).get
+      expect(beacon).to be_within(1).of(Time.now.to_f)
+    end
+  end
 end

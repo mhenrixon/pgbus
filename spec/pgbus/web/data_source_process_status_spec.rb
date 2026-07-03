@@ -10,6 +10,8 @@ RSpec.describe Pgbus::Web::DataSource do
 
     after do
       Pgbus.configuration.stall_threshold = 90
+      Pgbus.configuration.dispatch_interval = 1.0
+      Pgbus.configuration.recurring_schedule_interval = 1.0
     end
 
     describe "#derive_process_status (private)" do
@@ -36,9 +38,86 @@ RSpec.describe Pgbus::Web::DataSource do
         end
       end
 
-      context "when process is not a worker" do
-        it "returns :healthy regardless of metadata" do
+      context "when process is a dispatcher with stale loop_tick_at" do
+        it "returns :stalled" do
           metadata = { "loop_tick_at" => (Time.now.to_f - 120) }
+          result = data_source.send(:derive_process_status, false, metadata, "dispatcher")
+          expect(result).to eq(:stalled)
+        end
+      end
+
+      context "when process is a dispatcher with fresh loop_tick_at" do
+        it "returns :healthy" do
+          metadata = { "loop_tick_at" => Time.now.to_f }
+          result = data_source.send(:derive_process_status, false, metadata, "dispatcher")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when dispatcher beacon is stale only by its own sleep interval" do
+        before { Pgbus.configuration.dispatch_interval = 5.0 }
+
+        it "stays :healthy within stall_threshold + dispatch_interval" do
+          # 92s old: past the 90s worker threshold but under 90 + 5 = 95s.
+          metadata = { "loop_tick_at" => (Time.now.to_f - 92) }
+          result = data_source.send(:derive_process_status, false, metadata, "dispatcher")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when dispatcher has no loop_tick_at in metadata" do
+        it "returns :healthy (older process during a rolling deploy)" do
+          result = data_source.send(:derive_process_status, false, { "pid" => 1 }, "dispatcher")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when process is a scheduler with stale loop_tick_at" do
+        it "returns :stalled" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 120) }
+          result = data_source.send(:derive_process_status, false, metadata, "scheduler")
+          expect(result).to eq(:stalled)
+        end
+      end
+
+      context "when process is a scheduler with fresh loop_tick_at" do
+        it "returns :healthy" do
+          metadata = { "loop_tick_at" => Time.now.to_f }
+          result = data_source.send(:derive_process_status, false, metadata, "scheduler")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when scheduler beacon is stale only by its own sleep interval" do
+        before { Pgbus.configuration.recurring_schedule_interval = 5.0 }
+
+        it "stays :healthy within stall_threshold + recurring_schedule_interval" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 92) }
+          result = data_source.send(:derive_process_status, false, metadata, "scheduler")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when scheduler has no loop_tick_at in metadata" do
+        it "returns :healthy (older process during a rolling deploy)" do
+          result = data_source.send(:derive_process_status, false, { "pid" => 1 }, "scheduler")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when process is an unknown kind" do
+        it "returns :healthy regardless of metadata" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 999) }
+          result = data_source.send(:derive_process_status, false, metadata, "streamer")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when dispatcher stall_threshold is nil" do
+        before { Pgbus.configuration.stall_threshold = nil }
+
+        it "returns :healthy even with old loop_tick_at" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 999) }
           result = data_source.send(:derive_process_status, false, metadata, "dispatcher")
           expect(result).to eq(:healthy)
         end
