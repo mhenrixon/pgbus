@@ -458,6 +458,10 @@ en:
           metadata: Metadata
           pid: PID
           status: Status
+        rates:
+          dequeued: dequeued
+          failed: failed
+          processed: processed
     queues:
       destroy:
         success: Queue %{name} deleted.

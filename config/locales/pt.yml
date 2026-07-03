@@ -458,6 +458,10 @@ pt:
           metadata: Metadados
           pid: PID
           status: Status
+        rates:
+          dequeued: retirados
+          failed: falharam
+          processed: processados
     queues:
       destroy:
         success: Fila %{name} excluída.

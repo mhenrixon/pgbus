@@ -458,6 +458,10 @@ fi:
           metadata: Metatiedot
           pid: PID
           status: Tila
+        rates:
+          dequeued: haettu
+          failed: epäonnistui
+          processed: käsitelty
     queues:
       destroy:
         success: Jono %{name} poistettu.

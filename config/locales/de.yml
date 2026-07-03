@@ -458,6 +458,10 @@ de:
           metadata: Metadaten
           pid: PID
           status: Status
+        rates:
+          dequeued: entnommen
+          failed: fehlgeschlagen
+          processed: verarbeitet
     queues:
       destroy:
         success: Warteschlange %{name} gelöscht.

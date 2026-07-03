@@ -458,6 +458,10 @@ es:
           metadata: Metadatos
           pid: PID
           status: Estado
+        rates:
+          dequeued: extraídos
+          failed: fallidos
+          processed: procesados
     queues:
       destroy:
         success: Cola %{name} eliminada.

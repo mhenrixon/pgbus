@@ -52,6 +52,38 @@ RSpec.describe Pgbus::ApplicationHelper do
     end
   end
 
+  describe "#pgbus_worker_rates" do
+    it "returns nil when the metadata carries no rates" do
+      expect(helper.pgbus_worker_rates({ "queues" => %w[default] })).to be_nil
+      expect(helper.pgbus_worker_rates(nil)).to be_nil
+    end
+
+    it "renders the known rate keys as a human-readable string" do
+      rates = { "processed" => 12.4, "failed" => 0.2, "dequeued" => 10.1 }
+
+      result = helper.pgbus_worker_rates({ "rates" => rates })
+
+      expect(result).to include("12.4/s")
+      expect(result).to include("0.2/s")
+      expect(result).to include("10.1/s")
+    end
+
+    it "omits zero rates to keep the label compact" do
+      rates = { "processed" => 3.0, "failed" => 0.0, "dequeued" => 0.0 }
+
+      result = helper.pgbus_worker_rates({ "rates" => rates })
+
+      expect(result).to include("3.0/s")
+      expect(result).not_to include("0.0/s")
+    end
+
+    it "returns nil when all rates are zero" do
+      rates = { "processed" => 0.0, "failed" => 0.0, "dequeued" => 0.0 }
+
+      expect(helper.pgbus_worker_rates({ "rates" => rates })).to be_nil
+    end
+  end
+
   describe "#pgbus_duration" do
     it "returns dash for nil" do
       expect(helper.pgbus_duration(nil)).to eq("—")

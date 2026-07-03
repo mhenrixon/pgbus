@@ -29,6 +29,31 @@ module Pgbus
       end
     end
 
+    # Order the rate keys are rendered in, and their i18n label suffixes.
+    WORKER_RATE_KEYS = %w[processed failed dequeued].freeze
+
+    # Render a worker's per-second throughput rates (from heartbeat metadata)
+    # as a compact human-readable string, e.g. "12.4/s processed · 0.2/s failed".
+    # Zero rates are omitted; returns nil when there are no non-zero rates so
+    # callers can fall back to the raw metadata rendering.
+    def pgbus_worker_rates(metadata)
+      return nil unless metadata.is_a?(Hash)
+
+      rates = metadata["rates"]
+      return nil unless rates.is_a?(Hash)
+
+      parts = WORKER_RATE_KEYS.filter_map do |key|
+        value = rates[key].to_f
+        next if value.zero?
+
+        label = I18n.t("pgbus.processes.processes_table.rates.#{key}", default: key)
+        "#{value}/s #{label}"
+      end
+      return nil if parts.empty?
+
+      parts.join(" · ")
+    end
+
     def pgbus_status_badge(healthy_or_status)
       status = case healthy_or_status
                when true then :healthy

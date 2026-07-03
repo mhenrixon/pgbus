@@ -44,6 +44,48 @@ RSpec.describe Pgbus::Web::DataSource do
     end
   end
 
+  describe "#processes" do
+    let(:worker_metadata) do
+      {
+        "queues" => %w[default],
+        "rates" => { "processed" => 12.4, "failed" => 0.2, "dequeued" => 10.1 },
+        "jobs_processed" => 42,
+        "jobs_failed" => 1,
+        "in_flight" => 3
+      }
+    end
+
+    let(:process_row) do
+      {
+        "id" => 7,
+        "kind" => "worker",
+        "hostname" => "host-1",
+        "pid" => 1234,
+        "metadata" => JSON.generate(worker_metadata),
+        "last_heartbeat_at" => Time.now,
+        "created_at" => Time.now
+      }
+    end
+
+    it "passes worker throughput rates through in metadata" do
+      allow(mock_connection).to receive(:select_all).and_return(double(to_a: [process_row]))
+
+      result = data_source.processes
+
+      expect(result.size).to eq(1)
+      expect(result.first[:metadata]).to include(
+        "rates" => { "processed" => 12.4, "failed" => 0.2, "dequeued" => 10.1 },
+        "jobs_processed" => 42
+      )
+    end
+
+    it "returns an empty array on error" do
+      allow(mock_connection).to receive(:select_all).and_raise(StandardError)
+
+      expect(data_source.processes).to eq([])
+    end
+  end
+
   describe "#queue_detail" do
     it "returns formatted metrics for a single queue" do
       allow(mock_connection).to receive(:select_one)

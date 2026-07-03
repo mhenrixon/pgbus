@@ -11,11 +11,12 @@ module Pgbus
 
       attr_reader :process_entry
 
-      def initialize(kind:, metadata: {}, on_beat: nil, loop_tick_supplier: nil)
+      def initialize(kind:, metadata: {}, on_beat: nil, loop_tick_supplier: nil, metadata_supplier: nil)
         @kind = kind
         @metadata = metadata
         @on_beat = on_beat
         @loop_tick_supplier = loop_tick_supplier
+        @metadata_supplier = metadata_supplier
         @timer = nil
       end
 
@@ -35,16 +36,28 @@ module Pgbus
 
         @on_beat&.call
         updates = { last_heartbeat_at: Time.current }
-        if @loop_tick_supplier
-          tick = @loop_tick_supplier.call
-          updates[:metadata] = @metadata.merge("loop_tick_at" => tick&.to_f)
-        end
+        metadata = beat_metadata
+        updates[:metadata] = metadata unless metadata.nil?
         ProcessEntry.where(id: @process_id).update_all(updates)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Heartbeat failed: #{e.message}" }
       end
 
       private
+
+      # Build the metadata hash to persist on this beat. Returns nil when no
+      # supplier is configured so heartbeats without dynamic metadata
+      # (supervisor/dispatcher/scheduler) leave the column untouched, exactly
+      # as before. The loop_tick and metadata suppliers are called here — after
+      # @on_beat has run — so any snapshot!/refresh in on_beat is reflected.
+      def beat_metadata
+        return nil unless @loop_tick_supplier || @metadata_supplier
+
+        metadata = @metadata.dup
+        metadata["loop_tick_at"] = @loop_tick_supplier.call&.to_f if @loop_tick_supplier
+        metadata.merge!(@metadata_supplier.call) if @metadata_supplier
+        metadata
+      end
 
       def register_process
         record = ProcessEntry.create!(

@@ -108,6 +108,51 @@ RSpec.describe Pgbus::Process::Worker do
       expect(Pgbus::Process::Heartbeat).to have_received(:new)
         .with(hash_including(on_beat: an_instance_of(Proc)))
     end
+
+    it "wires a metadata_supplier that reports rates and counters" do
+      allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(heartbeat)
+
+      worker.send(:start_heartbeat)
+
+      expect(Pgbus::Process::Heartbeat).to have_received(:new)
+        .with(hash_including(metadata_supplier: an_instance_of(Proc)))
+    end
+
+    it "supplies string-keyed rates and current counters" do
+      supplier = nil
+      allow(Pgbus::Process::Heartbeat).to receive(:new) do |**kwargs|
+        supplier = kwargs[:metadata_supplier]
+        heartbeat
+      end
+
+      worker.send(:start_heartbeat)
+      payload = supplier.call
+
+      expect(payload).to include(
+        "rates" => hash_including("processed", "failed", "dequeued"),
+        "jobs_processed" => 0,
+        "jobs_failed" => 0,
+        "in_flight" => 0
+      )
+    end
+
+    it "snapshots the rate counter before the supplier reads it" do
+      supplier = nil
+      allow(Pgbus::Process::Heartbeat).to receive(:new) do |**kwargs|
+        supplier = kwargs[:metadata_supplier]
+        heartbeat
+      end
+      counter = worker.instance_variable_get(:@rate_counter)
+      counter.increment(:processed, 3)
+
+      worker.send(:start_heartbeat)
+      worker.send(:on_heartbeat) # simulates Heartbeat calling on_beat first
+      payload = supplier.call
+
+      # snapshot! in on_heartbeat computed a positive processed rate from the
+      # 3 increments; the supplier reads those refreshed rates.
+      expect(payload["rates"]["processed"]).to be > 0
+    end
   end
 
   describe "stat buffer construction" do
