@@ -34,6 +34,15 @@ RSpec.describe Pgbus::Configuration do
       expect(config.max_retries).to eq(5)
     end
 
+    it "leaves metrics_backend off by default" do
+      expect(config.metrics_backend).to be_nil
+    end
+
+    it "has default statsd host and port" do
+      expect(config.statsd_host).to eq("127.0.0.1")
+      expect(config.statsd_port).to eq(8125)
+    end
+
     it "has default polling interval" do
       expect(config.polling_interval).to eq(0.1)
     end
@@ -1123,6 +1132,36 @@ RSpec.describe Pgbus::Configuration do
     it "accepts per-worker execution_mode override" do
       config.workers = [{ queues: %w[default], threads: 50, execution_mode: :async }]
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts nil metrics_backend (default)" do
+      config.metrics_backend = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts :prometheus metrics_backend" do
+      config.metrics_backend = :prometheus
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts :statsd metrics_backend" do
+      config.metrics_backend = :statsd
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a Pgbus::Metrics::Backend instance" do
+      config.metrics_backend = Pgbus::Metrics::Backend::Null.new
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects an unknown metrics_backend symbol" do
+      config.metrics_backend = :bogus
+      expect { config.validate! }.to raise_error(ArgumentError, /metrics_backend/)
+    end
+
+    it "rejects a non-backend metrics_backend object" do
+      config.metrics_backend = "prometheus"
+      expect { config.validate! }.to raise_error(ArgumentError, /metrics_backend/)
     end
   end
 
