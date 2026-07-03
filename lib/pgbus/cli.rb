@@ -16,6 +16,8 @@ module Pgbus
         show_status
       when "queues"
         list_queues
+      when "dlq"
+        DLQ.start(args[1..] || [])
       when "mcp"
         start_mcp_server
       when "doctor"
@@ -174,6 +176,8 @@ module Pgbus
           start    Start the Pgbus supervisor (workers + dispatcher)
           status   Show running Pgbus processes
           queues   List queues with metrics
+          dlq      Inspect and drain dead-letter queues
+                   (list/show/retry/retry-all/purge)
           mcp      Start the read-only MCP diagnostic server over stdio
           doctor   Run environment diagnostics (config, DB, PGMQ, queues,
                    LISTEN/NOTIFY, process liveness); exits 1 on any failure
