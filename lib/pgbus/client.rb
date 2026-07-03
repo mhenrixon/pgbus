@@ -719,11 +719,29 @@ module Pgbus
     ].freeze
     private_constant :STALE_CONNECTION_PATTERNS
 
-    # Rescue PGMQ::Errors::ConnectionError once if its message matches a
-    # known stale-socket pattern. pgmq-ruby's auto_reconnect + verify_connection!
-    # already recovers on the *next* checkout, so a single retry is sufficient.
-    # Other connection errors (pool timeout, misconfiguration, truly unreachable
-    # DB) propagate.
+    # How many times a matched stale-connection error is retried before it
+    # propagates. Two attempts (not one) so a transient window — a PgBouncer
+    # restart or a brief failover — that outlasts the first immediate retry
+    # still gets a second, backed-off chance rather than failing an enqueue
+    # the caller may never retry.
+    STALE_RETRY_ATTEMPTS = 2
+    private_constant :STALE_RETRY_ATTEMPTS
+
+    # Backoff before each retry, indexed by (attempt - 1): ~0.1s before the
+    # first retry, ~0.5s before the second. Short enough to stay invisible on
+    # a healthy path (error-path only — never slept on success) and to not
+    # stall a worker loop, long enough to let a pooler/failover window clear.
+    STALE_RETRY_DELAYS = [0.1, 0.5].freeze
+    private_constant :STALE_RETRY_DELAYS
+
+    # Rescue PGMQ::Errors::ConnectionError if its message matches a known
+    # stale-socket pattern, retrying up to STALE_RETRY_ATTEMPTS times with a
+    # short backoff (STALE_RETRY_DELAYS) between attempts. pgmq-ruby's
+    # auto_reconnect + verify_connection! recovers a single dead pooled socket
+    # on the *next* checkout, but a transient window — a PgBouncer restart or a
+    # brief failover — can outlast an immediate retry; the backed-off second
+    # attempt gives that window time to clear. Other connection errors (pool
+    # timeout, misconfiguration, truly unreachable DB) propagate immediately.
     #
     # Wraps every @pgmq.* call site. Pattern matching is intentionally narrow
     # (pre-flight / idle-socket signals only), so retry is safe even for
@@ -761,10 +779,19 @@ module Pgbus
         yield
       rescue PGMQ::Errors::ConnectionError => e
         attempts += 1
-        raise unless attempts == 1 && stale_connection_error?(e)
+        raise unless attempts <= STALE_RETRY_ATTEMPTS && stale_connection_error?(e)
+
+        # Sleep here — in the rescue, *outside* the yielded block — so the
+        # backoff never runs while @pgmq_mutex is held: on the shared-connection
+        # path the mutex lives inside `synchronized` within the yielded block,
+        # and the raise unwinds out of it (releasing the mutex) before we get
+        # here. See STALE_RETRY_DELAYS. Clamp the index to the last delay so a
+        # future STALE_RETRY_ATTEMPTS > STALE_RETRY_DELAYS.size never sleeps nil.
+        sleep STALE_RETRY_DELAYS[[attempts - 1, STALE_RETRY_DELAYS.size - 1].min]
 
         Pgbus.logger.warn do
-          "[Pgbus::Client] Retrying after stale pgmq connection: #{e.message}"
+          "[Pgbus::Client] Retrying after stale pgmq connection " \
+            "(attempt #{attempts}/#{STALE_RETRY_ATTEMPTS}): #{e.message}"
         end
         retry
       end
