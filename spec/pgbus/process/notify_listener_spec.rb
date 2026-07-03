@@ -373,11 +373,11 @@ RSpec.describe Pgbus::Process::NotifyListener do
       # A connection built at start that dies mid-loop drives run_loop through
       # its rescue/ensure path, which clears @running. The worker relies on
       # running? flipping to false to detect a dead listener and restart it.
-      allow_any_instance_of(described_class).to receive(:build_connection)
+      allow(listener).to receive(:build_connection)
         .and_raise(PG::Error.new("boot failed"))
 
       listener.start
-      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+      wait_until { !listener.running? }
 
       expect(listener.running?).to be(false)
     end
