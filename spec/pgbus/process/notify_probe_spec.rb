@@ -13,7 +13,10 @@ RSpec.describe Pgbus::Process::NotifyProbe do
   # A minimal PG::Connection double whose wait_for_notify behavior is
   # configurable per scenario. It records every SQL string passed to exec so
   # tests can assert LISTEN/UNLISTEN issuance.
-  def build_conn(deliver:, notify_raises: nil)
+  # deliver_channel: when set, the emulated notification fires on THAT channel
+  # instead of the probe's own — used to prove wait_for_notify is scoped to the
+  # probe channel (an incidental NOTIFY on another channel must not count).
+  def build_conn(deliver:, notify_raises: nil, deliver_channel: nil)
     executed = []
     conn = Object.new
     conn.define_singleton_method(:exec) do |sql|
@@ -30,8 +33,10 @@ RSpec.describe Pgbus::Process::NotifyProbe do
       # deliver == false → timeout → returns nil
       next nil unless deliver
 
-      # Emulate PG delivering the notification on the same session.
-      channel = executed.grep(/\ALISTEN /).last.to_s[/LISTEN "(.+)"/, 1]
+      # Emulate PG delivering the notification on the same session. By default
+      # it fires on the probe's own channel (the last LISTEN); deliver_channel
+      # overrides it to simulate an unrelated notification.
+      channel = deliver_channel || executed.grep(/\ALISTEN /).last.to_s[/LISTEN "(.+)"/, 1]
       block&.call(channel, 0, "")
       channel
     end
@@ -89,6 +94,23 @@ RSpec.describe Pgbus::Process::NotifyProbe do
       it "best-effort UNLISTENs the probe channel even on failure" do
         described_class.probe_notify_delivery!(conn, logger: logger)
         expect(conn.executed.grep(/\AUNLISTEN /)).not_to be_empty
+      end
+    end
+
+    context "when an unrelated NOTIFY arrives on a different channel" do
+      # wait_for_notify yields the next notification on the connection, not one
+      # scoped to a channel. An incidental NOTIFY on some other channel must NOT
+      # be mistaken for the probe's self-NOTIFY — otherwise a genuinely broken
+      # delivery path could read as healthy.
+      let(:conn) { build_conn(deliver: true, deliver_channel: "some_other_channel") }
+
+      it "does not count it as a delivered probe (returns false)" do
+        expect(described_class.probe_notify_delivery!(conn, logger: logger)).to be false
+      end
+
+      it "logs the actionable failure error" do
+        described_class.probe_notify_delivery!(conn, logger: logger)
+        expect(logger).to have_received(:error)
       end
     end
 

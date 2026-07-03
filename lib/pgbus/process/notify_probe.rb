@@ -34,7 +34,7 @@ module Pgbus
           begin
             conn.exec(%(LISTEN "#{channel}"))
             conn.exec_params("SELECT pg_notify($1, '')", [channel])
-            delivered = wait_for_probe(conn)
+            delivered = wait_for_probe(conn, channel)
             log_failure(logger) unless delivered
             delivered
           rescue PG::Error => e
@@ -42,7 +42,7 @@ module Pgbus
             log_failure(logger, error: e)
             false
           ensure
-            safe_unlisten(conn, channel)
+            safe_unlisten(conn, channel, logger: logger)
           end
         end
 
@@ -59,16 +59,24 @@ module Pgbus
           SecureRandom.hex(4)
         end
 
-        def wait_for_probe(conn)
+        # wait_for_notify yields the NEXT notification on the connection, not one
+        # filtered to a channel, so confirm the delivered channel is our probe's.
+        # The probe runs on a fresh connection with only this channel LISTENed,
+        # but scoping the check here keeps the method correct regardless of the
+        # caller's LISTEN ordering — an incidental NOTIFY must not read as a
+        # successful probe (that would mask the exact failure this catches).
+        def wait_for_probe(conn, channel)
           delivered = false
-          conn.wait_for_notify(PROBE_TIMEOUT_SECONDS) { |_channel, _pid, _payload| delivered = true }
+          conn.wait_for_notify(PROBE_TIMEOUT_SECONDS) do |notified_channel, _pid, _payload|
+            delivered = (notified_channel == channel)
+          end
           delivered
         end
 
-        def safe_unlisten(conn, channel)
+        def safe_unlisten(conn, channel, logger: Pgbus.logger)
           conn.exec(%(UNLISTEN "#{channel}"))
-        rescue PG::Error
-          nil
+        rescue PG::Error => e
+          logger.debug { "[Pgbus::NotifyProbe] best-effort UNLISTEN \"#{channel}\" failed: #{e.class}: #{e.message}" }
         end
 
         def log_failure(logger, error: nil)
