@@ -675,7 +675,7 @@ module Pgbus
 
       # Queues from worker configs
       (config.workers || []).each do |w|
-        worker_queues = w[:queues] || w["queues"] || [config.default_queue]
+        worker_queues = w[:queues] || [config.default_queue]
         worker_queues.each { |q| queues << q unless q == "*" }
       end
 
