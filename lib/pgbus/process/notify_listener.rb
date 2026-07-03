@@ -103,6 +103,11 @@ module Pgbus
 
       def run_loop
         conn = build_connection
+        # One-shot delivery self-probe on the initial connection only. A pooler
+        # or replica that silently breaks LISTEN/NOTIFY is surfaced here with an
+        # actionable error; the listener still runs and degrades to polling.
+        # Reconnects skip the probe to stay cheap.
+        NotifyProbe.probe_notify_delivery!(conn, logger: @logger)
         @state_mutex.synchronize { @conn = conn }
         drain_commands
 
