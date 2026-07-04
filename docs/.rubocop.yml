@@ -1,0 +1,114 @@
+---
+plugins:
+- rubocop-rspec
+require:
+- docs_kit/rubocop
+inherit_gem:
+  rubocop-rails-omakase: rubocop.yml
+  docs-kit:
+  - config/rubocop/docs_kit.yml
+
+# The docs-kit cop that nudges `render Component.new` over bare instantiation,
+# scoped to this app's Ruby.
+DocsKit/RenderComponentPreferred:
+  Enabled: true
+  Include:
+  - app/**/*.rb
+
+# An explicit Include is what lets this nested app lint itself: the pgbus
+# repo-root .rubocop.yml (an ancestor RuboCop auto-discovers) excludes
+# docs/**/*, so without re-including the app + spec trees here, a run from docs/
+# would inspect nothing.
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Include:
+  - app/**/*.rb
+  - spec/**/*.rb
+  - Rakefile
+  - config.ru
+  - config/**/*.rb
+  Exclude:
+  - bin/**/*
+  - node_modules/**/*
+  - tmp/**/*
+  - vendor/**/*
+  - storage/**/*
+  - log/**/*
+
+# Declarative Phlex prose/markup (docs pages, diagram components) reads better on
+# one line than hard-wrapped — a one-line SEO `description` or a nav blurb is
+# naturally past 120 chars. Raise the cap and exempt the view/component trees.
+Layout/LineLength:
+  Max: 125
+  AllowHeredoc: true
+  AllowURI: true
+  AllowCopDirectives: true
+  AllowedPatterns:
+  - '\A\s*#\s*'
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+  - config/initializers/**/*
+
+# The Phlex view/component trees are declarative markup — method-length,
+# complexity, and class-length cops fight the content rather than improve it.
+Metrics/MethodLength:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+Metrics/AbcSize:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+Metrics/BlockLength:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+  - spec/**/*
+  - config/initializers/**/*
+Metrics/ClassLength:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+Metrics/CyclomaticComplexity:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+Metrics/PerceivedComplexity:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+Lint/MissingSuper:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+
+# Short coordinate/builder params (x, y, s) are idiomatic in the SVG diagram
+# components.
+Naming/MethodParameterName:
+  Exclude:
+  - app/views/**/*
+  - app/components/**/*
+
+# The registry iterates pages to render/enumerate — not an ActiveRecord relation.
+Rails/FindEach:
+  Exclude:
+  - app/models/doc.rb
+  - app/views/**/*
+  - spec/**/*
+
+Style/Documentation:
+  Enabled: false
+
+# Request specs read top-to-bottom and legitimately assert more than once.
+RSpec/ExampleLength:
+  Enabled: false
+RSpec/MultipleExpectations:
+  Enabled: false
+RSpec/DescribeClass:
+  Enabled: false
+# The registry pages and Phlex views are content, not spec'd by class path.
+RSpec/SpecFilePathFormat:
+  Enabled: false

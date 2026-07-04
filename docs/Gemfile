@@ -1,0 +1,80 @@
+source "https://rubygems.org"
+
+# docs-kit shared docs chrome + its runtime deps. Pinned to a released tag (not
+# the default branch ref the scaffolder wrote) so a docs-kit change can't silently
+# reshape this site on the next bundle. Referenced from GitHub — docs-kit is not
+# on rubygems, and the Docker build context (the pgbus repo root) can't see the
+# sibling checkout a path: dep would need.
+gem "docs-kit", github: "mhenrixon/docs-kit", tag: "v1.0.2", require: "docs_kit"
+gem "daisyui", require: "daisy_ui"
+gem "phlex-rails"
+gem "rails_icons", "~> 1.1"
+gem "rouge"
+
+# The gem this site documents. Path dep on the repo root (the app lives at docs/)
+# — used ONLY for c.version_badge (Pgbus::VERSION) and the config-reference drift
+# spec. `require: "pgbus/version"` loads just the version constant; the Rails
+# engine is never booted by the docs app. The Docker build context is the repo
+# root (see config/deploy.yml `context: ..`), so the path resolves in CI too.
+gem "pgbus", path: "..", require: "pgbus/version"
+
+# docs-kit's optional read-only MCP server (POST /mcp, JSON-RPC). Present so the
+# endpoint goes live (routes uncommented in config/routes.rb); the whole
+# zoolutions docs fleet is consumed by agents.
+gem "mcp"
+
+# Throttle the public, unauthenticated AI endpoints (/mcp, /llms*, /docs/search)
+# by IP — they're bare ActionController::Base controllers in the gem, so a
+# controller-level rate_limit can't reach them; a Rack middleware can. See
+# config/initializers/rack_attack.rb.
+gem "rack-attack"
+
+# Bundle edge Rails instead: gem "rails", github: "rails/rails", branch: "main"
+gem "rails", "~> 8.1.3"
+# The modern asset pipeline for Rails [https://github.com/rails/propshaft]
+gem "propshaft"
+# Use the Puma web server [https://github.com/puma/puma]
+gem "puma", ">= 5.0"
+# Use JavaScript with ESM import maps [https://github.com/rails/importmap-rails]
+gem "importmap-rails"
+# Hotwire's SPA-like page accelerator [https://turbo.hotwired.dev]
+gem "turbo-rails"
+# Hotwire's modest JavaScript framework [https://stimulus.hotwired.dev]
+gem "stimulus-rails"
+
+# Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
+# gem "bcrypt", "~> 3.1.7"
+
+# Windows does not include zoneinfo files, so bundle the tzinfo-data gem
+gem "tzinfo-data", platforms: %i[ windows jruby ]
+
+# Add HTTP asset caching/compression and X-Sendfile acceleration to Puma [https://github.com/basecamp/thruster/]
+gem "thruster", require: false
+
+group :development, :test do
+  # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
+  gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
+
+  # Audits gems for known security defects (use config/bundler-audit.yml to ignore issues)
+  gem "bundler-audit", require: false
+
+  # Static analysis for security vulnerabilities [https://brakemanscanner.org/]
+  gem "brakeman", require: false
+
+  # The site's test suite: render every registered page, exercise the AI surfaces
+  # (/llms.txt, /docs/search, /mcp), and the config-reference drift spec.
+  gem "rspec-rails"
+end
+
+group :development do
+  # Use console on exceptions pages [https://github.com/rails/web-console]
+  gem "web-console"
+
+  # RuboCop. The site's own .rubocop.yml inherits docs-kit's shipped cops and
+  # rubocop-rails-omakase (its `inherit_gem`), and requires docs_kit/rubocop.
+  # rubocop-rspec covers the request/drift specs. (The pgbus repo-root
+  # .rubocop.yml excludes docs/**/*, so the gem's cops never reach this app.)
+  gem "rubocop", require: false
+  gem "rubocop-rails-omakase", require: false
+  gem "rubocop-rspec", require: false
+end

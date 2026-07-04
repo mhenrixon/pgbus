@@ -1,0 +1,15 @@
+name: Deploy docs
+# Build + deploy via docs-kit's reusable workflow (defined once for all sites).
+on:
+  release: { types: [published] }
+  workflow_dispatch:
+jobs:
+  deploy:
+    uses: mhenrixon/docs-kit/.github/workflows/deploy.yml@main
+    with:
+      image: mhenrixon/pgbus
+      service: pgbus
+      build_context: "."
+      dockerfile: "Dockerfile"
+      working_directory: "."
+    secrets: inherit
