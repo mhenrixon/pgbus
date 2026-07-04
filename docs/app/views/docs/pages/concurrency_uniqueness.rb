@@ -21,9 +21,9 @@ class Views::Docs::Pages::ConcurrencyUniqueness < DocsUI::Page
     DocsUI::Section("Job uniqueness", description: "At most one job with a given key exists, from enqueue to done.") do
       md <<~'MD'
         `ensures_uniqueness` guarantees that at most one job with a given key
-        exists in the system at a time. The lock is held in `pgbus_job_locks` —
-        never released by a timer, only when the job completes, is dead-lettered,
-        or is found orphaned by the reaper.
+        exists in the system at a time. The lock is held in
+        `pgbus_uniqueness_keys` — never released by a timer, only when the job
+        completes, is dead-lettered, or is found orphaned by the reaper.
       MD
       DocsUI::Code(<<~'RUBY', filename: "app/jobs/import_order_job.rb")
         class ImportOrderJob < ApplicationJob
@@ -37,9 +37,10 @@ class Views::Docs::Pages::ConcurrencyUniqueness < DocsUI::Page
         end
       RUBY
       DocsUI::Callout(:note) do
-        plain "Crash recovery is heartbeat-based: the reaper (every 5 minutes in the dispatcher) "
-        plain "cross-references the lock's owner_pid against live process heartbeats and releases "
-        plain "an orphaned lock. A last-resort 24-hour TTL covers a fully-dead supervisor."
+        plain "Crash recovery checks the PGMQ queue, not a timer: the dispatcher's reaper "
+        plain "periodically looks for locks whose referenced message no longer exists in the "
+        plain "queue and releases them. A lock backed by a message still in the queue is never "
+        plain "touched, however old it looks."
       end
     end
   end
@@ -66,7 +67,7 @@ class Views::Docs::Pages::ConcurrencyUniqueness < DocsUI::Page
         ]
       )
       md <<~'MD'
-        Add the table with `rails generate pgbus:add_job_locks` (append
+        Add the table with `rails generate pgbus:add_uniqueness_keys` (append
         `--database=pgbus` for a separate database).
       MD
     end

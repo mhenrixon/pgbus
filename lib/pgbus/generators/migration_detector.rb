@@ -35,9 +35,10 @@ module Pgbus
     #
     # 5. Indexes missing on existing tables → queued. Additive, safe.
     #
-    # 6. Modern replacements for legacy tables (e.g. pgbus_job_locks →
-    #    pgbus_uniqueness_keys) → queue the migration path only if the
-    #    legacy table still exists. Otherwise queue the fresh install.
+    # 6. Modern uniqueness table (pgbus_uniqueness_keys) missing → queue
+    #    add_uniqueness_keys unconditionally. A legacy pgbus_job_locks
+    #    table left over from an older install is not dropped by this
+    #    detector — run `pgbus:migrate_job_locks` by hand to retire it.
     class MigrationDetector
       # Sentinel returned when the database looks empty of pgbus tables.
       # The caller (pgbus:update generator) should redirect the user to
@@ -58,13 +59,14 @@ module Pgbus
 
       # generator_key → Rails generator name. Passed to Thor's invoke.
       #
-      # Note: uniqueness_keys uses the migrate_job_locks generator for
-      # both the fresh-install and upgrade-from-job_locks paths. The
-      # template is idempotent: `unless table_exists?(:pgbus_uniqueness_keys)`
-      # creates it, and `if table_exists?(:pgbus_job_locks)` drops the
-      # legacy table. One generator covers both cases.
+      # Note: uniqueness_keys invokes add_uniqueness_keys, which only
+      # creates the modern pgbus_uniqueness_keys table. If the legacy
+      # pgbus_job_locks table is also present (an install mid-migration),
+      # run `pgbus:migrate_job_locks` separately to drop it — that
+      # generator is not part of this detector's default flow since it
+      # requires the legacy table to already exist.
       GENERATOR_MAP = {
-        uniqueness_keys: "pgbus:migrate_job_locks",
+        uniqueness_keys: "pgbus:add_uniqueness_keys",
         add_job_stats: "pgbus:add_job_stats",
         add_job_stats_latency: "pgbus:add_job_stats_latency",
         add_job_stats_queue_index: "pgbus:add_job_stats_queue_index",
@@ -81,7 +83,7 @@ module Pgbus
       # Human-friendly description of each migration for the generator
       # output. Keeps the update generator's run log readable.
       DESCRIPTIONS = {
-        uniqueness_keys: "uniqueness keys table (job deduplication, also upgrades legacy job_locks if present)",
+        uniqueness_keys: "uniqueness keys table (job deduplication)",
         add_job_stats: "job stats table (Insights dashboard)",
         add_job_stats_latency: "job stats latency columns (enqueue_latency_ms, retry_count)",
         add_job_stats_queue_index: "job stats (queue_name, created_at) index",
@@ -128,10 +130,9 @@ module Pgbus
         CORE_INSTALL_TABLES.none? { |t| table_exists?(t) }
       end
 
-      # Legacy pgbus_job_locks → modern pgbus_uniqueness_keys.
-      # The migrate_job_locks template is idempotent: it creates
-      # uniqueness_keys if missing and drops job_locks if present.
-      # One symbol covers both cases; see GENERATOR_MAP.
+      # Queue add_uniqueness_keys whenever the modern table is missing.
+      # This does not touch a legacy pgbus_job_locks table — that is
+      # handled separately by `pgbus:migrate_job_locks`, see GENERATOR_MAP.
       def uniqueness_key_migrations
         return [] if table_exists?("pgbus_uniqueness_keys")
 

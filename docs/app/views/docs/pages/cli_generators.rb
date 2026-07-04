@@ -81,7 +81,7 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
           [ [ :code, "pgbus:add_outbox" ], "The transactional-outbox table." ],
           [ [ :code, "pgbus:add_presence" ], "The stream-presence table." ],
           [ [ :code, "pgbus:add_queue_states" ], "The queue pause/resume + circuit-breaker state table." ],
-          [ [ :code, "pgbus:add_job_locks" ], "The job-uniqueness lock table." ],
+          [ [ :code, "pgbus:add_uniqueness_keys" ], "The job-uniqueness lock table." ],
           [ [ :code, "pgbus:add_job_stats" ], "The job-stats table for the Insights dashboard." ],
           [ [ :code, "pgbus:add_stream_stats" ], "The stream-stats table (opt-in metrics)." ]
         ]

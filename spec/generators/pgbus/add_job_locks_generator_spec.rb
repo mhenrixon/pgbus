@@ -55,4 +55,17 @@ RSpec.describe Pgbus::Generators::AddJobLocksGenerator do
       end
     end
   end
+
+  describe "deprecation warning" do
+    it "steers new installs to add_uniqueness_keys and existing migrations to migrate_job_locks" do
+      generate_migration(described_class, basename: "_add_pgbus_job_locks.rb") do |_path, _content, tmpdir|
+        generator = described_class.new([], {})
+        generator.destination_root = tmpdir
+
+        expect do
+          generator.display_post_install
+        end.to output(/DEPRECATED.*pgbus:add_uniqueness_keys.*pgbus:migrate_job_locks/m).to_stdout
+      end
+    end
+  end
 end

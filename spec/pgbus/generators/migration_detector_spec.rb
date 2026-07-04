@@ -93,9 +93,11 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       it "queues it exactly once even if legacy pgbus_job_locks also exists" do
         add_table("pgbus_job_locks")
 
-        # The migrate_job_locks template is idempotent — handles both
-        # fresh-install and legacy-upgrade paths. We only need one
-        # entry in the output list.
+        # add_uniqueness_keys only creates the modern table — it does not
+        # touch a legacy pgbus_job_locks table. Its presence alongside a
+        # missing pgbus_uniqueness_keys should still queue exactly one
+        # entry; retiring the legacy table is a separate, manual
+        # `pgbus:migrate_job_locks` step.
         expect(detector.missing_migrations.count(:uniqueness_keys)).to eq(1)
       end
     end
