@@ -21,7 +21,8 @@ module Pgbus
   #   pgbus.stream.broadcast       — stream broadcast (sync or deferred)
   #   pgbus.outbox.publish         — outbox row created
   #   pgbus.recurring.enqueue      — scheduler enqueued a due recurring task
-  #   pgbus.worker.recycle         — worker hit a recycle threshold
+  #   pgbus.worker.recycle         — worker hit a recycle threshold (reason/jobs_processed/memory_mb/lifetime_seconds)
+  #   pgbus.consumer.recycle       — consumer hit a recycle threshold (same payload shape as pgbus.worker.recycle)
   #   pgbus.serializer.serialize   — job/event serialization
   #   pgbus.serializer.deserialize — job/event deserialization
   #

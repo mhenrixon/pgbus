@@ -70,10 +70,12 @@ class Views::Docs::Pages::Observability < DocsUI::Page
           [ [ :code, "pgbus.client.send_message" ], "A message was enqueued." ],
           [ [ :code, "pgbus.client.send_batch" ], "A batch was enqueued." ],
           [ [ :code, "pgbus.client.read_batch" ], "A worker read a batch." ],
+          [ [ :code, "pgbus.client.pool" ], "Connection pool snapshot, emitted per worker heartbeat." ],
           [ [ :code, "pgbus.stream.broadcast" ], "A stream broadcast fired." ],
           [ [ :code, "pgbus.outbox.publish" ], "An outbox entry was published." ],
           [ [ :code, "pgbus.recurring.enqueue" ], "A recurring task was enqueued." ],
-          [ [ :code, "pgbus.worker.recycle" ], "A worker recycled itself." ]
+          [ [ :code, "pgbus.worker.recycle" ], "A worker recycled itself." ],
+          [ [ :code, "pgbus.consumer.recycle" ], "An event consumer recycled itself." ]
         ]
       )
     end
@@ -103,7 +105,9 @@ class Views::Docs::Pages::Observability < DocsUI::Page
         `pgbus_queue_job_count`, `pgbus_job_duration_ms`, `pgbus_event_count`,
         `pgbus_messages_sent` / `_read`, `pgbus_stream_broadcast_count`,
         `pgbus_outbox_published`, `pgbus_recurring_enqueued`,
-        `pgbus_worker_recycled`.
+        `pgbus_worker_recycled` (tagged `reason` and `kind` — `worker` or
+        `consumer`), and `pgbus_pool_size` / `pgbus_pool_available` (tagged
+        `hostname`).
       MD
     end
   end

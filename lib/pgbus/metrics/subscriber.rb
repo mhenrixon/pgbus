@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "socket"
+
 module Pgbus
   module Metrics
     # Consumes Pgbus::Instrumentation events and forwards them to the configured
@@ -36,7 +38,9 @@ module Pgbus
             subscribe("pgbus.stream.broadcast") { |event| on_stream_broadcast(event) },
             subscribe("pgbus.outbox.publish") { |event| on_outbox_publish(event) },
             subscribe("pgbus.recurring.enqueue") { |event| on_recurring_enqueue(event) },
-            subscribe("pgbus.worker.recycle") { |event| on_worker_recycle(event) }
+            subscribe("pgbus.worker.recycle") { |event| on_worker_recycle(event) },
+            subscribe("pgbus.consumer.recycle") { |event| on_consumer_recycle(event) },
+            subscribe("pgbus.client.pool") { |event| on_client_pool(event) }
           ]
           @installed = true
         end
@@ -176,8 +180,28 @@ module Pgbus
         def on_worker_recycle(event)
           backend.increment(
             "#{METRIC_PREFIX}worker_recycled", 1,
-            compact(reason: event.payload[:reason])
+            compact(reason: event.payload[:reason], kind: "worker")
           )
+        end
+
+        def on_consumer_recycle(event)
+          backend.increment(
+            "#{METRIC_PREFIX}worker_recycled", 1,
+            compact(reason: event.payload[:reason], kind: "consumer")
+          )
+        end
+
+        # ── Connection pool ───────────────────────────────────────────────
+
+        def on_client_pool(event)
+          payload = event.payload
+          tags = { hostname: hostname }
+          backend.gauge("#{METRIC_PREFIX}pool_size", payload[:size], tags)
+          backend.gauge("#{METRIC_PREFIX}pool_available", payload[:available], tags)
+        end
+
+        def hostname
+          Socket.gethostname
         end
 
         # Drop nil-valued tags so backends don't emit empty labels.

@@ -792,7 +792,8 @@ c.metrics_backend = MyOpenTelemetryBackend.new
 | `pgbus_stream_broadcast_count` | counter | `stream`, `deferred` |
 | `pgbus_outbox_published` | counter | `kind` |
 | `pgbus_recurring_enqueued` | counter | `task`, `class_name` |
-| `pgbus_worker_recycled` | counter | `reason` |
+| `pgbus_worker_recycled` | counter | `reason`, `kind` (`worker`/`consumer`) |
+| `pgbus_pool_size` / `pgbus_pool_available` | gauge | `hostname` |
 
 A backend that raises (registry bug, StatsD socket down) is logged and swallowed — a metrics failure never propagates into the thread that emitted the event.
 
@@ -820,7 +821,7 @@ ActiveSupport::Notifications.subscribe(/^pgbus\./) do |name, start, finish, _id,
 end
 ```
 
-Events emitted: `pgbus.executor.execute`, `pgbus.job_completed`, `pgbus.job_failed`, `pgbus.job_dead_lettered`, `pgbus.event_processed`, `pgbus.event_failed`, `pgbus.client.send_message`, `pgbus.client.send_batch`, `pgbus.client.read_batch`, `pgbus.stream.broadcast`, `pgbus.outbox.publish`, `pgbus.recurring.enqueue`, `pgbus.worker.recycle`. Payload keys are documented in `lib/pgbus/instrumentation.rb`.
+Metrics-relevant events emitted (the subset the metrics subscriber maps; see `lib/pgbus/instrumentation.rb` for the full `pgbus.*` catalog): `pgbus.executor.execute`, `pgbus.job_completed`, `pgbus.job_failed`, `pgbus.job_dead_lettered`, `pgbus.event_processed`, `pgbus.event_failed`, `pgbus.client.send_message`, `pgbus.client.send_batch`, `pgbus.client.read_batch`, `pgbus.client.pool`, `pgbus.stream.broadcast`, `pgbus.outbox.publish`, `pgbus.recurring.enqueue`, `pgbus.worker.recycle`, `pgbus.consumer.recycle`. Payload keys are documented in `lib/pgbus/instrumentation.rb`.
 
 ### Structured logging
 

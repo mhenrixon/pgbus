@@ -41,7 +41,13 @@ module Pgbus
               subscribe("pgbus.stream.broadcast") { |event| on_stream_broadcast(event) },
               subscribe("pgbus.outbox.publish") { |event| on_outbox_publish(event) },
               subscribe("pgbus.recurring.enqueue") { |event| on_recurring_enqueue(event) },
-              subscribe("pgbus.worker.recycle") { |event| on_worker_recycle(event) }
+              subscribe("pgbus.worker.recycle") { |event| on_worker_recycle(event) },
+              subscribe("pgbus.consumer.recycle") { |event| on_consumer_recycle(event) }
+              # pgbus.client.pool is deliberately NOT subscribed here — the
+              # minutely Probe#track_pool already reports pgbus_pool_size /
+              # pgbus_pool_available gauges for AppSignal (see probe.rb).
+              # Subscribing here too would double-report on every heartbeat
+              # and skew the gauges.
             ]
             @installed = true
           end
@@ -250,7 +256,16 @@ module Pgbus
             ::Appsignal.increment_counter(
               "#{METRIC_PREFIX}worker_recycled",
               1,
-              { reason: payload[:reason] }
+              { reason: payload[:reason], kind: "worker" }
+            )
+          end
+
+          def on_consumer_recycle(event)
+            payload = event.payload
+            ::Appsignal.increment_counter(
+              "#{METRIC_PREFIX}worker_recycled",
+              1,
+              { reason: payload[:reason], kind: "consumer" }
             )
           end
 

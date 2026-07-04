@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "socket"
 
 RSpec.describe Pgbus::Metrics::Subscriber do
   # A recording backend that captures every call for assertion.
@@ -170,11 +171,34 @@ RSpec.describe Pgbus::Metrics::Subscriber do
   end
 
   describe "pgbus.worker.recycle" do
-    it "increments worker_recycled" do
+    it "increments worker_recycled tagged kind: worker" do
       ActiveSupport::Notifications.instrument("pgbus.worker.recycle", reason: "max_jobs")
 
       expect(backend.counters).to include(
-        ["pgbus_worker_recycled", 1, { reason: "max_jobs" }]
+        ["pgbus_worker_recycled", 1, { reason: "max_jobs", kind: "worker" }]
+      )
+    end
+  end
+
+  describe "pgbus.consumer.recycle" do
+    it "increments worker_recycled tagged kind: consumer" do
+      ActiveSupport::Notifications.instrument("pgbus.consumer.recycle", reason: "max_memory")
+
+      expect(backend.counters).to include(
+        ["pgbus_worker_recycled", 1, { reason: "max_memory", kind: "consumer" }]
+      )
+    end
+  end
+
+  describe "pgbus.client.pool" do
+    it "forwards size and available as gauges tagged with hostname" do
+      ActiveSupport::Notifications.instrument("pgbus.client.pool", size: 10, available: 7, pool_timeout: 5)
+
+      expect(backend.gauges).to include(
+        ["pgbus_pool_size", 10, { hostname: Socket.gethostname }]
+      )
+      expect(backend.gauges).to include(
+        ["pgbus_pool_available", 7, { hostname: Socket.gethostname }]
       )
     end
   end
