@@ -1,5 +1,15 @@
 ## [Unreleased]
 
+### Added
+
+### Changed
+
+### Fixed
+
+### Security
+
+## [0.9.8.1] - 2026-07-04
+
 ### Changed
 
 - **CI now proves the `railties >= 7.1, < 9.0` support matrix at both endpoints, not just the top.** Every CI leg previously resolved a single `Gemfile.lock` pinned to the latest 8.x, so Rails 7.1 — the lower bound the gemspec promises — was never exercised; shipping 1.0 with an untested support claim is a semver-integrity risk. Added `gemfiles/rails_7_1.gemfile` (+ a checked-in `gemfiles/rails_7_1.gemfile.lock`) that pins the Rails components to `~> 7.1.0` via a plain `BUNDLE_GEMFILE` override (no appraisal gem), and the `test` job now runs the unit suite (`spec/pgbus/ spec/generators/`) against both the main 8.x Gemfile (Ruby 3.3/3.4/4.0) and the 7.1 endpoint (Ruby 3.3 floor + 4.0 ceiling). The 7.1 legs pass green — the only fix needed was test-side: `spec/pgbus/web/data_source_spec.rb` mocked the ActiveRecord connection but let real model side-paths (`QueueState.paused`, `RecurringTask.count`) hit it, and AR 7.1's eager schema load raised RSpec's `MockExpectationError` (an `Exception`, not a `StandardError`, so the methods' rescue missed it); AR 8.1 resolves schema lazily and never surfaced the gap. The main Gemfile now reads an optional `RAILS_VERSION` env override (defaulting to the full supported range) so the endpoint gemfile can pin the lower bound without duplicating gem declarations. A `lint_floor` CI job also runs rubocop + `rake build` on Ruby 3.3 (the gemspec's `required_ruby_version` floor). Refs #284.

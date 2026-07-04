@@ -2,7 +2,7 @@ plugins:
   - rubocop-rspec
 
 require:
-  - ./lib/rubocop/pgbus
+  - ./rubocop/pgbus
 
 AllCops:
   TargetRubyVersion: 3.3
