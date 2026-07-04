@@ -20,10 +20,10 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
   def overview
     DocsUI::Section("Overview") do
       md <<~'MD'
-        Every pgbus upgrade — patch, minor, or major — follows the same five-step
-        procedure: update the gem, run the migration generator, migrate the
-        database, check the vendored PGMQ schema, deploy, then verify with
-        `pgbus doctor`. The steps below are generic; per-version sections list
+        Every pgbus upgrade — patch, minor, or major — follows the same six-step
+        procedure: update the gem, review and apply the migration generator,
+        migrate the database, check the vendored PGMQ schema, deploy, then verify
+        with `pgbus doctor`. The steps below are generic; per-version sections list
         only what's different for that hop.
 
         Work through the sections **oldest first** if you're behind by more than
