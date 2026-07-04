@@ -24,7 +24,7 @@ The two things that make a batch of PRs churn on this repo are **recurring and m
 
 - A space/comma-separated ordered list of PR numbers: `292 288 289 293 294 295` (also accepts `#292`, `PR292`).
 - The word `automerge` anywhere in the args → enable `gh pr merge --auto --squash` on each PR once it is green + approved (still respects branch protection; GitHub merges when gates pass). Strip it out before parsing numbers.
-- Empty → auto-discover: `gh pr list --author=@me --state=open --json number,title,headRefName,createdAt` and order **oldest-first** (`createdAt` ascending). Oldest-first is the safe default: the earliest PR is usually the base others were cut from, so merging it first minimizes downstream rebases. Show the discovered order and proceed.
+- Empty → auto-discover: `gh pr list --author=@me --state=open --limit 100 --json number,title,headRefName,createdAt` and order **oldest-first** (`createdAt` ascending). The explicit `--limit` matters — `gh pr list` defaults to 30, so without it the discovery silently drops older PRs once the queue grows past 30. Oldest-first is the safe default: the earliest PR is usually the base others were cut from, so merging it first minimizes downstream rebases. Show the discovered order and proceed.
 
 **Order matters.** Each merge invalidates the others' merge base. Processing in a fixed order means you rebase each remaining PR exactly once per upstream merge, not repeatedly. If the user gave an explicit order, honor it exactly — they may know a dependency the metadata doesn't show.
 
@@ -41,7 +41,7 @@ For each PR you need a checkout of its branch to rebase and push. Prefer, in ord
 1. An existing worktree already on that branch: `git worktree list` — match the branch. (Parallel-agent runs leave worktrees under `.claude/worktrees/agent-*`.)
 2. If none, create one: `git worktree add .claude/worktrees/finish-<PR> <branch>` (fetch the branch first: `git fetch origin <branch>`).
 
-Never rebase a branch that is currently checked out in the **main working directory** — operate in a worktree so the user's main checkout is undisturbed. Never touch `main` directly except the one explicit sync in Phase 4-lockfile-on-main (below), and only if the user opted into it.
+Never rebase a branch that is currently checked out in the **main working directory** — operate in a worktree so the user's main checkout is undisturbed. Never touch `main` directly except the optional lockfile-drift fix in Phase 4 (below), and only if the user explicitly opts into it.
 
 ---
 
@@ -67,7 +67,7 @@ If the rebase stops on a conflict:
 
   Then **read the result** and verify: no conflict markers remain (`grep -n '^<<<<<<<\|^=======\|^>>>>>>>\|^|||||||' CHANGELOG.md`), this PR's `Refs #<n>` entry is present exactly once, ordering reads cleanly, and no unrelated entry was dropped or duplicated. The perl is a fast path, not a substitute for reading — if the conflict is not the simple same-anchor shape, resolve it by hand.
 
-- **`docs/Gemfile.lock`** — do not hand-merge. Take main's side, then regenerate: `git checkout --theirs docs/Gemfile.lock 2>/dev/null || true`, then `cd docs && bundle install` (updates the pin to the current gemspec version), `cd ..`. Confirm the only change is the `pgbus (X.Y.Z)` pin.
+- **`docs/Gemfile.lock`** — do not hand-merge. Take main's side, then regenerate. **During a rebase the sides are inverted** — `--ours` is the base (main) you are replaying onto and `--theirs` is your branch's commit — so main's side is `--ours`: `git checkout --ours docs/Gemfile.lock 2>/dev/null || true`, then `cd docs && bundle install` (updates the pin to the current gemspec version), `cd ..`. (The `bundle install` re-derives the pin regardless, so this mainly avoids a spurious hand-merge; the side only matters if `bundle install` is skipped.) Confirm the only change is the `pgbus (X.Y.Z)` pin.
 
 - **Any other conflicted file** — this command's auto-resolution covers only the two known-mechanical files. For anything else, STOP the rebase (`git rebase --abort`), report the conflicted file(s) to the user, and ask how to proceed. Do not guess at semantic conflicts.
 
