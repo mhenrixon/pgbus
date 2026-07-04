@@ -5,25 +5,7 @@ require "rails/generators"
 require "generators/pgbus/add_recurring_generator"
 
 RSpec.describe Pgbus::Generators::AddRecurringGenerator do
-  describe "generator class wiring" do
-    it "is a Rails::Generators::Base subclass" do
-      expect(described_class.ancestors).to include(Rails::Generators::Base)
-    end
-
-    it "mixes in the shared MigrationPath path logic" do
-      expect(described_class.ancestors).to include(Pgbus::Generators::MigrationPath)
-    end
-
-    it "exposes a --database option defaulting to nil" do
-      option = described_class.class_options[:database]
-      expect(option).not_to be_nil
-      expect(option.default).to be_nil
-    end
-
-    it "has a description mentioning recurring jobs" do
-      expect(described_class.desc).to match(/recurring/i)
-    end
-  end
+  it_behaves_like "a pgbus generator", /recurring/i
 
   describe "generated migration" do
     let(:basename) { "_add_pgbus_recurring_tables.rb" }

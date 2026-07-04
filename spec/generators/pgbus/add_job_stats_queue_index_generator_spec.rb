@@ -5,25 +5,7 @@ require "rails/generators"
 require "generators/pgbus/add_job_stats_queue_index_generator"
 
 RSpec.describe Pgbus::Generators::AddJobStatsQueueIndexGenerator do
-  describe "generator class wiring" do
-    it "is a Rails::Generators::Base subclass" do
-      expect(described_class.ancestors).to include(Rails::Generators::Base)
-    end
-
-    it "mixes in the shared MigrationPath path logic" do
-      expect(described_class.ancestors).to include(Pgbus::Generators::MigrationPath)
-    end
-
-    it "exposes a --database option defaulting to nil" do
-      option = described_class.class_options[:database]
-      expect(option).not_to be_nil
-      expect(option.default).to be_nil
-    end
-
-    it "has a description mentioning the composite index" do
-      expect(described_class.desc).to include("pgbus_job_stats")
-    end
-  end
+  it_behaves_like "a pgbus generator", /pgbus_job_stats/
 
   describe "generated migration" do
     let(:basename) { "_add_pgbus_job_stats_queue_index.rb" }
