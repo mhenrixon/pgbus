@@ -18,10 +18,11 @@ RSpec.describe Pgbus::Client do
   end
 
   before do
-    # `require "pgmq"` fires inside Client#initialize before the instance exists,
-    # so stub it at the module boundary rather than on any instance.
-    allow(Kernel).to receive(:require).and_call_original
-    allow(Kernel).to receive(:require).with("pgmq").and_return(true)
+    # Client#initialize loads pgmq via the class method load_pgmq_gem!; stub it
+    # so the fake PGMQ::Client below is not overwritten by the real gem. A
+    # per-example class-method stub, torn down cleanly — unlike stubbing the
+    # global Kernel#require, which would permanently block the real gem load.
+    allow(described_class).to receive(:load_pgmq_gem!)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)

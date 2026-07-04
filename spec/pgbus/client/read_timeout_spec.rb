@@ -6,8 +6,7 @@ RSpec.describe Pgbus::Client do
   describe "read_timeout" do
     subject(:client) do
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-      c = described_class.new(config)
-      c.instance_variable_set(:@schema_ensured, true)
+      c = described_class.new(config, schema_ensured: true)
       allow(c).to receive(:tune_autovacuum)
       allow(c).to receive(:notify_trigger_current?).and_return(false)
       c
@@ -21,10 +20,9 @@ RSpec.describe Pgbus::Client do
     end
 
     before do
-      # require "pgmq" fires inside Client#initialize before the instance exists,
-      # so stub it at the module boundary rather than on any instance.
-      allow(Kernel).to receive(:require).and_call_original
-      allow(Kernel).to receive(:require).with("pgmq").and_return(true)
+      # Stub the class method that loads pgmq so the faked PGMQ::Client stands;
+      # a clean per-example stub, unlike stubbing global Kernel#require.
+      allow(described_class).to receive(:load_pgmq_gem!)
       stub_const("PGMQ::Client", Class.new { def initialize(*args, **kwargs); end })
       # Real PGMQ::Errors::ConnectionError coexists with the faked PGMQ::Client.
       real_pgmq_connection_error
@@ -117,8 +115,7 @@ RSpec.describe Pgbus::Client do
       context "when on the shared-connection (Proc) path" do
         subject(:shared_client) do
           allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-          c = described_class.new(shared_config)
-          c.instance_variable_set(:@schema_ensured, true)
+          c = described_class.new(shared_config, schema_ensured: true)
           allow(c).to receive(:tune_autovacuum)
           allow(c).to receive(:notify_trigger_current?).and_return(false)
           c
