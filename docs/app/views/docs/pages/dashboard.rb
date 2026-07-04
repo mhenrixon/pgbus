@@ -37,7 +37,7 @@ class Views::Docs::Pages::Dashboard < DocsUI::Page
           [ "Queues", "Per-queue metrics with purge / pause / resume / delete." ],
           [ "Jobs", "Enqueued and failed jobs, with retry / discard." ],
           [ "Dead letter", "DLQ messages with retry / discard and bulk actions." ],
-          [ "Processes", "Active workers, dispatcher, consumers with heartbeat status." ],
+          [ "Processes", [ :md, "Active workers, dispatcher, consumers with heartbeat status **and per-worker throughput** (e.g. `12.4/s processed · 0.2/s failed`)." ] ],
           [ "Events", "Registered subscribers and processed events." ],
           [ "Outbox", "Transactional outbox entries pending publication." ],
           [ "Locks", "Active uniqueness locks — state, owner PID@host, age." ],
@@ -51,6 +51,15 @@ class Views::Docs::Pages::Dashboard < DocsUI::Page
         code { "rails generate pgbus:add_job_stats" }
         plain ". Stats are buffered and bulk-inserted; if the migration hasn't run, recording is silently skipped."
       end
+      md <<~'MD'
+        Each worker snapshots its live in-process rate counter (dequeued / processed
+        / failed) into its heartbeat metadata on every beat, so the Processes panel
+        shows a cluster-wide, near-real-time throughput view with no extra query —
+        `Web::DataSource` just passes the existing heartbeat metadata through.
+        Zero rates are omitted from the rendered string. Non-worker processes
+        (dispatcher, scheduler, consumers) carry no rate data and render only their
+        static boot metadata, unchanged.
+      MD
     end
   end
 

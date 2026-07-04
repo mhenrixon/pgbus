@@ -23,6 +23,8 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
   - [Job uniqueness](#job-uniqueness)
   - [Concurrency controls](#concurrency-controls)
   - [Circuit breaker and queue pause/resume](#circuit-breaker-and-queue-pauseresume)
+  - [Client-level circuit breaker (database-down)](#client-level-circuit-breaker-database-down)
+  - [Read timeouts (libpq-native)](#read-timeouts-libpq-native)
   - [Prefetch flow control](#prefetch-flow-control)
   - [Worker recycling](#worker-recycling)
   - [Retry backoff](#retry-backoff)
@@ -36,9 +38,11 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
   - [Archive compaction](#archive-compaction)
 - [Observability](#observability)
   - [Error reporting](#error-reporting)
+  - [Connection pool metrics](#connection-pool-metrics)
   - [Structured logging](#structured-logging)
   - [Queue health monitoring](#queue-health-monitoring)
   - [Health endpoints (liveness / readiness)](#health-endpoints-liveness--readiness)
+  - [Boot diagnostics banner](#boot-diagnostics-banner)
 - [Real-time broadcasts](#real-time-broadcasts-turbo-streams-replacement)
 - [Testing](#testing)
   - [RSpec setup](#rspec-setup)
@@ -131,6 +135,8 @@ end
 ```
 
 The capsule string DSL is the shortest form for the common case. Use `c.capsule` when you need named capsules with advanced options like `single_active_consumer` or `consumer_priority`. See [Routing and ordering](#routing-and-ordering) for the full set.
+
+Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#validate!` right after your block yields, so an invalid value (`visibility_timeout = 0`, for example) raises `ArgumentError` at boot instead of failing later inside a worker. Set `c.eager_validation = false` for the rare setup that intentionally holds a transiently-invalid config across sequential `configure` calls.
 
 > **Upgrading from an older pgbus?** Run `rails generate pgbus:update`. It does two things in one pass:
 >
@@ -452,6 +458,49 @@ You can also **manually pause/resume** queues from the dashboard. The pause stat
 rails generate pgbus:add_queue_states           # Add the queue_states migration
 rails generate pgbus:add_queue_states --database=pgbus  # For separate database
 ```
+
+### Client-level circuit breaker (database-down)
+
+The circuit breaker above (`Pgbus::CircuitBreaker`) is **per-queue** and persists its pause state in the database — useless when the database itself is down, since its `check_paused` rescues and returns `false`, tripping nothing. `Pgbus::Client::ConnectionHealth` is a **separate, in-memory, process-local** latch owned by `Pgbus::Client` for exactly that failure mode. Do not confuse the two:
+
+| | `Pgbus::CircuitBreaker` | `Client::ConnectionHealth` |
+|---|---|---|
+| Scope | Per queue | Per client (whole process) |
+| Trips on | Job execution failures | Consecutive `PGMQ::Errors::ConnectionError` |
+| State lives in | `pgbus_queue_states` (DB) | In-process memory (Mutex-guarded) |
+| Survives restart | Yes | No — resets on process start |
+| Purpose | Isolate a queue whose job code keeps failing | Stop hammering a database that is down |
+| Configuration | `circuit_breaker_enabled` + constants | None — constants only |
+
+`ConnectionHealth` trips open after 5 consecutive connection errors across *any* operation. Once open, the read paths (`read_message`, `read_batch`, `read_multi`, `read_batch_prioritized`, `read_grouped*`, `read_with_poll`) fail fast with a new `Pgbus::ConnectionCircuitOpenError` **without checking out a pool connection**. A single half-open probe is admitted after a monotonic backoff (1s base, doubling per re-open, capped at 60s); its success closes and resets the breaker, its failure re-opens it with a doubled window. Enqueues (`send_message`/`send_batch`) are **never** short-circuited — callers must see enqueue failures. `Worker#fetch_messages` rescues `ConnectionCircuitOpenError` before its generic rescue and idles the poll with no `ErrorReporter` call, so a whole-fleet outage produces two log lines total (a `warn` on open, an `info` on close) instead of one per worker per poll.
+
+There is no configuration for this breaker — like `Pgbus::CircuitBreaker`'s thresholds, the values rarely need tuning.
+
+### Read timeouts (libpq-native)
+
+`config.read_timeout` (default `30` seconds) caps how long a single PGMQ read can block. Reads used to be bounded with Ruby `Timeout.timeout`, which interrupts via `Thread#raise` — that can fire mid-libpq-call and leave a pooled connection corrupted for the next checkout. On a **dedicated connection** (`database_url` or `connection_params`), pgbus now bakes two libpq-native bounds into the connection at boot instead:
+
+| Bound | How | Effect |
+|---|---|---|
+| Server-side | `statement_timeout` via `options=-c statement_timeout=<read_timeout>ms` | Postgres cleanly cancels an overrunning query, surfaced as `Pgbus::ReadTimeoutError` |
+| Client-side | `tcp_user_timeout` + `keepalives` (sized `read_timeout + 5s`) | A dead/hung socket makes libpq raise `PG::ConnectionBad` synchronously — no `Thread#raise`, no buffer corruption |
+
+The client-side bound only applies on Linux with libpq ≥ 12 (older libpq rejects the `tcp_user_timeout` conninfo keyword; non-Linux hosts no-op it) — detected automatically via `Socket.const_defined?(:TCP_USER_TIMEOUT)` and `PG.library_version`, no configuration needed. Ruby `Timeout` remains only as a narrow last-resort fallback on a dedicated connection where libpq can't bound the socket (non-Linux hosts, or libpq < 12).
+
+**The shared-AR `Proc` connection path** (`-> { ActiveRecord::Base.connection.raw_connection }`) gets neither bound automatically — pgbus doesn't own that socket. Configure the same libpq timeouts yourself in `database.yml`; ActiveRecord passes them straight through:
+
+```yaml
+# config/database.yml
+production:
+  primary:
+    <<: *default
+    variables:
+      statement_timeout: 30000   # ms — match config.read_timeout
+    # tcp_user_timeout / keepalives: set via the connection URL or driver/OS
+    # defaults; ActiveRecord passes libpq conninfo options straight through.
+```
+
+A custom RuboCop cop, `Pgbus/NoRubyTimeout`, bans `Timeout.timeout` project-wide to prevent this class of bug from regressing.
 
 ### Prefetch flow control
 
@@ -820,6 +869,23 @@ end
 
 Metrics-relevant events emitted (the subset the metrics subscriber maps; see `lib/pgbus/instrumentation.rb` for the full `pgbus.*` catalog): `pgbus.executor.execute`, `pgbus.job_completed`, `pgbus.job_failed`, `pgbus.job_dead_lettered`, `pgbus.event_processed`, `pgbus.event_failed`, `pgbus.client.send_message`, `pgbus.client.send_batch`, `pgbus.client.read_batch`, `pgbus.client.pool`, `pgbus.stream.broadcast`, `pgbus.outbox.publish`, `pgbus.recurring.enqueue`, `pgbus.worker.recycle`, `pgbus.consumer.recycle`. Payload keys are documented in `lib/pgbus/instrumentation.rb`.
 
+### Connection pool metrics
+
+The PGMQ connection pool was previously invisible — pgmq-ruby exposes `size`/`available` counters, but nothing read them, so the first sign of an undersized or leaking pool was an opaque `PGMQ::Errors::ConnectionError: Connection pool timeout`. `Pgbus::Client#pool_stats` surfaces the live counters:
+
+```ruby
+Pgbus.client.pool_stats
+# => { size: 10, available: 3, pool_timeout: 5 }
+```
+
+It's purely observational (rescues internally to `{}`), so reading the pool can never break job processing, and it works on both the dedicated-pool path and the shared-`Proc` connection path (`size` reports `1` there). The worker heartbeat emits a `pgbus.client.pool` instrumentation event once per beat (never on a per-job hot path) carrying that payload, and the AppSignal minutely probe reports `pgbus_pool_size` / `pgbus_pool_available` gauges tagged by hostname (the pool is per-process, unlike the cluster-wide queue/summary gauges).
+
+A pool-timeout error is re-raised as the same `PGMQ::Errors::ConnectionError` class (so `with_stale_connection_retry` semantics and non-retryability are unchanged) with the live pool state and an actionable hint appended:
+
+```
+Connection pool timeout (pool {size: 10, available: 0, pool_timeout: 5}) — raise Pgbus.configuration.pool_size or reduce worker threads
+```
+
 ### Structured logging
 
 Pgbus ships two log formatters inspired by Sidekiq's `Logger::Formatters`:
@@ -1052,6 +1118,24 @@ livenessProbe:
 readinessProbe:
   httpGet: { path: /readyz, port: 9394 }
 ```
+
+### Boot diagnostics banner
+
+`Supervisor#run` logs a one-block banner right after the heartbeat starts and before queues bootstrap, so a misconfigured deployment states its actual settings instead of forcing an operator to attach a console. Every line is `"[Pgbus] boot:"`-prefixed and renders cleanly under both the `:text` and `:json` log formatters:
+
+```
+[Pgbus] boot: pgbus 0.9.8 pid=42317
+[Pgbus] boot: connection=host/dbname pool=12
+[Pgbus] boot: pgmq_schema_mode=auto pgmq_version=1.4.0
+[Pgbus] boot: listen_notify=true worker_notify_wakeup=true
+[Pgbus] boot: roles=workers,dispatcher,scheduler
+[Pgbus] boot: capsule=critical queues=critical threads=5 mode=threads
+[Pgbus] boot: capsule=default queues=default,mailers threads=10 mode=threads
+```
+
+It states: the pgbus version; the connection target reduced to `host/dbname` (never the password) across all three `connection_options` forms (`database_url` string, `connection_params` hash, AR-derived hash); the resolved pool size; `pgmq_schema_mode` and the installed PGMQ version (best-effort — `unknown` on any error); `listen_notify` and `worker_notify_wakeup?`; the roles that will actually boot (honoring `config.roles`); and one line per worker capsule (name, queues, threads, execution mode) and per event consumer (topics, threads).
+
+Every DB-dependent field is wrapped so a transient failure degrades that field to `unknown` — the banner can never abort boot.
 
 ## Real-time broadcasts (turbo-streams replacement)
 
@@ -1709,9 +1793,47 @@ Day-to-day running of Pgbus: starting and stopping processes, observing what is 
 pgbus start     # Start supervisor with workers + dispatcher + scheduler
 pgbus status    # Show running processes
 pgbus queues    # List queues with depth/metrics
+pgbus dlq       # Inspect and drain dead-letter queues (see below)
+pgbus doctor    # Preflight diagnostics; exits 1 on any failed check (see below)
+pgbus mcp       # Start the read-only MCP diagnostic server over stdio
 pgbus version   # Print version
 pgbus help      # Show help
 ```
+
+#### pgbus doctor
+
+A single preflight command that answers "is this environment healthy enough to run?" — useful as a deploy or CI gate. It runs six checks and never raises; a broken environment turns every probe into a failed/warned check instead of a crash:
+
+| Check | Fails (`:fail`) when | Warns (`:warn`) when |
+|---|---|---|
+| Configuration | `Configuration#validate!` raises | — |
+| Database | Unreachable (`SELECT 1` via `Client#ping`) | — |
+| PGMQ schema | Schema not installed | Installed but untracked, or behind the vendored version |
+| Queues | A configured queue has no PGMQ table | — |
+| LISTEN/NOTIFY | — | A configured queue is missing its insert trigger (falls back to polling) |
+| Process liveness | Verdict is `STALLED` | Verdict is `DEGRADED` |
+
+```bash
+pgbus doctor       # prints the report; exit 1 unless every check passed
+rake pgbus:doctor  # identical checks, for a Rake-based deploy pipeline
+```
+
+The report ends with a resolved-config summary (queue prefix, pool size, roles, capsules) with any password redacted from `database_url` / `connection_params`. Warnings do not fail the exit code — only a `:fail` result does.
+
+#### pgbus dlq
+
+Dead-letter inspect/drain operations from a headless deployment or incident runbook, routed through `Web::DataSource` so retry/discard semantics are identical to the dashboard (origin-queue re-enqueue, transactional produce+delete, lock release on discard) with zero raw SQL and no direct PGMQ calls:
+
+| Subcommand | Does |
+|---|---|
+| `pgbus dlq list [--page N] [--per-page N]` | Table of msg_id / DLQ queue / origin queue / read_ct / enqueued_at, plus a total count. Never prints payloads. |
+| `pgbus dlq show MSG_ID` | Message metadata plus the payload, filtered through the dashboard's sensitive-data filter. |
+| `pgbus dlq retry MSG_ID` | Re-enqueue one message to its origin queue. |
+| `pgbus dlq retry-all` | Re-enqueue every dead-letter message; prints the count. |
+| `pgbus dlq purge MSG_ID` | Discard a single message. |
+| `pgbus dlq purge --all --yes` | Discard every dead-letter message. Omitting `--yes` makes no changes and exits 1. |
+
+An unknown `msg_id` or an unknown subcommand exits 1.
 
 #### Role flags (split deployments)
 
@@ -1744,13 +1866,15 @@ The dashboard is a mountable Rails engine at `/pgbus` with:
 - **Queues** — per-queue metrics, purge/pause/resume/delete actions
 - **Jobs** — enqueued and failed jobs, retry/discard actions
 - **Dead letter** — DLQ messages with retry/discard, bulk actions
-- **Processes** — active workers/dispatcher/consumers with heartbeat status
+- **Processes** — active workers/dispatcher/consumers with heartbeat status **and per-worker throughput** (e.g. `12.4/s processed · 0.2/s failed`)
 - **Events** — registered subscribers and processed events
 - **Outbox** — transactional outbox entries pending publication
 - **Locks** — active job uniqueness locks with state (queued/executing), owner PID@hostname, age
 - **Insights** — throughput chart (jobs/min), status distribution donut, slowest job classes table
 
 All tables use Turbo Frames for periodic auto-refresh without page reloads. Destructive actions use styled confirmation dialogs (not browser `confirm()`), and flash messages appear as auto-dismissing toast notifications.
+
+Each worker snapshots its live in-process rate counter (dequeued/processed/failed) into its heartbeat metadata on every beat, so the Processes panel shows a cluster-wide, near-real-time throughput view with no extra query. Zero rates are omitted from the rendered string. Non-worker processes (dispatcher, scheduler, consumers) carry no rate data and render only their static boot metadata, unchanged.
 
 #### Queue management
 
@@ -1877,6 +2001,7 @@ PostgreSQL + PGMQ
 | `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
 | `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
 | `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures (threshold and backoff are tuned via `Pgbus::CircuitBreaker` constants) |
+| `read_timeout` | `30` | Seconds before a single PGMQ read is bounded (libpq `statement_timeout` + `tcp_user_timeout` on a dedicated connection; nil disables) |
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
 | `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
@@ -1904,6 +2029,9 @@ PostgreSQL + PGMQ
 | `metrics_backend` | `nil` | Generic metrics adapter: `nil` (off), `:prometheus`, `:statsd`, or a `Pgbus::Metrics::Backend` instance |
 | `statsd_host` | `"127.0.0.1"` | StatsD UDP host (used when `metrics_backend = :statsd`) |
 | `statsd_port` | `8125` | StatsD UDP port (used when `metrics_backend = :statsd`) |
+| `health_port` | `nil` | Port for standalone HTTP liveness/readiness probes served by the supervisor; nil disables |
+| `health_bind` | `"127.0.0.1"` | Bind address for the standalone health server |
+| `eager_validation` | `true` | Run `Configuration#validate!` automatically after `Pgbus.configure` / `ConfigLoader.apply`; an invalid value raises `ArgumentError` at boot. Set `false` to suppress and validate manually. |
 
 ## Development
 

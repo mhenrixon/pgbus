@@ -10,9 +10,12 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
 
   def content
     cli
+    boot_banner
     roles
     recycling
     circuit_breaker
+    connection_circuit_breaker
+    read_timeouts
     prefetch
     async
   end
@@ -27,6 +30,37 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
         pgbus queues    # list queues with depth/metrics
         pgbus version   # print the version
       SHELL
+    end
+  end
+
+  def boot_banner
+    DocsUI::Section("Boot diagnostics banner", description: "See what actually booted, at a glance.") do
+      md <<~'MD'
+        `Supervisor#run` logs a one-block banner right after the heartbeat starts
+        and before queues bootstrap — every `"[Pgbus] boot:"`-prefixed line renders
+        cleanly under both the `:text` and `:json` log formatters:
+      MD
+      DocsUI::Code(<<~LOG, lexer: :text, filename: "log output")
+        [Pgbus] boot: pgbus 0.9.8 pid=42317
+        [Pgbus] boot: connection=host/dbname pool=12
+        [Pgbus] boot: pgmq_schema_mode=auto pgmq_version=1.4.0
+        [Pgbus] boot: listen_notify=true worker_notify_wakeup=true
+        [Pgbus] boot: roles=workers,dispatcher,scheduler
+        [Pgbus] boot: capsule=critical queues=critical threads=5 mode=threads
+        [Pgbus] boot: capsule=default queues=default,mailers threads=10 mode=threads
+      LOG
+      md <<~'MD'
+        It states the version, the connection target (host/dbname only — never the
+        password, across the `database_url`, `connection_params`, and
+        ActiveRecord-derived connection forms), the resolved pool size, the PGMQ
+        schema mode and installed version, LISTEN/NOTIFY status, the roles that
+        will actually boot, and one line per worker capsule and event consumer.
+      MD
+      DocsUI::Callout(:note) do
+        plain "Every DB-dependent field degrades to "
+        code { "unknown" }
+        plain " on a transient failure — the banner can never abort boot."
+      end
     end
   end
 
@@ -92,6 +126,101 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
         code { "rails generate pgbus:add_queue_states" }
         plain "."
       end
+    end
+  end
+
+  def connection_circuit_breaker
+    DocsUI::Section("Client-level circuit breaker (database-down)",
+                     description: "A different breaker from the one above — trips on connection failure, not job failure.") do
+      md <<~'MD'
+        The circuit breaker above (`Pgbus::CircuitBreaker`) is **per-queue** and
+        persists its pause state in the database — so it's useless when the
+        database itself is down; its `check_paused` rescues and returns `false`,
+        tripping nothing. `Pgbus::Client::ConnectionHealth` is a **separate,
+        in-memory, process-local** latch owned by `Pgbus::Client` for exactly that
+        case: it trips on repeated connection failures, not job failures, and
+        needs no database access to operate (it can't — the database is down).
+      MD
+      DocsUI::Table(
+        [ "", [ :code, "Pgbus::CircuitBreaker" ], [ :code, "Client::ConnectionHealth" ] ],
+        [
+          [ "Scope", "Per queue", "Per client (whole process)" ],
+          [ "Trips on", "Job execution failures", [ :md, "Consecutive `PGMQ::Errors::ConnectionError`" ] ],
+          [ "State lives in", [ :md, "`pgbus_queue_states` (DB)" ], "In-process memory (Mutex-guarded)" ],
+          [ "Survives restart", "Yes", "No — resets on process start" ],
+          [ "Purpose", "Isolate a queue whose job code keeps failing", "Stop hammering a database that is down" ]
+        ]
+      )
+      md <<~'MD'
+        `ConnectionHealth` trips open after 5 consecutive connection errors across
+        *any* operation. Once open, read paths (`read_message`, `read_batch`,
+        `read_multi`, `read_grouped*`, `read_with_poll`) fail fast with
+        `Pgbus::ConnectionCircuitOpenError` **without checking out a pool
+        connection** — no wasted connection attempt, no `ErrorReporter` noise per
+        poll. A single half-open probe is admitted after a monotonic backoff (1s
+        base, doubling per re-open, capped at 60s); its success closes the breaker,
+        its failure re-opens it with a doubled window. Enqueues (`send_message` /
+        `send_batch`) are **never** short-circuited — callers must see enqueue
+        failures rather than have them silently swallowed.
+      MD
+      DocsUI::Callout(:note) do
+        plain "This costs an outage exactly two log lines total instead of one per "
+        plain "worker per poll: a "
+        code { "warn" }
+        plain " when the breaker opens, an "
+        code { "info" }
+        plain " when it closes. There is no configuration for this breaker — the "
+        plain "thresholds are constants, mirroring "
+        code { "Pgbus::CircuitBreaker" }
+        plain "."
+      end
+    end
+  end
+
+  def read_timeouts
+    DocsUI::Section("Read timeouts (libpq-native)", description: "Bounded reads without Ruby Timeout.") do
+      md <<~'MD'
+        `config.read_timeout` (default `30` seconds) caps how long a single PGMQ
+        read can block. On a **dedicated connection** (`database_url` or
+        `connection_params`), pgbus bakes two libpq-native bounds into the
+        connection at boot — no Ruby `Timeout.timeout`, which can interrupt
+        mid-libpq-call and leave a pooled connection corrupted for the next
+        checkout:
+      MD
+      DocsUI::Table(
+        [ "Bound", "How", "Effect" ],
+        [
+          [ "Server-side", [ :md, "`statement_timeout` (via `options=-c statement_timeout=<ms>`)" ],
+            [ :md, "Postgres cleanly cancels an overrunning query → `Pgbus::ReadTimeoutError`" ] ],
+          [ "Client-side", [ :md, "`tcp_user_timeout` + `keepalives` (sized `read_timeout + 5s`)" ],
+            "A dead/hung socket raises `PG::ConnectionBad` synchronously" ]
+        ]
+      )
+      md <<~'MD'
+        The client-side bound only applies on Linux with libpq ≥ 12 (older libpq
+        rejects the `tcp_user_timeout` conninfo keyword; non-Linux hosts no-op it),
+        detected automatically at connection init — no configuration needed. Ruby
+        `Timeout` remains only as a narrow last resort on a dedicated connection
+        where libpq can't bound the socket (non-Linux or libpq < 12).
+      MD
+      DocsUI::Callout(:warning) do
+        plain "The "
+        code { "Proc" }
+        plain "-based shared-AR connection path (`-> { ActiveRecord::Base.connection.raw_connection }`) "
+        plain "gets neither bound automatically — pgbus doesn't own that socket. "
+        plain "Configure the same libpq timeouts yourself in "
+        code { "database.yml" }
+        plain ":"
+      end
+      DocsUI::Code(<<~YAML, filename: "config/database.yml", lexer: :yaml)
+        production:
+          primary:
+            <<: *default
+            variables:
+              statement_timeout: 30000 # ms — match config.read_timeout
+            # tcp_user_timeout / keepalives: set at the connection-string or
+            # OS/driver level; ActiveRecord passes libpq options straight through.
+      YAML
     end
   end
 

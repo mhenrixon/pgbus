@@ -11,6 +11,8 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
   def content
     cli
     cli_flags
+    doctor
+    dlq
     core_generators
     feature_generators
     tuning_generators
@@ -26,10 +28,85 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
           [ [ :code, "pgbus start" ], "Boot the supervisor (workers, dispatcher, scheduler, consumers)." ],
           [ [ :code, "pgbus status" ], "Show running processes." ],
           [ [ :code, "pgbus queues" ], "List queues with depth and metrics." ],
+          [ [ :code, "pgbus dlq" ], "Inspect and drain dead-letter queues (see below)." ],
+          [ [ :code, "pgbus doctor" ], "Preflight diagnostics — gates a deploy or CI run (see below)." ],
+          [ [ :code, "pgbus mcp" ], "Start the read-only MCP diagnostic server over stdio." ],
           [ [ :code, "pgbus version" ], "Print the version." ],
           [ [ :code, "pgbus help" ], "Show help." ]
         ]
       )
+    end
+  end
+
+  def doctor
+    DocsUI::Section("pgbus doctor", description: "One preflight command for deploy/CI gating.") do
+      md <<~'MD'
+        `pgbus doctor` (and the equivalent `rake pgbus:doctor`) runs six checks and
+        prints a report — config validity, database connectivity, PGMQ schema
+        version, configured-queue existence, LISTEN/NOTIFY triggers, and process
+        liveness (the same `OK` / `DEGRADED` / `STALLED` verdict as the MCP
+        `pgbus_health` tool). It never touches PGMQ or PostgreSQL directly outside
+        `Pgbus::Client`, and it never raises — a broken environment turns every
+        probe into a failed check instead of a crash.
+      MD
+      DocsUI::Table(
+        [ "Check", "Fails when" ],
+        [
+          [ "Configuration", [ :md, "`Configuration#validate!` raises." ] ],
+          [ "Database", [ :md, "The DB is unreachable (a plain `SELECT 1` via `Client#ping`)." ] ],
+          [ "PGMQ schema", "The schema is missing, untracked, or behind the vendored version (warn)." ],
+          [ "Queues", "A configured queue has no PGMQ table." ],
+          [ "LISTEN/NOTIFY", "A configured queue is missing its insert trigger (warn — falls back to polling)." ],
+          [ "Process liveness", [ :md, "`STALLED` (silent worker wedge); `DEGRADED` only warns." ] ]
+        ]
+      )
+      md <<~'MD'
+        The report ends with a resolved-config summary (queue prefix, pool size,
+        roles, capsules) with any password redacted from `database_url` /
+        `connection_params`.
+      MD
+      DocsUI::Code(<<~SHELL, lexer: :shell)
+        pgbus doctor        # prints the report; exit 1 if any check failed
+        rake pgbus:doctor   # same checks, for a Rake-based deploy pipeline
+      SHELL
+      DocsUI::Callout(:tip) do
+        plain "Warnings (an outdated PGMQ schema, a missing NOTIFY trigger) don't fail "
+        plain "the exit code — only a failed check does. Wire "
+        code { "pgbus doctor" }
+        plain " into your deploy pipeline or CI to gate on a broken environment before "
+        plain "it reaches production."
+      end
+    end
+  end
+
+  def dlq
+    DocsUI::Section("pgbus dlq", description: "Dead-letter management from a headless deployment.") do
+      md <<~'MD'
+        Every subcommand routes through `Web::DataSource`, so retry/discard
+        semantics are identical to the dashboard — origin-queue re-enqueue,
+        transactional produce+delete, lock release on discard — with zero raw
+        SQL and no direct PGMQ calls.
+      MD
+      DocsUI::Table(
+        [ "Subcommand", "Does" ],
+        [
+          [ [ :code, "pgbus dlq list [--page N] [--per-page N]" ], "Table of msg_id / DLQ queue / origin queue / read_ct / enqueued_at, plus a total count. Never prints payloads." ],
+          [ [ :code, "pgbus dlq show MSG_ID" ], "Message metadata plus the payload, passed through the dashboard's sensitive-data filter." ],
+          [ [ :code, "pgbus dlq retry MSG_ID" ], "Re-enqueue one message to its origin queue." ],
+          [ [ :code, "pgbus dlq retry-all" ], "Re-enqueue every dead-letter message; prints the count." ],
+          [ [ :code, "pgbus dlq purge MSG_ID" ], "Discard a single message." ],
+          [ [ :code, "pgbus dlq purge --all --yes" ], "Discard every dead-letter message. Omitting --yes makes no changes and exits 1." ]
+        ]
+      )
+      DocsUI::Callout(:warning) do
+        plain "An unknown "
+        code { "msg_id" }
+        plain " or an unknown subcommand exits 1. "
+        code { "purge --all" }
+        plain " without "
+        code { "--yes" }
+        plain " is a deliberate safety rail — it refuses to purge and exits 1 rather than prompting."
+      end
     end
   end
 
