@@ -1,0 +1,33 @@
+name: Deploy docs
+
+# Deploys the docs site (docs/) to the oss-infrastructure server via Kamal when a
+# release is published, or on demand. The build + deploy logic is shared across
+# all docs-kit sites — see mhenrixon/docs-kit/.github/workflows/deploy.yml.
+#
+# `image`/`service` are the REPO name (pgbus) so the pushed ghcr package
+# auto-links to this repo and GITHUB_TOKEN can push + pull it (no PAT). They must
+# match `service:`/`image:` in docs/config/deploy.yml and the Dockerfile LABEL.
+#
+# The reusable workflow's defaults already build from the repo root
+# (build_context ".", dockerfile "docs/Dockerfile", working_directory "docs"),
+# which is what the `gem "pgbus", path: ".."` path dependency needs — so the
+# caller only passes image + service.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# The caller MUST grant packages: write — a reusable workflow can only narrow the
+# permissions it's given, never escalate. With the repo default of read-only, the
+# build job's push would exceed the grant and fail at startup.
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    uses: mhenrixon/docs-kit/.github/workflows/deploy.yml@main
+    with:
+      image: mhenrixon/pgbus
+      service: pgbus
+    secrets: inherit

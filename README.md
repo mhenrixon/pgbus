@@ -4,6 +4,8 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 
 **Why Pgbus?** If you already run PostgreSQL, you don't need Redis for background jobs. Pgbus gives you ActiveJob integration, AMQP-style topic routing, dead letter queues, worker memory management, and a live dashboard -- all backed by your existing database.
 
+📖 **Documentation:** [pgbus.zoolutions.llc](https://pgbus.zoolutions.llc) — guides, flow diagrams, and a full configuration reference. (This README stays the canonical GitHub reference.)
+
 [![Ruby](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml/badge.svg)](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml)
 
 ## Table of contents
