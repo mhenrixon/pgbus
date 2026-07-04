@@ -1,24 +1,31 @@
-# README
+# Pgbus Documentation
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+## Migration guides
 
-Things you may want to cover:
+Switching to Pgbus from another job backend? These guides cover what changes, what stays the same, and what to watch out for.
 
-* Ruby version
+| Guide | Backend | Key differences |
+|-------|---------|-----------------|
+| [Switch from Sidekiq](switch_from_sidekiq.md) | Sidekiq (+ Pro/Enterprise) | Remove Redis, convert native workers to ActiveJob, replace middleware with callbacks |
+| [Switch from SolidQueue](switch_from_solid_queue.md) | SolidQueue | Similar architecture (PostgreSQL + `SKIP LOCKED`), swap config format, gain LISTEN/NOTIFY + worker recycling |
+| [Switch from GoodJob](switch_from_good_job.md) | GoodJob | Both PostgreSQL-native with LISTEN/NOTIFY, swap advisory locks for PGMQ visibility timeouts, gain worker recycling |
 
-* System dependencies
+## Feature comparison
 
-* Configuration
-
-* Database creation
-
-* Database initialization
-
-* How to run the test suite
-
-* Services (job queues, cache servers, search engines, etc.)
-
-* Deployment instructions
-
-* ...
+| Feature | Sidekiq | SolidQueue | GoodJob | Pgbus |
+|---------|---------|------------|---------|-------|
+| Infrastructure | Redis | PostgreSQL | PostgreSQL | PostgreSQL (PGMQ) |
+| ActiveJob adapter | Yes | Yes | Yes | Yes |
+| Bulk enqueue | No | Yes | Yes | Yes |
+| LISTEN/NOTIFY | N/A | No (polling only) | Yes | Yes |
+| Dead letter queues | No (retries only) | No | No | Yes |
+| Worker recycling | No | No | No | Yes |
+| Event bus | No | No | No | Yes |
+| Idempotent events | No | No | No | Yes |
+| Concurrency controls | Enterprise | `limits_concurrency` | `good_job_control_concurrency_with` | `Pgbus::Concurrency` |
+| Recurring/cron jobs | `sidekiq-cron` gem | `config/recurring.yml` | `config.good_job.cron` | Planned |
+| Batches | Pro | No | `GoodJob::Batch` | `Pgbus::Batch` |
+| Web dashboard | `Sidekiq::Web` | Mission Control | `GoodJob::Engine` | `Pgbus::Engine` |
+| Turbo Streams transport | ActionCable (Redis) | ActionCable (Redis or PG) | ActionCable (Redis or PG) | Built-in SSE (`pgbus_stream_from`) |
+| Lost messages on reconnect | Yes (rails/rails#52420) | Yes | Yes | No (PGMQ msg_id cursor) |
+| Transactional broadcasts | No | No | No | Yes (deferred until commit) |
