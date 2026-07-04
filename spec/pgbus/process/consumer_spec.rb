@@ -134,7 +134,7 @@ RSpec.describe Pgbus::Process::Consumer do
 
     it "caps the total across queues at qty so the execution pool cannot overflow (issue #123)" do
       allow(mock_client).to receive(:read_multi).and_return([])
-      consumer.send(:fetch_multi_consumer, 3)
+      consumer.send(:fetch_multi_consumer, %w[q_orders q_payments q_shipping], 3)
       expect(mock_client).to have_received(:read_multi)
         .with(%w[q_orders q_payments q_shipping], qty: 3, limit: 3)
     end
@@ -525,6 +525,222 @@ RSpec.describe Pgbus::Process::Consumer do
       consumer.notify_listener = fake_listener
       consumer.send(:shutdown)
       expect(fake_listener).to have_received(:stop)
+    end
+  end
+
+  # Operational parity with Worker (issue #274). A consumer fork must be
+  # visible to the supervisor watchdog, so it stamps a loop beacon each
+  # iteration and persists it via the heartbeat's loop_tick_supplier.
+  describe "loop-tick beacon (issue #274)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"], queue_names: ["q_orders"]) }
+
+    it "starts with a nil last_loop_tick" do
+      expect(consumer.last_loop_tick).to be_nil
+    end
+
+    it "stamps a wall-clock loop tick when stamp_loop_tick runs" do
+      before_stamp = Time.now.to_f
+      consumer.send(:stamp_loop_tick)
+      expect(consumer.last_loop_tick).to be >= before_stamp
+    end
+
+    it "pokes the liveness pipe with a byte when the supervisor forked one" do
+      reader, writer = IO.pipe
+      piped = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], liveness_pipe: writer)
+
+      piped.send(:stamp_loop_tick)
+
+      expect(reader.read_nonblock(16)).to eq("\0")
+    ensure
+      reader.close unless reader.closed?
+      writer.close unless writer.closed?
+    end
+
+    it "never raises from stamp_loop_tick when the pipe reader is gone" do
+      reader, writer = IO.pipe
+      reader.close
+      piped = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], liveness_pipe: writer)
+
+      expect { piped.send(:stamp_loop_tick) }.not_to raise_error
+    ensure
+      writer.close unless writer.closed?
+    end
+
+    it "wires the heartbeat with kind consumer, a loop_tick_supplier, and an on_beat hook" do
+      allow(Pgbus::Process::Heartbeat).to receive(:new).and_return(mock_heartbeat)
+      consumer.send(:stamp_loop_tick)
+      tick = consumer.last_loop_tick
+
+      consumer.send(:start_heartbeat)
+
+      expect(Pgbus::Process::Heartbeat).to have_received(:new) do |kwargs|
+        expect(kwargs[:kind]).to eq("consumer")
+        expect(kwargs[:on_beat]).to be_a(Proc)
+        expect(kwargs[:loop_tick_supplier].call).to eq(tick)
+      end
+    end
+  end
+
+  # Consumer consults the circuit breaker before fetching so a poison queue
+  # that keeps tripping the breaker is skipped instead of hammered forever.
+  describe "circuit breaker (issue #274)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"], queue_names: ["q_orders"]) }
+    let(:message) do
+      build_message_double(msg_id: 7, message: JSON.generate("headers" => { "routing_key" => "orders.created" }))
+    end
+
+    before do
+      allow(registry).to receive(:handlers_for).and_return([])
+    end
+
+    it "skips a queue whose breaker is tripped and reads nothing" do
+      allow(consumer.circuit_breaker).to receive(:paused?).with("q_orders").and_return(true)
+
+      consumer.send(:fetch_messages, 3)
+
+      expect(mock_client).not_to have_received(:read_batch)
+    end
+
+    it "reads a queue whose breaker is closed" do
+      allow(consumer.circuit_breaker).to receive(:paused?).with("q_orders").and_return(false)
+      allow(mock_client).to receive(:read_batch).with("q_orders", qty: 3).and_return([])
+
+      consumer.send(:fetch_messages, 3)
+
+      expect(mock_client).to have_received(:read_batch).with("q_orders", qty: 3)
+    end
+
+    it "records a breaker success on a handled message" do
+      allow(consumer.circuit_breaker).to receive(:record_success)
+      consumer.send(:handle_message, message, "q_orders")
+      expect(consumer.circuit_breaker).to have_received(:record_success).with("q_orders")
+    end
+
+    it "records a breaker failure when the handler raises" do
+      allow(registry).to receive(:handlers_for).and_raise(StandardError.new("boom"))
+      allow(consumer.circuit_breaker).to receive(:record_failure)
+
+      consumer.send(:handle_message, message, "q_orders")
+
+      expect(consumer.circuit_breaker).to have_received(:record_failure).with("q_orders")
+    end
+
+    it "idles the loop WITHOUT an ErrorReporter call when the connection breaker is open" do
+      allow(mock_client).to receive(:read_batch).and_raise(Pgbus::ConnectionCircuitOpenError)
+      allow(consumer.circuit_breaker).to receive(:paused?).and_return(false)
+      allow(Pgbus::ErrorReporter).to receive(:report)
+
+      expect(consumer.send(:fetch_messages, 3)).to eq([])
+      expect(Pgbus::ErrorReporter).not_to have_received(:report)
+    end
+
+    it "reports a generic fetch error to the ErrorReporter" do
+      allow(mock_client).to receive(:read_batch).and_raise(StandardError.new("db gone"))
+      allow(consumer.circuit_breaker).to receive(:paused?).and_return(false)
+      allow(Pgbus::ErrorReporter).to receive(:report)
+
+      expect(consumer.send(:fetch_messages, 3)).to eq([])
+      expect(Pgbus::ErrorReporter).to have_received(:report)
+    end
+  end
+
+  # StatBuffer parity: the consumer records success / failure / DLQ outcomes
+  # and flushes at drain entry, on recycle, and on stop, mirroring Worker.
+  describe "stat buffer (issue #274)" do
+    let(:message) do
+      build_message_double(msg_id: 7, message: JSON.generate("headers" => { "routing_key" => "orders.created" }))
+    end
+    let(:handler_instance) { double("handler", process: nil) }
+    let(:handler_class) { double("HandlerClass", new: handler_instance) }
+    let(:matching_subscriber) { instance_double(Pgbus::EventBus::Subscriber, handler_class: handler_class) }
+    let(:stat_buffer) { instance_double(Pgbus::StatBuffer, push: nil, flush: nil, flush_if_due: nil, stop: nil) }
+
+    before do
+      allow(registry).to receive(:handlers_for).with("orders.created").and_return([matching_subscriber])
+    end
+
+    it "builds a StatBuffer when stats_enabled is on" do
+      allow(Pgbus.configuration).to receive(:stats_enabled).and_return(true)
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"])
+      expect(consumer.stat_buffer).to be_a(Pgbus::StatBuffer)
+    end
+
+    it "builds no StatBuffer when stats_enabled is off" do
+      allow(Pgbus.configuration).to receive(:stats_enabled).and_return(false)
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"])
+      expect(consumer.stat_buffer).to be_nil
+    end
+
+    it "records a success stat on a handled message" do
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      consumer.send(:handle_message, message, "q_orders")
+      expect(stat_buffer).to have_received(:push).with(hash_including(status: "success", queue_name: "q_orders"))
+    end
+
+    it "records a failed stat when the handler raises" do
+      allow(registry).to receive(:handlers_for).and_raise(StandardError.new("boom"))
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      consumer.send(:handle_message, message, "q_orders")
+      expect(stat_buffer).to have_received(:push).with(hash_including(status: "failed"))
+    end
+
+    it "records a dead_lettered stat when the message is routed to the DLQ" do
+      dlq_message = build_message_double(msg_id: 9, message: message.message, read_ct: 99)
+      allow(Pgbus.configuration).to receive(:max_retries).and_return(5)
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      consumer.send(:handle_message, dlq_message, "q_orders")
+      expect(stat_buffer).to have_received(:push).with(hash_including(status: "dead_lettered"))
+    end
+
+    it "flushes buffered stats on graceful_shutdown (drain entry)" do
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      allow(consumer.wake_signal).to receive(:notify!)
+      consumer.graceful_shutdown
+      expect(stat_buffer).to have_received(:flush)
+    end
+
+    it "flushes buffered stats when a recycle is triggered" do
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      allow(consumer.wake_signal).to receive(:notify!)
+      allow(Pgbus::Instrumentation).to receive(:instrument)
+      consumer.config.max_jobs_per_worker = 5
+      consumer.jobs_processed = 5
+
+      consumer.send(:check_recycle)
+
+      expect(stat_buffer).to have_received(:flush)
+    ensure
+      consumer.config.max_jobs_per_worker = nil
+    end
+
+    it "stops the StatBuffer on shutdown" do
+      consumer = described_class.new(topics: ["orders.#"], queue_names: ["q_orders"], stat_buffer: stat_buffer)
+      consumer.send(:shutdown)
+      expect(stat_buffer).to have_received(:stop)
+    end
+  end
+
+  # Pool-stats heartbeat parity: on_beat emits pgbus.client.pool once per beat.
+  describe "pool-stats heartbeat (issue #274)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"], queue_names: ["q_orders"]) }
+
+    it "emits pgbus.client.pool with the pool stats" do
+      allow(Pgbus::Instrumentation).to receive(:instrument)
+      consumer.send(:on_heartbeat)
+      expect(Pgbus::Instrumentation).to have_received(:instrument)
+        .with("pgbus.client.pool", { size: 5, available: 5, pool_timeout: 5 })
+    end
+
+    it "does not emit when pool_stats is empty" do
+      allow(mock_client).to receive(:pool_stats).and_return({})
+      allow(Pgbus::Instrumentation).to receive(:instrument)
+      consumer.send(:on_heartbeat)
+      expect(Pgbus::Instrumentation).not_to have_received(:instrument)
+    end
+
+    it "never lets a heartbeat hook error crash the beat" do
+      allow(mock_client).to receive(:pool_stats).and_raise(StandardError.new("pool boom"))
+      expect { consumer.send(:on_heartbeat) }.not_to raise_error
     end
   end
 end

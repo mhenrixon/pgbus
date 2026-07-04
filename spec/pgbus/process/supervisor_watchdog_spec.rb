@@ -42,7 +42,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       it "kills a worker whose loop_tick_at exceeds stall_threshold" do
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001, 1002])
+          .with(kind: %w[worker consumer], pid: [1001, 1002])
           .and_return(double(to_a: [stalled_entry, healthy_entry]))
         allow(Process).to receive(:kill)
 
@@ -54,7 +54,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       it "does not kill a worker within threshold" do
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001, 1002])
+          .with(kind: %w[worker consumer], pid: [1001, 1002])
           .and_return(double(to_a: [healthy_entry]))
         allow(Process).to receive(:kill)
 
@@ -76,7 +76,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       it "handles Errno::ESRCH when process is already gone" do
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001, 1002])
+          .with(kind: %w[worker consumer], pid: [1001, 1002])
           .and_return(double(to_a: [stalled_entry]))
         allow(Process).to receive(:kill).with("KILL", 1001).and_raise(Errno::ESRCH)
 
@@ -88,7 +88,7 @@ RSpec.describe Pgbus::Process::Supervisor do
                                kind: "worker", pid: 1001,
                                metadata: { "queues" => ["default"] })
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001, 1002])
+          .with(kind: %w[worker consumer], pid: [1001, 1002])
           .and_return(double(to_a: [entry_no_tick]))
         allow(Process).to receive(:kill)
 
@@ -123,6 +123,59 @@ RSpec.describe Pgbus::Process::Supervisor do
         allow(Pgbus::ProcessEntry).to receive(:where).and_raise(StandardError, "connection lost")
 
         expect { supervisor.send(:check_stalled_workers) }.not_to raise_error
+      end
+    end
+
+    # Consumer operational parity (issue #274): consumer forks are now included
+    # in the watchdog selection and the DB loop-tick query so a wedged consumer
+    # is killed and restarted like a wedged worker.
+    describe "consumer forks (issue #274)" do
+      let(:stalled_consumer) do
+        double("ProcessEntry", kind: "consumer", pid: 4001,
+                               metadata: { "loop_tick_at" => (Time.now.to_f - 120) })
+      end
+
+      before do
+        supervisor.forks = {
+          4001 => { type: :consumer, config: { topics: ["orders.#"] } }
+        }
+        supervisor.last_watchdog_at = 0.0
+      end
+
+      it "queries the process table for worker AND consumer kinds" do
+        allow(Pgbus::ProcessEntry).to receive(:where)
+          .with(kind: %w[worker consumer], pid: [4001])
+          .and_return(double(to_a: []))
+        allow(Process).to receive(:kill)
+
+        supervisor.send(:check_stalled_workers)
+
+        expect(Pgbus::ProcessEntry).to have_received(:where).with(kind: %w[worker consumer], pid: [4001])
+      end
+
+      it "kills a consumer whose loop_tick_at exceeds stall_threshold" do
+        allow(Pgbus::ProcessEntry).to receive(:where)
+          .with(kind: %w[worker consumer], pid: [4001])
+          .and_return(double(to_a: [stalled_consumer]))
+        allow(Process).to receive(:kill)
+
+        supervisor.send(:check_stalled_workers)
+
+        expect(Process).to have_received(:kill).with("KILL", 4001)
+      end
+
+      it "kills a wedged consumer via the pipe fallback when the DB read raises" do
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        allow(Pgbus::ProcessEntry).to receive(:where).and_raise(StandardError, "connection lost")
+        supervisor.forks = {
+          4001 => { type: :consumer, config: { topics: ["orders.#"] },
+                    liveness_reader: nil, last_pipe_tick_at: now - 120, pipe_seen: true }
+        }
+        allow(Process).to receive(:kill)
+
+        supervisor.send(:check_stalled_workers)
+
+        expect(Process).to have_received(:kill).with("KILL", 4001)
       end
     end
 
@@ -178,7 +231,7 @@ RSpec.describe Pgbus::Process::Supervisor do
         stale_db = double("ProcessEntry", kind: "worker", pid: 1001,
                                           metadata: { "loop_tick_at" => (Time.now.to_f - 300) })
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001])
+          .with(kind: %w[worker consumer], pid: [1001])
           .and_return(double(to_a: [stale_db]))
         set_forks(1001, last_pipe_tick_at: now - 1, pipe_seen: true)
 
@@ -191,7 +244,7 @@ RSpec.describe Pgbus::Process::Supervisor do
         stale_db = double("ProcessEntry", kind: "worker", pid: 1001,
                                           metadata: { "loop_tick_at" => (Time.now.to_f - 300) })
         allow(Pgbus::ProcessEntry).to receive(:where)
-          .with(kind: "worker", pid: [1001])
+          .with(kind: %w[worker consumer], pid: [1001])
           .and_return(double(to_a: [stale_db]))
         set_forks(1001, last_pipe_tick_at: now - 120, pipe_seen: true)
 

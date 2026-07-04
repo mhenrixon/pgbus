@@ -12,6 +12,8 @@ RSpec.describe Pgbus::Web::DataSource do
       Pgbus.configuration.stall_threshold = 90
       Pgbus.configuration.dispatch_interval = 1.0
       Pgbus.configuration.recurring_schedule_interval = 1.0
+      Pgbus.configuration.polling_interval = 0.1
+      Pgbus.configuration.worker_notify_wakeup = nil
     end
 
     describe "#derive_process_status (private)" do
@@ -101,6 +103,77 @@ RSpec.describe Pgbus::Web::DataSource do
       context "when scheduler has no loop_tick_at in metadata" do
         it "returns :healthy (older process during a rolling deploy)" do
           result = data_source.send(:derive_process_status, false, { "pid" => 1 }, "scheduler")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      # Consumer parity (issue #274). The consumer's empty-read wait can reach
+      # NOTIFY_FALLBACK_POLL_SECONDS (15s) when a live listener drives wake-up,
+      # so its beacon is naturally staler than a worker's. The threshold widens
+      # by the consumer's max wait so a healthy idle consumer isn't flagged.
+      context "when process is a consumer with stale loop_tick_at" do
+        before { Pgbus.configuration.worker_notify_wakeup = false }
+        after { Pgbus.configuration.worker_notify_wakeup = nil }
+
+        it "returns :stalled well past the widened threshold" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 300) }
+          result = data_source.send(:derive_process_status, false, metadata, "consumer")
+          expect(result).to eq(:stalled)
+        end
+      end
+
+      context "when process is a consumer with fresh loop_tick_at" do
+        it "returns :healthy" do
+          metadata = { "loop_tick_at" => Time.now.to_f }
+          result = data_source.send(:derive_process_status, false, metadata, "consumer")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when a NOTIFY-driven consumer beacon is stale only by its poll ceiling" do
+        before { Pgbus.configuration.worker_notify_wakeup = true }
+        after { Pgbus.configuration.worker_notify_wakeup = nil }
+
+        it "stays :healthy within stall_threshold + NOTIFY_FALLBACK_POLL_SECONDS" do
+          # 100s old: past the 90s worker threshold but under 90 + 15 = 105s.
+          metadata = { "loop_tick_at" => (Time.now.to_f - 100) }
+          result = data_source.send(:derive_process_status, false, metadata, "consumer")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when a polling-only consumer beacon is stale only by its poll interval" do
+        before do
+          Pgbus.configuration.worker_notify_wakeup = false
+          Pgbus.configuration.polling_interval = 5.0
+        end
+
+        after do
+          Pgbus.configuration.worker_notify_wakeup = nil
+          Pgbus.configuration.polling_interval = 0.1
+        end
+
+        it "stays :healthy within stall_threshold + polling_interval" do
+          # 92s old: past 90s but under 90 + 5 = 95s (notify off, so no 15s ceiling).
+          metadata = { "loop_tick_at" => (Time.now.to_f - 92) }
+          result = data_source.send(:derive_process_status, false, metadata, "consumer")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when consumer has no loop_tick_at in metadata" do
+        it "returns :healthy (older process during a rolling deploy)" do
+          result = data_source.send(:derive_process_status, false, { "pid" => 1 }, "consumer")
+          expect(result).to eq(:healthy)
+        end
+      end
+
+      context "when consumer stall_threshold is nil" do
+        before { Pgbus.configuration.stall_threshold = nil }
+
+        it "returns :healthy even with old loop_tick_at" do
+          metadata = { "loop_tick_at" => (Time.now.to_f - 999) }
+          result = data_source.send(:derive_process_status, false, metadata, "consumer")
           expect(result).to eq(:healthy)
         end
       end

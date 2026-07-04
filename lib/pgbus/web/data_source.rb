@@ -1250,15 +1250,31 @@ module Pgbus
       # stall_threshold applies directly. The dispatcher and scheduler sleep
       # between iterations, so their beacon is naturally up to one sleep
       # interval stale even when healthy — widen the window by that interval to
-      # avoid false stalls. Kinds with no loop beacon (nil) are never stalled.
+      # avoid false stalls. Consumers idle on an empty-read wait that can reach
+      # NOTIFY_FALLBACK_POLL_SECONDS (15s) when a live listener drives wake-up,
+      # so widen by that max wait when notify is on, or by the poll interval
+      # otherwise. Kinds with no loop beacon (nil) are never stalled.
       def stall_threshold_for(kind)
-        base = Pgbus.configuration.stall_threshold
+        config = Pgbus.configuration
+        base = config.stall_threshold
         return nil unless base&.positive?
 
         case kind
         when "worker" then base
-        when "dispatcher" then base + Pgbus.configuration.dispatch_interval
-        when "scheduler" then base + Pgbus.configuration.recurring_schedule_interval
+        when "dispatcher" then base + config.dispatch_interval
+        when "scheduler" then base + config.recurring_schedule_interval
+        when "consumer" then base + consumer_stall_slack(config)
+        end
+      end
+
+      # Widen the consumer's stall window by its maximum empty-read wait. With
+      # notify wake-up live, that wait rises to NOTIFY_FALLBACK_POLL_SECONDS as a
+      # safety net; without it, the consumer polls at polling_interval.
+      def consumer_stall_slack(config)
+        if config.worker_notify_wakeup?
+          [config.polling_interval, Pgbus::Process::Consumer::NOTIFY_FALLBACK_POLL_SECONDS].max
+        else
+          config.polling_interval
         end
       end
 
