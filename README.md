@@ -2060,6 +2060,17 @@ PGBUS_DATABASE_URL=postgres://user@host/db bundle exec rake bench:streams
 
 The harness measures single-broadcast roundtrip latency, burst throughput, fanout to many clients, and concurrent connect under thundering herd. See `benchmarks/streams_bench.rb`.
 
+### Dependency watch
+
+A nightly GitHub Action (`.github/workflows/dependency-watch.yml`) compares the
+vendored PGMQ SQL (`lib/pgbus/pgmq_schema/pgmq_v*.sql`) and the locked
+`pgmq-ruby` gem version against their upstream releases, opening a GitHub issue
+on drift (deduplicated by exact title, so repeat runs are a no-op). It never
+auto-vendors SQL or auto-bumps the gem -- it only notifies. Set the optional
+`SLACK_WEBHOOK_URL` repository secret to also post drift notifications to
+Slack; the workflow logs and skips that step gracefully when the secret is
+unset.
+
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
