@@ -30,7 +30,10 @@ module Pgbus
     # advanced for longer than stall_threshold seconds (default 90).
     # read_timeout caps how long a single PGMQ read can block (default 30s),
     # so a dead socket raises instead of parking the loop forever.
-    attr_accessor :stall_threshold, :read_timeout
+    # drain_timeout bounds the graceful-shutdown drain phase (default 30s): a
+    # job still running after this is abandoned to shutdown's own termination
+    # wait, so recycling/deploy never wedges on a permanently-stuck job.
+    attr_accessor :stall_threshold, :read_timeout, :drain_timeout
 
     # Dispatcher settings
     attr_accessor :dispatch_interval
@@ -50,7 +53,8 @@ module Pgbus
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
-    # Grouped reads (PGMQ v1.11.0+ FIFO grouping).
+    # Grouped reads (PGMQ v1.11.0+ FIFO grouping). EXPERIMENTAL — exempt from
+    # the 1.0 stability promise; the shape may change in a minor release.
     # nil = disabled (default read_batch behavior).
     # :fifo = use read_grouped (drains oldest group first, throughput-optimized).
     # :round_robin = use read_grouped_rr (fair round-robin across groups).
@@ -89,7 +93,7 @@ module Pgbus
     attr_reader :event_consumers
 
     # Recurring jobs
-    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
+    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_enabled, :recurring_tasks_file
     attr_writer :recurring_tasks_files
     attr_reader :recurring_execution_retention # rubocop:disable Style/AccessorGrouping
 
@@ -110,7 +114,7 @@ module Pgbus
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
                   :insights_default_minutes, :base_controller_class, :return_to_app_url,
                   :metrics_enabled,
-                  :dashboard_filter_parameters, :dashboard_filter_sensitive
+                  :web_filter_parameters, :web_filter_sensitive
 
     # HTTP health endpoints (liveness/readiness for orchestrators like
     # Kubernetes). `health_port` nil (default) leaves the standalone server in
@@ -181,6 +185,7 @@ module Pgbus
 
       @stall_threshold = 90
       @read_timeout = 30
+      @drain_timeout = 30
 
       @dispatch_interval = 1.0
 
@@ -224,7 +229,7 @@ module Pgbus
       @recurring_schedule_interval = 1.0
       @recurring_tasks_file = nil
       @recurring_tasks_files = nil
-      @skip_recurring = false
+      @recurring_enabled = true
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
       @zombie_detection = true
@@ -248,8 +253,9 @@ module Pgbus
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
       @metrics_enabled = true
-      @dashboard_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
-      @dashboard_filter_sensitive = true
+      @web_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
+      @web_filter_sensitive = true
+      @deprecation_warned = Set.new
 
       # HTTP health endpoints — nil port disables the standalone server.
       @health_port = nil
@@ -290,6 +296,7 @@ module Pgbus
       # PG keepalive interval.
       @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
+      # EXPERIMENTAL — exempt from the 1.0 stability promise.
       @streams_falcon_streaming_body = false
       # Opt-in: when true, the Dispatcher writes one row to
       # pgbus_stream_stats per broadcast/connect/disconnect. Default
@@ -304,7 +311,8 @@ module Pgbus
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
       @streams_durable_patterns = []
-      # Streams matching these patterns get connection-driven presence:
+      # EXPERIMENTAL (both presence settings) — exempt from the 1.0 stability
+      # promise. Streams matching these patterns get connection-driven presence:
       # auto-join on SSE connect, auto-leave on disconnect, touch on the
       # keepalive heartbeat (issue #169). Empty by default (opt-in).
       @streams_presence_patterns = []
@@ -362,6 +370,13 @@ module Pgbus
       end
 
       @log_format = format
+
+      # Only install pgbus's formatter when the logger still carries a nil or
+      # pgbus-installed formatter. A user who set a custom logger with a custom
+      # formatter keeps it — log_format only records the intended format for
+      # pgbus's own defaults, it must not silently clobber their formatting.
+      return unless pgbus_installable_formatter?(@logger&.formatter)
+
       @logger.formatter = case format
                           when :json then LogFormatter::JSON.new
                           when :text then LogFormatter::Text.new
@@ -436,6 +451,7 @@ module Pgbus
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise Pgbus::ConfigurationError, "read_timeout must be a positive number or nil to disable"
       end
+      raise Pgbus::ConfigurationError, "drain_timeout must be > 0" unless drain_timeout.is_a?(Numeric) && drain_timeout.positive?
 
       unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
         raise Pgbus::ConfigurationError, "stats_flush_size must be a positive integer"
@@ -597,9 +613,11 @@ module Pgbus
     #     c.workers "*: 5"
     #     c.workers "critical: 5; default, mailers: 10"
     #
-    #   Array  — legacy explicit form. Each entry is a Hash with :queues
+    #   Array  — explicit form. Each entry is a Hash with :queues
     #            and :threads (and optionally :name, :single_active_consumer,
-    #            :consumer_priority, :prefetch_limit).
+    #            :consumer_priority, :prefetch_limit). This is the only way to
+    #            express N identical anonymous capsules, so it is supported
+    #            permanently alongside the String DSL.
     #
     #     c.workers [{ queues: %w[default], threads: 5 }]
     #
@@ -619,15 +637,15 @@ module Pgbus
     #   "*: 5"                       -> one anonymous capsule (wildcard never names)
     #   "*: 3; *: 3; *: 3"           -> three anonymous capsules — legal,
     #                                   represents "3 forks all reading every
-    #                                   queue", restoring the legacy YAML
-    #                                   `5 × {queues: ["*"], threads: 3}` shape
+    #                                   queue", the same shape as the Array form
+    #                                   `3 × {queues: ["*"], threads: 3}`
     #   "default: 5; default: 3"     -> two anonymous capsules — same logic
     #
-    # The point of the carve-out is the legacy "I want N forks of the same
-    # worker pool" pattern: it must keep working since PGMQ tolerates it
-    # natively (multiple processes reading the same queue with FOR UPDATE
-    # SKIP LOCKED). The CLI's --capsule selector only matches NAMED
-    # capsules, so anonymous duplicates can't be ambiguously addressed.
+    # The point of the carve-out is the "I want N forks of the same worker
+    # pool" pattern: it must keep working since PGMQ tolerates it natively
+    # (multiple processes reading the same queue with FOR UPDATE SKIP LOCKED).
+    # The CLI's --capsule selector only matches NAMED capsules, so anonymous
+    # duplicates can't be ambiguously addressed.
     def workers=(value)
       @workers = case value
                  when nil
@@ -639,7 +657,7 @@ module Pgbus
                    value.map { |entry| normalize_entry(entry, group: "worker") }
                  else
                    raise Pgbus::ConfigurationError,
-                         "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
+                         "workers must be a String (DSL), Array (explicit form), or nil — got #{value.class}"
                  end
     end
 
@@ -764,10 +782,56 @@ module Pgbus
       @recurring_execution_retention = coerce_duration!(value, :recurring_execution_retention)
     end
 
+    # recurring_tasks_file (singular) is deprecated in favor of the plural
+    # recurring_tasks_files. The engine still writes the singular internally to
+    # record which default file was loaded, so it stays a plain accessor; the
+    # deprecation warning fires only when a user has set BOTH — the case where
+    # the singular is silently ignored — pointing them at the plural.
     def recurring_tasks_files
-      return @recurring_tasks_files if @recurring_tasks_files
+      if @recurring_tasks_files
+        if @recurring_tasks_file
+          warn_deprecated_config(
+            :recurring_tasks_file,
+            "recurring_tasks_files is set, so recurring_tasks_file is ignored — " \
+            "consolidate onto recurring_tasks_files (plural)"
+          )
+        end
+        return @recurring_tasks_files
+      end
 
-      recurring_tasks_file ? [recurring_tasks_file] : nil
+      @recurring_tasks_file ? [@recurring_tasks_file] : nil
+    end
+
+    # --- Deprecated config aliases (renamed at 1.0.0, removed at 2.0.0) ---
+
+    # skip_recurring was the only negative-polarity toggle among the *_enabled
+    # switches. It now aliases recurring_enabled with inverted polarity.
+    def skip_recurring # rubocop:disable Naming/PredicateMethod
+      !recurring_enabled
+    end
+
+    def skip_recurring=(value)
+      warn_deprecated_config(:skip_recurring, "use recurring_enabled (positive polarity) instead")
+      self.recurring_enabled = !value
+    end
+
+    # dashboard_filter_* unify onto the incumbent web_ prefix.
+    def dashboard_filter_parameters
+      web_filter_parameters
+    end
+
+    def dashboard_filter_parameters=(value)
+      warn_deprecated_config(:dashboard_filter_parameters, "use web_filter_parameters instead")
+      self.web_filter_parameters = value
+    end
+
+    def dashboard_filter_sensitive
+      web_filter_sensitive
+    end
+
+    def dashboard_filter_sensitive=(value)
+      warn_deprecated_config(:dashboard_filter_sensitive, "use web_filter_sensitive instead")
+      self.web_filter_sensitive = value
     end
 
     # Returns the connection pool size to use for the PGMQ client.
@@ -902,6 +966,36 @@ module Pgbus
     end
 
     private
+
+    # True when log_format= may install its own formatter: no formatter set yet
+    # (nil), a pgbus formatter we installed, or a framework DEFAULT formatter
+    # (Ruby's Logger::Formatter, Rails' SimpleFormatter) that the app didn't
+    # deliberately choose. A genuinely custom formatter — a Proc, or any other
+    # class — is a deliberate choice and is left untouched.
+    def pgbus_installable_formatter?(formatter)
+      return true if formatter.nil?
+      return true if formatter.is_a?(LogFormatter::Text) || formatter.is_a?(LogFormatter::JSON)
+
+      # instance_of? (not is_a?) so a user subclass of these still counts as custom.
+      return true if formatter.instance_of?(::Logger::Formatter)
+      return true if defined?(::ActiveSupport::Logger::SimpleFormatter) &&
+                     formatter.instance_of?(::ActiveSupport::Logger::SimpleFormatter)
+
+      false
+    end
+
+    # Log a one-time deprecation warning for a renamed config key. Deduped per
+    # key on this Configuration instance so a setter called on every request
+    # (or a reader hit in a hot loop) warns once, not on every access.
+    def warn_deprecated_config(key, guidance)
+      @deprecation_warned ||= Set.new
+      return unless @deprecation_warned.add?(key)
+
+      Pgbus.logger.warn do
+        "[Pgbus] Configuration `#{key}` is deprecated and will be removed in 2.0 — #{guidance}. " \
+          "See https://pgbus.dev/docs/upgrading-pgbus"
+      end
+    end
 
     # Built-in presence-member extractor used when no custom
     # `streams_presence_member` is configured. Returns a { id:, metadata: }

@@ -16,15 +16,15 @@ RSpec.describe Pgbus::Uniqueness do
       job_class = Class.new do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness strategy: :until_executed, key: ->(id) { "test-#{id}" }, lock_ttl: 600
+        ensures_uniqueness strategy: :until_executed, key: ->(id) { "test-#{id}" }
       end
 
       config = job_class.pgbus_uniqueness
       expect(config[:strategy]).to eq(:until_executed)
-      expect(config[:lock_ttl]).to eq(600)
+      expect(config[:key]).to respond_to(:call)
     end
 
-    it "defaults to :until_executed strategy with 24h TTL" do
+    it "defaults to :until_executed strategy" do
       job_class = Class.new do
         include Pgbus::Uniqueness
 
@@ -32,7 +32,16 @@ RSpec.describe Pgbus::Uniqueness do
       end
 
       expect(job_class.pgbus_uniqueness[:strategy]).to eq(:until_executed)
-      expect(job_class.pgbus_uniqueness[:lock_ttl]).to eq(24 * 60 * 60)
+    end
+
+    it "raises ArgumentError when the removed lock_ttl: keyword is passed" do
+      expect do
+        Class.new do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness lock_ttl: 600
+        end
+      end.to raise_error(ArgumentError, /lock_ttl.*removed.*upgrading-pgbus/im)
     end
 
     it "rejects invalid strategies" do
@@ -141,7 +150,7 @@ RSpec.describe Pgbus::Uniqueness do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness strategy: :until_executed, lock_ttl: 600
+        ensures_uniqueness strategy: :until_executed
       end
       stub_const("LockJob", job_class)
       job = LockJob.new

@@ -155,14 +155,6 @@ module Pgbus
       ensure
         previous.each { |tl_key, value| Thread.current[tl_key] = value }
       end
-
-      # Kept for backward compatibility — the class-level durable callbacks
-      # (broadcasts_to with durable:) and any external callers may still use it.
-      def with_pgbus_durable(value, &)
-        return yield if value.nil?
-
-        with_pgbus_broadcast_opts(durable: value, &)
-      end
     end
   end
 end

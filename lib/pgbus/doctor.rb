@@ -5,7 +5,7 @@ require "pgbus/mcp/health_analyzer"
 
 module Pgbus
   # Preflight diagnostics for a pgbus deployment — the single command that
-  # answers "is this environment healthy enough to run?". Runs six checks and
+  # answers "is this environment healthy enough to run?". Runs seven checks and
   # returns a machine-readable result plus a human report, so `pgbus doctor`
   # and `rake pgbus:doctor` can gate a deploy or CI run (exit 0 on success,
   # 1 on any failure).
@@ -40,7 +40,8 @@ module Pgbus
         check_pgmq_schema,
         check_queues,
         check_notify,
-        check_processes
+        check_processes,
+        check_allowed_global_id_models
       ].map(&:to_h)
     end
 
@@ -83,11 +84,17 @@ module Pgbus
 
     private
 
+    # True in a Rails production environment. Guarded so the doctor still runs
+    # outside Rails (plain Ruby, tests) without assuming Rails is loaded.
+    def production?
+      defined?(Rails) && Rails.respond_to?(:env) && Rails.env.production?
+    end
+
     # 1. Configuration validity.
     def check_configuration
       @config.validate!
       Check.new(name: "Configuration", status: :ok, detail: "valid")
-    rescue ArgumentError => e
+    rescue Pgbus::ConfigurationError, ArgumentError => e
       Check.new(name: "Configuration", status: :fail, detail: e.message)
     rescue StandardError => e
       Check.new(name: "Configuration", status: :fail, detail: "#{e.class}: #{e.message}")
@@ -183,6 +190,24 @@ module Pgbus
       end
     rescue StandardError => e
       Check.new(name: "Process liveness", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # 7. GlobalID allowlist — security. allowed_global_id_models = nil means
+    # "allow ANY model as a GlobalID event/job argument", which lets a crafted
+    # payload deserialize arbitrary AR models. It's the default for upgrade
+    # continuity, so this is a warning (never a failure), and only in production
+    # where the blast radius is real.
+    def check_allowed_global_id_models
+      if @config.allowed_global_id_models.nil? && production?
+        return Check.new(name: "GlobalID allowlist", status: :warn,
+                         detail: "allowed_global_id_models is nil (allow-all) in production — " \
+                                 "set an explicit allowlist of models permitted as GlobalID arguments")
+      end
+
+      Check.new(name: "GlobalID allowlist", status: :ok,
+                detail: @config.allowed_global_id_models.nil? ? "allow-all (non-production)" : "allowlist configured")
+    rescue StandardError => e
+      Check.new(name: "GlobalID allowlist", status: :fail, detail: "#{e.class}: #{e.message}")
     end
 
     # Physical queue names known to PGMQ. list_queues rows may be Hashes (with a

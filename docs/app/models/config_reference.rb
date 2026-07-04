@@ -23,7 +23,7 @@ module ConfigReference
       { name: "default_queue", type: "String", default: '"default"', desc: "Queue for jobs without an explicit queue." },
       { name: "priority_levels", type: "Integer, nil", default: "nil", desc: "Number of priority sub-queues (2–10); nil disables." },
       { name: "default_priority", type: "Integer", default: "1", desc: "Priority for jobs without an explicit one." },
-      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue." }
+      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise." }
     ],
     "Workers" => [
       { name: "workers", type: "String / Array", default: "default: 5", desc: "Worker capsule definitions (string DSL or array)." },
@@ -61,10 +61,10 @@ module ConfigReference
     ],
     "Recurring tasks" => [
       { name: "recurring_tasks", type: "Hash, nil", default: "nil", desc: "Recurring task definitions as a hash." },
-      { name: "recurring_tasks_file", type: "String, nil", default: "nil", desc: "Path to a recurring.yml file." },
+      { name: "recurring_tasks_files", type: "Array, nil", default: "nil", desc: "Paths to recurring.yml files. Replaces the deprecated singular recurring_tasks_file." },
       { name: "recurring_schedule_interval", type: "Numeric", default: "1.0", desc: "Seconds between scheduler ticks." },
       { name: "recurring_execution_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep recurring execution history." },
-      { name: "skip_recurring", type: "Boolean", default: "false", desc: "Disable the recurring scheduler entirely." }
+      { name: "recurring_enabled", type: "Boolean", default: "true", desc: "Run the recurring scheduler (set false to disable it entirely). Replaces the deprecated skip_recurring." }
     ],
     "Job stats" => [
       { name: "stats_enabled", type: "Boolean", default: "true", desc: "Record job execution stats for insights." },
@@ -79,6 +79,8 @@ module ConfigReference
       { name: "web_refresh_interval", type: "Integer", default: "5000", desc: "Dashboard auto-refresh interval (ms)." },
       { name: "web_live_updates", type: "Boolean", default: "true", desc: "Enable Turbo Frames auto-refresh." },
       { name: "web_per_page", type: "Integer", default: "25", desc: "Dashboard pagination size." },
+      { name: "web_filter_sensitive", type: "Boolean", default: "true", desc: "Redact sensitive values in dashboard payload views. Replaces the deprecated dashboard_filter_sensitive." },
+      { name: "web_filter_parameters", type: "Array, nil", default: "nil (auto)", desc: "Parameter-name patterns to redact; nil auto-detects from Rails. Replaces the deprecated dashboard_filter_parameters." },
       { name: "metrics_enabled", type: "Boolean", default: "true", desc: "Expose Prometheus gauges on the dashboard." }
     ],
     "Metrics & logging" => [
@@ -94,7 +96,8 @@ module ConfigReference
       { name: "health_port", type: "Integer, nil", default: "nil", desc: "Port for HTTP liveness/readiness probes; nil disables." },
       { name: "health_bind", type: "String", default: '"127.0.0.1"', desc: "Bind address for the health server." },
       { name: "stall_threshold", type: "Numeric", default: "300", desc: "Seconds without progress before a worker is stalled." },
-      { name: "read_timeout", type: "Numeric", default: "30", desc: "Read timeout for worker fetches." }
+      { name: "read_timeout", type: "Numeric", default: "30", desc: "Read timeout for worker fetches." },
+      { name: "drain_timeout", type: "Numeric", default: "30", desc: "Seconds to wait for in-flight jobs to finish during graceful shutdown before abandoning them." }
     ],
     "Streams (SSE)" => [
       { name: "streams_enabled", type: "Boolean", default: "true", desc: "Enable the SSE streams transport." },
@@ -105,11 +108,11 @@ module ConfigReference
       { name: "streams_max_connections", type: "Integer", default: "2000", desc: "Max SSE connections per web-server process." },
       { name: "streams_idle_timeout", type: "Numeric", default: "3600", desc: "Close idle SSE connections after N seconds." },
       { name: "streams_path", type: "String, nil", default: "nil", desc: "Custom SSE endpoint path (auto-detected from mount)." },
-      { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack." },
+      { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack. Experimental — exempt from the 1.0 stability promise." },
       { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
       { name: "streams_test_mode", type: "Boolean", default: "false", desc: "Return a stub SSE response (auto-enabled by the test helpers)." },
-      { name: "streams_presence_patterns", type: "Array", default: "[]", desc: "Streams (exact string or Regexp) that get connection-driven presence: auto-join on connect, auto-leave on disconnect, heartbeat touch." },
-      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor." }
+      { name: "streams_presence_patterns", type: "Array", default: "[]", desc: "Streams (exact string or Regexp) that get connection-driven presence: auto-join on connect, auto-leave on disconnect, heartbeat touch. Experimental — exempt from the 1.0 stability promise." },
+      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor. Experimental — exempt from the 1.0 stability promise." }
     ],
     "Validation" => [
       { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },
@@ -125,10 +128,11 @@ module ConfigReference
   INTERNAL_ONLY = %w[
     logger
     web_data_source
+    skip_recurring
+    recurring_tasks_file
     dashboard_filter_parameters
     dashboard_filter_sensitive
     insights_default_minutes
-    recurring_tasks_files
     streams_signed_name_secret
     streams_database_url
     streams_host

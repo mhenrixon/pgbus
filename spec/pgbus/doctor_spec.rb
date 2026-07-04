@@ -41,8 +41,8 @@ RSpec.describe Pgbus::Doctor do
   end
 
   describe "#run" do
-    it "runs six checks" do
-      expect(doctor.run.size).to eq(6)
+    it "runs seven checks" do
+      expect(doctor.run.size).to eq(7)
     end
 
     it "returns hashes with :name, :status, :detail keys" do
@@ -99,6 +99,17 @@ RSpec.describe Pgbus::Doctor do
       check = config_check(doctor.run)
       expect(check[:status]).to eq(:fail)
       expect(check[:detail]).to include("pool_timeout")
+    end
+
+    it "renders the bare validate! message (no ClassName: prefix) for a ConfigurationError" do
+      # validate! raises Pgbus::ConfigurationError (#282); the check must catch
+      # it in the clean-message rescue, not fall through to the StandardError
+      # fallback that prefixes the error class.
+      config.pool_timeout = -1
+
+      detail = config_check(doctor.run)[:detail]
+      expect(detail).not_to include("Pgbus::ConfigurationError")
+      expect(detail).to start_with("pool_timeout")
     end
   end
 
@@ -221,6 +232,40 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  describe "the allowed_global_id_models check (security)" do
+    it "is :ok outside production even when allowed_global_id_models is nil" do
+      config.allowed_global_id_models = nil
+      allow(doctor).to receive(:production?).and_return(false)
+
+      expect(gid_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "warns in production when allowed_global_id_models is nil (allow-all)" do
+      config.allowed_global_id_models = nil
+      allow(doctor).to receive(:production?).and_return(true)
+
+      check = gid_check(doctor.run)
+      expect(check[:status]).to eq(:warn)
+      expect(check[:detail]).to include("allowed_global_id_models")
+    end
+
+    it "does not fail the run — a warning never blocks a deploy" do
+      config.allowed_global_id_models = nil
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(doctor.success?).to be(true)
+    end
+
+    it "is :ok in production when an allowlist is configured" do
+      # allowed_global_id_models is a Class/Module allowlist at runtime
+      # (see Serializer), not strings — model the valid happy path.
+      config.allowed_global_id_models = [stub_const("Order", Class.new)]
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(gid_check(doctor.run)[:status]).to eq(:ok)
+    end
+  end
+
   describe "#report" do
     it "renders one line per check" do
       report = doctor.report
@@ -302,4 +347,5 @@ RSpec.describe Pgbus::Doctor do
   def queue_check(checks)   = checks.find { |c| c[:name].match?(/queue/i) && !c[:name].match?(/notify/i) }
   def notify_check(checks)  = checks.find { |c| c[:name].match?(/notify/i) }
   def process_check(checks) = checks.find { |c| c[:name].match?(/process|liveness|health/i) }
+  def gid_check(checks)     = checks.find { |c| c[:name].match?(/globalid|allowlist/i) }
 end

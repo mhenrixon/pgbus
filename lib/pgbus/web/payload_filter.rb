@@ -16,7 +16,7 @@ module Pgbus
       FILTERED = "[FILTERED]"
 
       def filter(value)
-        return value unless Pgbus.configuration.dashboard_filter_sensitive
+        return value unless Pgbus.configuration.web_filter_sensitive
 
         case value
         when Hash
@@ -29,7 +29,7 @@ module Pgbus
       end
 
       def filter_json(value)
-        return value unless Pgbus.configuration.dashboard_filter_sensitive
+        return value unless Pgbus.configuration.web_filter_sensitive
 
         case value
         when nil then nil
@@ -46,7 +46,7 @@ module Pgbus
       end
 
       def parameter_filter
-        patterns = Pgbus.configuration.dashboard_filter_parameters ||
+        patterns = Pgbus.configuration.web_filter_parameters ||
                    rails_filter_parameters ||
                    DEFAULT_FILTER_PATTERNS
         ActiveSupport::ParameterFilter.new(patterns)

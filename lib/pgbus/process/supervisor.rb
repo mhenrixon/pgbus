@@ -308,7 +308,7 @@ module Pgbus
       end
 
       def boot_scheduler
-        return if config.skip_recurring
+        return unless config.recurring_enabled
         return unless recurring_tasks_configured?
 
         fork_scheduler

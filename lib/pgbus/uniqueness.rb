@@ -43,28 +43,28 @@ module Pgbus
 
     METADATA_KEY = "pgbus_uniqueness_key"
     STRATEGY_KEY = "pgbus_uniqueness_strategy"
-    TTL_KEY = "pgbus_uniqueness_lock_ttl"
-
-    # TTL is kept for metadata compatibility but no longer drives lock expiry.
-    # The lock exists until the job completes or is dead-lettered.
-    DEFAULT_LOCK_TTL = 24 * 60 * 60
 
     VALID_STRATEGIES = %i[until_executed while_executing].freeze
     VALID_CONFLICTS = %i[reject discard log].freeze
 
     class_methods do
-      def ensures_uniqueness(strategy: :until_executed, key: nil, lock_ttl: DEFAULT_LOCK_TTL, on_conflict: :reject)
+      def ensures_uniqueness(strategy: :until_executed, key: nil, on_conflict: :reject, **opts)
+        # lock_ttl was validated and stored in message metadata but never read
+        # by the lock lifecycle (the lock lives until the job completes or is
+        # dead-lettered, not until a TTL expires). Removed in 1.0.0.
+        if opts.key?(:lock_ttl)
+          raise ArgumentError,
+                "lock_ttl: was removed in pgbus 1.0.0 — it was validated but never read by anything. " \
+                "Remove it from ensures_uniqueness. See https://pgbus.dev/docs/upgrading-pgbus"
+        end
+        raise ArgumentError, "unknown keyword: #{opts.keys.first.inspect}" if opts.any?
         raise ArgumentError, "strategy must be one of: #{VALID_STRATEGIES.join(", ")}" unless VALID_STRATEGIES.include?(strategy)
         raise ArgumentError, "on_conflict must be one of: #{VALID_CONFLICTS.join(", ")}" unless VALID_CONFLICTS.include?(on_conflict)
-
-        valid_ttl = lock_ttl.is_a?(Numeric) || (defined?(ActiveSupport::Duration) && lock_ttl.is_a?(ActiveSupport::Duration))
-        raise ArgumentError, "lock_ttl must be a positive number or Duration" unless valid_ttl && lock_ttl.positive?
         raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
 
         @pgbus_uniqueness = {
           strategy: strategy,
           key: key || ->(*) { name },
-          lock_ttl: lock_ttl,
           on_conflict: on_conflict
         }.freeze
       end
@@ -102,8 +102,7 @@ module Pgbus
 
         payload_hash.merge(
           METADATA_KEY => key,
-          STRATEGY_KEY => config[:strategy].to_s,
-          TTL_KEY => config[:lock_ttl]
+          STRATEGY_KEY => config[:strategy].to_s
         )
       end
 

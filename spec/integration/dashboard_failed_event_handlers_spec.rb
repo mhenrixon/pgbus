@@ -28,8 +28,7 @@ RSpec.describe "Dashboard failed event handlers (integration)", :integration do
       "job_class" => "TestJob",
       "arguments" => [42],
       Pgbus::Uniqueness::METADATA_KEY => lock_key,
-      Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-      Pgbus::Uniqueness::TTL_KEY => 86_400
+      Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
     }
   end
 

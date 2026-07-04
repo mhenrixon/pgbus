@@ -128,4 +128,36 @@ RSpec.describe Pgbus::EventBus::Publisher do
       expect(result["published_at"]).to match(/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
     end
   end
+
+  describe "Pgbus.publish / Pgbus.publish_later (top-level shortcuts)" do
+    it "Pgbus.publish delegates to EventBus::Publisher.publish" do
+      allow(described_class).to receive(:publish).and_call_original
+
+      Pgbus.publish("orders.created", { "order_id" => 1 })
+
+      expect(described_class).to have_received(:publish).with(
+        "orders.created", { "order_id" => 1 }, headers: nil, delay: 0
+      )
+    end
+
+    it "Pgbus.publish forwards headers and delay" do
+      allow(described_class).to receive(:publish).and_call_original
+
+      Pgbus.publish("orders.created", { "order_id" => 1 }, headers: { "x" => "y" }, delay: 30)
+
+      expect(described_class).to have_received(:publish).with(
+        "orders.created", { "order_id" => 1 }, headers: { "x" => "y" }, delay: 30
+      )
+    end
+
+    it "Pgbus.publish_later delegates to EventBus::Publisher.publish_later with a required delay" do
+      allow(described_class).to receive(:publish_later).and_call_original
+
+      Pgbus.publish_later("orders.shipped", { "order_id" => 2 }, delay: 60)
+
+      expect(described_class).to have_received(:publish_later).with(
+        "orders.shipped", { "order_id" => 2 }, delay: 60, headers: nil
+      )
+    end
+  end
 end

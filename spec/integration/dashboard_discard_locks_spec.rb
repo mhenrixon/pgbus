@@ -20,8 +20,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         "job_class" => "ImportJob",
         "arguments" => [42],
         Pgbus::Uniqueness::METADATA_KEY => "import-42",
-        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-        Pgbus::Uniqueness::TTL_KEY => 86_400
+        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
       }
       client.send_message(queue_name, payload)
 
@@ -57,8 +56,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
           "job_class" => "ImportJob",
           "arguments" => [i],
           Pgbus::Uniqueness::METADATA_KEY => "import-#{i}",
-          Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-          Pgbus::Uniqueness::TTL_KEY => 86_400
+          Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
         }
         client.send_message(queue_name, payload)
         Pgbus::UniquenessKey.acquire!("import-#{i}", queue_name: queue_name, msg_id: 0)
@@ -88,8 +86,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         "job_class" => "ImportJob",
         "arguments" => [1],
         Pgbus::Uniqueness::METADATA_KEY => "import-1",
-        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-        Pgbus::Uniqueness::TTL_KEY => 86_400
+        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
       }
       client.send_message(queue_name, payload)
       Pgbus::UniquenessKey.acquire!("import-1", queue_name: queue_name, msg_id: 0)
@@ -163,8 +160,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
         "job_class" => "DlqJob",
         "arguments" => [1],
         Pgbus::Uniqueness::METADATA_KEY => "dlq-1",
-        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-        Pgbus::Uniqueness::TTL_KEY => 86_400
+        Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
       }
       ActiveRecord::Base.connection.execute(
         "INSERT INTO pgmq.q_#{full_dlq} (vt, message) VALUES (NOW(), '#{JSON.generate(payload)}')"
@@ -194,8 +190,7 @@ RSpec.describe "Dashboard discard operations clear locks (integration)", :integr
           "job_class" => "DlqJob",
           "arguments" => [i],
           Pgbus::Uniqueness::METADATA_KEY => "dlq-#{i}",
-          Pgbus::Uniqueness::STRATEGY_KEY => "until_executed",
-          Pgbus::Uniqueness::TTL_KEY => 86_400
+          Pgbus::Uniqueness::STRATEGY_KEY => "until_executed"
         }
         ActiveRecord::Base.connection.execute(
           "INSERT INTO pgmq.q_#{full_dlq} (vt, message) VALUES (NOW(), '#{JSON.generate(payload)}')"

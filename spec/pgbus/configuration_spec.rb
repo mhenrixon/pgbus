@@ -165,6 +165,10 @@ RSpec.describe Pgbus::Configuration do
       expect(config.read_timeout).to eq(30)
     end
 
+    it "has default drain_timeout of 30 seconds" do
+      expect(config.drain_timeout).to eq(30)
+    end
+
     it "enables eager_validation by default" do
       expect(config.eager_validation).to be(true)
     end
@@ -407,7 +411,7 @@ RSpec.describe Pgbus::Configuration do
   end
 
   describe "#workers=" do
-    context "when given an Array (legacy form)" do
+    context "when given an Array (explicit form)" do
       it "stores the array unchanged" do
         config.workers = [{ queues: %w[default], threads: 5 }]
         expect(config.workers).to eq([{ queues: %w[default], threads: 5 }])
@@ -1029,6 +1033,26 @@ RSpec.describe Pgbus::Configuration do
     it "rejects false read_timeout" do
       config.read_timeout = false
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /read_timeout/)
+    end
+
+    it "rejects non-numeric drain_timeout" do
+      config.drain_timeout = "30"
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
+    end
+
+    it "rejects zero drain_timeout" do
+      config.drain_timeout = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
+    end
+
+    it "rejects negative drain_timeout" do
+      config.drain_timeout = -5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
+    end
+
+    it "accepts a positive drain_timeout" do
+      config.drain_timeout = 60
+      expect { config.validate! }.not_to raise_error
     end
 
     it "rejects zero stats_flush_size" do
@@ -1730,6 +1754,159 @@ RSpec.describe Pgbus::Configuration do
       Pgbus.configuration.eager_validation = false
       Pgbus.configure { |c| c.polling_interval = 0 }
       expect { Pgbus.configuration.validate! }.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
+    end
+  end
+
+  describe "recurring_enabled (renamed from skip_recurring)" do
+    it "defaults to true" do
+      expect(config.recurring_enabled).to be(true)
+    end
+
+    it "controls recurring with positive polarity" do
+      config.recurring_enabled = false
+      expect(config.recurring_enabled).to be(false)
+    end
+
+    describe "deprecated skip_recurring alias" do
+      it "maps skip_recurring = true to recurring_enabled = false (inverted polarity)" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = true
+        expect(config.recurring_enabled).to be(false)
+      end
+
+      it "maps skip_recurring = false to recurring_enabled = true" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = false
+        expect(config.recurring_enabled).to be(true)
+      end
+
+      it "reads back the inverted recurring_enabled value" do
+        config.recurring_enabled = false
+        expect(config.skip_recurring).to be(true)
+      end
+
+      it "warns once about the deprecation when the writer is used" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = true
+        config.skip_recurring = false
+        expect(Pgbus.logger).to have_received(:warn).once
+      end
+
+      it "names the replacement in the warning" do
+        warned = nil
+        allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+        config.skip_recurring = true
+        expect(warned).to match(/skip_recurring.*recurring_enabled/)
+      end
+    end
+  end
+
+  describe "web_filter_parameters / web_filter_sensitive (renamed from dashboard_filter_*)" do
+    it "defaults web_filter_sensitive to true and web_filter_parameters to nil" do
+      expect(config.web_filter_sensitive).to be(true)
+      expect(config.web_filter_parameters).to be_nil
+    end
+
+    it "stores web_filter_parameters and web_filter_sensitive" do
+      config.web_filter_parameters = %w[ssn token]
+      config.web_filter_sensitive = false
+      expect(config.web_filter_parameters).to eq(%w[ssn token])
+      expect(config.web_filter_sensitive).to be(false)
+    end
+
+    describe "deprecated dashboard_filter_* aliases" do
+      it "routes dashboard_filter_parameters to web_filter_parameters" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_parameters = %w[ssn]
+        expect(config.web_filter_parameters).to eq(%w[ssn])
+        expect(config.dashboard_filter_parameters).to eq(%w[ssn])
+      end
+
+      it "routes dashboard_filter_sensitive to web_filter_sensitive" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_sensitive = false
+        expect(config.web_filter_sensitive).to be(false)
+        expect(config.dashboard_filter_sensitive).to be(false)
+      end
+
+      it "warns once per deprecated key" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_parameters = %w[a]
+        config.dashboard_filter_parameters = %w[b]
+        expect(Pgbus.logger).to have_received(:warn).once
+      end
+
+      it "names the replacement in the warning" do
+        warned = nil
+        allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+        config.dashboard_filter_sensitive = false
+        expect(warned).to match(/dashboard_filter_sensitive.*web_filter_sensitive/)
+      end
+    end
+  end
+
+  describe "recurring_tasks_file (singular) deprecation" do
+    it "warns once and prefers the plural when both singular and plural are set" do
+      warned = nil
+      allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+      config.recurring_tasks_files = ["config/plural.yml"]
+      config.recurring_tasks_file = "config/singular.yml"
+      expect(config.recurring_tasks_files).to eq(["config/plural.yml"])
+      expect(warned).to match(/recurring_tasks_file.*recurring_tasks_files/)
+    end
+
+    it "still wraps a lone singular value into the plural array without warning" do
+      allow(Pgbus.logger).to receive(:warn)
+      config.recurring_tasks_file = "config/only.yml"
+      expect(config.recurring_tasks_files).to eq(["config/only.yml"])
+      expect(Pgbus.logger).not_to have_received(:warn)
+    end
+  end
+
+  describe "#log_format=" do
+    it "installs the matching pgbus formatter when the logger has none" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = nil
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
+    it "replaces a pgbus-installed formatter with the new format" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = Pgbus::LogFormatter::Text.new
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
+    it "does not clobber a custom (non-pgbus) formatter on the logger" do
+      custom = ->(_severity, _time, _progname, msg) { "custom: #{msg}\n" }
+      logger = Logger.new(IO::NULL)
+      logger.formatter = custom
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be(custom)
+    end
+
+    it "replaces a framework-default formatter (not a deliberate choice)" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = Logger::Formatter.new
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
+    it "still validates the format regardless of the formatter guard" do
+      expect { config.log_format = :xml }.to raise_error(Pgbus::ConfigurationError, /log_format/)
     end
   end
 end

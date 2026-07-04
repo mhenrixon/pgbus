@@ -291,10 +291,10 @@ RSpec.describe Pgbus::Process::Worker do
     # TCP read with no timeout) would otherwise hold the drain loop open
     # forever — recycling never completes, TERM shutdown of the whole process
     # tree hangs, and the loop keeps stamping loop_tick so the supervisor
-    # watchdog never intervenes. After DRAIN_TIMEOUT the loop must fall
+    # watchdog never intervenes. After config.drain_timeout the loop must fall
     # through to shutdown, whose wait_for_termination(30) bounds the rest.
-    it "exits the drain loop after DRAIN_TIMEOUT even if a job never finishes" do
-      stub_const("Pgbus::Process::Worker::DRAIN_TIMEOUT", 0.2)
+    it "exits the drain loop after drain_timeout even if a job never finishes" do
+      worker.config.drain_timeout = 0.2
       allow(pool).to receive(:quiesced?).and_return(false)
       allow(worker).to receive(:start_notify_listener)
       allow(worker).to receive(:claim_and_execute)
@@ -310,6 +310,7 @@ RSpec.describe Pgbus::Process::Worker do
       expect(runner.join(3)).to eq(runner), "worker did not stop after the drain deadline"
     ensure
       Pgbus.stopping = false
+      worker.config.drain_timeout = 30
       runner&.kill
     end
   end

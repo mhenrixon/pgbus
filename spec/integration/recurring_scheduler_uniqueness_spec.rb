@@ -15,7 +15,7 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
         "UniqueRecurringJob"
       end
 
-      ensures_uniqueness strategy: :until_executed, lock_ttl: 3600
+      ensures_uniqueness strategy: :until_executed
     end
   end
 
@@ -50,7 +50,6 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
       expect(payload["job_class"]).to eq("UniqueRecurringJob")
       expect(payload[Pgbus::Uniqueness::METADATA_KEY]).to eq("UniqueRecurringJob")
       expect(payload[Pgbus::Uniqueness::STRATEGY_KEY]).to eq("until_executed")
-      expect(payload[Pgbus::Uniqueness::TTL_KEY]).to eq(3600)
     end
   end
 
@@ -144,7 +143,6 @@ RSpec.describe "Recurring scheduler uniqueness (integration)", :integration do
 
       expect(payload[Pgbus::Uniqueness::METADATA_KEY]).to eq("UniqueRecurringJob")
       expect(payload[Pgbus::Uniqueness::STRATEGY_KEY]).to eq("until_executed")
-      expect(payload[Pgbus::Uniqueness::TTL_KEY]).to eq(3600)
     end
   end
 
