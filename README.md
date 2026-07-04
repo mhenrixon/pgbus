@@ -144,6 +144,8 @@ Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#valida
 > - Inspects your live database and adds any missing pgbus migrations to `db/migrate` (or `db/pgbus_migrate` if you use `connects_to`). The generator detects your separate-database config automatically from `Pgbus.configuration.connects_to` or by scanning the initializer / `config/application.rb`, so you don't have to re-specify `--database=pgbus` every time.
 >
 > Useful flags: `--dry-run` (print the plan without creating files), `--skip-config`, `--skip-migrations`, `--quiet`. Running it on a database with no pgbus tables at all will redirect you to `pgbus:install` instead of stacking individual add_* migrations.
+>
+> For the full step-by-step procedure (including the vendored PGMQ schema check and post-upgrade verification with `pgbus doctor`) plus per-version breaking changes, see [Upgrading pgbus](https://pgbus.zoolutions.llc/docs/upgrading-pgbus).
 
 ### 2. Use as ActiveJob backend
 

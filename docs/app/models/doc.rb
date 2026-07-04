@@ -45,6 +45,7 @@ class Doc
   page "Testing", group: "Testing"
 
   # Migrate
+  page "Upgrading pgbus", group: "Migrate", slug: "upgrading-pgbus", view: "UpgradingPgbus"
   page "From Sidekiq",    group: "Migrate", slug: "from-sidekiq", view: "FromSidekiq"
   page "From SolidQueue", group: "Migrate", slug: "from-solid-queue", view: "FromSolidQueue"
   page "From GoodJob",    group: "Migrate", slug: "from-good-job", view: "FromGoodJob"
