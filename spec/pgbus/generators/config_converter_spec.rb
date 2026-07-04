@@ -233,7 +233,11 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
       end
     end
 
-    context "with deprecated settings (no longer supported)" do
+    context "with a deliberately-set pool_size (issue #276)" do
+      # pool_size is a live accessor (Configuration#pool_size) users set to
+      # override auto-tuning. It must survive the YAML -> DSL conversion —
+      # it is NOT deprecated. See the DEPRECATED_SETTINGS comment for the
+      # settings that genuinely no longer exist.
       let(:input) do
         {
           "production" => {
@@ -243,11 +247,11 @@ RSpec.describe Pgbus::Generators::ConfigConverter do
         }
       end
 
-      it "drops pool_size (auto-tuned now)" do
-        expect(output).not_to include("pool_size")
+      it "emits pool_size unchanged" do
+        expect(output).to include("c.pool_size = 17")
       end
 
-      it "still emits the workers (pool_size is what was dropped)" do
+      it "still emits the workers" do
         expect(output).to include('c.workers = "*: 15"')
       end
     end

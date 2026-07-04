@@ -1203,6 +1203,80 @@ RSpec.describe Pgbus::Configuration do
       config.metrics_backend = "prometheus"
       expect { config.validate! }.to raise_error(ArgumentError, /metrics_backend/)
     end
+
+    it "accepts the default statsd_host, statsd_port, and health_bind" do
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a non-String statsd_host" do
+      config.statsd_host = 123
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+    end
+
+    it "rejects an empty statsd_host" do
+      config.statsd_host = ""
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+    end
+
+    it "rejects a nil statsd_host" do
+      config.statsd_host = nil
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+    end
+
+    it "accepts a valid statsd_host" do
+      config.statsd_host = "statsd.internal"
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a non-Integer statsd_port" do
+      config.statsd_port = "8125"
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+    end
+
+    it "rejects a zero statsd_port" do
+      config.statsd_port = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+    end
+
+    it "rejects a negative statsd_port" do
+      config.statsd_port = -1
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+    end
+
+    it "rejects an out-of-range statsd_port" do
+      config.statsd_port = 70_000
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+    end
+
+    it "rejects a nil statsd_port" do
+      config.statsd_port = nil
+      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+    end
+
+    it "accepts a valid statsd_port" do
+      config.statsd_port = 9125
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a non-String health_bind" do
+      config.health_bind = 123
+      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+    end
+
+    it "rejects an empty health_bind" do
+      config.health_bind = ""
+      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+    end
+
+    it "rejects a nil health_bind" do
+      config.health_bind = nil
+      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+    end
+
+    it "accepts a valid health_bind" do
+      config.health_bind = "0.0.0.0"
+      expect { config.validate! }.not_to raise_error
+    end
   end
 
   describe "#connection_options" do

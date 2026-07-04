@@ -442,6 +442,14 @@ module Pgbus
         raise ArgumentError, "health_port must be an integer between 1 and 65535 or nil to disable"
       end
 
+      raise ArgumentError, "health_bind must be a non-empty String" unless health_bind.is_a?(String) && !health_bind.empty?
+
+      raise ArgumentError, "statsd_host must be a non-empty String" unless statsd_host.is_a?(String) && !statsd_host.empty?
+
+      unless statsd_port.is_a?(Integer) && statsd_port.between?(1, 65_535)
+        raise ArgumentError, "statsd_port must be an integer between 1 and 65535"
+      end
+
       # Validate global execution_mode
       ExecutionPools.normalize_mode(execution_mode)
 

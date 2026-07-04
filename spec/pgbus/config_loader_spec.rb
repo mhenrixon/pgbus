@@ -157,10 +157,33 @@ RSpec.describe Pgbus::ConfigLoader do
       YAML
     end
 
-    # When the running env has no section, load falls back to applying the
-    # whole file (flat-config support). The env names themselves must not be
-    # flagged as typos.
-    it "does not warn about env section names when falling back to the whole file" do
+    # When the running env has no matching section, load must NOT silently
+    # no-op: it warns naming the env and the available sections, and applies
+    # nothing (the file genuinely has no settings for this env). This
+    # replaced a prior "silently fall back to the whole file" behavior which
+    # was itself a silent-failure surface — see issue #276.
+    it "warns naming the env and available sections when no section matches" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      with_temp_config(sectioned_content) do |path|
+        described_class.load(path, env: "staging")
+      end
+
+      expect(io.string).to include("staging")
+      expect(io.string).to include("development")
+      expect(io.string).to include("production")
+    end
+
+    it "applies nothing when no section matches the current env" do
+      with_temp_config(sectioned_content) do |path|
+        described_class.load(path, env: "staging")
+      end
+
+      expect(Pgbus.configuration.queue_prefix).to eq("pgbus")
+    end
+
+    it "does not warn about 'Unknown configuration key' for env section names" do
       io = StringIO.new
       Pgbus.configuration.logger = Logger.new(io)
 
@@ -169,6 +192,14 @@ RSpec.describe Pgbus::ConfigLoader do
       end
 
       expect(io.string).not_to include("Unknown configuration key")
+    end
+
+    it "applies the matched section normally when present" do
+      with_temp_config(sectioned_content) do |path|
+        described_class.load(path, env: "development")
+      end
+
+      expect(Pgbus.configuration.queue_prefix).to eq("pgbus_dev")
     end
 
     it "still warns about typos inside a matched env section" do
@@ -207,6 +238,49 @@ RSpec.describe Pgbus::ConfigLoader do
       expect(io.string).to include("pooling_interval")
     end
 
+    # Regression for the misclassification bug: a legitimate flat pgbus.yml
+    # whose every top-level setting happens to be Hash-valued (connection_params,
+    # streams_retention, recurring_tasks, etc.) must still be detected as flat
+    # and applied — not misclassified as "sectioned" with no matching env,
+    # which previously silently applied nothing.
+    it "treats an all-Hash-valued flat file as flat and applies its keys" do
+      content = <<~YAML
+        connection_params:
+          host: db.internal
+          dbname: myapp
+        streams_retention:
+          "orders.*": 2592000
+        recurring_tasks:
+          nightly_cleanup:
+            queue: default
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "production")
+      end
+
+      expect(Pgbus.configuration.connection_params).to eq("host" => "db.internal", "dbname" => "myapp")
+      expect(Pgbus.configuration.streams_retention).to eq("orders.*" => 2_592_000)
+      expect(Pgbus.configuration.recurring_tasks).to eq(
+        "nightly_cleanup" => { "queue" => "default" }
+      )
+    end
+
+    it "does not warn for the all-Hash-valued flat file (correctly classified as flat)" do
+      io = StringIO.new
+      Pgbus.configuration.logger = Logger.new(io)
+
+      content = <<~YAML
+        connection_params:
+          host: db.internal
+          dbname: myapp
+      YAML
+      with_temp_config(content) do |path|
+        described_class.load(path, env: "production")
+      end
+
+      expect(io.string).not_to include("Unknown configuration key")
+    end
+
     def with_temp_config(content)
       file = Tempfile.new(["pgbus", ".yml"])
       file.write(content)
@@ -215,6 +289,43 @@ RSpec.describe Pgbus::ConfigLoader do
     ensure
       file.close
       file.unlink
+    end
+  end
+
+  describe ".sectioned?" do
+    it "returns false for a flat file with a real setter key even if all values are Hashes" do
+      parsed = {
+        "connection_params" => { "host" => "db.internal" },
+        "streams_retention" => { "orders.*" => 100 }
+      }
+      expect(described_class.sectioned?(parsed)).to be(false)
+    end
+
+    it "returns true for a sectioned file whose top-level keys are env names, not setters" do
+      parsed = {
+        "development" => { "queue_prefix" => "dev" },
+        "production" => { "queue_prefix" => "prod" }
+      }
+      expect(described_class.sectioned?(parsed)).to be(true)
+    end
+
+    it "returns false for an empty hash" do
+      expect(described_class.sectioned?({})).to be(false)
+    end
+
+    it "returns false for a non-Hash" do
+      expect(described_class.sectioned?(nil)).to be(false)
+      expect(described_class.sectioned?([1, 2])).to be(false)
+    end
+
+    it "returns false when a mix of setter and non-setter Hash-valued keys are present" do
+      # As soon as ONE top-level key is a real setter, the file is flat --
+      # env section names are never real Configuration setters.
+      parsed = {
+        "connection_params" => { "host" => "db.internal" },
+        "production" => { "queue_prefix" => "prod" }
+      }
+      expect(described_class.sectioned?(parsed)).to be(false)
     end
   end
 
