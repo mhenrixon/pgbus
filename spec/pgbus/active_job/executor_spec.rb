@@ -112,9 +112,10 @@ RSpec.describe Pgbus::ActiveJob::Executor do
     context "when archive fails with a connection error after the job succeeded" do
       let(:message) { build_message_double(msg_id: 9, message: message_json, read_ct: 1) }
 
-      before do
-        stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
-      end
+      # Load the genuine PGMQ::Errors::ConnectionError so this proves the
+      # executor's archive-retry rescue (archive_from → connection_error?) matches
+      # the real pgmq-ruby hierarchy — not a fake StandardError subclass.
+      before { real_pgmq_connection_error }
 
       it "retries the archive once and returns :success" do
         calls = 0

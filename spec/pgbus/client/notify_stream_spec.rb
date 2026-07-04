@@ -69,7 +69,7 @@ RSpec.describe Pgbus::Client::NotifyStream do
 
     context "with stale pgmq connection recovery" do
       before do
-        stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+        real_pgmq_connection_error
         # Stale retries now back off between attempts; stub the delay so the
         # suite doesn't actually sleep.
         allow(client).to receive(:sleep)

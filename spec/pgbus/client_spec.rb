@@ -162,7 +162,7 @@ RSpec.describe Pgbus::Client do
     end
 
     it "propagates PGMQ connection errors when queue creation fails" do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      real_pgmq_connection_error
 
       allow(mock_pgmq).to receive(:create).and_raise(
         PGMQ::Errors::ConnectionError.new("Database connection error: connection refused")
@@ -483,7 +483,7 @@ RSpec.describe Pgbus::Client do
     let(:raw_conn) { double("PG::Connection") }
 
     before do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      real_pgmq_connection_error
       stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
     end
 
@@ -738,7 +738,7 @@ RSpec.describe Pgbus::Client do
     end
 
     it "falls back to false (and enables notify) when the pooled connection raises" do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      real_pgmq_connection_error
       allow(mock_pgmq).to receive(:with_connection)
         .and_raise(PGMQ::Errors::ConnectionError, "schema not ready")
 
@@ -1055,7 +1055,9 @@ RSpec.describe Pgbus::Client do
 
   describe "stale pgmq connection recovery" do
     before do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      # Load the genuine PGMQ::Errors::ConnectionError so these prove
+      # with_stale_connection_retry rescues the real pgmq-ruby class, not a fake.
+      real_pgmq_connection_error
       # Stale retries now back off between attempts. Stub the delay so the
       # suite doesn't actually sleep; individual tests that assert the backoff
       # sequence override this with a spy.
@@ -1812,7 +1814,7 @@ RSpec.describe Pgbus::Client do
 
   describe "connection-health circuit breaker (issue #197)" do
     before do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      real_pgmq_connection_error
     end
 
     # Force the client's in-memory breaker into the open state so reads fail
@@ -1888,7 +1890,7 @@ RSpec.describe Pgbus::Client do
 
   describe "libpq connection bounds (issue #198)" do
     before do
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+      real_pgmq_connection_error
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
       # PG (the pg gem) is loaded via pgmq-ruby in production; these unit specs
       # mock PGMQ, so stub the one PG method the read-bounds gate consults.

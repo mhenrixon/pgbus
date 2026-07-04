@@ -23,8 +23,8 @@ RSpec.describe Pgbus::Client do
     before do
       allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
       stub_const("PGMQ::Client", Class.new { def initialize(*args, **kwargs); end })
-      stub_const("PGMQ::Errors", Module.new)
-      stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError))
+      # Real PGMQ::Errors::ConnectionError coexists with the faked PGMQ::Client.
+      real_pgmq_connection_error
       # pg is loaded via pgmq-ruby in production; stub the one method the
       # read-bounds gate consults so client construction works with mocked PGMQ.
       stub_pg_library_version
