@@ -25,35 +25,48 @@ RSpec.describe Pgbus::Generators::AddQueueStatesGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/add_queue_states.rb.erb", __dir__)
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_add_pgbus_queue_states.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "defines a versioned migration class" do
-      expect(content).to include("class AddPgbusQueueStates < ActiveRecord::Migration<%= migration_version %>")
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
     it "creates the pgbus_queue_states table" do
-      expect(content).to include("create_table :pgbus_queue_states")
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class AddPgbusQueueStates < ActiveRecord::Migration\[\d+\.\d+\]/)
+        expect(content).to include("create_table :pgbus_queue_states")
+      end
     end
 
     it "declares the pause and circuit breaker columns" do
-      expect(content).to include("t.string :queue_name, null: false")
-      expect(content).to include("t.boolean :paused, null: false, default: false")
-      expect(content).to include("t.integer :circuit_breaker_trip_count, default: 0")
-      expect(content).to include("t.datetime :circuit_breaker_resume_at")
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("t.string :queue_name, null: false")
+        expect(content).to include("t.boolean :paused, null: false, default: false")
+        expect(content).to include("t.integer :circuit_breaker_trip_count, default: 0")
+        expect(content).to include("t.datetime :circuit_breaker_resume_at")
+      end
     end
 
     it "adds a unique index on queue_name" do
-      expect(content).to include("add_index :pgbus_queue_states, :queue_name")
-      expect(content).to include("unique: true")
-      expect(content).to include('name: "idx_pgbus_queue_states_queue_name"')
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("add_index :pgbus_queue_states, :queue_name")
+        expect(content).to include("unique: true")
+        expect(content).to include('name: "idx_pgbus_queue_states_queue_name"')
+      end
     end
   end
 end

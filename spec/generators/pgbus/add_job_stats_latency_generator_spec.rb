@@ -25,34 +25,45 @@ RSpec.describe Pgbus::Generators::AddJobStatsLatencyGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/add_job_stats_latency.rb.erb", __dir__)
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_add_pgbus_job_stats_latency.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
+    end
+
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
     it "defines a versioned migration class" do
-      expect(content).to include(
-        "class AddPgbusJobStatsLatency < ActiveRecord::Migration<%= migration_version %>"
-      )
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class AddPgbusJobStatsLatency < ActiveRecord::Migration\[\d+\.\d+\]/)
+      end
     end
 
-    it "adds the enqueue_latency_ms column as bigint" do
-      expect(content).to include("add_column :pgbus_job_stats, :enqueue_latency_ms, :bigint")
-    end
-
-    it "adds the retry_count column defaulting to 0" do
-      expect(content).to include("add_column :pgbus_job_stats, :retry_count, :integer, default: 0")
+    it "adds the enqueue_latency_ms and retry_count columns" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("add_column :pgbus_job_stats, :enqueue_latency_ms, :bigint")
+        expect(content).to include("add_column :pgbus_job_stats, :retry_count, :integer, default: 0")
+      end
     end
 
     it "adds the queue latency index idempotently" do
-      expect(content).to include("add_index :pgbus_job_stats, [:queue_name, :created_at]")
-      expect(content).to include('name: "idx_pgbus_job_stats_queue_time"')
-      expect(content).to include("if_not_exists: true")
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("add_index :pgbus_job_stats, [:queue_name, :created_at]")
+        expect(content).to include('name: "idx_pgbus_job_stats_queue_time"')
+        expect(content).to include("if_not_exists: true")
+      end
     end
   end
 end

@@ -25,49 +25,51 @@ RSpec.describe Pgbus::Generators::MigrateJobLocksGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path(
-        "../../../lib/generators/pgbus/templates/migrate_job_locks_to_uniqueness_keys.rb.erb", __dir__
-      )
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_migrate_pgbus_job_locks_to_uniqueness_keys.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "defines a versioned migration class" do
-      expect(content).to include(
-        "class MigratePgbusJobLocksToUniquenessKeys < ActiveRecord::Migration<%= migration_version %>"
-      )
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "creates the new lightweight pgbus_uniqueness_keys table only if absent" do
-      expect(content).to include("unless table_exists?(:pgbus_uniqueness_keys)")
-      expect(content).to include("create_table :pgbus_uniqueness_keys, id: false")
-      expect(content).to include("t.string :lock_key, null: false")
-      expect(content).to include("t.bigint :msg_id, null: false")
+    it "creates the lightweight pgbus_uniqueness_keys table only if absent" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class MigratePgbusJobLocksToUniquenessKeys < ActiveRecord::Migration\[\d+\.\d+\]/)
+        expect(content).to include("unless table_exists?(:pgbus_uniqueness_keys)")
+        expect(content).to include("create_table :pgbus_uniqueness_keys, id: false")
+        expect(content).to include("t.string :lock_key, null: false")
+        expect(content).to include("t.bigint :msg_id, null: false")
+        expect(content).to include("add_index :pgbus_uniqueness_keys, :lock_key")
+        expect(content).to include('name: "idx_pgbus_uniqueness_keys_key"')
+      end
     end
 
-    it "adds a unique index on the uniqueness key" do
-      expect(content).to include("add_index :pgbus_uniqueness_keys, :lock_key")
-      expect(content).to include("unique: true")
-      expect(content).to include('name: "idx_pgbus_uniqueness_keys_key"')
-    end
-
-    it "refuses to migrate while active locks remain in pgbus_job_locks" do
-      expect(content).to include("if table_exists?(:pgbus_job_locks)")
-      expect(content).to include("SELECT COUNT(*) FROM pgbus_job_locks")
-      expect(content).to include("raise")
-    end
-
-    it "drops the old pgbus_job_locks table once drained" do
-      expect(content).to include("drop_table :pgbus_job_locks")
+    it "refuses to migrate while active locks remain, then drops the old table" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("if table_exists?(:pgbus_job_locks)")
+        expect(content).to include("SELECT COUNT(*) FROM pgbus_job_locks")
+        expect(content).to include("raise")
+        expect(content).to include("drop_table :pgbus_job_locks")
+      end
     end
 
     it "is irreversible on down" do
-      expect(content).to include("raise ActiveRecord::IrreversibleMigration")
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("raise ActiveRecord::IrreversibleMigration")
+      end
     end
   end
 end

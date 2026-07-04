@@ -25,60 +25,58 @@ RSpec.describe Pgbus::Generators::AddRecurringGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/add_recurring_tables.rb.erb", __dir__)
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_add_pgbus_recurring_tables.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
-    end
-
-    it "defines a versioned migration class" do
-      expect(content).to include(
-        "class AddPgbusRecurringTables < ActiveRecord::Migration<%= migration_version %>"
-      )
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "creates the pgbus_recurring_tasks table" do
-      expect(content).to include("create_table :pgbus_recurring_tasks")
-      expect(content).to include("t.string :key, null: false")
-      expect(content).to include("t.string :schedule, null: false")
-      expect(content).to include("t.boolean :enabled, null: false, default: true")
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "adds a unique index on the task key" do
-      expect(content).to include("add_index :pgbus_recurring_tasks, :key")
-      expect(content).to include("unique: true")
-      expect(content).to include('name: "idx_pgbus_recurring_tasks_key"')
+    it "creates the pgbus_recurring_tasks table with a unique key index" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class AddPgbusRecurringTables < ActiveRecord::Migration\[\d+\.\d+\]/)
+        expect(content).to include("create_table :pgbus_recurring_tasks")
+        expect(content).to include("t.string :key, null: false")
+        expect(content).to include("t.string :schedule, null: false")
+        expect(content).to include("t.boolean :enabled, null: false, default: true")
+        expect(content).to include("add_index :pgbus_recurring_tasks, :key")
+        expect(content).to include('name: "idx_pgbus_recurring_tasks_key"')
+      end
     end
 
-    it "creates the pgbus_recurring_executions table" do
-      expect(content).to include("create_table :pgbus_recurring_executions")
-      expect(content).to include("t.string :task_key, null: false")
-      expect(content).to include("t.datetime :run_at, null: false")
-    end
-
-    it "adds a unique dedup index on (task_key, run_at)" do
-      expect(content).to include("add_index :pgbus_recurring_executions, [:task_key, :run_at]")
-      expect(content).to include("unique: true")
-      expect(content).to include('name: "idx_pgbus_recurring_executions_dedup"')
-    end
-
-    it "adds a cleanup index on run_at" do
-      expect(content).to include("add_index :pgbus_recurring_executions, :run_at")
-      expect(content).to include('name: "idx_pgbus_recurring_executions_cleanup"')
+    it "creates the pgbus_recurring_executions table with dedup and cleanup indexes" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("create_table :pgbus_recurring_executions")
+        expect(content).to include("t.string :task_key, null: false")
+        expect(content).to include("t.datetime :run_at, null: false")
+        expect(content).to include("add_index :pgbus_recurring_executions, [:task_key, :run_at]")
+        expect(content).to include('name: "idx_pgbus_recurring_executions_dedup"')
+        expect(content).to include("add_index :pgbus_recurring_executions, :run_at")
+        expect(content).to include('name: "idx_pgbus_recurring_executions_cleanup"')
+      end
     end
   end
 
-  describe "recurring config template" do
-    let(:config_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/recurring.yml.erb", __dir__)
-    end
+  describe "recurring config" do
+    let(:basename) { "_add_pgbus_recurring_tables.rb" }
 
-    it "renders a config/recurring.yml template alongside the migration" do
-      expect(File.exist?(config_path)).to be(true)
+    it "also renders config/recurring.yml alongside the migration" do
+      generate_migration(described_class, basename: basename) do |_path, _content, root|
+        expect(File.exist?(File.join(root, "config", "recurring.yml"))).to be(true)
+      end
     end
   end
 end

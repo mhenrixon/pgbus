@@ -25,42 +25,52 @@ RSpec.describe Pgbus::Generators::AddOutboxGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/add_outbox.rb.erb", __dir__)
+  describe "generated migration" do
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: "_add_pgbus_outbox.rb") do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
-    let(:content) { File.read(template_path) }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: "_add_pgbus_outbox.rb"
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
     it "defines a versioned migration class" do
-      expect(content).to include("class AddPgbusOutbox < ActiveRecord::Migration<%= migration_version %>")
+      generate_migration(described_class, basename: "_add_pgbus_outbox.rb") do |_path, content|
+        expect(content).to match(/class AddPgbusOutbox < ActiveRecord::Migration\[\d+\.\d+\]/)
+      end
     end
 
-    it "creates the pgbus_outbox_entries table" do
-      expect(content).to include("create_table :pgbus_outbox_entries")
-    end
-
-    it "stores the jsonb payload as non-null" do
-      expect(content).to include("t.jsonb :payload, null: false")
+    it "creates the pgbus_outbox_entries table with a non-null jsonb payload" do
+      generate_migration(described_class, basename: "_add_pgbus_outbox.rb") do |_path, content|
+        expect(content).to include("create_table :pgbus_outbox_entries")
+        expect(content).to include("t.jsonb :payload, null: false")
+      end
     end
 
     it "enforces exactly one of queue_name or routing_key via a check constraint" do
-      expect(content).to include("add_check_constraint :pgbus_outbox_entries")
-      expect(content).to include("(queue_name IS NOT NULL) <> (routing_key IS NOT NULL)")
-      expect(content).to include('name: "chk_pgbus_outbox_destination"')
+      generate_migration(described_class, basename: "_add_pgbus_outbox.rb") do |_path, content|
+        expect(content).to include("add_check_constraint :pgbus_outbox_entries")
+        expect(content).to include("(queue_name IS NOT NULL) <> (routing_key IS NOT NULL)")
+        expect(content).to include('name: "chk_pgbus_outbox_destination"')
+      end
     end
 
-    it "indexes unpublished rows partially" do
-      expect(content).to include('where: "published_at IS NULL"')
-      expect(content).to include('name: "idx_pgbus_outbox_unpublished"')
-    end
-
-    it "indexes published rows for cleanup" do
-      expect(content).to include('where: "published_at IS NOT NULL"')
-      expect(content).to include('name: "idx_pgbus_outbox_cleanup"')
+    it "adds partial indexes for unpublished and published rows" do
+      generate_migration(described_class, basename: "_add_pgbus_outbox.rb") do |_path, content|
+        expect(content).to include('where: "published_at IS NULL"')
+        expect(content).to include('name: "idx_pgbus_outbox_unpublished"')
+        expect(content).to include('where: "published_at IS NOT NULL"')
+        expect(content).to include('name: "idx_pgbus_outbox_cleanup"')
+      end
     end
   end
 end

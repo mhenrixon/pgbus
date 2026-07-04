@@ -21,33 +21,42 @@ RSpec.describe Pgbus::Generators::AddJobStatsQueueIndexGenerator do
     end
 
     it "has a description mentioning the composite index" do
-      expect(described_class.desc).to match(/pgbus_job_stats/)
+      expect(described_class.desc).to include("pgbus_job_stats")
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/add_job_stats_queue_index.rb.erb", __dir__)
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_add_pgbus_job_stats_queue_index.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
+    end
+
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
     it "defines a versioned migration class" do
-      expect(content).to include(
-        "class AddPgbusJobStatsQueueIndex < ActiveRecord::Migration<%= migration_version %>"
-      )
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class AddPgbusJobStatsQueueIndex < ActiveRecord::Migration\[\d+\.\d+\]/)
+      end
     end
 
-    it "adds a composite index on (queue_name, created_at)" do
-      expect(content).to include("add_index :pgbus_job_stats, %i[queue_name created_at]")
-      expect(content).to include('name: "idx_pgbus_job_stats_queue_time"')
-    end
-
-    it "is idempotent via if_not_exists" do
-      expect(content).to include("if_not_exists: true")
+    it "adds an idempotent composite index on (queue_name, created_at)" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("add_index :pgbus_job_stats, %i[queue_name created_at]")
+        expect(content).to include('name: "idx_pgbus_job_stats_queue_time"')
+        expect(content).to include("if_not_exists: true")
+      end
     end
   end
 end

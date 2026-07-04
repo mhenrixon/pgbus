@@ -25,32 +25,40 @@ RSpec.describe Pgbus::Generators::TuneAutovacuumGenerator do
     end
   end
 
-  describe "migration template" do
-    let(:template_path) do
-      File.expand_path("../../../lib/generators/pgbus/templates/tune_autovacuum.rb.erb", __dir__)
-    end
-    let(:content) { File.read(template_path) }
+  describe "generated migration" do
+    let(:basename) { "_tune_pgbus_autovacuum.rb" }
 
-    it "exists" do
-      expect(File.exist?(template_path)).to be(true)
-    end
-
-    it "defines a versioned migration class" do
-      expect(content).to include("class TunePgbusAutovacuum < ActiveRecord::Migration<%= migration_version %>")
+    it "writes the migration into db/migrate by default" do
+      generate_migration(described_class, basename: basename) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "applies queue-wide autovacuum settings via AutovacuumTuning" do
-      expect(content).to include("execute Pgbus::AutovacuumTuning.sql_for_all_queues")
+    it "routes into db/pgbus_migrate when --database is set" do
+      generate_migration(
+        described_class,
+        options: { database: "pgbus" },
+        migrate_dir: "db/pgbus_migrate",
+        basename: basename
+      ) do |path, _content|
+        expect(path).not_to be_nil
+      end
     end
 
-    it "tunes high-churn pgbus tables too" do
-      expect(content).to include("execute Pgbus::AutovacuumTuning.sql_for_high_churn_tables")
+    it "applies queue and high-churn autovacuum settings via AutovacuumTuning" do
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to match(/class TunePgbusAutovacuum < ActiveRecord::Migration\[\d+\.\d+\]/)
+        expect(content).to include("execute Pgbus::AutovacuumTuning.sql_for_all_queues")
+        expect(content).to include("execute Pgbus::AutovacuumTuning.sql_for_high_churn_tables")
+      end
     end
 
     it "resets autovacuum settings on down" do
-      expect(content).to include("def down")
-      expect(content).to include("RESET (autovacuum_vacuum_scale_factor")
-      expect(content).to include("Pgbus::AutovacuumTuning::HIGH_CHURN_TABLES")
+      generate_migration(described_class, basename: basename) do |_path, content|
+        expect(content).to include("def down")
+        expect(content).to include("RESET (autovacuum_vacuum_scale_factor")
+        expect(content).to include("Pgbus::AutovacuumTuning::HIGH_CHURN_TABLES")
+      end
     end
   end
 end
