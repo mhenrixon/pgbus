@@ -358,7 +358,7 @@ module Pgbus
     def log_format=(format)
       format = format.to_sym
       unless VALID_LOG_FORMATS.include?(format)
-        raise ArgumentError, "Invalid log_format: #{format}. Must be one of: #{VALID_LOG_FORMATS.join(", ")}"
+        raise Pgbus::ConfigurationError, "Invalid log_format: #{format}. Must be one of: #{VALID_LOG_FORMATS.join(", ")}"
       end
 
       @log_format = format
@@ -373,7 +373,7 @@ module Pgbus
     def streams_default_broadcast_mode=(mode)
       mode = mode.to_sym
       unless VALID_BROADCAST_MODES.include?(mode)
-        raise ArgumentError,
+        raise Pgbus::ConfigurationError,
               "Invalid streams_default_broadcast_mode: #{mode}. Must be one of: #{VALID_BROADCAST_MODES.join(", ")}"
       end
 
@@ -388,11 +388,11 @@ module Pgbus
                 when Symbol then mode
                 when String then mode.to_sym
                 else
-                  raise ArgumentError,
+                  raise Pgbus::ConfigurationError,
                         "Invalid group_mode type: #{mode.class}. Must be nil, String, or Symbol"
                 end
       unless VALID_GROUP_MODES.include?(coerced)
-        raise ArgumentError, "Invalid group_mode: #{coerced.inspect}. Must be nil, :fifo, or :round_robin"
+        raise Pgbus::ConfigurationError, "Invalid group_mode: #{coerced.inspect}. Must be nil, :fifo, or :round_robin"
       end
 
       @group_mode = coerced
@@ -403,7 +403,7 @@ module Pgbus
     def pgmq_schema_mode=(mode)
       mode = mode.to_sym
       unless VALID_PGMQ_SCHEMA_MODES.include?(mode)
-        raise ArgumentError, "Invalid pgmq_schema_mode: #{mode}. Must be one of: #{VALID_PGMQ_SCHEMA_MODES.join(", ")}"
+        raise Pgbus::ConfigurationError, "Invalid pgmq_schema_mode: #{mode}. Must be one of: #{VALID_PGMQ_SCHEMA_MODES.join(", ")}"
       end
 
       @pgmq_schema_mode = mode
@@ -411,65 +411,74 @@ module Pgbus
 
     def validate!
       if pool_size && !(pool_size.is_a?(Numeric) && pool_size.positive?)
-        raise ArgumentError, "pool_size must be a positive number or nil (auto-tune)"
+        raise Pgbus::ConfigurationError, "pool_size must be a positive number or nil (auto-tune)"
       end
 
-      raise ArgumentError, "pool_timeout must be > 0" unless pool_timeout.is_a?(Numeric) && pool_timeout.positive?
-      raise ArgumentError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
-      raise ArgumentError, "visibility_timeout must be > 0" unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
-      raise ArgumentError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
-      raise ArgumentError, "retry_backoff must be > 0" unless retry_backoff.is_a?(Numeric) && retry_backoff.positive?
-      raise ArgumentError, "retry_backoff_max must be > 0" unless retry_backoff_max.is_a?(Numeric) && retry_backoff_max.positive?
+      raise Pgbus::ConfigurationError, "pool_timeout must be > 0" unless pool_timeout.is_a?(Numeric) && pool_timeout.positive?
+      raise Pgbus::ConfigurationError, "polling_interval must be > 0" unless polling_interval.is_a?(Numeric) && polling_interval.positive?
+      unless visibility_timeout.is_a?(Numeric) && visibility_timeout.positive?
+        raise Pgbus::ConfigurationError,
+              "visibility_timeout must be > 0"
+      end
+      raise Pgbus::ConfigurationError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
+      raise Pgbus::ConfigurationError, "retry_backoff must be > 0" unless retry_backoff.is_a?(Numeric) && retry_backoff.positive?
+      unless retry_backoff_max.is_a?(Numeric) && retry_backoff_max.positive?
+        raise Pgbus::ConfigurationError,
+              "retry_backoff_max must be > 0"
+      end
       unless retry_backoff_jitter.is_a?(Numeric) && retry_backoff_jitter >= 0 && retry_backoff_jitter <= 1
-        raise ArgumentError, "retry_backoff_jitter must be between 0 and 1"
+        raise Pgbus::ConfigurationError, "retry_backoff_jitter must be between 0 and 1"
       end
 
       unless stall_threshold.nil? || (stall_threshold.is_a?(Numeric) && stall_threshold.positive?)
-        raise ArgumentError, "stall_threshold must be a positive number or nil to disable"
+        raise Pgbus::ConfigurationError, "stall_threshold must be a positive number or nil to disable"
       end
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
-        raise ArgumentError, "read_timeout must be a positive number or nil to disable"
+        raise Pgbus::ConfigurationError, "read_timeout must be a positive number or nil to disable"
       end
 
       unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
-        raise ArgumentError, "stats_flush_size must be a positive integer"
+        raise Pgbus::ConfigurationError, "stats_flush_size must be a positive integer"
       end
       unless stats_flush_interval.is_a?(Numeric) && stats_flush_interval.positive?
-        raise ArgumentError, "stats_flush_interval must be a positive number"
+        raise Pgbus::ConfigurationError, "stats_flush_interval must be a positive number"
       end
 
       unless health_port.nil? || (health_port.is_a?(Integer) && health_port.between?(1, 65_535))
-        raise ArgumentError, "health_port must be an integer between 1 and 65535 or nil to disable"
+        raise Pgbus::ConfigurationError, "health_port must be an integer between 1 and 65535 or nil to disable"
       end
 
-      raise ArgumentError, "health_bind must be a non-empty String" unless health_bind.is_a?(String) && !health_bind.empty?
+      raise Pgbus::ConfigurationError, "health_bind must be a non-empty String" unless health_bind.is_a?(String) && !health_bind.empty?
 
-      raise ArgumentError, "statsd_host must be a non-empty String" unless statsd_host.is_a?(String) && !statsd_host.empty?
+      raise Pgbus::ConfigurationError, "statsd_host must be a non-empty String" unless statsd_host.is_a?(String) && !statsd_host.empty?
 
       unless statsd_port.is_a?(Integer) && statsd_port.between?(1, 65_535)
-        raise ArgumentError, "statsd_port must be an integer between 1 and 65535"
+        raise Pgbus::ConfigurationError, "statsd_port must be an integer between 1 and 65535"
       end
 
       # Validate global execution_mode
-      ExecutionPools.normalize_mode(execution_mode)
+      validate_execution_mode!(execution_mode)
 
       Array(workers).each do |w|
         threads = w[:threads] || 5
-        raise ArgumentError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
+        raise Pgbus::ConfigurationError, "worker threads must be > 0" unless threads.is_a?(Integer) && threads.positive?
 
         # Validate per-worker execution_mode override if present
         mode = w[:execution_mode]
-        ExecutionPools.normalize_mode(mode) if mode
+        validate_execution_mode!(mode) if mode
       end
 
-      raise ArgumentError, "prefetch_limit must be > 0" if prefetch_limit && !(prefetch_limit.is_a?(Integer) && prefetch_limit.positive?)
+      if prefetch_limit && !(prefetch_limit.is_a?(Integer) && prefetch_limit.positive?)
+        raise Pgbus::ConfigurationError,
+              "prefetch_limit must be > 0"
+      end
 
       if priority_levels && !(priority_levels.is_a?(Integer) && priority_levels >= 1 && priority_levels <= 10)
-        raise ArgumentError, "priority_levels must be an integer between 1 and 10"
+        raise Pgbus::ConfigurationError, "priority_levels must be an integer between 1 and 10"
       end
 
       unless insights_default_minutes.is_a?(Integer) && insights_default_minutes.positive?
-        raise ArgumentError, "insights_default_minutes must be a positive integer"
+        raise Pgbus::ConfigurationError, "insights_default_minutes must be a positive integer"
       end
 
       validate_streams!
@@ -480,47 +489,53 @@ module Pgbus
 
     def validate_streams!
       unless streams_default_retention.is_a?(Numeric) && streams_default_retention >= 0
-        raise ArgumentError, "streams_default_retention must be a non-negative number"
+        raise Pgbus::ConfigurationError, "streams_default_retention must be a non-negative number"
       end
 
       unless streams_max_connections.is_a?(Integer) && streams_max_connections.positive?
-        raise ArgumentError, "streams_max_connections must be a positive integer"
+        raise Pgbus::ConfigurationError, "streams_max_connections must be a positive integer"
       end
 
       unless streams_heartbeat_interval.is_a?(Numeric) && streams_heartbeat_interval.positive?
-        raise ArgumentError, "streams_heartbeat_interval must be a positive number"
+        raise Pgbus::ConfigurationError, "streams_heartbeat_interval must be a positive number"
       end
 
       unless streams_idle_timeout.is_a?(Numeric) && streams_idle_timeout.positive?
-        raise ArgumentError, "streams_idle_timeout must be a positive number"
+        raise Pgbus::ConfigurationError, "streams_idle_timeout must be a positive number"
       end
 
       unless streams_listen_health_check_ms.is_a?(Integer) && streams_listen_health_check_ms.positive?
-        raise ArgumentError, "streams_listen_health_check_ms must be a positive integer"
+        raise Pgbus::ConfigurationError, "streams_listen_health_check_ms must be a positive integer"
       end
 
       unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
-        raise ArgumentError, "streams_write_deadline_ms must be a positive integer"
+        raise Pgbus::ConfigurationError, "streams_write_deadline_ms must be a positive integer"
       end
 
-      raise ArgumentError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
+      raise Pgbus::ConfigurationError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
 
       if streams_orphan_sweep_interval && !(streams_orphan_sweep_interval.is_a?(Numeric) && streams_orphan_sweep_interval.positive?)
-        raise ArgumentError, "streams_orphan_sweep_interval must be a positive number or nil to disable"
+        raise Pgbus::ConfigurationError, "streams_orphan_sweep_interval must be a positive number or nil to disable"
       end
 
-      raise ArgumentError, "streams_durable_patterns must be an Array of strings/regex" unless streams_durable_patterns.is_a?(Array)
+      unless streams_durable_patterns.is_a?(Array)
+        raise Pgbus::ConfigurationError,
+              "streams_durable_patterns must be an Array of strings/regex"
+      end
 
-      raise ArgumentError, "streams_presence_patterns must be an Array of strings/regex" unless streams_presence_patterns.is_a?(Array)
+      unless streams_presence_patterns.is_a?(Array)
+        raise Pgbus::ConfigurationError,
+              "streams_presence_patterns must be an Array of strings/regex"
+      end
 
       if !streams_presence_member.nil? && !streams_presence_member.respond_to?(:call)
-        raise ArgumentError, "streams_presence_member must respond to #call (a Proc/lambda) or be nil"
+        raise Pgbus::ConfigurationError, "streams_presence_member must respond to #call (a Proc/lambda) or be nil"
       end
 
       return if streams_orphan_threshold.nil?
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
-      raise ArgumentError, "streams_orphan_threshold must be a positive number or nil to disable"
+      raise Pgbus::ConfigurationError, "streams_orphan_threshold must be a positive number or nil to disable"
     end
 
     def validate_metrics_backend!
@@ -529,7 +544,7 @@ module Pgbus
       return if %i[prometheus statsd].include?(value)
       return if defined?(Pgbus::Metrics::Backend) && value.is_a?(Pgbus::Metrics::Backend)
 
-      raise ArgumentError,
+      raise Pgbus::ConfigurationError,
             "metrics_backend must be nil, :prometheus, :statsd, or a " \
             "Pgbus::Metrics::Backend instance (got #{value.inspect})"
     end
@@ -623,7 +638,7 @@ module Pgbus
                  when Array
                    value.map { |entry| normalize_entry(entry, group: "worker") }
                  else
-                   raise ArgumentError,
+                   raise Pgbus::ConfigurationError,
                          "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
                  end
     end
@@ -639,7 +654,7 @@ module Pgbus
         when Array
           value.map { |entry| normalize_entry(entry, group: "event_consumer") }
         else
-          raise ArgumentError,
+          raise Pgbus::ConfigurationError,
                 "event_consumers must be an Array or nil — got #{value.class}"
         end
     end
@@ -654,13 +669,15 @@ module Pgbus
     # +c.workers "..."+ followed by +c.capsule :name, ...+ appends the
     # named capsule to the list parsed from the string.
     def capsule(name, queues:, threads:, **)
-      raise ArgumentError, "capsule queues must be a non-empty Array" unless queues.is_a?(Array) && queues.any?
-      raise ArgumentError, "capsule threads must be a positive Integer" unless threads.is_a?(Integer) && threads.positive?
+      raise Pgbus::ConfigurationError, "capsule queues must be a non-empty Array" unless queues.is_a?(Array) && queues.any?
+      raise Pgbus::ConfigurationError, "capsule threads must be a positive Integer" unless threads.is_a?(Integer) && threads.positive?
 
       normalized_name = name.to_s
       @workers ||= []
 
-      raise ArgumentError, "capsule #{name.inspect} is already defined" if @workers.any? { |c| capsule_name(c) == normalized_name }
+      if @workers.any? { |c| capsule_name(c) == normalized_name }
+        raise Pgbus::ConfigurationError, "capsule #{name.inspect} is already defined"
+      end
 
       validate_no_queue_overlap!(queues)
 
@@ -696,9 +713,9 @@ module Pgbus
     #   Array         — list of roles to boot
     #
     # Each role is normalized to a downcased symbol and validated against
-    # VALID_ROLES. Unknown role names raise ArgumentError immediately so
-    # typos like `[:workres]` fail loud at boot rather than leaving the
-    # supervisor idling with no children.
+    # VALID_ROLES. Unknown role names raise Pgbus::ConfigurationError
+    # immediately so typos like `[:workres]` fail loud at boot rather than
+    # leaving the supervisor idling with no children.
     def roles=(value)
       if value.nil?
         @roles = nil
@@ -708,7 +725,7 @@ module Pgbus
       normalized = Array(value).map { |r| r.to_s.downcase.to_sym }.uniq
       invalid = normalized - VALID_ROLES
       if invalid.any?
-        raise ArgumentError,
+        raise Pgbus::ConfigurationError,
               "invalid role(s) #{invalid.inspect} — valid roles are: #{VALID_ROLES.join(", ")}"
       end
 
@@ -925,14 +942,24 @@ module Pgbus
         return validate_positive_duration!(value, name)
       end
 
-      raise ArgumentError,
+      raise Pgbus::ConfigurationError,
             "#{name} must be a Numeric (seconds), ActiveSupport::Duration, or nil to disable, got #{value.inspect}"
     end
 
     def validate_positive_duration!(numeric, name)
-      raise ArgumentError, "#{name} must be a positive number, got #{numeric}" unless numeric.positive?
+      raise Pgbus::ConfigurationError, "#{name} must be a positive number, got #{numeric}" unless numeric.positive?
 
       numeric
+    end
+
+    # ExecutionPools.normalize_mode raises ArgumentError for an unknown mode —
+    # that's the right shape for the factory's own callers, but a bad
+    # execution_mode reaching here is a configuration failure, so re-raise it
+    # as ConfigurationError to match the rest of validate! (issue #282).
+    def validate_execution_mode!(mode)
+      ExecutionPools.normalize_mode(mode)
+    rescue ArgumentError => e
+      raise Pgbus::ConfigurationError, e.message
     end
 
     # Symbolize the top-level keys of a worker/consumer config entry so every
@@ -940,7 +967,7 @@ module Pgbus
     # yields string keys; the Ruby DSL and +capsule+ builder yield symbols.
     # Entries are flat hashes with array/scalar values — no deep recursion.
     def normalize_entry(entry, group:)
-      raise ArgumentError, "#{group} entry must be a Hash, got #{entry.class}: #{entry.inspect}" unless entry.is_a?(Hash)
+      raise Pgbus::ConfigurationError, "#{group} entry must be a Hash, got #{entry.class}: #{entry.inspect}" unless entry.is_a?(Hash)
 
       entry.transform_keys(&:to_sym)
     end
@@ -985,13 +1012,13 @@ module Pgbus
       return if existing_queues.empty?
 
       if existing_queues.include?(CapsuleDSL::WILDCARD)
-        raise ArgumentError,
+        raise Pgbus::ConfigurationError,
               "an existing named capsule already uses '*' (matches every queue) — " \
               "the new capsule's queues #{new_queues.inspect} would overlap with it"
       end
 
       if new_queues.include?(CapsuleDSL::WILDCARD)
-        raise ArgumentError,
+        raise Pgbus::ConfigurationError,
               "the new capsule uses '*' (matches every queue) but other named capsules " \
               "are already defined with queues #{existing_queues.inspect} — " \
               "the wildcard would overlap with all of them"
@@ -1000,7 +1027,7 @@ module Pgbus
       conflict = new_queues.find { |q| existing_queues.include?(q) }
       return unless conflict
 
-      raise ArgumentError,
+      raise Pgbus::ConfigurationError,
             "queue #{conflict.inspect} is already assigned to another named capsule — " \
             "named capsules cannot share queues"
     end
@@ -1011,7 +1038,7 @@ module Pgbus
       entries.sum do |entry|
         threads = entry[:threads] || default_threads
         unless threads.is_a?(Integer) && threads.positive?
-          raise ArgumentError,
+          raise Pgbus::ConfigurationError,
                 "#{group} threads must be a positive integer, got #{threads.inspect}"
         end
 

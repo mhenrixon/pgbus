@@ -55,7 +55,7 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
     it "raises when pool is shutting down" do
       pool.shutdown
       sleep 0.05
-      expect { pool.post { nil } }.to raise_error(RuntimeError, /shutting down/)
+      expect { pool.post { nil } }.to raise_error(Pgbus::ExecutionPoolError, /shutting down/)
     end
 
     it "raises when pool is at capacity" do
@@ -64,7 +64,7 @@ RSpec.describe Pgbus::ExecutionPools::AsyncPool do
       capacity.times { pool.post { barrier.wait(5) } }
       sleep 0.05
 
-      expect { pool.post { nil } }.to raise_error(RuntimeError, /at capacity/)
+      expect { pool.post { nil } }.to raise_error(Pgbus::ExecutionPoolError, /at capacity/)
       barrier.set
     end
   end

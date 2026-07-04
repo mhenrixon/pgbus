@@ -37,7 +37,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects invalid values" do
       expect { config.streams_default_broadcast_mode = :bogus }
-        .to raise_error(ArgumentError, /streams_default_broadcast_mode/)
+        .to raise_error(Pgbus::ConfigurationError, /streams_default_broadcast_mode/)
     end
   end
 
@@ -49,12 +49,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects non-positive streams_orphan_sweep_interval" do
       config.streams_orphan_sweep_interval = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_orphan_sweep_interval/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_orphan_sweep_interval/)
     end
 
     it "rejects non-positive streams_orphan_threshold" do
       config.streams_orphan_threshold = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_orphan_threshold/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_orphan_threshold/)
     end
 
     it "accepts nil streams_orphan_sweep_interval (disables sweeper)" do

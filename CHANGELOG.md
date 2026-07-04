@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The error hierarchy is unified under `Pgbus::Error` for the 1.0 API freeze.** Several call sites raised bare stdlib errors that no `rescue Pgbus::Error` could catch, freezing an inconsistent contract into 1.0. Now: **`Configuration#validate!` and every config setter raise `Pgbus::ConfigurationError`** (was `ArgumentError`) — this is the one that can break existing code: a `rescue ArgumentError` around `Pgbus.configure` or a boot-time config read will no longer catch config failures; switch to `rescue Pgbus::Error` (or `rescue Pgbus::ConfigurationError`). The ActiveJob adapter's `perform_all_later` msg_id-count mismatch now raises **`Pgbus::EnqueueError`** (new, was `RuntimeError`); `ExecutionPools::AsyncPool` shutdown/at-capacity raises now use **`Pgbus::ExecutionPoolError`** (new, was `RuntimeError`); `Serializer#locate_global_id` GlobalID rejections raise **`Pgbus::SerializationError`** (was `ArgumentError`). Four error classes that bypassed the base — `PgmqSchema::VersionNotFoundError`, `Streams::SignedName::InvalidSignedName`/`MissingSecret`, and `Generators::ConfigConverter::Error` — are re-parented under `Pgbus::Error`. Three classes that reject a malformed *argument shape* — `Configuration::CapsuleDSL::ParseError`, `Streams::Cursor::InvalidCursor`, `Streams::StreamNameTooLong` — **deliberately stay `ArgumentError` subclasses**; the policy ("argument-shape errors are `ArgumentError`, operational errors are `Pgbus::Error`") is documented in `lib/pgbus.rb` and pinned by `spec/pgbus/error_hierarchy_spec.rb`. Messages are unchanged. Refs #282.
+
 ### Added
 
 ### Changed

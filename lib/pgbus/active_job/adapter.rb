@@ -151,7 +151,7 @@ module Pgbus
         msg_ids = Pgbus.client.send_batch(queue, payloads)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
-          raise "Pgbus batch enqueue failed: expected #{jobs.size} ids, got #{msg_ids&.size || 0}"
+          raise Pgbus::EnqueueError, "Pgbus batch enqueue failed: expected #{jobs.size} ids, got #{msg_ids&.size || 0}"
         end
 
         jobs.zip(msg_ids).each { |job, id| job.provider_job_id = id }

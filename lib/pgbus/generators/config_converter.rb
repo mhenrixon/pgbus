@@ -30,7 +30,7 @@ module Pgbus
     # generator's CLI wrapper writes the new initializer and tells the
     # user to delete the YAML when ready.
     class ConfigConverter
-      class Error < StandardError; end
+      class Error < Pgbus::Error; end
 
       # Setters that accept ActiveSupport::Duration (PR 5).
       DURATION_SETTINGS = %w[

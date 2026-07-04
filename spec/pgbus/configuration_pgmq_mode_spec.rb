@@ -22,7 +22,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects invalid modes" do
       expect { config.pgmq_schema_mode = :invalid }
-        .to raise_error(ArgumentError, /invalid/)
+        .to raise_error(Pgbus::ConfigurationError, /invalid/)
     end
   end
 end

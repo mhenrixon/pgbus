@@ -32,7 +32,7 @@ RSpec.describe Pgbus::Configuration do
     end
 
     it "raises for invalid formats" do
-      expect { config.log_format = :xml }.to raise_error(ArgumentError, /Invalid log_format/)
+      expect { config.log_format = :xml }.to raise_error(Pgbus::ConfigurationError, /Invalid log_format/)
     end
 
     it "accepts string values" do

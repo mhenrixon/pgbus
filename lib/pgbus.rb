@@ -10,6 +10,24 @@ module Pgbus
   # this to be configurable.
   DEAD_LETTER_SUFFIX = "_dlq"
 
+  # Error-hierarchy policy (the 1.0 contract, issue #282):
+  #
+  #   * OPERATIONAL errors — a pgbus subsystem failed to do its job at runtime
+  #     (bad configuration, a pool that's shutting down, a batch enqueue that
+  #     came back short, a rejected GlobalID, a missing PGMQ version) — descend
+  #     from Pgbus::Error. `rescue Pgbus::Error` is meant to catch every one of
+  #     them; that is the whole point of the hierarchy.
+  #
+  #   * ARGUMENT-SHAPE errors — the caller handed a method a malformed argument
+  #     (a stream name too long for the queue-name budget, an unparseable
+  #     cursor, a capsule DSL line that doesn't parse) — stay ArgumentError
+  #     subclasses. That's what ArgumentError means, and rescuing it is the
+  #     caller's responsibility, not an operational concern. These live in
+  #     their own files: Streams::StreamNameTooLong, Streams::Cursor::InvalidCursor,
+  #     Configuration::CapsuleDSL::ParseError.
+  #
+  # When adding a new error class, decide which half it belongs to and parent
+  # it accordingly — do not default to StandardError.
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class SerializationError < Error; end
@@ -19,6 +37,16 @@ module Pgbus
   class JobNotUnique < Error; end
   class SchemaNotReady < Error; end
   class ReadTimeoutError < Error; end
+
+  # Raised by the ActiveJob adapter when a batch enqueue (perform_all_later)
+  # comes back with a msg_id count that doesn't match the number of jobs sent —
+  # a data-integrity signal that some jobs may not have been persisted.
+  class EnqueueError < Error; end
+
+  # Raised by the execution pools when work can't be accepted: the pool is
+  # shutting down, or it's momentarily at capacity. Consumer-reachable during
+  # job submission, so it descends from Pgbus::Error rather than RuntimeError.
+  class ExecutionPoolError < Error; end
 
   # Raised by Client read paths when the in-memory connection-health circuit
   # breaker (Client::ConnectionHealth) is open: the database has failed enough

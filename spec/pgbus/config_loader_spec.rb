@@ -111,14 +111,14 @@ RSpec.describe Pgbus::ConfigLoader do
       expect(entry).to eq(topics: %w[orders.*], threads: 4)
     end
 
-    it "raises ArgumentError naming the offending key for an invalid value" do
+    it "raises Pgbus::ConfigurationError naming the offending key for an invalid value" do
       yaml = <<~YAML
         test:
           visibility_timeout: 0
       YAML
       expect do
         with_yaml(yaml) { |path| described_class.load(path, env: "test") }
-      end.to raise_error(ArgumentError, /visibility_timeout/)
+      end.to raise_error(Pgbus::ConfigurationError, /visibility_timeout/)
     end
 
     it "raises for an invalid value in a flat (un-sectioned) file" do
@@ -127,7 +127,7 @@ RSpec.describe Pgbus::ConfigLoader do
       YAML
       expect do
         with_yaml(yaml) { |path| described_class.load(path, env: "development") }
-      end.to raise_error(ArgumentError, /polling_interval/)
+      end.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
     end
 
     it "loads a valid file without raising" do
@@ -379,7 +379,7 @@ RSpec.describe Pgbus::ConfigLoader do
       Pgbus.reset!
       expect do
         described_class.apply({ "polling_interval" => 0 })
-      end.to raise_error(ArgumentError, /polling_interval/)
+      end.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
     end
 
     it "does not validate when eager_validation is disabled" do
