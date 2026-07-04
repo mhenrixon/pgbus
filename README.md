@@ -178,18 +178,22 @@ Publish events with AMQP-style topic routing:
 
 ```ruby
 # Publish an event
-Pgbus::EventBus::Publisher.publish(
+Pgbus.publish(
   "orders.created",
   { order_id: order.id, total: order.total }
 )
 
 # Publish with delay
-Pgbus::EventBus::Publisher.publish_later(
+Pgbus.publish_later(
   "invoices.due",
   { invoice_id: invoice.id },
   delay: 30.days
 )
 ```
+
+`Pgbus.publish` / `Pgbus.publish_later` are top-level shortcuts for
+`Pgbus::EventBus::Publisher.publish` / `.publish_later` (symmetric with
+`Pgbus.stream`). The long form still works.
 
 Subscribe with handlers:
 

@@ -209,6 +209,24 @@ module Pgbus
       Streams::Key.stream_key!(key)
     end
 
+    # Publish an event to the bus — the top-level shortcut for
+    # `Pgbus::EventBus::Publisher.publish`, symmetric with `Pgbus.stream`.
+    #
+    #   Pgbus.publish("orders.created", { order_id: 42 })
+    #   Pgbus.publish("orders.created", order, headers: { "x-trace" => id }, delay: 30)
+    def publish(routing_key, payload, headers: nil, delay: 0)
+      EventBus::Publisher.publish(routing_key, payload, headers: headers, delay: delay)
+    end
+
+    # Publish an event with a delay. Mirrors
+    # `Pgbus::EventBus::Publisher.publish_later`; `delay:` is required (a
+    # publish_later with no delay is just publish).
+    #
+    #   Pgbus.publish_later("orders.reminder", { order_id: 42 }, delay: 1.hour)
+    def publish_later(routing_key, payload, delay:, headers: nil)
+      EventBus::Publisher.publish_later(routing_key, payload, delay: delay, headers: headers)
+    end
+
     def reset!
       @client&.close
       @client = nil
