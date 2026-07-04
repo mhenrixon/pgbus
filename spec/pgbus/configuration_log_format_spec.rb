@@ -5,6 +5,12 @@ require "spec_helper"
 RSpec.describe Pgbus::Configuration do
   subject(:config) { described_class.new }
 
+  # A fresh Configuration defaults its logger to the shared Rails.logger, so
+  # setting #log_format= would mutate that global logger's formatter and leak
+  # into request specs (Rails::Rack::Logger#push_tags then fails on the bare
+  # Pgbus formatter). Give the config-under-test an isolated logger instead.
+  before { config.logger = Logger.new(IO::NULL) }
+
   describe "#log_format" do
     it "defaults to :text" do
       expect(config.log_format).to eq(:text)

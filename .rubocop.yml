@@ -90,6 +90,9 @@ RSpec/InstanceVariable:
     # alternative (shared_context with around hooks) is much more verbose
     # for the same semantics.
     - spec/integration/**/*
+    # Request specs share @stub_data_source, set by a before(:each) hook in
+    # spec/support/pgbus/request_spec_setup.rb — same idiom as system specs.
+    - spec/requests/**/*
 
 RSpec/BeforeAfterAll:
   Exclude:
@@ -105,3 +108,7 @@ Naming/PredicateMethod:
 Lint/UnusedMethodArgument:
   Exclude:
     - spec/system/support/**/*
+    # The shared StubDataSource mirrors Web::DataSource's keyword signatures
+    # (minutes:, page:, per_page:) that controllers pass through, even where
+    # the in-memory stub ignores them.
+    - spec/support/pgbus/stub_data_source.rb
