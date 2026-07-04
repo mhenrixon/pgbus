@@ -53,7 +53,8 @@ module Pgbus
     # Priority queues
     attr_accessor :priority_levels, :default_priority
 
-    # Grouped reads (PGMQ v1.11.0+ FIFO grouping).
+    # Grouped reads (PGMQ v1.11.0+ FIFO grouping). EXPERIMENTAL — exempt from
+    # the 1.0 stability promise; the shape may change in a minor release.
     # nil = disabled (default read_batch behavior).
     # :fifo = use read_grouped (drains oldest group first, throughput-optimized).
     # :round_robin = use read_grouped_rr (fair round-robin across groups).
@@ -295,6 +296,7 @@ module Pgbus
       # PG keepalive interval.
       @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
+      # EXPERIMENTAL — exempt from the 1.0 stability promise.
       @streams_falcon_streaming_body = false
       # Opt-in: when true, the Dispatcher writes one row to
       # pgbus_stream_stats per broadcast/connect/disconnect. Default
@@ -309,7 +311,8 @@ module Pgbus
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
       @streams_durable_patterns = []
-      # Streams matching these patterns get connection-driven presence:
+      # EXPERIMENTAL (both presence settings) — exempt from the 1.0 stability
+      # promise. Streams matching these patterns get connection-driven presence:
       # auto-join on SSE connect, auto-leave on disconnect, touch on the
       # keepalive heartbeat (issue #169). Empty by default (opt-in).
       @streams_presence_patterns = []
@@ -367,6 +370,13 @@ module Pgbus
       end
 
       @log_format = format
+
+      # Only install pgbus's formatter when the logger still carries a nil or
+      # pgbus-installed formatter. A user who set a custom logger with a custom
+      # formatter keeps it — log_format only records the intended format for
+      # pgbus's own defaults, it must not silently clobber their formatting.
+      return unless pgbus_installable_formatter?(@logger&.formatter)
+
       @logger.formatter = case format
                           when :json then LogFormatter::JSON.new
                           when :text then LogFormatter::Text.new
@@ -603,9 +613,11 @@ module Pgbus
     #     c.workers "*: 5"
     #     c.workers "critical: 5; default, mailers: 10"
     #
-    #   Array  — legacy explicit form. Each entry is a Hash with :queues
+    #   Array  — explicit form. Each entry is a Hash with :queues
     #            and :threads (and optionally :name, :single_active_consumer,
-    #            :consumer_priority, :prefetch_limit).
+    #            :consumer_priority, :prefetch_limit). This is the only way to
+    #            express N identical anonymous capsules, so it is supported
+    #            permanently alongside the String DSL.
     #
     #     c.workers [{ queues: %w[default], threads: 5 }]
     #
@@ -625,15 +637,15 @@ module Pgbus
     #   "*: 5"                       -> one anonymous capsule (wildcard never names)
     #   "*: 3; *: 3; *: 3"           -> three anonymous capsules — legal,
     #                                   represents "3 forks all reading every
-    #                                   queue", restoring the legacy YAML
-    #                                   `5 × {queues: ["*"], threads: 3}` shape
+    #                                   queue", the same shape as the Array form
+    #                                   `3 × {queues: ["*"], threads: 3}`
     #   "default: 5; default: 3"     -> two anonymous capsules — same logic
     #
-    # The point of the carve-out is the legacy "I want N forks of the same
-    # worker pool" pattern: it must keep working since PGMQ tolerates it
-    # natively (multiple processes reading the same queue with FOR UPDATE
-    # SKIP LOCKED). The CLI's --capsule selector only matches NAMED
-    # capsules, so anonymous duplicates can't be ambiguously addressed.
+    # The point of the carve-out is the "I want N forks of the same worker
+    # pool" pattern: it must keep working since PGMQ tolerates it natively
+    # (multiple processes reading the same queue with FOR UPDATE SKIP LOCKED).
+    # The CLI's --capsule selector only matches NAMED capsules, so anonymous
+    # duplicates can't be ambiguously addressed.
     def workers=(value)
       @workers = case value
                  when nil
@@ -645,7 +657,7 @@ module Pgbus
                    value.map { |entry| normalize_entry(entry, group: "worker") }
                  else
                    raise Pgbus::ConfigurationError,
-                         "workers must be a String (DSL), Array (legacy form), or nil — got #{value.class}"
+                         "workers must be a String (DSL), Array (explicit form), or nil — got #{value.class}"
                  end
     end
 
@@ -954,6 +966,15 @@ module Pgbus
     end
 
     private
+
+    # True when log_format= may install its own formatter: no formatter set yet
+    # (nil), or the current one is a pgbus formatter we installed. A custom
+    # formatter (any other object) is left untouched.
+    def pgbus_installable_formatter?(formatter)
+      formatter.nil? ||
+        formatter.is_a?(LogFormatter::Text) ||
+        formatter.is_a?(LogFormatter::JSON)
+    end
 
     # Log a one-time deprecation warning for a renamed config key. Deduped per
     # key on this Configuration instance so a setter called on every request

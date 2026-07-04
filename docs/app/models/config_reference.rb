@@ -23,7 +23,7 @@ module ConfigReference
       { name: "default_queue", type: "String", default: '"default"', desc: "Queue for jobs without an explicit queue." },
       { name: "priority_levels", type: "Integer, nil", default: "nil", desc: "Number of priority sub-queues (2–10); nil disables." },
       { name: "default_priority", type: "Integer", default: "1", desc: "Priority for jobs without an explicit one." },
-      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue." }
+      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise." }
     ],
     "Workers" => [
       { name: "workers", type: "String / Array", default: "default: 5", desc: "Worker capsule definitions (string DSL or array)." },
@@ -108,11 +108,11 @@ module ConfigReference
       { name: "streams_max_connections", type: "Integer", default: "2000", desc: "Max SSE connections per web-server process." },
       { name: "streams_idle_timeout", type: "Numeric", default: "3600", desc: "Close idle SSE connections after N seconds." },
       { name: "streams_path", type: "String, nil", default: "nil", desc: "Custom SSE endpoint path (auto-detected from mount)." },
-      { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack." },
+      { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack. Experimental — exempt from the 1.0 stability promise." },
       { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
       { name: "streams_test_mode", type: "Boolean", default: "false", desc: "Return a stub SSE response (auto-enabled by the test helpers)." },
-      { name: "streams_presence_patterns", type: "Array", default: "[]", desc: "Streams (exact string or Regexp) that get connection-driven presence: auto-join on connect, auto-leave on disconnect, heartbeat touch." },
-      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor." }
+      { name: "streams_presence_patterns", type: "Array", default: "[]", desc: "Streams (exact string or Regexp) that get connection-driven presence: auto-join on connect, auto-leave on disconnect, heartbeat touch. Experimental — exempt from the 1.0 stability promise." },
+      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor. Experimental — exempt from the 1.0 stability promise." }
     ],
     "Validation" => [
       { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },

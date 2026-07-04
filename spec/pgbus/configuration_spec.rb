@@ -411,7 +411,7 @@ RSpec.describe Pgbus::Configuration do
   end
 
   describe "#workers=" do
-    context "when given an Array (legacy form)" do
+    context "when given an Array (explicit form)" do
       it "stores the array unchanged" do
         config.workers = [{ queues: %w[default], threads: 5 }]
         expect(config.workers).to eq([{ queues: %w[default], threads: 5 }])
@@ -1860,6 +1860,43 @@ RSpec.describe Pgbus::Configuration do
       config.recurring_tasks_file = "config/only.yml"
       expect(config.recurring_tasks_files).to eq(["config/only.yml"])
       expect(Pgbus.logger).not_to have_received(:warn)
+    end
+  end
+
+  describe "#log_format=" do
+    it "installs the matching pgbus formatter when the logger has none" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = nil
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
+    it "replaces a pgbus-installed formatter with the new format" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = Pgbus::LogFormatter::Text.new
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
+    it "does not clobber a custom (non-pgbus) formatter on the logger" do
+      custom = ->(_severity, _time, _progname, msg) { "custom: #{msg}\n" }
+      logger = Logger.new(IO::NULL)
+      logger.formatter = custom
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be(custom)
+    end
+
+    it "still validates the format regardless of the formatter guard" do
+      expect { config.log_format = :xml }.to raise_error(ArgumentError, /log_format/)
     end
   end
 end
