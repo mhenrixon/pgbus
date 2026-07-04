@@ -87,6 +87,8 @@ def bootstrap_integration_tables(conn)
       );
       CREATE INDEX idx_pgbus_outbox_unpublished
         ON pgbus_outbox_entries (published_at) WHERE published_at IS NULL;
+      CREATE INDEX idx_pgbus_outbox_cleanup
+        ON pgbus_outbox_entries (published_at) WHERE published_at IS NOT NULL;
     SQL
   end
 
@@ -104,6 +106,8 @@ def bootstrap_integration_tables(conn)
       );
       CREATE UNIQUE INDEX idx_pgbus_processed_events_unique
         ON pgbus_processed_events (event_id, handler_class);
+      CREATE INDEX idx_pgbus_processed_events_cleanup
+        ON pgbus_processed_events (processed_at);
     SQL
   end
 
@@ -129,6 +133,7 @@ def bootstrap_integration_tables(conn)
         finished_at TIMESTAMP
       );
       CREATE UNIQUE INDEX idx_pgbus_batches_batch_id ON pgbus_batches (batch_id);
+      CREATE INDEX idx_pgbus_batches_status ON pgbus_batches (status);
     SQL
   end
 rescue StandardError => e
