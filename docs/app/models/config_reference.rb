@@ -94,7 +94,7 @@ module ConfigReference
       { name: "health_port", type: "Integer, nil", default: "nil", desc: "Port for HTTP liveness/readiness probes; nil disables." },
       { name: "health_bind", type: "String", default: '"127.0.0.1"', desc: "Bind address for the health server." },
       { name: "stall_threshold", type: "Numeric", default: "300", desc: "Seconds without progress before a worker is stalled." },
-      { name: "read_timeout", type: "Numeric", default: "5", desc: "Read timeout for worker fetches." }
+      { name: "read_timeout", type: "Numeric", default: "30", desc: "Read timeout for worker fetches." }
     ],
     "Streams (SSE)" => [
       { name: "streams_enabled", type: "Boolean", default: "true", desc: "Enable the SSE streams transport." },
