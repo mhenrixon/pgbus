@@ -1,0 +1,185 @@
+name: Dependency watch
+
+# Nightly check for upstream drift on the two hand-tracked dependencies pgbus
+# vendors/pins: the PGMQ SQL schema (lib/pgbus/pgmq_schema/pgmq_v*.sql) and the
+# pgmq-ruby gem (pinned `~> 0.7.0` in pgbus.gemspec). Nothing else watches these
+# upstreams, so a newer PGMQ release or pgmq-ruby release can sit unnoticed.
+#
+# This workflow is notification-only: it never vendors SQL or bumps the gem. On
+# drift it opens a GitHub issue (the durable, deduplicating record -- dedup is by
+# exact issue title, so a second run with the same drift is a no-op) and a
+# best-effort Slack post via the SLACK_WEBHOOK_URL repo secret. Both checks are
+# plain bash + gh api/curl + jq -- no Ruby application boot -- except for a
+# `bundle lock` to resolve the actual locked pgmq-ruby version, since
+# Gemfile.lock is gitignored for this gem and never committed to the repo.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  dependency-watch:
+    runs-on: ubuntu-latest
+    name: Check upstream releases
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: false
+
+      - name: Resolve locked pgmq-ruby version
+        # `bundle lock` only resolves dependencies and writes Gemfile.lock (which
+        # is gitignored, so a fresh checkout never has one) -- it does not install
+        # gems or boot the pgbus application, keeping this a pure version lookup.
+        run: bundle lock
+
+      - name: Check vendored PGMQ SQL against upstream
+        id: pgmq
+        run: |
+          set -euo pipefail
+
+          # Source of truth is the vendored filenames -- never hardcode the
+          # current version here.
+          vendored=$(
+            for f in lib/pgbus/pgmq_schema/pgmq_v*.sql; do
+              basename "$f" .sql | sed -E 's/^pgmq_v//'
+            done | sort -V | tail -n1
+          )
+
+          latest_tag=$(curl -sf https://api.github.com/repos/pgmq/pgmq/releases/latest | jq -r '.tag_name')
+          latest="${latest_tag#v}"
+          release_url="https://github.com/pgmq/pgmq/releases/tag/${latest_tag}"
+
+          echo "Vendored PGMQ: $vendored"
+          echo "Latest PGMQ upstream: $latest ($latest_tag)"
+
+          drift=false
+          if [ "$vendored" != "$latest" ]; then
+            highest=$(printf '%s\n%s\n' "$vendored" "$latest" | sort -V | tail -n1)
+            [ "$highest" = "$latest" ] && drift=true
+          fi
+
+          {
+            echo "drift=$drift"
+            echo "current=$vendored"
+            echo "latest=$latest"
+            echo "release_url=$release_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check pgmq-ruby gem against RubyGems
+        id: pgmq_ruby
+        run: |
+          set -euo pipefail
+
+          current=$(grep -E "^    pgmq-ruby \(" Gemfile.lock | sed -E 's/^    pgmq-ruby \(([0-9.]+)\)$/\1/')
+          if [ -z "$current" ]; then
+            echo "::error::Could not find a locked pgmq-ruby version in Gemfile.lock"
+            exit 1
+          fi
+
+          latest=$(curl -sf https://rubygems.org/api/v1/gems/pgmq-ruby.json | jq -r '.version')
+          release_url="https://rubygems.org/gems/pgmq-ruby/versions/${latest}"
+
+          echo "Locked pgmq-ruby: $current"
+          echo "Latest pgmq-ruby upstream: $latest"
+
+          drift=false
+          if [ "$current" != "$latest" ]; then
+            highest=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)
+            [ "$highest" = "$latest" ] && drift=true
+          fi
+
+          {
+            echo "drift=$drift"
+            echo "current=$current"
+            echo "latest=$latest"
+            echo "release_url=$release_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report PGMQ drift
+        if: steps.pgmq.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEP: "PGMQ"
+          CURRENT: ${{ steps.pgmq.outputs.current }}
+          LATEST: ${{ steps.pgmq.outputs.latest }}
+          RELEASE_URL: ${{ steps.pgmq.outputs.release_url }}
+          BODY_DETAIL: >-
+            Vendored SQL under `lib/pgbus/pgmq_schema/` is behind the upstream
+            [pgmq/pgmq](https://github.com/pgmq/pgmq) release. Vendor the new
+            schema following `lib/pgbus/pgmq_schema.rb` conventions once
+            reviewed -- this issue does not auto-vendor anything.
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          title="Upstream release: $DEP $LATEST"
+
+          existing=$(gh issue list --search "in:title \"$title\"" --state all --json title --jq ".[] | select(.title == \"$title\") | .title")
+
+          if [ -n "$existing" ]; then
+            echo "Issue already exists for $title -- skipping create"
+          else
+            gh issue create \
+              --title "$title" \
+              --body "$(printf '%s\n\n**Current (vendored):** %s\n**Latest upstream:** %s\n**Release notes:** %s\n' "$BODY_DETAIL" "$CURRENT" "$LATEST" "$RELEASE_URL")"
+          fi
+
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "SLACK_WEBHOOK_URL not set -- skipping Slack notification"
+          else
+            curl -sf -X POST -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg dep "$DEP" \
+                --arg current "$CURRENT" \
+                --arg latest "$LATEST" \
+                --arg url "$RELEASE_URL" \
+                '{text: ("Upstream release: \($dep) \($latest) (current: \($current)) -- \($url)")}')" \
+              "$SLACK_WEBHOOK_URL" || echo "Slack notification failed -- continuing"
+          fi
+
+      - name: Report pgmq-ruby drift
+        if: steps.pgmq_ruby.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEP: "pgmq-ruby"
+          CURRENT: ${{ steps.pgmq_ruby.outputs.current }}
+          LATEST: ${{ steps.pgmq_ruby.outputs.latest }}
+          RELEASE_URL: ${{ steps.pgmq_ruby.outputs.release_url }}
+          BODY_DETAIL: >-
+            Gemfile.lock is behind the upstream
+            [pgmq-ruby](https://rubygems.org/gems/pgmq-ruby) gem (pinned
+            `~> 0.7.0` in `pgbus.gemspec`). Review the changelog before
+            bumping the constraint -- this issue does not auto-bump anything.
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          title="Upstream release: $DEP $LATEST"
+
+          existing=$(gh issue list --search "in:title \"$title\"" --state all --json title --jq ".[] | select(.title == \"$title\") | .title")
+
+          if [ -n "$existing" ]; then
+            echo "Issue already exists for $title -- skipping create"
+          else
+            gh issue create \
+              --title "$title" \
+              --body "$(printf '%s\n\n**Current (locked):** %s\n**Latest upstream:** %s\n**Release notes:** %s\n' "$BODY_DETAIL" "$CURRENT" "$LATEST" "$RELEASE_URL")"
+          fi
+
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "SLACK_WEBHOOK_URL not set -- skipping Slack notification"
+          else
+            curl -sf -X POST -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg dep "$DEP" \
+                --arg current "$CURRENT" \
+                --arg latest "$LATEST" \
+                --arg url "$RELEASE_URL" \
+                '{text: ("Upstream release: \($dep) \($latest) (current: \($current)) -- \($url)")}')" \
+              "$SLACK_WEBHOOK_URL" || echo "Slack notification failed -- continuing"
+          fi
