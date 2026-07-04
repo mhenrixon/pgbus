@@ -458,6 +458,10 @@ fr:
           metadata: Métadonnées
           pid: PID
           status: Statut
+        rates:
+          dequeued: retirés
+          failed: échoués
+          processed: traités
     queues:
       destroy:
         success: File d'attente %{name} supprimée.

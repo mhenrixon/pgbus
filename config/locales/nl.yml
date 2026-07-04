@@ -458,6 +458,10 @@ nl:
           metadata: Metadata
           pid: PID
           status: Status
+        rates:
+          dequeued: opgehaald
+          failed: mislukt
+          processed: verwerkt
     queues:
       destroy:
         success: Wachtrij %{name} verwijderd.

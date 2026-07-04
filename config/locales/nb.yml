@@ -458,6 +458,10 @@ nb:
           metadata: Metadata
           pid: PID
           status: Status
+        rates:
+          dequeued: hentet
+          failed: mislyktes
+          processed: behandlet
     queues:
       destroy:
         success: Køen %{name} slettet.

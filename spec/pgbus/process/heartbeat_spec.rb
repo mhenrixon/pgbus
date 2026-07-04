@@ -70,6 +70,81 @@ RSpec.describe Pgbus::Process::Heartbeat do
         expect { heartbeat.beat }.not_to raise_error
       end
     end
+
+    context "with a metadata_supplier" do
+      let(:scope) { double("scope", update_all: 1) }
+      let(:heartbeat) do
+        described_class.new(
+          kind: "worker",
+          metadata: { queues: %w[default] },
+          metadata_supplier: -> { { "rates" => { "processed" => 12.4 } } }
+        )
+      end
+
+      before do
+        allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(scope)
+        heartbeat.start
+      end
+
+      it "merges the supplier hash into persisted metadata" do
+        heartbeat.beat
+
+        expect(scope).to have_received(:update_all) do |args|
+          expect(args[:metadata]).to include(
+            queues: %w[default],
+            "rates" => { "processed" => 12.4 }
+          )
+        end
+      end
+
+      it "merges supplier metadata alongside loop_tick_at" do
+        heartbeat = described_class.new(
+          kind: "worker",
+          metadata: { queues: %w[default] },
+          metadata_supplier: -> { { "rates" => { "processed" => 1.0 } } },
+          loop_tick_supplier: -> { 123.45 }
+        )
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(scope)
+        heartbeat.start
+        heartbeat.beat
+
+        expect(scope).to have_received(:update_all) do |args|
+          expect(args[:metadata]).to include(
+            "loop_tick_at" => 123.45,
+            "rates" => { "processed" => 1.0 }
+          )
+        end
+      end
+    end
+
+    context "when the metadata_supplier raises" do
+      let(:scope) { double("scope", update_all: 1) }
+      let(:heartbeat) do
+        described_class.new(
+          kind: "worker",
+          metadata: { queues: %w[default] },
+          metadata_supplier: -> { raise "supplier boom" }
+        )
+      end
+
+      before do
+        allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(scope)
+        heartbeat.start
+      end
+
+      it "continues without raising" do
+        expect { heartbeat.beat }.not_to raise_error
+      end
+
+      it "logs a warning when the supplier fails" do
+        allow(Pgbus.logger).to receive(:warn)
+        heartbeat.beat
+
+        expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
   end
 
   describe "#stop" do

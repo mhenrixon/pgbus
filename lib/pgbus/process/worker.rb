@@ -661,7 +661,8 @@ module Pgbus
             execution_mode: @execution_mode, consumer_priority: @consumer_priority
           },
           on_beat: -> { on_heartbeat },
-          loop_tick_supplier: -> { @loop_tick_at.get }
+          loop_tick_supplier: -> { @loop_tick_at.get },
+          metadata_supplier: -> { throughput_metadata }
         )
         @heartbeat.start
       end
@@ -685,6 +686,21 @@ module Pgbus
         return if stats.empty?
 
         Pgbus::Instrumentation.instrument("pgbus.client.pool", stats)
+      end
+
+      # Per-worker throughput persisted into pgbus_processes.metadata on every
+      # heartbeat so the dashboard can show cluster-wide live rates. Called by
+      # the Heartbeat's metadata_supplier after on_beat (snapshot!) has
+      # refreshed the rate counter, so these rates are current. Keys are
+      # stringified because the value round-trips through JSON in the metadata
+      # column.
+      def throughput_metadata
+        {
+          "rates" => @rate_counter.rates.transform_keys(&:to_s),
+          "jobs_processed" => @jobs_processed.value,
+          "jobs_failed" => @jobs_failed.value,
+          "in_flight" => @in_flight.value
+        }
       end
 
       def shutdown

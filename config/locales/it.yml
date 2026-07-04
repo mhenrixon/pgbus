@@ -458,6 +458,10 @@ it:
           metadata: Metadati
           pid: PID
           status: Stato
+        rates:
+          dequeued: prelevati
+          failed: falliti
+          processed: elaborati
     queues:
       destroy:
         success: Coda %{name} eliminata.

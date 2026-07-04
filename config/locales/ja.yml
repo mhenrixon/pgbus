@@ -458,6 +458,10 @@ ja:
           metadata: メタデータ
           pid: PID
           status: ステータス
+        rates:
+          dequeued: 取得
+          failed: 失敗
+          processed: 処理
     queues:
       destroy:
         success: キュー %{name} を削除しました。

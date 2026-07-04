@@ -458,6 +458,10 @@ sv:
           metadata: Metadata
           pid: PID
           status: Status
+        rates:
+          dequeued: hämtade
+          failed: misslyckade
+          processed: bearbetade
     queues:
       destroy:
         success: Kön %{name} borttagen.

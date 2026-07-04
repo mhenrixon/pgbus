@@ -458,6 +458,10 @@ da:
           metadata: Metadata
           pid: PID
           status: Status
+        rates:
+          dequeued: hentet
+          failed: mislykkedes
+          processed: behandlet
     queues:
       destroy:
         success: Køen %{name} slettet.
