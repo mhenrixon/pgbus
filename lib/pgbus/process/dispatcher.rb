@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
 module Pgbus
   module Process
     class Dispatcher
@@ -89,6 +91,7 @@ module Pgbus
         @last_table_maintenance_at = monotonic_now
         @maintenance_failure_streak = 0
         @maintenance_backoff_until = nil
+        @loop_tick_at = Concurrent::AtomicReference.new(nil)
       end
 
       def run
@@ -99,6 +102,7 @@ module Pgbus
         end
 
         loop do
+          stamp_loop_tick
           break if @shutting_down
 
           process_signals
@@ -540,8 +544,21 @@ module Pgbus
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
       end
 
+      # Wall clock (not monotonic) so the dashboard can compare the beacon
+      # against Time.now across processes; the heartbeat timer thread reads it
+      # via loop_tick_supplier. A dispatcher wedged inside run_maintenance stops
+      # advancing this while heartbeats keep firing, so the beacon ages and the
+      # processes page can surface the stall.
+      def stamp_loop_tick
+        @loop_tick_at.set(Time.now.to_f)
+      end
+
       def start_heartbeat
-        @heartbeat = Heartbeat.new(kind: "dispatcher", metadata: { pid: ::Process.pid })
+        @heartbeat = Heartbeat.new(
+          kind: "dispatcher",
+          metadata: { pid: ::Process.pid },
+          loop_tick_supplier: -> { @loop_tick_at.get }
+        )
         @heartbeat.start
       end
 

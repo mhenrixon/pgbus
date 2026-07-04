@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "concurrent"
+
 module Pgbus
   module Recurring
     class Scheduler
@@ -12,6 +14,7 @@ module Pgbus
         @schedule = Schedule.new(config: config)
         @shutting_down = false
         @last_runs = {}
+        @loop_tick_at = Concurrent::AtomicReference.new(nil)
       end
 
       def run
@@ -25,6 +28,7 @@ module Pgbus
         end
 
         loop do
+          stamp_loop_tick
           break if @shutting_down
 
           process_signals
@@ -100,10 +104,20 @@ module Pgbus
         Pgbus.logger.error { "[Pgbus] Failed to sync recurring tasks: #{e.class}: #{e.message}" }
       end
 
+      # Wall clock (not monotonic) so the dashboard can compare the beacon
+      # against Time.now across processes; the heartbeat timer thread reads it
+      # via loop_tick_supplier. A scheduler wedged inside tick stops advancing
+      # this while heartbeats keep firing, so the beacon ages and the processes
+      # page can surface the stall.
+      def stamp_loop_tick
+        @loop_tick_at.set(Time.now.to_f)
+      end
+
       def start_heartbeat
         @heartbeat = Process::Heartbeat.new(
           kind: "scheduler",
-          metadata: { pid: ::Process.pid, tasks: schedule.tasks.size }
+          metadata: { pid: ::Process.pid, tasks: schedule.tasks.size },
+          loop_tick_supplier: -> { @loop_tick_at.get }
         )
         @heartbeat.start
       end

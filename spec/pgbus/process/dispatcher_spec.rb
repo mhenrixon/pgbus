@@ -562,10 +562,36 @@ RSpec.describe Pgbus::Process::Dispatcher do
   end
 
   describe "#start_heartbeat (private)" do
-    it "creates and starts a heartbeat" do
+    it "creates and starts a heartbeat with a loop_tick_supplier" do
       dispatcher.send(:start_heartbeat)
-      expect(Pgbus::Process::Heartbeat).to have_received(:new).with(kind: "dispatcher", metadata: { pid: Process.pid })
+      expect(Pgbus::Process::Heartbeat).to have_received(:new).with(
+        kind: "dispatcher",
+        metadata: { pid: Process.pid },
+        loop_tick_supplier: kind_of(Proc)
+      )
       expect(heartbeat).to have_received(:start)
+    end
+
+    it "supplies the latest stamped loop tick to the heartbeat" do
+      supplier = nil
+      allow(Pgbus::Process::Heartbeat).to receive(:new) do |**kwargs|
+        supplier = kwargs[:loop_tick_supplier]
+        heartbeat
+      end
+
+      dispatcher.send(:start_heartbeat)
+      expect(supplier.call).to be_nil
+
+      dispatcher.send(:stamp_loop_tick)
+      expect(supplier.call).to be_within(1).of(Time.now.to_f)
+    end
+  end
+
+  describe "#stamp_loop_tick (private)" do
+    it "advances the beacon on each call" do
+      dispatcher.send(:stamp_loop_tick)
+      first = dispatcher.instance_variable_get(:@loop_tick_at).get
+      expect(first).to be_within(1).of(Time.now.to_f)
     end
   end
 
