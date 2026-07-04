@@ -37,11 +37,13 @@ module Pgbus
       def broadcast_stream_to(*streamables, content:)
         name = stream_name_from(streamables)
         override = Thread.current[:pgbus_broadcast_durable]
-        durable = if override.nil?
-                    Pgbus.configuration.streams_default_broadcast_mode == :durable
-                  else
-                    override
-                  end
+        # When no explicit thread-local override is present, let the config
+        # resolver decide: it checks `streams_durable_patterns` first (exact
+        # string or regex match), then falls back to
+        # `streams_default_broadcast_mode`. Passing this through keeps
+        # pattern-based routing alive for the whole Turbo::Broadcastable and
+        # phlex-reactive broadcast path (see issue #267).
+        durable = override.nil? ? Pgbus.configuration.stream_durable?(name) : override
         Pgbus.stream(name, durable: durable).broadcast(
           content,
           exclude: Thread.current[:pgbus_broadcast_exclude],
