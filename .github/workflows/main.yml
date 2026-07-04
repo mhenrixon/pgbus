@@ -52,9 +52,31 @@ jobs:
         # applies — so a bare run at the repo root loads docs/.rubocop.yml and
         # crashes on gems absent from the gem's bundle (rubocop-rake, docs_kit).
         # docs/ lints itself in the Docs site workflow.
-        run: bundle exec rubocop app benchmarks config lib spec Gemfile Rakefile pgbus.gemspec
+        run: bundle exec rubocop app benchmarks config gemfiles lib spec Gemfile Rakefile pgbus.gemspec
       - name: Herb (HTML+ERB linter)
         run: bun run lint:herb
+      - name: Verify gem builds
+        run: bundle exec rake build
+
+  # Exercise the gemspec's required_ruby_version floor (>= 3.3.0) beyond rspec:
+  # rubocop + `rake build` on the oldest supported Ruby so we catch syntax or
+  # gem-build regressions that only surface on 3.3. The full lint job (bun/herb,
+  # Ruby-version-independent) stays on 3.4; this leg is deliberately narrow.
+  # See issue #284.
+  lint_floor:
+    runs-on: ubuntu-latest
+    name: Lint (Ruby 3.3 floor)
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+      - name: RuboCop
+        run: bundle exec rubocop app benchmarks config gemfiles lib spec Gemfile Rakefile pgbus.gemspec
       - name: Verify gem builds
         run: bundle exec rake build
 
@@ -83,14 +105,33 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    name: Ruby ${{ matrix.ruby }}
+    name: Ruby ${{ matrix.ruby }} (Rails ${{ matrix.rails }})
     strategy:
       fail-fast: false
+      # Prove the gemspec's `railties >= 7.1, < 9.0` support claim at BOTH
+      # endpoints, not just the top (see issue #284). The default legs run the
+      # main Gemfile (latest 8.x) across every supported Ruby. The `include`
+      # legs pin the 7.1 lower bound via BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile
+      # on the Ruby floor (3.3) and ceiling (4.0) — endpoints only, no full cube.
       matrix:
         ruby:
           - "3.3"
           - "3.4"
           - "4.0"
+        gemfile:
+          - "Gemfile"
+        rails:
+          - "8.x"
+        include:
+          - ruby: "3.3"
+            gemfile: "gemfiles/rails_7_1.gemfile"
+            rails: "7.1"
+          - ruby: "4.0"
+            gemfile: "gemfiles/rails_7_1.gemfile"
+            rails: "7.1"
+
+    env:
+      BUNDLE_GEMFILE: ${{ matrix.gemfile }}
 
     steps:
       - uses: actions/checkout@v6
@@ -100,6 +141,8 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
+          # bundler-cache keys on BUNDLE_GEMFILE (set above), so the main and
+          # 7.1 legs get separate caches keyed on their own lockfiles.
           bundler-cache: true
       - name: Run unit tests
         run: bundle exec rspec spec/pgbus/ spec/generators/
@@ -107,7 +150,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage-ruby-${{ matrix.ruby }}
+          name: coverage-ruby-${{ matrix.ruby }}-rails-${{ matrix.rails }}
           path: coverage/
           if-no-files-found: warn
 

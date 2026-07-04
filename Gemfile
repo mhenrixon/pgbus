@@ -38,9 +38,15 @@ group :test do
 end
 
 group :development, :test do
-  gem "actioncable", ">= 7.1", "< 9.0"
-  gem "activejob", ">= 7.1", "< 9.0"
-  gem "activerecord", ">= 7.1", "< 9.0"
+  # Rails component constraint. Defaults to the full supported range (>= 7.1,
+  # < 9.0), which resolves to the latest 8.x. The 7.1 endpoint gemfile
+  # (gemfiles/rails_7_1.gemfile) sets RAILS_VERSION to pin the lower bound so
+  # CI proves the whole support matrix, not just the top. See issue #284.
+  rails_version = ENV.fetch("RAILS_VERSION", nil)
+  rails_requirement = rails_version ? [rails_version] : [">= 7.1", "< 9.0"]
+  gem "actioncable", *rails_requirement
+  gem "activejob", *rails_requirement
+  gem "activerecord", *rails_requirement
   gem "globalid", ">= 1.0"
   gem "mcp", "~> 0.22"
   gem "pg", "~> 1.5"
