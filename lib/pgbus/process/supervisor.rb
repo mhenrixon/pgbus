@@ -20,15 +20,24 @@ module Pgbus
       RESTART_BACKOFF_BASE = 1
       RESTART_BACKOFF_MAX = 60
 
-      attr_reader :config
+      attr_reader :config, :forks
 
-      def initialize(config: Pgbus.configuration)
+      # The child-fork bookkeeping (`forks`, `pending_restarts`) and the
+      # `shutting_down` flag accept injected seeds so tests can drive the
+      # monitor/reap loops from a known state without poking private ivars. All
+      # default to the empty/false values production always starts from.
+      def initialize(config: Pgbus.configuration, forks: {}, shutting_down: false,
+                     pending_restarts: [])
         @config = config
-        @forks = {}
-        @shutting_down = false
+        @forks = forks
+        @shutting_down = shutting_down
         @last_watchdog_at = monotonic_now
-        @pending_restarts = []
+        @pending_restarts = pending_restarts
         @crash_counts = Hash.new(0)
+      end
+
+      def shutting_down?
+        @shutting_down
       end
 
       def run
