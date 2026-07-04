@@ -37,6 +37,15 @@ module Pgbus
       MAINTENANCE_BACKOFF_BASE = 30    # seconds; first backoff window
       MAINTENANCE_BACKOFF_MAX = 600    # seconds; window ceiling (10 minutes)
 
+      # The per-task monotonic timestamps run_maintenance consults via run_if_due.
+      # Enumerated so set_maintenance_timestamp can validate its argument.
+      MAINTENANCE_TIMESTAMPS = %i[
+        @last_cleanup_at @last_reap_at @last_concurrency_at @last_batch_cleanup_at
+        @last_recurring_cleanup_at @last_archive_compaction_at @last_stream_archive_compaction_at
+        @last_outbox_cleanup_at @last_job_lock_cleanup_at @last_stats_cleanup_at
+        @last_orphan_stream_sweep_at @last_table_maintenance_at
+      ].freeze
+
       # Outcome of a single maintenance task in a cycle. Lets run_maintenance
       # distinguish success/failed/skipped and, on failure, carry the error
       # and task name for reporting or summarizing.
@@ -72,7 +81,38 @@ module Pgbus
         end
       end
 
-      attr_reader :config
+      attr_reader :config, :maintenance_failure_streak, :maintenance_backoff_until
+
+      def shutting_down?
+        @shutting_down
+      end
+
+      # The last monotonic timestamp stamped by the run loop (via the heartbeat's
+      # loop_tick_supplier). nil until the first stamp_loop_tick.
+      def last_loop_tick
+        @loop_tick_at.get
+      end
+
+      # Test seam: set one of the @last_*_at maintenance timestamps so a task
+      # becomes (or stops being) due on the next run_maintenance. The timestamps
+      # are per-task monotonic clocks with no constructor injection point (all 12
+      # default to monotonic_now at construction), so a post-construction setter
+      # is the minimal way to drive the due/not-due logic deterministically.
+      # ivar must be one of the recognized @last_*_at names.
+      def set_maintenance_timestamp(ivar, monotonic_value)
+        raise ArgumentError, "unknown maintenance timestamp #{ivar}" unless MAINTENANCE_TIMESTAMPS.include?(ivar.to_sym)
+
+        instance_variable_set(ivar, monotonic_value)
+      end
+
+      # Read one of the @last_*_at maintenance timestamps (companion to
+      # set_maintenance_timestamp) so a test can assert a timestamp did or did
+      # not advance without reaching into the ivar directly.
+      def maintenance_timestamp(ivar)
+        raise ArgumentError, "unknown maintenance timestamp #{ivar}" unless MAINTENANCE_TIMESTAMPS.include?(ivar.to_sym)
+
+        instance_variable_get(ivar)
+      end
 
       def initialize(config: Pgbus.configuration)
         @config = config
