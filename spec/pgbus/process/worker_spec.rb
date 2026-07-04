@@ -74,7 +74,7 @@ RSpec.describe Pgbus::Process::Worker do
 
   describe "heartbeat pool observability" do
     it "snapshots the rate counter on each beat" do
-      counter = worker.instance_variable_get(:@rate_counter)
+      counter = worker.rate_counter
       allow(counter).to receive(:snapshot!)
 
       worker.send(:on_heartbeat)
@@ -142,7 +142,7 @@ RSpec.describe Pgbus::Process::Worker do
         supplier = kwargs[:metadata_supplier]
         heartbeat
       end
-      counter = worker.instance_variable_get(:@rate_counter)
+      counter = worker.rate_counter
       counter.increment(:processed, 3)
 
       worker.send(:start_heartbeat)
@@ -176,19 +176,19 @@ RSpec.describe Pgbus::Process::Worker do
       built = described_class.new(queues: %w[default], threads: 5)
 
       expect(Pgbus::StatBuffer).not_to have_received(:new)
-      expect(built.instance_variable_get(:@stat_buffer)).to be_nil
+      expect(built.stat_buffer).to be_nil
     ensure
       Pgbus.configuration.stats_enabled = true
     end
   end
 
   describe "#graceful_shutdown" do
-    before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
+    before { worker.lifecycle.transition_to!(:running) }
     after { Pgbus.stopping = false }
 
     it "transitions to draining state" do
       worker.graceful_shutdown
-      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:draining)
+      expect(worker.lifecycle.state).to eq(:draining)
     end
 
     it "sets Pgbus.stopping for ActiveJob::Continuation support" do
@@ -197,7 +197,7 @@ RSpec.describe Pgbus::Process::Worker do
 
     it "flushes the stat buffer so entries survive a subsequent SIGKILL" do
       buffer = instance_double(Pgbus::StatBuffer, flush: nil)
-      worker.instance_variable_set(:@stat_buffer, buffer)
+      worker.stat_buffer = buffer
 
       worker.graceful_shutdown
 
@@ -205,7 +205,7 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     it "does not raise when stats are disabled (nil buffer)" do
-      worker.instance_variable_set(:@stat_buffer, nil)
+      worker.stat_buffer = nil
 
       expect { worker.graceful_shutdown }.not_to raise_error
     end
@@ -213,9 +213,9 @@ RSpec.describe Pgbus::Process::Worker do
 
   describe "#check_recycle (private) drain flush" do
     before do
-      worker.instance_variable_get(:@lifecycle).transition_to!(:running)
+      worker.lifecycle.transition_to!(:running)
       worker.config.max_jobs_per_worker = 1
-      worker.instance_variable_get(:@jobs_processed).value = 5
+      worker.jobs_processed = 5
     end
 
     after do
@@ -225,28 +225,28 @@ RSpec.describe Pgbus::Process::Worker do
 
     it "flushes the stat buffer when a recycle triggers drain" do
       buffer = instance_double(Pgbus::StatBuffer, flush: nil)
-      worker.instance_variable_set(:@stat_buffer, buffer)
+      worker.stat_buffer = buffer
 
       worker.send(:check_recycle)
 
-      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:draining)
+      expect(worker.lifecycle.state).to eq(:draining)
       expect(buffer).to have_received(:flush)
     end
 
     it "does not raise when recycling with stats disabled (nil buffer)" do
-      worker.instance_variable_set(:@stat_buffer, nil)
+      worker.stat_buffer = nil
 
       expect { worker.send(:check_recycle) }.not_to raise_error
     end
   end
 
   describe "#immediate_shutdown" do
-    before { worker.instance_variable_get(:@lifecycle).transition_to!(:running) }
+    before { worker.lifecycle.transition_to!(:running) }
     after { Pgbus.stopping = false }
 
     it "transitions to stopped state and kills the pool" do
       worker.immediate_shutdown
-      expect(worker.instance_variable_get(:@lifecycle).state).to eq(:stopped)
+      expect(worker.lifecycle.state).to eq(:stopped)
       expect(pool).to have_received(:kill)
     end
 
@@ -340,12 +340,12 @@ RSpec.describe Pgbus::Process::Worker do
       before { worker.config.max_jobs_per_worker = 100 }
 
       it "returns true when jobs_processed reaches the limit" do
-        worker.instance_variable_get(:@jobs_processed).value = 100
+        worker.jobs_processed = 100
         expect(worker.send(:recycle_needed?)).to be true
       end
 
       it "returns false when below the limit" do
-        worker.instance_variable_get(:@jobs_processed).value = 50
+        worker.jobs_processed = 50
         expect(worker.send(:recycle_needed?)).to be false
       end
     end
@@ -354,8 +354,11 @@ RSpec.describe Pgbus::Process::Worker do
       before { worker.config.max_worker_lifetime = 60 }
 
       it "returns true when lifetime is exceeded" do
-        worker.instance_variable_set(:@started_at_monotonic, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 120)
-        expect(worker.send(:recycle_needed?)).to be true
+        aged = described_class.new(
+          queues: %w[default], threads: 5,
+          started_at_monotonic: Process.clock_gettime(Process::CLOCK_MONOTONIC) - 120
+        )
+        expect(aged.send(:recycle_needed?)).to be true
       end
     end
 
@@ -451,13 +454,13 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     context "when a queue table is missing (deleted queue)" do
+      let(:worker) { described_class.new(queues: %w[default stale_queue], threads: 5) }
       let(:prefix) { worker.config.queue_prefix }
       let(:error_message) do
         "Database connection error: ERROR:  relation \"pgmq.q_#{prefix}_stale_queue\" does not exist"
       end
 
       before do
-        worker.instance_variable_set(:@queues, %w[default stale_queue])
         allow(mock_client).to receive(:read_multi)
           .and_raise(StandardError, error_message)
       end
@@ -473,10 +476,10 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     context "when eviction removes ALL queues (regression: issue #174)" do
+      let(:worker) { described_class.new(queues: %w[only_queue], threads: 5) }
       let(:prefix) { worker.config.queue_prefix }
 
       before do
-        worker.instance_variable_set(:@queues, %w[only_queue])
         error_message = "Database connection error: ERROR:  relation \"pgmq.q_#{prefix}_only_queue\" does not exist"
         allow(mock_client).to receive(:read_batch)
           .and_raise(StandardError, error_message)
@@ -488,14 +491,14 @@ RSpec.describe Pgbus::Process::Worker do
         stub_monotonic(0)
         worker.send(:fetch_messages, 5)
         expect(worker.queues).to be_empty
-        expect(worker.instance_variable_get(:@restore_streak)).to eq(0)
+        expect(worker.restore_streak).to eq(0)
 
         # After the cooldown the leading restore reinstates the initial queues;
         # the trailing read still fails and re-evicts, so the restore is observed
         # via the streak increment rather than the (again empty) queue list.
         stub_monotonic(Pgbus::Process::Worker::RESTORE_COOLDOWN_BASE)
         worker.send(:fetch_messages, 5)
-        expect(worker.instance_variable_get(:@restore_streak)).to eq(1)
+        expect(worker.restore_streak).to eq(1)
       end
     end
 
@@ -527,7 +530,7 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       def streak
-        worker.instance_variable_get(:@restore_streak)
+        worker.restore_streak
       end
 
       it "does not restore before the base cooldown after full eviction" do
@@ -626,7 +629,7 @@ RSpec.describe Pgbus::Process::Worker do
         worker.send(:fetch_messages, 5) # restore (streak → 1) then a clean read
 
         expect(worker.queues).to eq(%w[flaky])
-        expect(worker.instance_variable_get(:@restore_streak)).to eq(0)
+        expect(worker.restore_streak).to eq(0)
       end
     end
 
@@ -708,7 +711,7 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "prefetch flow control" do
-    let(:wake_signal) { worker.instance_variable_get(:@wake_signal) }
+    let(:wake_signal) { worker.wake_signal }
 
     before { allow(wake_signal).to receive(:wait) }
 
@@ -733,7 +736,7 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "waits when in_flight >= prefetch_limit" do
-        worker.instance_variable_get(:@in_flight).value = 3
+        worker.in_flight = 3
         worker.send(:claim_and_execute)
         expect(mock_client).not_to have_received(:read_batch)
         expect(wake_signal).to have_received(:wait)
@@ -741,7 +744,7 @@ RSpec.describe Pgbus::Process::Worker do
 
       it "uses min of idle and available prefetch" do
         # 2 in flight, limit 3 => available = 1, idle = 5 => fetch 1
-        worker.instance_variable_get(:@in_flight).value = 2
+        worker.in_flight = 2
         allow(mock_client).to receive(:read_batch).and_return([])
         worker.send(:claim_and_execute)
         expect(mock_client).to have_received(:read_batch).with("default", qty: 1)
@@ -813,7 +816,7 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "circuit breaker integration" do
-    before { allow(worker.instance_variable_get(:@wake_signal)).to receive(:wait) }
+    before { allow(worker.wake_signal).to receive(:wait) }
 
     it "skips paused queues" do
       allow(circuit_breaker).to receive(:paused?).with("default").and_return(true)
@@ -853,7 +856,7 @@ RSpec.describe Pgbus::Process::Worker do
 
     before do
       allow(Pgbus::Process::QueueLock).to receive(:new).and_return(queue_lock)
-      allow(worker.instance_variable_get(:@wake_signal)).to receive(:wait)
+      allow(worker.wake_signal).to receive(:wait)
     end
 
     it "only reads from queues where advisory lock is held" do
@@ -895,12 +898,18 @@ RSpec.describe Pgbus::Process::Worker do
     end
 
     it "re-resolves when enough time has passed" do
+      # Drive the refresh interval gate through a controllable monotonic clock
+      # instead of poking @last_wildcard_resolve: resolve at t=0, refresh at
+      # t=60 (past WILDCARD_REFRESH_INTERVAL of 30s).
+      clock = [0.0]
+      allow(worker).to receive(:monotonic_now) { clock[0] }
+
       allow(conn).to receive(:select_values).and_return(["#{prefix}_default", "#{prefix}_events"])
       worker.send(:resolve_wildcard_queues)
       expect(worker.queues).to eq(%w[default events])
 
       # Simulate time passing and queues changing
-      worker.instance_variable_set(:@last_wildcard_resolve, Process.clock_gettime(Process::CLOCK_MONOTONIC) - 60)
+      clock[0] = 60.0
       allow(conn).to receive(:select_values).and_return(["#{prefix}_default"])
       worker.send(:refresh_wildcard_queues)
       expect(worker.queues).to eq(%w[default])
@@ -918,7 +927,7 @@ RSpec.describe Pgbus::Process::Worker do
   end
 
   describe "zombie message detection" do
-    let(:wake_signal) { worker.instance_variable_get(:@wake_signal) }
+    let(:wake_signal) { worker.wake_signal }
 
     before do
       allow(wake_signal).to receive(:wait)
@@ -1030,7 +1039,9 @@ RSpec.describe Pgbus::Process::Worker do
       it "is false when config does not respond to worker_notify_wakeup? (old configs)" do
         stripped_config = double("Config")
         allow(stripped_config).to receive(:respond_to?).with(:worker_notify_wakeup?).and_return(false)
-        worker.instance_variable_set(:@config, stripped_config)
+        # Stub the public config reader rather than construct with the stripped
+        # double (which lacks the stats_* methods the constructor calls).
+        allow(worker).to receive(:config).and_return(stripped_config)
         expect(worker.send(:notify_wakeup?)).to be false
       end
     end
@@ -1044,9 +1055,9 @@ RSpec.describe Pgbus::Process::Worker do
           .to eq(["#{prefix}_default", "#{prefix}_low"])
       end
 
-      it "uses the current @queues, not the initial set (post-eviction safe)" do
-        worker.instance_variable_set(:@queues, %w[events])
-        expect(worker.send(:physical_queue_names)).to eq(["#{prefix}_events"])
+      it "uses the current queues, not the initial set (post-eviction safe)" do
+        events_worker = described_class.new(queues: %w[events], threads: 5)
+        expect(events_worker.send(:physical_queue_names)).to eq(["#{prefix}_events"])
       end
     end
 
@@ -1067,7 +1078,7 @@ RSpec.describe Pgbus::Process::Worker do
 
       it "returns effective_polling_interval when wakeup is on but no listener attached yet" do
         allow(worker).to receive(:notify_wakeup?).and_return(true)
-        worker.instance_variable_set(:@notify_listener, nil)
+        worker.notify_listener = nil
         expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
       end
 
@@ -1076,7 +1087,7 @@ RSpec.describe Pgbus::Process::Worker do
         # not the steady-state cadence. The ceiling lets one missed NOTIFY
         # cost bounded latency, never a stuck queue.
         allow(worker).to receive(:notify_wakeup?).and_return(true)
-        worker.instance_variable_set(:@notify_listener, fake_listener)
+        worker.notify_listener = fake_listener
         expect(worker.send(:wake_timeout))
           .to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
       end
@@ -1088,7 +1099,7 @@ RSpec.describe Pgbus::Process::Worker do
         # up. Fall back to the polling interval until it's restarted.
         allow(worker).to receive(:notify_wakeup?).and_return(true)
         allow(fake_listener).to receive(:running?).and_return(false)
-        worker.instance_variable_set(:@notify_listener, fake_listener)
+        worker.notify_listener = fake_listener
         expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
       end
     end
@@ -1111,7 +1122,7 @@ RSpec.describe Pgbus::Process::Worker do
         allow(Pgbus::Process::NotifyListener).to receive(:new)
         worker.send(:start_notify_listener)
         expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
-        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+        expect(worker.notify_listener).to be_nil
       end
 
       it "constructs and starts a listener for every physical queue when wakeup is on" do
@@ -1131,7 +1142,7 @@ RSpec.describe Pgbus::Process::Worker do
           logger: Pgbus.logger
         )
         expect(fake_listener).to have_received(:start)
-        expect(worker.instance_variable_get(:@notify_listener)).to be(fake_listener)
+        expect(worker.notify_listener).to be(fake_listener)
       end
 
       it "clamps health_check_ms below 250ms up to the floor" do
@@ -1175,7 +1186,7 @@ RSpec.describe Pgbus::Process::Worker do
         allow(Pgbus.logger).to receive(:error)
 
         expect { worker.send(:start_notify_listener) }.not_to raise_error
-        expect(worker.instance_variable_get(:@notify_listener)).to be_nil
+        expect(worker.notify_listener).to be_nil
         expect(Pgbus.logger).to have_received(:error)
       end
     end
@@ -1197,7 +1208,7 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "is a no-op while a healthy listener is running" do
-        worker.instance_variable_set(:@notify_listener, fake_listener)
+        worker.notify_listener = fake_listener
         allow(worker).to receive(:start_notify_listener)
         worker.send(:ensure_notify_listener)
         expect(worker).not_to have_received(:start_notify_listener)
@@ -1205,18 +1216,18 @@ RSpec.describe Pgbus::Process::Worker do
 
       it "does not retry before the backoff window elapses" do
         # Listener is absent and a retry was just scheduled into the future.
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) + base)
+        worker.notify_listener = nil
+        worker.notify_retry_at = worker.send(:monotonic_now) + base
         allow(worker).to receive(:start_notify_listener)
         worker.send(:ensure_notify_listener)
         expect(worker).not_to have_received(:start_notify_listener)
       end
 
       it "retries start once the backoff window has elapsed" do
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = nil
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         allow(worker).to receive(:start_notify_listener) do
-          worker.instance_variable_set(:@notify_listener, fake_listener)
+          worker.notify_listener = fake_listener
         end
 
         worker.send(:ensure_notify_listener)
@@ -1224,48 +1235,48 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "doubles the backoff each time the restart fails" do
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = nil
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         # start leaves @notify_listener nil (failed to start).
         allow(worker).to receive(:start_notify_listener)
 
         worker.send(:ensure_notify_listener)
-        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base * 2)
+        expect(worker.notify_retry_backoff).to eq(base * 2)
 
         # Second failed attempt (advance clock past the new window) doubles again.
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         worker.send(:ensure_notify_listener)
-        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base * 4)
+        expect(worker.notify_retry_backoff).to eq(base * 4)
       end
 
       it "caps the backoff at NOTIFY_RETRY_MAX_SECONDS" do
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_backoff, described_class::NOTIFY_RETRY_MAX_SECONDS)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = nil
+        worker.notify_retry_backoff = described_class::NOTIFY_RETRY_MAX_SECONDS
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         allow(worker).to receive(:start_notify_listener)
 
         worker.send(:ensure_notify_listener)
-        expect(worker.instance_variable_get(:@notify_retry_backoff))
+        expect(worker.notify_retry_backoff)
           .to eq(described_class::NOTIFY_RETRY_MAX_SECONDS)
       end
 
       it "resets the backoff after a successful restart" do
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_backoff, base * 8)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = nil
+        worker.notify_retry_backoff = base * 8
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         allow(worker).to receive(:start_notify_listener) do
-          worker.instance_variable_set(:@notify_listener, fake_listener)
+          worker.notify_listener = fake_listener
         end
 
         worker.send(:ensure_notify_listener)
-        expect(worker.instance_variable_get(:@notify_retry_backoff)).to eq(base)
+        expect(worker.notify_retry_backoff).to eq(base)
       end
 
       it "stops a dead listener before restarting it" do
         dead = fake_listener
         allow(dead).to receive(:running?).and_return(false)
-        worker.instance_variable_set(:@notify_listener, dead)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = dead
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         allow(worker).to receive(:start_notify_listener)
 
         worker.send(:ensure_notify_listener)
@@ -1273,10 +1284,10 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "reconciles queues after a successful restart (wildcard workers)" do
-        worker.instance_variable_set(:@notify_listener, nil)
-        worker.instance_variable_set(:@notify_retry_at, worker.send(:monotonic_now) - 1)
+        worker.notify_listener = nil
+        worker.notify_retry_at = worker.send(:monotonic_now) - 1
         allow(worker).to receive(:start_notify_listener) do
-          worker.instance_variable_set(:@notify_listener, fake_listener)
+          worker.notify_listener = fake_listener
         end
         allow(worker).to receive(:sync_notify_listener_queues)
 
@@ -1289,7 +1300,7 @@ RSpec.describe Pgbus::Process::Worker do
       let(:multi_worker) { described_class.new(queues: %w[default low], threads: 4) }
       let(:queue_prefix) { multi_worker.config.queue_prefix }
 
-      before { multi_worker.instance_variable_set(:@notify_listener, fake_listener) }
+      before { multi_worker.notify_listener = fake_listener }
 
       it "adds new physical queues and removes dropped ones based on the set difference" do
         # Listener currently watches default + statistics; @queues is
@@ -1310,7 +1321,7 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "is a no-op when no listener is attached" do
-        multi_worker.instance_variable_set(:@notify_listener, nil)
+        multi_worker.notify_listener = nil
         expect { multi_worker.send(:sync_notify_listener_queues) }.not_to raise_error
         expect(fake_listener).not_to have_received(:add_queue)
         expect(fake_listener).not_to have_received(:remove_queue)
@@ -1327,13 +1338,13 @@ RSpec.describe Pgbus::Process::Worker do
 
     describe "#shutdown" do
       it "stops the notify listener before draining the pool" do
-        worker.instance_variable_set(:@notify_listener, fake_listener)
+        worker.notify_listener = fake_listener
         worker.send(:shutdown)
         expect(fake_listener).to have_received(:stop)
       end
 
       it "is a no-op for the listener when none was started (default-off path)" do
-        worker.instance_variable_set(:@notify_listener, nil)
+        worker.notify_listener = nil
         expect { worker.send(:shutdown) }.not_to raise_error
       end
     end
@@ -1362,14 +1373,14 @@ RSpec.describe Pgbus::Process::Worker do
 
       w.send(:stamp_loop_tick)
 
-      expect(w.instance_variable_get(:@loop_tick_at).get).to be_a(Float)
+      expect(w.last_loop_tick).to be_a(Float)
     end
 
     it "does not write to a pipe and behaves as today when no liveness_pipe is given" do
       w = described_class.new(queues: %w[default], threads: 5)
 
       expect { w.send(:stamp_loop_tick) }.not_to raise_error
-      expect(w.instance_variable_get(:@loop_tick_at).get).to be_a(Float)
+      expect(w.last_loop_tick).to be_a(Float)
     end
 
     it "does not raise when the pipe is full (write dropped, worker still alive)" do
