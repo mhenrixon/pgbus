@@ -85,7 +85,7 @@ class Views::Docs::Pages::QuickStart < DocsUI::Page
         Publish with AMQP-style topic routing:
       MD
       DocsUI::Code(<<~RUBY)
-        Pgbus::EventBus::Publisher.publish(
+        Pgbus.publish(
           "orders.created",
           { order_id: order.id, total: order.total }
         )

@@ -172,17 +172,15 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
   end
 
   def v100_stub
-    DocsUI::Section("0.9.8 → 1.0.0", description: "The error hierarchy has landed; config renames still pending.") do
-      DocsUI::Callout(:warning, title: "Partial — 1.0.0 hasn't shipped yet") do
-        plain "The unified error hierarchy below is "
-        strong { "shipped" }
-        plain " (issue "
+    DocsUI::Section("0.9.8 → 1.0.0", description: "The 1.0 API freeze: error hierarchy, config renames, and dead-surface removal.") do
+      DocsUI::Callout(:warning, title: "1.0.0 not yet released") do
+        plain "Everything below is "
+        strong { "implemented and lands in 1.0.0" }
+        plain " — the unified error hierarchy (issue "
         a(href: "https://github.com/mhenrixon/pgbus/issues/282", class: "link") { "#282" }
-        plain ") and describes real current behavior on the unreleased 1.0 line. "
-        plain "The config renames and dead-surface removal further down are still "
-        plain "tracked by "
+        plain ") and the config renames, dead-surface removals, and new shortcuts (issue "
         a(href: "https://github.com/mhenrixon/pgbus/issues/283", class: "link") { "#283" }
-        plain " and remain a plan until that issue lands."
+        plain "). It describes real behavior on the unreleased 1.0 line; only the release itself hasn't happened yet."
       end
       md <<~'MD'
         ### The 1.0.0 commitment
@@ -239,30 +237,42 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         Error *messages* are unchanged, so any `rescue ... => e` that only reads
         `e.message` keeps working. Only the rescued *class* changed.
 
-        ### Planned: config renames and dead-surface removal (tracked by #283)
+        ### Config renames and dead-surface removal (#283)
 
-        Renames ship as a deprecated alias in 1.0.0 (old name still works, logs a
-        warning once) with removal in a future 2.0 — nothing breaks *at* 1.0.0
-        except surface confirmed to have zero real-world callers:
+        Renames ship as a **deprecated alias** in 1.0.0 — the old name still
+        works but logs a warning once — with removal in a future 2.0. Nothing
+        breaks *at* 1.0.0 except surface confirmed to have zero real-world
+        callers (verified in the API-freeze audit):
       MD
       DocsUI::Table(
-        [ "Today", "Planned 1.0.0 change", "Deprecation path" ],
+        [ "Old", "1.0.0", "Path" ],
         [
-          [ [ :code, "skip_recurring" ], [ :md, "Renamed to `recurring_enabled` (positive polarity)." ], "Old name aliases to the new one and warns once; removed in 2.0." ],
+          [ [ :code, "skip_recurring" ], [ :md, "Renamed to `recurring_enabled` (positive polarity — `true` means run)." ], "Old name aliases (inverting the boolean) and warns once; removed in 2.0." ],
           [ [ :code, "dashboard_filter_parameters" ], [ :md, "Renamed to `web_filter_parameters` (unify on the `web_` prefix)." ], "Old name aliases and warns once; removed in 2.0." ],
           [ [ :code, "dashboard_filter_sensitive" ], [ :md, "Renamed to `web_filter_sensitive`." ], "Old name aliases and warns once; removed in 2.0." ],
+          [ [ :code, "recurring_tasks_file" ], [ :md, "Deprecated in favor of `recurring_tasks_files` (plural)." ], "Setting both now warns once (the singular was silently ignored before); a lone singular still works." ],
           [ [ :code, "lock_ttl:" ], [ :md, "Removed from `ensures_uniqueness` — validated but never read by anything." ], [ :md, "Passing it raises `ArgumentError` naming the removal and this page." ] ],
-          [ [ :code, "pgbus:add_job_locks" ], [ :md, "Generator removed; `Pgbus::JobLock` model removed (zero references today)." ], "No replacement — remove any reference before upgrading." ]
+          [ [ :code, "pgbus:add_job_locks" ], [ :md, "Generator removed; `Pgbus::JobLock` model removed (zero references)." ], [ :md, "No replacement — new installs use `pgbus:add_uniqueness_keys`; `pgbus:migrate_job_locks` still retires the legacy table." ] ],
+          [ [ :code, "with_pgbus_durable" ], [ :md, "Removed (internal streams helper, zero callers)." ], [ :md, "Use `with_pgbus_broadcast_opts(durable:)`." ] ]
         ]
       )
       md <<~'MD'
-        Also planned: `Pgbus.publish` / `Pgbus.publish_later` top-level
-        shortcuts (symmetric with `Pgbus.stream`), and a `config.drain_timeout`
-        replacing the `Worker::DRAIN_TIMEOUT = 30` constant.
+        **New in 1.0.0:**
 
-        Watch this section for the final shape — it will be rewritten with
-        exact before/after code and a checked-off deprecation timeline once
-        #282 and #283 merge.
+        - `Pgbus.publish` / `Pgbus.publish_later` — top-level shortcuts for
+          `Pgbus::EventBus::Publisher.publish` / `.publish_later`, symmetric with
+          `Pgbus.stream`. The long form still works.
+        - `config.drain_timeout` (default 30s) replaces the hardcoded
+          `Worker::DRAIN_TIMEOUT` constant — raise it if your jobs legitimately
+          run longer than the graceful-shutdown window.
+        - `pgbus doctor` now warns when `allowed_global_id_models` is `nil`
+          (allow-all) in production. The default is unchanged for upgrade
+          continuity, but set an explicit allowlist — it is security-relevant.
+
+        `log_format=` no longer overwrites a custom logger's formatter.
+        `streams_presence_*`, `group_mode`, and `streams_falcon_streaming_body`
+        are marked **experimental** and are exempt from the 1.0 stability
+        promise.
       MD
     end
   end

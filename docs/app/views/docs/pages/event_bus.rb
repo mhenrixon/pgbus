@@ -24,12 +24,12 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
         with a delay:
       MD
       DocsUI::Code(<<~RUBY)
-        Pgbus::EventBus::Publisher.publish(
+        Pgbus.publish(
           "orders.created",
           { order_id: order.id, total: order.total }
         )
 
-        Pgbus::EventBus::Publisher.publish_later(
+        Pgbus.publish_later(
           "invoices.due",
           { invoice_id: invoice.id },
           delay: 30.days
@@ -39,6 +39,11 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
         plain "The payload is JSON. Keep it to data a subscriber can act on — ids, "
         plain "amounts, timestamps — not whole objects."
       end
+      md <<~'MD'
+        `Pgbus.publish` / `Pgbus.publish_later` are top-level shortcuts for
+        `Pgbus::EventBus::Publisher.publish` / `.publish_later` (symmetric with
+        `Pgbus.stream`). The long form still works if you prefer it.
+      MD
     end
   end
 
