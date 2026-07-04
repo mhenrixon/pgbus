@@ -176,12 +176,12 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       expect(connects).to eq(connects_before + 1)
     end
 
-    it "passes no factory when a pg_connection is injected (reset fallback)" do
+    it "still wires a connection_factory when a pg_connection is injected (reconnect rebuilds fresh)" do
       allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
 
       instance = described_class.new(client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL))
 
-      expect(instance.listener.instance_variable_get(:@connection_factory)).to be_nil
+      expect(instance.listener.instance_variable_get(:@connection_factory)).to respond_to(:call)
     end
 
     context "when the freshly built connection lands on a read-only replica" do

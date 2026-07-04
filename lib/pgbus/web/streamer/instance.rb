@@ -46,9 +46,9 @@ module Pgbus
             # On reconnect the Listener rebuilds its OWN connection via this
             # factory (fresh connect re-resolves DNS, converges on the promoted
             # primary after a failover) instead of resetting a possibly-dead
-            # socket. Skipped for an injected pg_connection: (unit tests) — a
-            # nil factory falls back to conn.reset.
-            connection_factory: pg_connection ? nil : -> { build_raw_pg_connection }
+            # socket. Always provided — even when an initial pg_connection: is
+            # injected, the reconnect path builds a fresh raw connection.
+            connection_factory: -> { build_raw_pg_connection }
           )
           @dispatcher = StreamEventDispatcher.new(
             client: @client,

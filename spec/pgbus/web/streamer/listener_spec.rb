@@ -12,7 +12,8 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       pg_connection: fake_pg,
       dispatch_queue: dispatch_queue,
       health_check_ms: 50,
-      logger: logger
+      logger: logger,
+      connection_factory: -> { factory_conns.shift }
     )
   end
 
@@ -106,6 +107,7 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
   let(:dispatch_queue) { Queue.new }
   let(:logger)         { Logger.new(IO::NULL) }
+  let(:factory_conns)  { [] }
 
   after { listener.stop }
 
@@ -244,40 +246,38 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       end.new
     end
 
-    it "calls reset and re-LISTENs on every previously-known channel" do
-      listener.start
+    before { stub_const("#{described_class}::RECONNECT_BACKOFF_SECONDS", 0.01) }
 
+    it "rebuilds a fresh connection and re-LISTENs every previously-known channel" do
+      new_pg = fake_pg.class.new
+      factory_conns << new_pg
+      listener.start
       listener.ensure_listening("chat")
       listener.ensure_listening("presence")
       fake_pg.push_timeout
       wait_until { listener.listening_to.size == 2 }
 
-      pg_error = PG::Error.new("connection reset")
-      fake_pg.push_error(pg_error)
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      new_pg.push_timeout # keep the fresh connection's loop alive
 
-      wait_until { fake_pg.reset_count >= 1 }
-
-      # Keep the loop alive so we can observe post-reconnect state
-      fake_pg.push_timeout
-
-      # After reconnect we expect LISTEN to be issued a second time for both
-      # channels. The `executed` array accumulates across the whole run.
-      wait_until do
-        chat = fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") }
-        presence = fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_presence.INSERT") }
-        chat >= 2 && presence >= 2
-      end
-
-      expect(listener.listening_to).to contain_exactly(
-        "pgmq.q_chat.INSERT",
-        "pgmq.q_presence.INSERT"
-      )
+      # LISTEN is re-issued for both channels on the FRESH factory connection.
+      wait_until { new_pg.executed.count { |s| s.start_with?("LISTEN") } >= 2 }
+      expect(new_pg.executed).to include(%(LISTEN "pgmq.q_chat.INSERT"), %(LISTEN "pgmq.q_presence.INSERT"))
+      # The old connection is discarded, never reset — a fresh connect was used.
+      expect(fake_pg.reset_count).to eq(0)
+      expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT")
     end
 
     it "preserves the canonical subscription set when a re-LISTEN raises mid-loop" do
+      # First factory conn fails its LISTEN mid-rebuild; the loop discards it,
+      # backs off, and rebuilds from the second (good) conn.
+      partial = fake_pg.class.new.tap(&:fail_next_listen!)
+      good = fake_pg.class.new
+      raising_conns = [partial, good]
+      factory = -> { raising_conns.shift }
       raising_listener = described_class.new(
         pg_connection: raising_pg, dispatch_queue: dispatch_queue,
-        health_check_ms: 50, logger: logger
+        health_check_ms: 50, logger: logger, connection_factory: factory
       )
       raising_listener.start
       raising_listener.ensure_listening("chat")
@@ -285,18 +285,14 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       raising_pg.push_timeout
       wait_until { raising_listener.listening_to.size == 2 }
 
-      # Make the second LISTEN inside the reconnect loop raise.
-      raising_pg.fail_next_listen!
       raising_pg.push_error(PG::Error.new("network blip"))
-      wait_until { raising_pg.reset_count >= 1 }
-      sleep 0.1
+      good.push_timeout # keep the good conn's loop alive
+      wait_until { good.executed.count { |s| s.start_with?("LISTEN") } >= 2 }
 
-      # The previous version cleared @listening_to before the loop, so
-      # any channel not yet retried was permanently forgotten. Now both
-      # channels survive a transient mid-reconnect failure.
-      expect(raising_listener.listening_to).to contain_exactly(
-        "pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT"
-      )
+      # Both channels survive a transient mid-reconnect failure — the earlier
+      # version cleared @listening_to before the loop and permanently forgot them.
+      expect(raising_listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT", "pgmq.q_presence.INSERT")
+      expect(raising_pg.reset_count).to eq(0) # old conn discarded, never reset
       raising_listener.stop
     end
   end
@@ -426,59 +422,41 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
     end
   end
 
-  describe "reconnect fallback without a factory (uses conn.reset)" do
-    it "still resets the original connection when no factory is provided" do
-      listener.start
-      listener.ensure_listening("chat")
-      fake_pg.push_timeout
-      wait_until { listener.listening_to.size == 1 }
-
-      fake_pg.push_error(PG::Error.new("connection reset"))
-      wait_until { fake_pg.reset_count >= 1 }
-      fake_pg.push_timeout
-
-      wait_until do
-        fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 2
-      end
-      expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
-    end
-  end
-
   describe "replica rejection on reconnect (failover self-healing)" do
-    it "keeps retrying while conn.reset lands on a replica, then re-LISTENs on the primary" do
+    before { stub_const("#{described_class}::RECONNECT_BACKOFF_SECONDS", 0.01) }
+
+    it "keeps retrying while a fresh conn lands on a replica, then re-LISTENs on the primary" do
+      # First factory conn is a replica (validate raises); the next is the
+      # promoted primary (validate passes). reconnect! loops internally on
+      # validation failure, backing off between cycles.
+      replica = fake_pg.class.new
+      primary = fake_pg.class.new
+      factory_conns.push(replica, primary)
       listener.start
       listener.ensure_listening("chat")
       fake_pg.push_timeout
       wait_until { listener.listening_to.size == 1 }
 
-      # First validation after reset sees a replica (pg_is_in_recovery => t) and
-      # raises; the second sees the promoted primary and passes. reconnect! sleeps
-      # 0.5s between cycles, so drive one PG::Error, wait for the retry, then feed
-      # the loop a timeout so the successful relisten can be observed.
       calls = 0
       allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!) do |conn|
-        calls += 1
-        raise Pgbus::Process::ReplicaConnectionError, "on a replica" if calls == 1
-
-        conn
+        (calls += 1) == 1 ? raise(Pgbus::Process::ReplicaConnectionError, "on a replica") : conn
       end
 
       fake_pg.push_error(PG::Error.new("connection reset"))
-      # First reconnect: reset succeeds, validate raises replica → logs, sleeps 0.5s.
-      wait_until { fake_pg.reset_count >= 1 }
-      # Second reconnect cycle: another PG::Error drives the loop back in; this
-      # time validate passes and every channel is re-LISTENed.
-      fake_pg.push_error(PG::Error.new("still settling"))
-      fake_pg.push_timeout
+      primary.push_timeout # keep the primary conn's loop alive
+      wait_until(timeout: 3) { primary.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 1 }
 
-      wait_until(timeout: 3) do
-        fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 2
-      end
-
+      expect(primary.executed).to include(%(LISTEN "pgmq.q_chat.INSERT"))
+      expect(fake_pg.reset_count).to eq(0) # old conn discarded, never reset
       expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
     end
 
     it "does not re-LISTEN channels while still on a replica" do
+      # Every reconnect attempt lands on the same replica; validate_primary!
+      # always raises, so the loop spins without ever re-LISTENing.
+      replica = fake_pg.class.new
+      factory_conns.push(replica)
+      allow(factory_conns).to receive(:shift).and_return(replica)
       listener.start
       listener.ensure_listening("chat")
       fake_pg.push_timeout
@@ -486,15 +464,14 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
       allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!)
         .and_raise(Pgbus::Process::ReplicaConnectionError.new("on a replica"))
-
-      listen_count_before = fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") }
       fake_pg.push_error(PG::Error.new("connection reset"))
-      wait_until { fake_pg.reset_count >= 1 }
+      wait_until { replica.close_count >= 1 } # loop consumed a fresh conn and discarded it
       sleep 0.1
 
-      # A replica reset must not re-LISTEN — the channel would register on a host
-      # that never NOTIFYs. The subscription set is preserved for the next cycle.
-      expect(fake_pg.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") }).to eq(listen_count_before)
+      # A replica reconnect must not re-LISTEN — the channel would register on a
+      # host that never NOTIFYs. The subscription set is preserved for the next cycle.
+      expect(replica.executed).to be_empty
+      expect(fake_pg.reset_count).to eq(0) # old conn discarded, never reset
       expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
     end
   end
