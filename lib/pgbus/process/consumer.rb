@@ -7,7 +7,28 @@ module Pgbus
     class Consumer
       include SignalHandler
 
-      attr_reader :topics, :threads, :config, :execution_mode
+      attr_reader :topics, :threads, :config, :execution_mode,
+                  :queue_names, :wake_signal, :notify_retry_backoff
+      # notify_listener is writable so tests can simulate a start_notify_listener
+      # success from inside a stub (production sets it in start_notify_listener).
+      # notify_retry_at is writable so a test can re-arm the backoff window
+      # between successive ensure_notify_listener calls.
+      attr_accessor :notify_listener, :notify_retry_at
+
+      def shutting_down?
+        @shutting_down
+      end
+
+      def jobs_processed
+        @jobs_processed.value
+      end
+
+      # Seed the processed-job counter. Used by tests to drive the recycle
+      # thresholds without running thousands of real jobs; production only ever
+      # increments it via the AtomicFixnum during message handling.
+      def jobs_processed=(count)
+        @jobs_processed.value = count
+      end
 
       # Mirrors Worker::NOTIFY_FALLBACK_POLL_SECONDS. When a live NotifyListener
       # drives wake-up latency, the empty-read wait is a safety net rather than
@@ -22,7 +43,16 @@ module Pgbus
       NOTIFY_RETRY_BASE_SECONDS = 5
       NOTIFY_RETRY_MAX_SECONDS = 300
 
-      def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads)
+      # The notify-listener lifecycle state (`notify_listener`, `notify_retry_at`,
+      # `notify_retry_backoff`), the recycle clock (`started_at_monotonic`), and
+      # the resolved subscription set (`queue_names`) accept injected seeds so
+      # tests can drive the run loop from a known state without poking private
+      # ivars. All default to the values production initializes to; `queue_names`
+      # defaults to nil, meaning "derive from the registry in setup_subscriptions".
+      def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads,
+                     queue_names: nil, notify_listener: nil, notify_retry_at: 0.0,
+                     notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
+                     started_at_monotonic: nil)
         @topics = Array(topics)
         @threads = threads
         @config = config
@@ -30,7 +60,7 @@ module Pgbus
         @shutting_down = false
         @recycling = false
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
-        @started_at_monotonic = monotonic_now
+        @started_at_monotonic = started_at_monotonic || monotonic_now
         @wake_signal = WakeSignal.new
         @pool = ExecutionPools.build(
           mode: @execution_mode,
@@ -38,9 +68,10 @@ module Pgbus
           on_state_change: -> { @wake_signal.notify! }
         )
         @registry = EventBus::Registry.instance
-        @notify_listener = nil
-        @notify_retry_at = 0.0
-        @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
+        @queue_names = queue_names
+        @notify_listener = notify_listener
+        @notify_retry_at = notify_retry_at
+        @notify_retry_backoff = notify_retry_backoff
       end
 
       def run
