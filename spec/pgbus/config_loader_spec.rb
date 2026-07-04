@@ -5,6 +5,13 @@ require "spec_helper"
 require "tempfile"
 
 RSpec.describe Pgbus::ConfigLoader do
+  # Reset before AND after each example: the `after` alone leaves the first
+  # example run under a random seed exposed to config state another spec file
+  # left dirty (e.g. queue_prefix = "pgbus_test"). Examples here that assert the
+  # pristine default (a sectioned file with no matching env applies nothing) then
+  # fail on the leaked value. The `before` guarantees a clean default regardless
+  # of run order.
+  before { Pgbus.reset! }
   after { Pgbus.reset! }
 
   def with_yaml(content)
