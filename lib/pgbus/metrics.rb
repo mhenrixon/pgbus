@@ -3,7 +3,7 @@
 module Pgbus
   # Backend-agnostic metrics adapter.
   #
-  # Pgbus emits ~16 `pgbus.*` ActiveSupport::Notifications events (see
+  # Pgbus emits 21 `pgbus.*` ActiveSupport::Notifications events (see
   # Pgbus::Instrumentation). The AppSignal integration is one consumer of those
   # events; this namespace is a second, vendor-neutral consumer that forwards the
   # same event→metric mapping to a configurable backend so teams on Prometheus,

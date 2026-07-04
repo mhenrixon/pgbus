@@ -241,7 +241,7 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Subscriber" do
   end
 
   describe "pgbus.worker.recycle" do
-    it "increments the recycled counter with the reason" do
+    it "increments the recycled counter with the reason and kind: worker" do
       ActiveSupport::Notifications.instrument(
         "pgbus.worker.recycle",
         reason: :max_jobs,
@@ -249,8 +249,34 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Subscriber" do
       )
 
       expect(appsignal_class.counters).to include(
-        ["pgbus_worker_recycled", 1, hash_including(reason: :max_jobs)]
+        ["pgbus_worker_recycled", 1, hash_including(reason: :max_jobs, kind: "worker")]
       )
+    end
+  end
+
+  describe "pgbus.consumer.recycle" do
+    it "increments the recycled counter with the reason and kind: consumer" do
+      ActiveSupport::Notifications.instrument(
+        "pgbus.consumer.recycle",
+        reason: :max_memory,
+        jobs_processed: 500
+      )
+
+      expect(appsignal_class.counters).to include(
+        ["pgbus_worker_recycled", 1, hash_including(reason: :max_memory, kind: "consumer")]
+      )
+    end
+  end
+
+  describe "pgbus.client.pool" do
+    it "is not subscribed — the minutely probe already covers AppSignal pool gauges" do
+      appsignal_class.gauges.clear
+
+      ActiveSupport::Notifications.instrument("pgbus.client.pool", size: 10, available: 7, pool_timeout: 5)
+
+      expect(appsignal_class.gauges).to be_empty
+      expect(appsignal_class.counters).to be_empty
+      expect(appsignal_class.distributions).to be_empty
     end
   end
 
