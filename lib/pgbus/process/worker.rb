@@ -127,8 +127,10 @@ module Pgbus
         @in_flight.value = count
       end
 
-      # The last monotonic loop-tick stamp fed to the heartbeat's
-      # loop_tick_supplier. nil until the first stamp_loop_tick.
+      # The last wall-clock loop-tick stamp (Time.now.to_f) fed to the
+      # heartbeat's loop_tick_supplier. Wall-clock — NOT monotonic — so it stays
+      # comparable across the process boundary the supervisor watchdog reads it
+      # over. nil until the first stamp_loop_tick.
       def last_loop_tick
         @loop_tick_at.get
       end

@@ -87,8 +87,10 @@ module Pgbus
         @shutting_down
       end
 
-      # The last monotonic timestamp stamped by the run loop (via the heartbeat's
-      # loop_tick_supplier). nil until the first stamp_loop_tick.
+      # The last wall-clock timestamp (Time.now.to_f) stamped by the run loop
+      # via the heartbeat's loop_tick_supplier. Wall-clock — NOT monotonic — so
+      # it stays comparable across the parent/child process boundary the
+      # supervisor watchdog reads it over. nil until the first stamp_loop_tick.
       def last_loop_tick
         @loop_tick_at.get
       end
@@ -117,18 +119,10 @@ module Pgbus
       def initialize(config: Pgbus.configuration)
         @config = config
         @shutting_down = false
-        @last_cleanup_at = monotonic_now
-        @last_reap_at = monotonic_now
-        @last_concurrency_at = monotonic_now
-        @last_batch_cleanup_at = monotonic_now
-        @last_recurring_cleanup_at = monotonic_now
-        @last_archive_compaction_at = monotonic_now
-        @last_stream_archive_compaction_at = monotonic_now
-        @last_outbox_cleanup_at = monotonic_now
-        @last_job_lock_cleanup_at = monotonic_now
-        @last_stats_cleanup_at = monotonic_now
-        @last_orphan_stream_sweep_at = monotonic_now
-        @last_table_maintenance_at = monotonic_now
+        # Seed every per-task timestamp from the single source of truth so the
+        # list can never drift from set_maintenance_timestamp's allow-list.
+        now = monotonic_now
+        MAINTENANCE_TIMESTAMPS.each { |ivar| instance_variable_set(ivar, now) }
         @maintenance_failure_streak = 0
         @maintenance_backoff_until = nil
         @loop_tick_at = Concurrent::AtomicReference.new(nil)
