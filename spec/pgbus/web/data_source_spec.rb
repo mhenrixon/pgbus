@@ -12,6 +12,20 @@ RSpec.describe Pgbus::Web::DataSource do
 
   before do
     allow(Pgbus::BusRecord).to receive(:connection).and_return(mock_connection)
+    # Several DataSource methods touch AR model classes (QueueState, RecurringTask)
+    # as side paths — e.g. #summary_stats reads recurring_tasks_count and
+    # fetch_queues_with_metrics reads paused_queue_names. These specs mock only
+    # the AR connection, so under ActiveRecord 7.1 the eager schema load asks the
+    # bare connection double for :schema_cache, which raises RSpec's
+    # MockExpectationError (an Exception, NOT a StandardError, so those methods'
+    # `rescue StandardError` misses it). AR 8.1 resolves schema lazily and never
+    # touches the double, which is why the gap only surfaces on the 7.1 endpoint.
+    # Stubbing the class-method side paths makes behavior identical across Rails
+    # versions. Dedicated describe blocks re-stub these where they matter.
+    allow(Pgbus::QueueState).to receive(:paused).and_return(
+      instance_double(ActiveRecord::Relation, pluck: [])
+    )
+    allow(Pgbus::RecurringTask).to receive(:count).and_return(0)
   end
 
   describe "#queues_with_metrics" do
