@@ -16,7 +16,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
   before do
     stub_const("PG", Module.new) unless defined?(PG)
     stub_const("PG::Error", Class.new(StandardError)) unless defined?(PG::Error)
-    allow_any_instance_of(described_class).to receive(:build_connection).and_return(fake_pg)
+    allow(listener).to receive(:build_connection).and_return(fake_pg)
     # The self-probe owns its own connection dance and is covered by
     # notify_probe_spec. Neutralize it by default so it doesn't consume events
     # from the fake connection's queue; the probe-specific describe re-stubs it.
@@ -187,7 +187,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
       # missed reconnect could pass by reading channels from the first conn.
       second_pg = fake_pg.class.new
       call_count = 0
-      allow_any_instance_of(described_class).to receive(:build_connection) do
+      allow(listener).to receive(:build_connection) do
         call_count += 1
         call_count == 1 ? fake_pg : second_pg
       end
@@ -217,7 +217,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       before do
         call_sequence = [fake_pg, half_built, good_pg]
-        allow_any_instance_of(described_class).to receive(:build_connection) { call_sequence.shift }
+        allow(listener).to receive(:build_connection) { call_sequence.shift }
         stub_const("Pgbus::Process::NotifyListener::RECONNECT_BACKOFF_SECONDS", 0.01)
         listener.start
         fake_pg.push_timeout
@@ -251,7 +251,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
         # Initial conn (fake_pg) is a primary; the first reconnect attempt lands
         # on a replica; the second reconnect attempt lands on the primary.
         call_sequence = [fake_pg, replica_pg, primary_pg]
-        allow_any_instance_of(described_class).to receive(:build_connection) { call_sequence.shift }
+        allow(listener).to receive(:build_connection) { call_sequence.shift }
         # validate_primary! passes fake_pg and primary_pg through, but raises
         # for replica_pg — mirroring pg_is_in_recovery() => t on the demoted host.
         allow(Pgbus::Process::PrimaryValidator).to receive(:validate_primary!) do |conn|
@@ -338,7 +338,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       second_pg = fake_pg.class.new
       call_count = 0
-      allow_any_instance_of(described_class).to receive(:build_connection) do
+      allow(listener).to receive(:build_connection) do
         call_count += 1
         call_count == 1 ? fake_pg : second_pg
       end
@@ -394,7 +394,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
 
     it "clears @running after the thread exits so start can spawn a fresh thread" do
-      allow_any_instance_of(described_class).to receive(:build_connection)
+      allow(listener).to receive(:build_connection)
         .and_raise(PG::Error.new("boot failed"))
 
       listener.start
