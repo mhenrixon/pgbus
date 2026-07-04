@@ -1,0 +1,154 @@
+# frozen_string_literal: true
+
+# The single source of truth for the Configuration reference page — every option
+# as {name, type, default, description}, in groups. The page renders grouped
+# PropTables from GROUPS; the drift spec (spec/config_reference_spec.rb) checks
+# both directions against the real Pgbus::Configuration accessors, so a renamed
+# or added option fails the build until this list is updated.
+#
+# INTERNAL_ONLY lists accessors that are deliberately NOT surfaced here — private
+# plumbing, test hooks, or values set indirectly by other options. Keeping them
+# in an explicit allowlist means a NEW undocumented accessor still trips the spec.
+module ConfigReference
+  GROUPS = {
+    "Connection" => [
+      { name: "database_url", type: "String, nil", default: "nil", desc: "PostgreSQL URL (auto-detected in Rails)." },
+      { name: "connection_params", type: "Hash, nil", default: "nil", desc: "Extra connection parameters merged into the pool." },
+      { name: "pool_size", type: "Integer, nil", default: "nil (auto)", desc: "Connection pool size; auto-tuned from thread counts when nil." },
+      { name: "pool_timeout", type: "Numeric", default: "5", desc: "Seconds to wait for a pooled connection." },
+      { name: "connects_to", type: "Hash, nil", default: "nil", desc: "Rails multi-database config for a dedicated pgbus database." }
+    ],
+    "Queues" => [
+      { name: "queue_prefix", type: "String", default: '"pgbus"', desc: "Prefix for every PGMQ queue name." },
+      { name: "default_queue", type: "String", default: '"default"', desc: "Queue for jobs without an explicit queue." },
+      { name: "priority_levels", type: "Integer, nil", default: "nil", desc: "Number of priority sub-queues (2–10); nil disables." },
+      { name: "default_priority", type: "Integer", default: "1", desc: "Priority for jobs without an explicit one." },
+      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue." }
+    ],
+    "Workers" => [
+      { name: "workers", type: "String / Array", default: "default: 5", desc: "Worker capsule definitions (string DSL or array)." },
+      { name: "event_consumers", type: "String / Array, nil", default: "nil", desc: "Event-consumer process definitions." },
+      { name: "roles", type: "Array, nil", default: "nil (all)", desc: "Supervisor role filter — usually set via CLI flags." },
+      { name: "execution_mode", type: "Symbol", default: ":threads", desc: "Global execution mode (:threads or :async)." },
+      { name: "polling_interval", type: "Numeric", default: "0.1", desc: "Seconds between polls (LISTEN/NOTIFY is primary)." },
+      { name: "prefetch_limit", type: "Integer, nil", default: "nil", desc: "Max in-flight messages per worker." },
+      { name: "visibility_timeout", type: "Duration", default: "30", desc: "How long a read message stays invisible before retry." }
+    ],
+    "Worker recycling" => [
+      { name: "max_jobs_per_worker", type: "Integer, nil", default: "nil", desc: "Recycle a worker after N jobs." },
+      { name: "max_memory_mb", type: "Integer, nil", default: "nil", desc: "Recycle a worker above N MB RSS." },
+      { name: "max_worker_lifetime", type: "Duration, nil", default: "nil", desc: "Recycle a worker after N seconds." }
+    ],
+    "Retries & reliability" => [
+      { name: "max_retries", type: "Integer", default: "5", desc: "Failed reads before routing to the dead-letter queue." },
+      { name: "retry_backoff", type: "Numeric", default: "5", desc: "Base delay (seconds) for exponential retry backoff." },
+      { name: "retry_backoff_max", type: "Numeric", default: "300", desc: "Cap on the retry delay." },
+      { name: "retry_backoff_jitter", type: "Float", default: "0.15", desc: "Jitter factor (0–1) added to retry delays." },
+      { name: "circuit_breaker_enabled", type: "Boolean", default: "true", desc: "Auto-pause a queue after consecutive failures." },
+      { name: "listen_notify", type: "Boolean", default: "true", desc: "Use PGMQ LISTEN/NOTIFY for instant wake-up." },
+      { name: "zombie_detection", type: "Boolean", default: "true", desc: "Detect and reclaim work from crashed workers." }
+    ],
+    "Dispatcher & maintenance" => [
+      { name: "dispatch_interval", type: "Numeric", default: "1.0", desc: "Seconds between dispatcher maintenance ticks." },
+      { name: "archive_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep archived messages; nil disables cleanup." },
+      { name: "idempotency_ttl", type: "Duration, nil", default: "7.days", desc: "How long processed-event records are kept for dedup." }
+    ],
+    "Outbox" => [
+      { name: "outbox_enabled", type: "Boolean", default: "false", desc: "Enable the transactional outbox poller." },
+      { name: "outbox_poll_interval", type: "Numeric", default: "1.0", desc: "Seconds between outbox poll cycles." },
+      { name: "outbox_batch_size", type: "Integer", default: "100", desc: "Max entries claimed per outbox cycle." },
+      { name: "outbox_retention", type: "Duration, nil", default: "1.day", desc: "How long to keep published outbox entries." }
+    ],
+    "Recurring tasks" => [
+      { name: "recurring_tasks", type: "Hash, nil", default: "nil", desc: "Recurring task definitions as a hash." },
+      { name: "recurring_tasks_file", type: "String, nil", default: "nil", desc: "Path to a recurring.yml file." },
+      { name: "recurring_schedule_interval", type: "Numeric", default: "1.0", desc: "Seconds between scheduler ticks." },
+      { name: "recurring_execution_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep recurring execution history." },
+      { name: "skip_recurring", type: "Boolean", default: "false", desc: "Disable the recurring scheduler entirely." }
+    ],
+    "Job stats" => [
+      { name: "stats_enabled", type: "Boolean", default: "true", desc: "Record job execution stats for insights." },
+      { name: "stats_retention", type: "Duration, nil", default: "30.days", desc: "How long to keep job stats." },
+      { name: "stats_flush_size", type: "Integer", default: "100", desc: "Buffered stats per worker before a bulk insert." },
+      { name: "stats_flush_interval", type: "Numeric", default: "5", desc: "Seconds between periodic stat flushes." }
+    ],
+    "Dashboard" => [
+      { name: "web_auth", type: "Callable, nil", default: "nil", desc: "Lambda authorizing dashboard access." },
+      { name: "base_controller_class", type: "String", default: '"::ActionController::Base"', desc: "Base class for dashboard controllers." },
+      { name: "return_to_app_url", type: "String, nil", default: "nil", desc: 'URL for the "back to app" button.' },
+      { name: "web_refresh_interval", type: "Integer", default: "5000", desc: "Dashboard auto-refresh interval (ms)." },
+      { name: "web_live_updates", type: "Boolean", default: "true", desc: "Enable Turbo Frames auto-refresh." },
+      { name: "web_per_page", type: "Integer", default: "25", desc: "Dashboard pagination size." },
+      { name: "metrics_enabled", type: "Boolean", default: "true", desc: "Expose Prometheus gauges on the dashboard." }
+    ],
+    "Metrics & logging" => [
+      { name: "metrics_backend", type: "Symbol, Object, nil", default: "nil", desc: "Metrics adapter: nil, :prometheus, :statsd, or a Backend." },
+      { name: "statsd_host", type: "String", default: '"127.0.0.1"', desc: "StatsD UDP host." },
+      { name: "statsd_port", type: "Integer", default: "8125", desc: "StatsD UDP port." },
+      { name: "log_format", type: "Symbol", default: ":text", desc: "Log formatter (:text or :json)." },
+      { name: "error_reporters", type: "Array", default: "[]", desc: "Callables invoked on caught exceptions." },
+      { name: "appsignal_enabled", type: "Boolean", default: "true", desc: "Enable the AppSignal subscriber + probe (when the gem is present)." },
+      { name: "appsignal_probe_enabled", type: "Boolean", default: "true", desc: "Enable the minutely AppSignal gauge probe." }
+    ],
+    "Health & liveness" => [
+      { name: "health_port", type: "Integer, nil", default: "nil", desc: "Port for HTTP liveness/readiness probes; nil disables." },
+      { name: "health_bind", type: "String", default: '"127.0.0.1"', desc: "Bind address for the health server." },
+      { name: "stall_threshold", type: "Numeric", default: "300", desc: "Seconds without progress before a worker is stalled." },
+      { name: "read_timeout", type: "Numeric", default: "5", desc: "Read timeout for worker fetches." }
+    ],
+    "Streams (SSE)" => [
+      { name: "streams_enabled", type: "Boolean", default: "true", desc: "Enable the SSE streams transport." },
+      { name: "streams_queue_prefix", type: "String", default: '"pgbus_stream"', desc: "Prefix for stream queues." },
+      { name: "streams_default_retention", type: "Numeric", default: "300", desc: "Default stream retention in seconds." },
+      { name: "streams_retention", type: "Hash", default: "{}", desc: "Per-stream retention overrides." },
+      { name: "streams_heartbeat_interval", type: "Numeric", default: "15", desc: "SSE heartbeat interval (seconds)." },
+      { name: "streams_max_connections", type: "Integer", default: "2000", desc: "Max SSE connections per web-server process." },
+      { name: "streams_idle_timeout", type: "Numeric", default: "3600", desc: "Close idle SSE connections after N seconds." },
+      { name: "streams_path", type: "String, nil", default: "nil", desc: "Custom SSE endpoint path (auto-detected from mount)." },
+      { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack." },
+      { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
+      { name: "streams_test_mode", type: "Boolean", default: "false", desc: "Return a stub SSE response (auto-enabled by the test helpers)." }
+    ],
+    "Validation" => [
+      { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },
+      { name: "allowed_global_id_models", type: "Array, nil", default: "nil", desc: "Allowlist of models permitted as GlobalID event arguments." },
+      { name: "pgmq_schema_mode", type: "Symbol", default: ":auto", desc: "PGMQ schema install mode (:auto, :extension, :embedded)." }
+    ]
+  }.freeze
+
+  # Accessors deliberately not documented on the reference page: injected
+  # collaborators, indirect/derived writers, low-level stream tuning, and
+  # dashboard internals. Listed explicitly so a NEW undocumented accessor still
+  # fails the drift spec.
+  INTERNAL_ONLY = %w[
+    logger
+    web_data_source
+    dashboard_filter_parameters
+    dashboard_filter_sensitive
+    insights_default_minutes
+    recurring_tasks_files
+    streams_signed_name_secret
+    streams_database_url
+    streams_host
+    streams_port
+    streams_listen_health_check_ms
+    streams_write_deadline_ms
+    streams_orphan_sweep_interval
+    streams_orphan_threshold
+    streams_durable_patterns
+    streams_presence_patterns
+    streams_presence_member
+    streams_default_broadcast_mode
+    worker_notify_database_url
+    worker_notify_host
+    worker_notify_port
+    worker_notify_wakeup
+  ].freeze
+
+  module_function
+
+  # Every documented option name, flat — used by the page and the drift spec.
+  def documented_names
+    GROUPS.values.flatten.map { |o| o[:name] }
+  end
+end

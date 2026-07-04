@@ -1,0 +1,46 @@
+# Kamal deploy → the oss-infrastructure server (Cloudflare Tunnel + kamal-proxy).
+# service/image = the repo OWNER/REPO so the ghcr package auto-links to the
+# repo and GITHUB_TOKEN can push + pull it (no PAT). See docs-kit's README.
+service: pgbus
+image: mhenrixon/pgbus
+
+servers:
+  web:
+    hosts:
+      - <%= ENV["DEPLOY_HOST"] %>
+
+ssh:
+  user: <%= ENV.fetch("DEPLOY_SSH_USER", "oss") %>
+
+proxy:
+  host: <%= ENV["DEPLOY_DOMAIN"] %>
+  app_port: 3000
+  ssl: false
+  healthcheck:
+    path: /up
+    interval: 5
+    timeout: 30
+
+registry:
+  server: ghcr.io
+  username: mhenrixon
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# The build context is the REPO ROOT (gem + app): the docs app depends on the
+# gem via `gem "pgbus", path: ".."`, which the Docker build can only resolve if
+# the whole repo is in the context. Kamal runs from docs/, so `dockerfile` is
+# relative to docs/ (just "Dockerfile") while `context: ..` points at the root.
+builder:
+  arch: amd64
+  context: ..
+  dockerfile: Dockerfile
+
+env:
+  clear:
+    RAILS_SERVE_STATIC_FILES: "true"
+    RAILS_LOG_TO_STDOUT: "true"
+    # A stateless docs site: SECRET_KEY_BASE only signs cookies (there is no user
+    # data), so it's inlined rather than managed as a secret. Rotate with
+    # `bin/rails secret`.
+    SECRET_KEY_BASE: "26f358265e45b298bc7e84f94925790dc45f7dce3aa6c1982fe1f3918e1d7fd194969d8678cee79a79443f7ea6f589979d5ec483b82055bcb66b438e9f595932"

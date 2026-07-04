@@ -1,0 +1,62 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+# The docs-kit MCP server (read-only, stateless JSON-RPC over POST) exposes this
+# site's docs as agent tools. It's live because the `mcp` gem is bundled, the
+# /mcp route is drawn, and c.mcp defaults to true. These specs lock in that the
+# three tools respond and that GET/DELETE are rejected — so a regression (gem
+# dropped, route recommented, c.mcp flipped) fails loudly.
+RSpec.describe "MCP endpoint", type: :request do
+  def rpc(method, params = {})
+    post "/mcp",
+         params: { jsonrpc: "2.0", id: 1, method:, params: }.to_json,
+         headers: { "CONTENT_TYPE" => "application/json" }
+    response.parsed_body
+  end
+
+  def tool_text(name, arguments = {})
+    result = rpc("tools/call", { name:, arguments: }).fetch("result")
+    expect(result["isError"]).to be_falsey
+    result.dig("content", 0, "text").to_s
+  end
+
+  describe "tools/list" do
+    it "advertises the three read-only docs tools" do
+      names = rpc("tools/list").dig("result", "tools").pluck("name")
+      expect(names).to contain_exactly("list_pages", "get_page", "search_docs")
+    end
+  end
+
+  describe "tools/call" do
+    it "list_pages returns the authored pages with their slugs and urls" do
+      text = tool_text("list_pages")
+      expect(text).to include("overview").and include("/docs/overview")
+    end
+
+    it "get_page returns the requested page's own Markdown by slug" do
+      text = tool_text("get_page", { slug: "overview" })
+      # Assert on content unique to the Overview page (its title + a phrase from
+      # its lead), so the tool must return THIS page, not just any non-empty body.
+      expect(text).to include("Overview")
+      expect(text).to include("PostgreSQL-native")
+    end
+
+    it "search_docs ranks hits for a query" do
+      text = tool_text("search_docs", { query: "queue" })
+      expect(text).to include("/docs/")
+    end
+  end
+
+  describe "method handling" do
+    it "rejects GET with 405 (POST-only, stateless — no SSE session)" do
+      get "/mcp"
+      expect(response).to have_http_status(:method_not_allowed)
+    end
+
+    it "rejects DELETE with 405 (no session to terminate)" do
+      delete "/mcp"
+      expect(response).to have_http_status(:method_not_allowed)
+    end
+  end
+end
