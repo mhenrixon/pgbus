@@ -112,7 +112,7 @@ RSpec.describe Pgbus::Recurring::Schedule do # deduplication
           "UniqueMinuteJob"
         end
 
-        ensures_uniqueness strategy: :until_executed, lock_ttl: 3600
+        ensures_uniqueness strategy: :until_executed
       end
     end
 

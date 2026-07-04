@@ -202,8 +202,7 @@ module Pgbus
 
         payload.merge(
           Pgbus::Uniqueness::METADATA_KEY => key,
-          Pgbus::Uniqueness::STRATEGY_KEY => config[:strategy].to_s,
-          Pgbus::Uniqueness::TTL_KEY => config[:lock_ttl]
+          Pgbus::Uniqueness::STRATEGY_KEY => config[:strategy].to_s
         )
       end
     end

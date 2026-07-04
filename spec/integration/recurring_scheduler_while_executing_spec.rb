@@ -15,7 +15,7 @@ RSpec.describe "Recurring scheduler with :while_executing strategy (integration)
         "WhileExecutingJob"
       end
 
-      ensures_uniqueness strategy: :while_executing, lock_ttl: 3600
+      ensures_uniqueness strategy: :while_executing
     end
   end
 
@@ -60,7 +60,6 @@ RSpec.describe "Recurring scheduler with :while_executing strategy (integration)
       # by the scheduler — the executor handles lock acquisition at runtime
       expect(payload).not_to have_key(Pgbus::Uniqueness::METADATA_KEY)
       expect(payload).not_to have_key(Pgbus::Uniqueness::STRATEGY_KEY)
-      expect(payload).not_to have_key(Pgbus::Uniqueness::TTL_KEY)
     end
 
     it "allows multiple enqueues since no lock prevents it" do
