@@ -12,8 +12,10 @@ class Views::Docs::Pages::Observability < DocsUI::Page
     error_reporting
     instrumentation
     metrics
+    pool_metrics
     appsignal
     logging
+    stats_buffering
     health
   end
 
@@ -112,6 +114,30 @@ class Views::Docs::Pages::Observability < DocsUI::Page
     end
   end
 
+  def pool_metrics
+    DocsUI::Section("Connection pool metrics", description: "See utilization before you hit a pool timeout.") do
+      md <<~'MD'
+        `Pgbus::Client#pool_stats` returns `{ size:, available:, pool_timeout: }` —
+        pgmq-ruby's live pool counters merged with the configured timeout. It's
+        purely observational (rescues internally to `{}`), so reading the pool can
+        never break job processing:
+      MD
+      DocsUI::Code(<<~RUBY)
+        Pgbus.client.pool_stats
+        # => { size: 10, available: 3, pool_timeout: 5 }
+      RUBY
+      md <<~'MD'
+        The worker heartbeat emits a `pgbus.client.pool` instrumentation event once
+        per beat (never on a per-job hot path) carrying that payload, and the
+        AppSignal minutely probe reports `pgbus_pool_size` / `pgbus_pool_available`
+        gauges tagged by hostname (the pool is per-process, unlike the cluster-wide
+        queue gauges). A pool-timeout error is re-raised with the live pool state
+        and an actionable hint — raise `pool_size` or reduce worker threads —
+        appended to the message.
+      MD
+    end
+  end
+
   def appsignal
     DocsUI::Section("AppSignal", description: "Auto-installs when the gem is present.") do
       md <<~'MD'
@@ -137,17 +163,86 @@ class Views::Docs::Pages::Observability < DocsUI::Page
     end
   end
 
-  def health
-    DocsUI::Section("Health endpoints", description: "Liveness and readiness for Kubernetes.") do
+  def stats_buffering
+    DocsUI::Section("Stats buffering", description: "Tune the SIGKILL loss window.") do
       md <<~'MD'
-        The supervisor can serve HTTP liveness and readiness probes on a dedicated
-        port, so an orchestrator can tell a running-but-wedged process from a healthy
-        one:
+        Job stats (for the Insights dashboard) are buffered in memory per worker and
+        bulk-inserted rather than written one row per job. A worker flushes when its
+        buffer fills to `stats_flush_size` entries, when `stats_flush_interval`
+        seconds have elapsed, and immediately on entering drain — a graceful `TERM`
+        shutdown or a recycle threshold (`max_jobs`/`max_memory`/`max_lifetime`):
       MD
       DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
         Pgbus.configure do |c|
-          c.health_port = 9394       # nil disables the endpoints
-          c.health_bind = "0.0.0.0"
+          c.stats_flush_size = 500     # flush after 500 buffered stats (default 100)
+          c.stats_flush_interval = 2   # ...or every 2 seconds (default 5), whichever first
+        end
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "Stats are advisory — dashboard/insights only, never a job payload. A "
+        plain "clean stop flushes the buffer, so nothing is lost. Only an un-trappable "
+        plain "supervisor "
+        code { "SIGKILL" }
+        plain " on a stalled worker can lose up to "
+        code { "stats_flush_interval" }
+        plain " seconds / "
+        code { "stats_flush_size" }
+        plain " entries accumulated since the last flush. Tune both down on a "
+        plain "high-throughput deployment for a tighter loss window, or up to reduce "
+        plain "insert frequency."
+      end
+    end
+  end
+
+  def health
+    DocsUI::Section("Health endpoints", description: "Liveness and readiness for Kubernetes.") do
+      md <<~'MD'
+        Pgbus exposes two HTTP probes: `/livez` (is the serving process up?) and
+        `/readyz` (are queues draining, or is a worker silently wedged?). `/readyz`
+        runs the same `OK` / `DEGRADED` / `STALLED` verdict as the MCP
+        `pgbus_health` tool — `DEGRADED` deliberately stays ready; only the
+        silent-wedge `STALLED` signal fails readiness.
+      MD
+      DocsUI::Table(
+        [ "Path", "Method", "200", "503", "Touches DB" ],
+        [
+          [ [ :code, "/livez" ], "GET", [ :md, "always (`ok`)" ], "never", "no" ],
+          [ [ :code, "/readyz" ], "GET", [ :md, "verdict `OK` or `DEGRADED`" ],
+            [ :md, "verdict `STALLED`, or DB unreachable (`{\"status\":\"ERROR\"}`)" ], "yes" ]
+        ]
+      )
+      md <<~'MD'
+        Unknown paths return `404`; non-`GET` methods return `405`. The `/readyz`
+        body is the verdict JSON, so a probe failure is self-describing in the
+        pod's event log.
+      MD
+      md <<~'MD'
+        `Pgbus::Web::HealthApp` is a plain Rack app — mount it wherever your web
+        pods already serve HTTP. It needs no auth (it exposes only aggregate
+        health, never payloads), but keep it on an internal network:
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/routes.rb")
+        mount Pgbus::Web::HealthApp.new => "/pgbus/health"
+      RUBY
+      DocsUI::Code(<<~YAML, filename: "kubelet probes (Deployment spec)", lexer: :yaml)
+        livenessProbe:
+          httpGet: { path: /pgbus/health/livez, port: 3000 }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /pgbus/health/readyz, port: 3000 }
+          periodSeconds: 10
+          failureThreshold: 3
+      YAML
+      md <<~'MD'
+        Worker pods that run only the supervisor (`bin/pgbus`, no Puma) have no
+        Rails server to mount into. Set `health_port` and the supervisor serves
+        both paths itself over a tiny TCP server (no Rails, no dashboard), so a
+        kubelet can probe the process that actually forks and watches workers:
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |c|
+          c.health_port = 9394       # nil (default) disables the standalone endpoints
+          c.health_bind = "0.0.0.0" # default "127.0.0.1"
         end
       RUBY
     end

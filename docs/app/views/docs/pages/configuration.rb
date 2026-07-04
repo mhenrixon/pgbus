@@ -12,6 +12,7 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
   def content
     initializer
     common_knobs
+    eager_validation
     capsules
     upgrading
   end
@@ -65,6 +66,43 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
         The complete list — outbox, streams, metrics, health, and the rest — is on
         the [Configuration reference](/docs/configuration-reference).
       MD
+    end
+  end
+
+  def eager_validation
+    DocsUI::Section("Configuration is validated eagerly", description: "A bad setting fails boot, not a worker mid-run.") do
+      md <<~'MD'
+        `Pgbus.configure` runs `configuration.validate!` right after your block
+        yields, and the engine's `pgbus.configure` initializer does the same after
+        loading `config/pgbus.yml`. An invalid value — `visibility_timeout = 0`, for
+        example — now raises `ArgumentError` at Rails boot instead of sitting
+        dormant until a worker code path finally consumes it, far from the
+        misconfiguration. `validate!` stays DB-free, so eager validation adds no
+        boot-time database dependency.
+      MD
+      md <<~'MD'
+        This is backward-incompatible in one direction: an invalid-but-previously-
+        unread config now raises at boot instead of silently later. That's the
+        intended fix. For an exotic setup that intentionally holds a transiently-
+        invalid config (built up across several sequential `configure` calls, say),
+        set the escape hatch:
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |c|
+          c.eager_validation = false # default true; suppresses the automatic validate!
+        end
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "Explicit "
+        code { "Pgbus.configuration.validate!" }
+        plain " calls always still run — "
+        code { "eager_validation" }
+        plain " only suppresses the automatic call after "
+        code { "configure" }
+        plain " / "
+        code { "ConfigLoader.apply" }
+        plain "."
+      end
     end
   end
 
