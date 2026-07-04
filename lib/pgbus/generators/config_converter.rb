@@ -11,7 +11,9 @@ module Pgbus
     #
     # Drops settings that:
     #   - match the gem default (no point restating it)
-    #   - are deprecated (e.g. pool_size, which is now auto-tuned)
+    #   - are deprecated (settings that no longer exist in the public API —
+    #     see DEPRECATED_SETTINGS; pool_size is NOT one of these, it's a
+    #     live accessor that overrides auto-tuning and is preserved)
     #
     # Converts seconds to durations when they evenly divide into a clean
     # unit (7 days, 30 days, 10 minutes). Falls back to the raw integer
@@ -38,15 +40,15 @@ module Pgbus
 
       # Settings that no longer exist in the public API. The converter
       # silently drops these from the generated initializer so users on
-      # legacy YAML get a clean migration.
+      # legacy YAML get a clean migration. NOTE: pool_size is intentionally
+      # NOT here — it's a live Configuration#pool_size accessor users set to
+      # override auto-tuning, so it must survive the conversion unchanged.
       #
-      #   - pool_size              -> auto-tuned from worker thread counts
       #   - notify_throttle_ms     -> Pgbus::Client::NOTIFY_THROTTLE_MS
       #   - circuit_breaker_*      -> Pgbus::CircuitBreaker constants
       #   - archive_compaction_*   -> Pgbus::Process::Dispatcher constants
       #   - dead_letter_queue_suffix -> Pgbus::DEAD_LETTER_SUFFIX (frozen)
       DEPRECATED_SETTINGS = %w[
-        pool_size
         notify_throttle_ms
         circuit_breaker_threshold circuit_breaker_base_backoff circuit_breaker_max_backoff
         archive_compaction_interval archive_compaction_batch_size
