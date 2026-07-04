@@ -383,6 +383,36 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
     end
 
+    it "survives a ConfigurationError from the factory and recovers on a later attempt" do
+      # build_raw_pg_connection can raise Pgbus::ConfigurationError (e.g. a
+      # pooled AR connection in streams_connection_options). The reconnect loop
+      # must catch it, back off, and retry rather than let it kill the thread.
+      good = fake_pg.class.new
+      calls = 0
+      config_error_factory = lambda do
+        calls += 1
+        raise Pgbus::ConfigurationError, "bad streams_connection_options" if calls == 1
+
+        good
+      end
+      failing_listener = described_class.new(
+        pg_connection: fake_pg, dispatch_queue: dispatch_queue, health_check_ms: 50,
+        logger: logger, connection_factory: config_error_factory
+      )
+
+      failing_listener.start
+      failing_listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { failing_listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      good.push_timeout
+
+      wait_until { good.executed.count { |s| s == %(LISTEN "pgmq.q_chat.INSERT") } >= 1 }
+      expect(failing_listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
+      failing_listener.stop
+    end
+
     it "closes the partially-built connection before retrying (no leak)" do
       half_built = fake_pg.class.new
       good = fake_pg.class.new

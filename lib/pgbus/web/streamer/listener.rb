@@ -235,10 +235,13 @@ module Pgbus
               # primary; re-LISTENing on a replica registers channels that never wake.
               Pgbus::Process::PrimaryValidator.validate_primary!(new_conn)
               channels.each { |channel| new_conn.exec(%(LISTEN "#{channel}")) }
-            rescue PG::Error, Pgbus::Process::ReplicaConnectionError => e
-              # The factory may have returned a live conn before a later LISTEN
-              # raised (or validate_primary! rejected a replica). Close the
-              # partial conn so repeated failures don't leak PG connections.
+            rescue PG::Error, Pgbus::Process::ReplicaConnectionError, Pgbus::ConfigurationError => e
+              # The factory may raise a ConfigurationError (a bad
+              # streams_connection_options, e.g. a pooled AR connection) or return
+              # a live conn before a later LISTEN raised (or validate_primary!
+              # rejected a replica). Close any partial conn so repeated failures
+              # don't leak PG connections, then back off and retry rather than
+              # letting the exception kill the listener thread silently.
               close_quietly(new_conn)
               @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
               sleep RECONNECT_BACKOFF_SECONDS

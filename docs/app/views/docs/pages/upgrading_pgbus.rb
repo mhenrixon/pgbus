@@ -90,10 +90,11 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         bundle exec pgbus doctor
       SHELL
       md <<~'MD'
-        `doctor` runs six checks — configuration validity, database connectivity,
-        PGMQ schema version, queue existence, LISTEN/NOTIFY liveness, and process
-        liveness — and exits non-zero on any failure, so it's safe to wire into a
-        deploy gate or a post-deploy CI job.
+        `doctor` runs seven checks — configuration validity, database connectivity,
+        PGMQ schema version, queue existence, LISTEN/NOTIFY liveness, process
+        liveness, and the GlobalID allowlist (a security warning when
+        `allowed_global_id_models` is nil in production) — and exits non-zero on
+        any failure, so it's safe to wire into a deploy gate or a post-deploy CI job.
       MD
       DocsUI::Callout(:note) do
         plain "Rolling deploys are safe. Pgbus's heartbeat and process metadata "
@@ -253,7 +254,8 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
           [ [ :code, "recurring_tasks_file" ], [ :md, "Deprecated in favor of `recurring_tasks_files` (plural)." ], "Setting both now warns once (the singular was silently ignored before); a lone singular still works." ],
           [ [ :code, "lock_ttl:" ], [ :md, "Removed from `ensures_uniqueness` — validated but never read by anything." ], [ :md, "Passing it raises `ArgumentError` naming the removal and this page." ] ],
           [ [ :code, "pgbus:add_job_locks" ], [ :md, "Generator removed; `Pgbus::JobLock` model removed (zero references)." ], [ :md, "No replacement — new installs use `pgbus:add_uniqueness_keys`; `pgbus:migrate_job_locks` still retires the legacy table." ] ],
-          [ [ :code, "with_pgbus_durable" ], [ :md, "Removed (internal streams helper, zero callers)." ], [ :md, "Use `with_pgbus_broadcast_opts(durable:)`." ] ]
+          [ [ :code, "with_pgbus_durable" ], [ :md, "Removed (internal streams helper, zero callers)." ], [ :md, "Use `with_pgbus_broadcast_opts(durable:)`." ] ],
+          [ [ :code, "reconnect_via_reset" ], [ :md, "Removed — the streamer's `conn.reset` reconnect fallback (only test wiring reached it)." ], [ :md, "`connection_factory` is now required on `Streamer::Listener` and always injected; reconnect always rebuilds a fresh connection." ] ]
         ]
       )
       md <<~'MD'

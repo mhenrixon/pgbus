@@ -61,7 +61,7 @@ module ConfigReference
     ],
     "Recurring tasks" => [
       { name: "recurring_tasks", type: "Hash, nil", default: "nil", desc: "Recurring task definitions as a hash." },
-      { name: "recurring_tasks_file", type: "String, nil", default: "nil", desc: "Path to a recurring.yml file." },
+      { name: "recurring_tasks_files", type: "Array, nil", default: "nil", desc: "Paths to recurring.yml files. Replaces the deprecated singular recurring_tasks_file." },
       { name: "recurring_schedule_interval", type: "Numeric", default: "1.0", desc: "Seconds between scheduler ticks." },
       { name: "recurring_execution_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep recurring execution history." },
       { name: "recurring_enabled", type: "Boolean", default: "true", desc: "Run the recurring scheduler (set false to disable it entirely). Replaces the deprecated skip_recurring." }
@@ -129,10 +129,10 @@ module ConfigReference
     logger
     web_data_source
     skip_recurring
+    recurring_tasks_file
     dashboard_filter_parameters
     dashboard_filter_sensitive
     insights_default_minutes
-    recurring_tasks_files
     streams_signed_name_secret
     streams_database_url
     streams_host

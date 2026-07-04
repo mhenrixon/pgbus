@@ -257,7 +257,9 @@ RSpec.describe Pgbus::Doctor do
     end
 
     it "is :ok in production when an allowlist is configured" do
-      config.allowed_global_id_models = %w[User]
+      # allowed_global_id_models is a Class/Module allowlist at runtime
+      # (see Serializer), not strings — model the valid happy path.
+      config.allowed_global_id_models = [stub_const("Order", Class.new)]
       allow(doctor).to receive(:production?).and_return(true)
 
       expect(gid_check(doctor.run)[:status]).to eq(:ok)

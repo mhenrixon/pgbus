@@ -184,6 +184,18 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       expect(instance.listener.instance_variable_get(:@connection_factory)).to respond_to(:call)
     end
 
+    it "passes an injected connection_factory through to the Listener (no real config touched)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+      injected = -> { fake_pg }
+
+      instance = described_class.new(
+        client: client, config: config, pg_connection: fake_pg,
+        logger: Logger.new(IO::NULL), connection_factory: injected
+      )
+
+      expect(instance.listener.instance_variable_get(:@connection_factory)).to be(injected)
+    end
+
     context "when the freshly built connection lands on a read-only replica" do
       before do
         require "pg"
