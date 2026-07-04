@@ -27,7 +27,8 @@ module Pgbus
       def display_post_install
         say ""
         say "DEPRECATED: pgbus:add_job_locks creates the legacy pgbus_job_locks table.", :yellow
-        say "  Nothing in pgbus reads it anymore -- ensures_uniqueness uses pgbus_uniqueness_keys.", :yellow
+        say "  The pgbus runtime no longer reads it -- ensures_uniqueness uses pgbus_uniqueness_keys.", :yellow
+        say "  (pgbus:migrate_job_locks still reads it to migrate legacy rows across.)", :yellow
         say "  New installs: run `rails generate pgbus:add_uniqueness_keys` instead.", :yellow
         say "  Existing installs mid-migration: keep this generator alongside " \
             "`rails generate pgbus:migrate_job_locks`.", :yellow
