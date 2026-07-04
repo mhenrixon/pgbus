@@ -1170,6 +1170,20 @@ Pgbus.stream_key(chat, :messages)  # => "ai_chat_a3f8c1e9d2b47610_messages"
 
 The budget is computed from `config.queue_prefix` at call time so prefix overrides adjust automatically. If a stream name exceeds the budget, `Pgbus::Streams::StreamNameTooLong` is raised immediately with the offending name, computed budget, and a pointer to `Pgbus.stream_key` — before PGMQ is ever touched.
 
+#### `stream_key` idempotency
+
+A single `String` argument to `Pgbus.stream_key` is treated as an already-built pgbus stream key and returned unchanged (after the queue-name budget check), instead of tripping the colon-separator guard. This lets a consumer hold one `stream_key` value and pass it to both `pgbus_stream_from` and the broadcaster without a second call raising `ArgumentError`:
+
+```ruby
+key = Pgbus.stream_key(chat, :messages)  # => "ai_chat_a3f8c1e9d2b47610:messages"
+
+# Both calls accept the same pre-built key without raising:
+pgbus_stream_from(key)
+Pgbus.stream(key).broadcast(html)
+```
+
+`Pgbus.stream_key!(key)` accepts a pre-built key explicitly (`String` required, budget still enforced) for call sites that want to be explicit that no re-keying should happen. The guard still fires for the genuinely ambiguous multi-fragment join (`stream_key("a:b", :c)` — colliding with `stream_key("a", "b:c")`), and a `Symbol`/record fragment containing a colon is still rejected (a colon there never came from `stream_key`).
+
 ### Transactional broadcasts
 
 **This is the feature no other Rails real-time stack can offer.** A broadcast issued inside an open ActiveRecord transaction is deferred until the transaction commits. If it rolls back, the broadcast silently drops — clients never see the change that the database never persisted.
@@ -1208,6 +1222,29 @@ The replay cap is applied server-side: the helper computes `since_id = max(0, cu
 
 How much history is actually available depends on the stream's retention setting (`streams_retention` or `streams_default_retention`, both in seconds). A chat stream configured with `streams_retention = { /^chat_/ => 7.days }` will replay up to seven days of history with `replay: :all`; a notification stream with the 5-minute default will only go back five minutes.
 
+### `msg_id` reconciliation for optimistic UI
+
+Every delivered frame carries its monotonic PGMQ `msg_id` as the SSE `id:` line — the same watermark that powers reconnect replay. `<pgbus-stream-source>` surfaces it to the client two ways: the standard `message` `MessageEvent` sets `lastEventId` to the msg_id (Turbo ignores it; a reactive runtime listening for `message` reads the revision with no pgbus-specific API), and a `pgbus:message` `CustomEvent` carries `{ msgId, data }` (`msgId` is a `Number` when numeric; a negative value marks an ephemeral frame that bypassed PGMQ rather than a durable, archived one).
+
+**The reconciliation recipe:** track the highest applied `msgId` per render target; when a frame arrives, skip the morph if you've already applied a newer revision for that target. This stops a late echo — a broadcast that was in flight when a newer one landed — from clobbering a newer optimistic edit:
+
+```js
+const appliedRevision = new Map() // target -> highest applied msgId
+
+document.addEventListener("pgbus:message", (event) => {
+  const { msgId, data } = event.detail
+  const target = extractTargetFrom(data) // however your markup encodes it
+
+  const highest = appliedRevision.get(target) ?? -Infinity
+  if (msgId != null && msgId < highest) return // stale — skip the morph
+
+  appliedRevision.set(target, msgId)
+  applyMorph(target, data)
+})
+```
+
+This complements `exclude:` (below): `exclude:` handles the actor (never receives its own echo at all); msg_id reconciliation handles out-of-order delivery for everyone else.
+
 ### Server-side audience filtering
 
 Some broadcasts shouldn't reach every subscriber on a stream. Pgbus supports per-connection filtering via a registry of named predicates evaluated against each connection's authorize-hook context:
@@ -1244,6 +1281,95 @@ Failure semantics:
 - **No `visible_to` on the broadcast** → no filter applied; everyone sees it.
 
 The filter registry is process-local. Each Puma worker (or Falcon reactor) has its own copy populated at boot. Filter predicates run **on the subscriber side** — the predicate itself can't be serialized through PGMQ, so the broadcast carries only the label name.
+
+### Actor-echo suppression (`exclude:`)
+
+An actor who just triggered a change already applied it via the HTTP response of their own action. If the resulting broadcast reaches their own SSE connection too, it double-applies — re-running animations or clobbering an optimistic edit. Pass `exclude:` with a connection id to skip delivery to that one connection; everyone else still gets the broadcast:
+
+```ruby
+Pgbus.stream(room).broadcast(html, exclude: connection_id)
+```
+
+Every server-minted SSE connection exposes its id to the page: right after the open handshake, pgbus sends a `pgbus:connected` frame carrying the connection id, and `<pgbus-stream-source>` captures it onto its `connection-id` attribute and re-dispatches it as a `pgbus:connected` event (also present in `pgbus:open`'s detail). The page reads that id and sends it back as the `X-Pgbus-Connection` header on the action request that triggers the broadcast:
+
+```js
+document.addEventListener("pgbus:connected", (event) => {
+  document.querySelector("meta[name='pgbus-connection-id']")
+    ?.setAttribute("content", event.detail.connectionId)
+})
+
+// On the next fetch/form submit:
+fetch(url, {
+  method: "POST",
+  headers: { "X-Pgbus-Connection": connectionIdMetaTag() }
+})
+```
+
+```ruby
+def create
+  @message = @room.messages.create!(message_params)
+  @room.broadcast_append_to(:messages, exclude: request.headers["X-Pgbus-Connection"])
+end
+```
+
+A nil or blank `exclude:` is a no-op — the common path for background jobs and other server-initiated broadcasts with no originating connection. Reuses the existing per-connection delivery (Filters) path.
+
+### `broadcast_render` — render and broadcast in one call
+
+`Stream#broadcast_render` renders a Phlex component, a ViewComponent, or a pre-rendered HTML string into a complete `<turbo-stream>` action tag and broadcasts it atomically — removing the off-request render + tag-building boilerplate (and the easy-to-get-wrong view context) from every call site:
+
+```ruby
+Pgbus.stream("chat", room).broadcast_render(
+  renderable: Chat::Message.new(chat_message: msg),
+  action: :append,
+  target: "chat-messages-#{room}",
+  exclude: connection_id   # composes with #exclude
+)
+```
+
+`action` defaults to `:replace`; `target:` is required. The renderable is resolved via `String` → `#call` (Phlex) → `#render_in` (ViewComponent; called with a `nil` view context since there's no controller off-request) → `#to_s`. Content-less actions (`remove`) emit no `<template>` wrapper. `exclude:`, `visible_to:`, `durable:`, `event:`, and `coalesce:` all forward to `#broadcast` unchanged, so actor-echo suppression and audience filtering compose. A component that needs URL helpers or a full view context should be rendered by the app and the resulting string passed as `renderable:`.
+
+### Typed SSE event names (`event:`)
+
+A broadcast can set the SSE `event:` field while keeping the payload a Turbo Stream, so clients route on a typed name instead of sniffing the HTML:
+
+```ruby
+Pgbus.stream(name).broadcast(html, event: "presence")
+Pgbus.stream(name).broadcast_render(renderable: component, target: "cursor", event: "reactive")
+```
+
+The default (`nil` or `"turbo-stream"`) is omitted from the JSONB payload to avoid redundancy, but is still set on the SSE frame's `event:` line (falling back to `turbo-stream`), so default consumers still get the standard `message`/turbo-stream path.
+
+On the client, `<pgbus-stream-source>` dispatches a typed broadcast two ways: a generic `pgbus:event` (`{ event, data, msgId }`) for one listener that handles every typed event, and a named `pgbus:<event>` (`{ data, msgId }`) for `addEventListener("pgbus:presence", …)` ergonomics:
+
+```js
+document.addEventListener("pgbus:presence", (event) => {
+  const { data, msgId } = event.detail
+  // ...
+})
+```
+
+Native `EventSource` (the reconnect path) only invokes listeners registered by name, so declare every typed event name you use on the element's `listen-events` attribute (comma- or space-separated) — otherwise a typed broadcast is silently dropped after a reconnect, even though it worked on the first connection (which uses `fetch()` and routes any event generically):
+
+```erb
+<%= pgbus_stream_from @room, "listen-events": "presence reactive" %>
+```
+
+### `coalesce:` — publish-side debounce
+
+A chatty component — a live cursor, a typing indicator, a progress bar — can fan out many small broadcasts per second. Pass `coalesce:` (a window in milliseconds, or `true` for the 50ms default) together with `target:` to batch broadcasts per `(stream, target)` and publish only the *latest* frame within the window:
+
+```ruby
+Pgbus.stream(name).broadcast_render(
+  renderable: CursorPosition.new(x:, y:),
+  target: "cursor-#{user_id}",
+  coalesce: true   # or coalesce: 100 for a 100ms window
+)
+```
+
+Superseded frames never hit the bus at all — no PGMQ insert, no NOTIFY, no fan-out. This is last-write-wins, so it's only safe for **idempotent replace/update of a stable target** (exactly the high-frequency case above) — never for actions where every intermediate frame matters (an `append` to a running log, for instance).
+
+Semantics: the first submit for a `(stream, target)` schedules the flush one window later; every subsequent submit within that window only overwrites the buffered payload. Latency is bounded to one window (trailing-edge-with-max-wait, not a resettable debounce). The flush re-enters the normal broadcast path, so a coalesced frame still composes with `visible_to:`, `exclude:`, `event:`, and `durable:`. Coalescing is process-wide and in-memory — behind multiple Puma workers or Falcon processes, each process debounces its own submissions independently.
 
 ### Presence
 
@@ -1293,11 +1419,34 @@ Pgbus.stream(@room).presence.sweep!(older_than: 60.seconds.ago)
 
 The sweep uses `DELETE ... RETURNING` so multiple workers running it concurrently won't double-emit leave events.
 
-**Deliberately left to the application**:
+**Deliberately left to the application (manual API)**:
 
-- Join/leave is explicit, not connection-driven. The controller decides who is "present" — a connected SSE client is not always a present user (think tab-in-background, multi-tab dedup).
+- Join/leave is explicit, not connection-driven, unless you opt into connection-driven presence below. The controller decides who is "present" — a connected SSE client is not always a present user (think tab-in-background, multi-tab dedup).
 - The stale-member sweep is manual. Run it from a cron, an ActiveJob, or your existing heartbeat — pgbus does not assume one over the others.
 - The DOM markup for join/leave is whatever your `join`/`leave` block returns. Pgbus does not impose a fixed presence schema on `<pgbus-stream-source>`.
+
+#### Connection-driven presence (opt-in)
+
+Streams matching `config.streams_presence_patterns` (an exact string or a `Regexp`, mirroring `streams_durable_patterns`) automatically join a member when an SSE connection opens, leave when it closes, and refresh `last_seen_at` on every keepalive heartbeat tick — no explicit `join`/`leave`/sweeper calls required:
+
+```ruby
+Pgbus.configure do |c|
+  c.streams_presence_patterns = [/^room:/, "lobby"]
+end
+```
+
+Identity comes from the connection's authorize-hook context (the value your `StreamApp` `authorize:` callable returns). The built-in extractor handles the common shapes without any configuration: a `Hash` with `:member_id` (or `:id`) and optional `:metadata`, or any object responding to `#id` (e.g. a `User` model). For anything else, provide a custom extractor — a `->(context) { { id:, metadata: } }` callable returning `nil` for a context with no derivable identity (anonymous connections are simply skipped, not an error):
+
+```ruby
+Pgbus.configure do |c|
+  c.streams_presence_patterns = [/^room:/]
+  c.streams_presence_member = ->(user) {
+    { id: user.id, metadata: { name: user.name, avatar: user.avatar_url } } if user
+  }
+end
+```
+
+Membership work runs on the dispatcher thread (which already releases AR connections each pass); the heartbeat posts a batched touch per tick. Presence failures are logged and swallowed so a presence-table hiccup can't knock a live SSE connection out of the registry.
 
 ### Stream stats (opt-in)
 
