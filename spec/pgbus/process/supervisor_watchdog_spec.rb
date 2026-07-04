@@ -33,11 +33,11 @@ RSpec.describe Pgbus::Process::Supervisor do
       end
 
       before do
-        supervisor.instance_variable_set(:@forks, {
-                                           1001 => { type: :worker, config: { queues: ["default"] } },
-                                           1002 => { type: :worker, config: { queues: ["priority"] } }
-                                         })
-        supervisor.instance_variable_set(:@last_watchdog_at, 0.0)
+        supervisor.forks = {
+          1001 => { type: :worker, config: { queues: ["default"] } },
+          1002 => { type: :worker, config: { queues: ["priority"] } }
+        }
+        supervisor.last_watchdog_at = 0.0
       end
 
       it "kills a worker whose loop_tick_at exceeds stall_threshold" do
@@ -98,8 +98,7 @@ RSpec.describe Pgbus::Process::Supervisor do
       end
 
       it "respects the WATCHDOG_INTERVAL rate limiter" do
-        supervisor.instance_variable_set(:@last_watchdog_at,
-                                         Process.clock_gettime(Process::CLOCK_MONOTONIC))
+        supervisor.last_watchdog_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         allow(Pgbus::ProcessEntry).to receive(:where)
 
         supervisor.send(:check_stalled_workers)
@@ -108,10 +107,10 @@ RSpec.describe Pgbus::Process::Supervisor do
       end
 
       it "does not check non-worker forks" do
-        supervisor.instance_variable_set(:@forks, {
-                                           2001 => { type: :dispatcher },
-                                           2002 => { type: :scheduler }
-                                         })
+        supervisor.forks = {
+          2001 => { type: :dispatcher },
+          2002 => { type: :scheduler }
+        }
 
         allow(Pgbus::ProcessEntry).to receive(:where)
 
@@ -134,17 +133,17 @@ RSpec.describe Pgbus::Process::Supervisor do
       let(:now) { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
 
       before do
-        supervisor.instance_variable_set(:@last_watchdog_at, 0.0)
+        supervisor.last_watchdog_at = 0.0
         allow(Process).to receive(:kill)
       end
 
       def set_forks(pid, last_pipe_tick_at:, pipe_seen:)
-        supervisor.instance_variable_set(:@forks, {
-                                           pid => { type: :worker, config: { queues: ["default"] },
-                                                    liveness_reader: nil,
-                                                    last_pipe_tick_at: last_pipe_tick_at,
-                                                    pipe_seen: pipe_seen }
-                                         })
+        supervisor.forks = {
+          pid => { type: :worker, config: { queues: ["default"] },
+                   liveness_reader: nil,
+                   last_pipe_tick_at: last_pipe_tick_at,
+                   pipe_seen: pipe_seen }
+        }
       end
 
       it "SIGKILLs a worker with a stale pipe tick when the DB read raises" do
@@ -208,14 +207,14 @@ RSpec.describe Pgbus::Process::Supervisor do
       it "advances last_pipe_tick_at and arms pipe_seen when bytes are readable" do
         reader, writer = IO.pipe
         writer.write("\0\0")
-        supervisor.instance_variable_set(:@forks, {
-                                           1001 => { type: :worker, liveness_reader: reader,
-                                                     last_pipe_tick_at: 0.0, pipe_seen: false }
-                                         })
+        supervisor.forks = {
+          1001 => { type: :worker, liveness_reader: reader,
+                    last_pipe_tick_at: 0.0, pipe_seen: false }
+        }
 
         supervisor.send(:drain_liveness_pipes)
 
-        info = supervisor.instance_variable_get(:@forks)[1001]
+        info = supervisor.forks[1001]
         expect(info[:pipe_seen]).to be(true)
         expect(info[:last_pipe_tick_at]).to be > 0.0
       ensure
@@ -225,14 +224,14 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       it "does not arm pipe_seen when the pipe is empty" do
         reader, writer = IO.pipe
-        supervisor.instance_variable_set(:@forks, {
-                                           1001 => { type: :worker, liveness_reader: reader,
-                                                     last_pipe_tick_at: 0.0, pipe_seen: false }
-                                         })
+        supervisor.forks = {
+          1001 => { type: :worker, liveness_reader: reader,
+                    last_pipe_tick_at: 0.0, pipe_seen: false }
+        }
 
         supervisor.send(:drain_liveness_pipes)
 
-        expect(supervisor.instance_variable_get(:@forks)[1001][:pipe_seen]).to be(false)
+        expect(supervisor.forks[1001][:pipe_seen]).to be(false)
       ensure
         reader.close unless reader.closed?
         writer.close unless writer.closed?
@@ -242,10 +241,10 @@ RSpec.describe Pgbus::Process::Supervisor do
         reader, writer = IO.pipe
         reader.close
         writer.close
-        supervisor.instance_variable_set(:@forks, {
-                                           1001 => { type: :worker, liveness_reader: reader,
-                                                     last_pipe_tick_at: 0.0, pipe_seen: false }
-                                         })
+        supervisor.forks = {
+          1001 => { type: :worker, liveness_reader: reader,
+                    last_pipe_tick_at: 0.0, pipe_seen: false }
+        }
 
         expect { supervisor.send(:drain_liveness_pipes) }.not_to raise_error
       end

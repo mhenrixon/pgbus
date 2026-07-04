@@ -299,12 +299,13 @@ RSpec.describe Pgbus::Process::NotifyListener do
         .and_raise(Pgbus::Process::ReplicaConnectionError.new("on a replica"))
 
       listener.start
-      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+      # running? flips to false in the run-loop ensure once the thread exits.
+      wait_until { !listener.running? }
 
       # The replica is rejected before the delivery probe runs (probe is only
       # meaningful on a primary), and the thread exits via the fatal/ensure path.
       expect(Pgbus::Process::NotifyProbe).not_to have_received(:probe_notify_delivery!)
-      expect(listener.instance_variable_get(:@running)).to be(false)
+      expect(listener.running?).to be(false)
     end
   end
 
@@ -393,15 +394,16 @@ RSpec.describe Pgbus::Process::NotifyListener do
       expect(listener.listening_to).to be_empty
     end
 
-    it "clears @running after the thread exits so start can spawn a fresh thread" do
+    it "clears running state after the thread exits so start can spawn a fresh thread" do
       allow(listener).to receive(:build_connection)
         .and_raise(PG::Error.new("boot failed"))
 
       listener.start
-      # Thread crashes immediately on build_connection.
-      wait_until { !listener.instance_variable_get(:@thread)&.alive? }
+      # Thread crashes immediately on build_connection; running? flips back to
+      # false in the run-loop ensure.
+      wait_until { !listener.running? }
 
-      expect(listener.instance_variable_get(:@running)).to be(false)
+      expect(listener.running?).to be(false)
     end
   end
 end

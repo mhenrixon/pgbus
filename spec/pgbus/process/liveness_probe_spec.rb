@@ -28,10 +28,8 @@ RSpec.describe Pgbus::Process::Worker do
     describe "loop beacon" do
       let(:worker) { described_class.new(queues: %w[default], threads: 5) }
 
-      it "initializes @loop_tick_at as an AtomicReference" do
-        tick = worker.instance_variable_get(:@loop_tick_at)
-        expect(tick).to be_a(Concurrent::AtomicReference)
-        expect(tick.get).to be_nil
+      it "starts with no stamped loop tick" do
+        expect(worker.last_loop_tick).to be_nil
       end
 
       it "passes loop_tick_supplier when starting heartbeat" do
@@ -47,15 +45,14 @@ RSpec.describe Pgbus::Process::Worker do
         expect(captured_args).to include(loop_tick_supplier: an_instance_of(Proc))
       end
 
-      it "stamp_loop_tick writes a wall-clock timestamp to @loop_tick_at" do
-        tick_ref = worker.instance_variable_get(:@loop_tick_at)
-        expect(tick_ref.get).to be_nil
+      it "stamp_loop_tick writes a wall-clock timestamp readable via last_loop_tick" do
+        expect(worker.last_loop_tick).to be_nil
 
         before = Time.now.to_f
         worker.send(:stamp_loop_tick)
         after = Time.now.to_f
 
-        stamped = tick_ref.get
+        stamped = worker.last_loop_tick
         expect(stamped).to be_a(Float)
         expect(stamped).to be >= before
         expect(stamped).to be <= after

@@ -20,18 +20,22 @@ module Pgbus
       RESTART_BACKOFF_BASE = 1
       RESTART_BACKOFF_MAX = 60
 
-      attr_reader :config, :forks
+      attr_reader :config
+      # forks is readable everywhere; the writer exists only so tests can seed a
+      # known set of children before exercising the reap/watchdog paths (in
+      # production forks is populated by fork_* as children spawn).
+      attr_accessor :forks
 
       # The child-fork bookkeeping (`forks`, `pending_restarts`) and the
       # `shutting_down` flag accept injected seeds so tests can drive the
       # monitor/reap loops from a known state without poking private ivars. All
       # default to the empty/false values production always starts from.
       def initialize(config: Pgbus.configuration, forks: {}, shutting_down: false,
-                     pending_restarts: [])
+                     pending_restarts: [], last_watchdog_at: nil)
         @config = config
         @forks = forks
         @shutting_down = shutting_down
-        @last_watchdog_at = monotonic_now
+        @last_watchdog_at = last_watchdog_at || monotonic_now
         @pending_restarts = pending_restarts
         @crash_counts = Hash.new(0)
       end
@@ -39,6 +43,11 @@ module Pgbus
       def shutting_down?
         @shutting_down
       end
+
+      # Test seam: reset the watchdog clock so check_stalled_workers runs on the
+      # next call instead of waiting out WATCHDOG_INTERVAL. Production advances
+      # this internally after each watchdog pass.
+      attr_writer :last_watchdog_at
 
       def run
         setup_signals
