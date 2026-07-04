@@ -66,6 +66,71 @@ def bootstrap_integration_tables(conn)
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pgbus_failed_events_queue_msg
       ON pgbus_failed_events (queue_name, msg_id);
   SQL
+
+  # Transactional outbox — mirrors lib/generators/pgbus/templates/add_outbox.rb.erb.
+  # The Poller reads OutboxEntry.unpublished (published_at IS NULL), so the
+  # nullable published_at column is load-bearing for the outbox_flow_spec.
+  unless conn.table_exists?("pgbus_outbox_entries")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_outbox_entries (
+        id BIGSERIAL PRIMARY KEY,
+        queue_name VARCHAR,
+        routing_key VARCHAR,
+        payload JSONB NOT NULL,
+        headers JSONB,
+        priority INTEGER DEFAULT 0,
+        delay INTEGER DEFAULT 0,
+        published_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT chk_pgbus_outbox_destination
+          CHECK ((queue_name IS NOT NULL) <> (routing_key IS NOT NULL))
+      );
+      CREATE INDEX idx_pgbus_outbox_unpublished
+        ON pgbus_outbox_entries (published_at) WHERE published_at IS NULL;
+    SQL
+  end
+
+  # Idempotency ledger — mirrors the processed_events DDL in
+  # lib/generators/pgbus/templates/migration.rb.erb. Handler#claim_idempotency?
+  # does INSERT ... ON CONFLICT (event_id, handler_class) DO NOTHING, so the
+  # unique index is what makes the second delivery return :skipped.
+  unless conn.table_exists?("pgbus_processed_events")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_processed_events (
+        id BIGSERIAL PRIMARY KEY,
+        event_id VARCHAR NOT NULL,
+        handler_class VARCHAR NOT NULL,
+        processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_processed_events_unique
+        ON pgbus_processed_events (event_id, handler_class);
+    SQL
+  end
+
+  # Batch tracking — mirrors the pgbus_batches DDL in
+  # lib/generators/pgbus/templates/migration.rb.erb. BatchEntry.increment_counter!
+  # locks the row and fires callbacks when completed + discarded == total.
+  unless conn.table_exists?("pgbus_batches")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_batches (
+        id BIGSERIAL PRIMARY KEY,
+        batch_id VARCHAR NOT NULL,
+        description VARCHAR,
+        on_finish_class VARCHAR,
+        on_success_class VARCHAR,
+        on_discard_class VARCHAR,
+        properties JSONB DEFAULT '{}',
+        total_jobs INTEGER NOT NULL DEFAULT 0,
+        completed_jobs INTEGER NOT NULL DEFAULT 0,
+        failed_jobs INTEGER NOT NULL DEFAULT 0,
+        discarded_jobs INTEGER NOT NULL DEFAULT 0,
+        status VARCHAR NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_batches_batch_id ON pgbus_batches (batch_id);
+    SQL
+  end
 rescue StandardError => e
   warn "[pgbus integration] Bootstrap warning: #{e.message}"
 end
@@ -160,7 +225,8 @@ def cleanup_tables
   tables = %w[
     pgbus_semaphores pgbus_blocked_executions pgbus_uniqueness_keys
     pgbus_processes pgbus_recurring_executions pgbus_failed_events
-    pgbus_presence_members
+    pgbus_presence_members pgbus_outbox_entries pgbus_processed_events
+    pgbus_batches
   ]
   tables.each do |table|
     conn.execute("DELETE FROM #{table}")
