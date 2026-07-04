@@ -30,7 +30,10 @@ module Pgbus
     # advanced for longer than stall_threshold seconds (default 90).
     # read_timeout caps how long a single PGMQ read can block (default 30s),
     # so a dead socket raises instead of parking the loop forever.
-    attr_accessor :stall_threshold, :read_timeout
+    # drain_timeout bounds the graceful-shutdown drain phase (default 30s): a
+    # job still running after this is abandoned to shutdown's own termination
+    # wait, so recycling/deploy never wedges on a permanently-stuck job.
+    attr_accessor :stall_threshold, :read_timeout, :drain_timeout
 
     # Dispatcher settings
     attr_accessor :dispatch_interval
@@ -181,6 +184,7 @@ module Pgbus
 
       @stall_threshold = 90
       @read_timeout = 30
+      @drain_timeout = 30
 
       @dispatch_interval = 1.0
 
@@ -437,6 +441,7 @@ module Pgbus
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise Pgbus::ConfigurationError, "read_timeout must be a positive number or nil to disable"
       end
+      raise ArgumentError, "drain_timeout must be > 0" unless drain_timeout.is_a?(Numeric) && drain_timeout.positive?
 
       unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
         raise Pgbus::ConfigurationError, "stats_flush_size must be a positive integer"

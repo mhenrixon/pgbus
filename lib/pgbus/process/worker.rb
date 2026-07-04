@@ -141,20 +141,10 @@ module Pgbus
       # restarting, failover, DNS blip) or its thread can die mid-run. Rather
       # than downgrade to blind polling until process restart, the loop retries
       # from ensure_notify_listener on an exponential backoff: NOTIFY_RETRY_BASE
-      # doubling up to NOTIFY_RETRY_MAX. Constant-tuned, matching DRAIN_TIMEOUT
-      # and CircuitBreaker/Dispatcher precedent.
+      # doubling up to NOTIFY_RETRY_MAX. Constant-tuned, matching the
+      # CircuitBreaker/Dispatcher precedent.
       NOTIFY_RETRY_BASE_SECONDS = 5
       NOTIFY_RETRY_MAX_SECONDS = 300
-
-      # Upper bound on the drain phase. Waiting for quiesced? must be
-      # bounded: a permanently-stuck job would otherwise hold the loop open
-      # forever — recycling never completes, TERM shutdown hangs the whole
-      # process tree, and the loop keeps stamping loop_tick so the
-      # supervisor watchdog never intervenes. After this many seconds the
-      # loop falls through to shutdown, whose wait_for_termination(30)
-      # bounds the remaining in-flight work. Tuned via constant rather than
-      # configuration, matching CircuitBreaker/Dispatcher precedent.
-      DRAIN_TIMEOUT = 30
 
       def run
         setup_signals
@@ -178,7 +168,7 @@ module Pgbus
           # quiesced? (all slots free), not idle? (any slot free) — exiting
           # with work still in flight abandons those jobs to the 30s
           # wait_for_termination timeout in shutdown. Bounded by
-          # DRAIN_TIMEOUT so a stuck job can't wedge the loop forever.
+          # config.drain_timeout so a stuck job can't wedge the loop forever.
           break if @lifecycle.draining? && (@pool.quiesced? || drain_deadline_exceeded?)
 
           claim_and_execute if @lifecycle.can_process?
@@ -223,7 +213,7 @@ module Pgbus
       # deleted), the first restore waits RESTORE_COOLDOWN_BASE seconds; each
       # consecutive failed restore doubles the wait up to RESTORE_COOLDOWN_MAX.
       # A successful fetch resets the streak so a recreated queue restores
-      # promptly. Constant-tuned, matching NOTIFY_RETRY/DRAIN_TIMEOUT precedent.
+      # promptly. Constant-tuned, matching the NOTIFY_RETRY precedent.
       RESTORE_COOLDOWN_BASE = 30
       RESTORE_COOLDOWN_MAX = 300
 
@@ -531,10 +521,10 @@ module Pgbus
       # state (graceful_shutdown, recycling) without hooking each one.
       def drain_deadline_exceeded?
         @drain_started_at ||= monotonic_now
-        return false unless monotonic_now - @drain_started_at > DRAIN_TIMEOUT
+        return false unless monotonic_now - @drain_started_at > config.drain_timeout
 
         Pgbus.logger.warn do
-          "[Pgbus] Worker drain deadline (#{DRAIN_TIMEOUT}s) reached with #{@in_flight.value} job(s) " \
+          "[Pgbus] Worker drain deadline (#{config.drain_timeout}s) reached with #{@in_flight.value} job(s) " \
             "still in flight — proceeding to shutdown"
         end
         true

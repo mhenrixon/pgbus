@@ -165,6 +165,10 @@ RSpec.describe Pgbus::Configuration do
       expect(config.read_timeout).to eq(30)
     end
 
+    it "has default drain_timeout of 30 seconds" do
+      expect(config.drain_timeout).to eq(30)
+    end
+
     it "enables eager_validation by default" do
       expect(config.eager_validation).to be(true)
     end
@@ -1029,6 +1033,26 @@ RSpec.describe Pgbus::Configuration do
     it "rejects false read_timeout" do
       config.read_timeout = false
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /read_timeout/)
+    end
+
+    it "rejects non-numeric drain_timeout" do
+      config.drain_timeout = "30"
+      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+    end
+
+    it "rejects zero drain_timeout" do
+      config.drain_timeout = 0
+      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+    end
+
+    it "rejects negative drain_timeout" do
+      config.drain_timeout = -5
+      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+    end
+
+    it "accepts a positive drain_timeout" do
+      config.drain_timeout = 60
+      expect { config.validate! }.not_to raise_error
     end
 
     it "rejects zero stats_flush_size" do
