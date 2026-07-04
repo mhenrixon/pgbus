@@ -14,7 +14,13 @@ class Views::Docs::Pages::Streams < DocsUI::Page
     what_it_fixes
     transactional
     replay
+    broadcast_options
+    broadcast_render_section
+    typed_events
+    coalescing
     presence
+    stream_keys
+    reconciliation
     consumer
   end
 
@@ -112,12 +118,214 @@ class Views::Docs::Pages::Streams < DocsUI::Page
     end
   end
 
+  def broadcast_options
+    DocsUI::Section("Broadcast options", description: "Every keyword #broadcast and #broadcast_render accept.") do
+      md <<~'MD'
+        `Pgbus.stream(name).broadcast(html, **options)` (and `broadcast_render`,
+        below) take a common set of keyword options that compose freely:
+      MD
+      DocsUI::Table(
+        [ "Option", "Type", "Effect" ],
+        [
+          [ [ :code, "exclude:" ], "connection id", "Skip delivery to the named SSE connection — actor-echo suppression." ],
+          [ [ :code, "event:" ], "String, Symbol", "Set the SSE `event:` field so clients can route without sniffing the HTML." ],
+          [ [ :code, "coalesce:" ], "true, Numeric (ms)", [ :md, "Debounce rapid broadcasts to the same `(stream, target)`; requires `target:`." ] ],
+          [ [ :code, "durable:" ], "true, false, nil", "Per-broadcast override of the stream's durable mode (PGMQ-backed vs. ephemeral NOTIFY-only)." ],
+          [ [ :code, "visible_to:" ], "Symbol", "Restrict delivery to connections whose authorize-hook context passes the named filter." ]
+        ]
+      )
+      md <<~'MD'
+        `durable:` predates this release and is covered in
+        [Transactional broadcasts](#transactional-broadcasts) above; `visible_to:`
+        restricts delivery to connections whose authorize-hook context passes a
+        filter registered via `Pgbus::Streams.filters.register` (see the
+        [README's audience filtering section](https://github.com/mhenrixon/pgbus#server-side-audience-filtering)
+        for the full registry API). The rest — `exclude:`, `event:`,
+        `coalesce:` — are documented below.
+      MD
+
+      DocsUI::Section("exclude: — actor-echo suppression", description: "Don't re-deliver a broadcast to the connection that triggered it.") do
+        md <<~'MD'
+          An actor who just triggered a change already applied it via the HTTP
+          response of their own action. If the resulting broadcast reaches their
+          own SSE connection too, it double-applies — re-running animations or
+          clobbering an optimistic edit. Pass `exclude:` with a connection id to
+          skip that one connection; everyone else still gets the broadcast:
+        MD
+        DocsUI::Code(<<~RUBY)
+          Pgbus.stream(room).broadcast(html, exclude: connection_id)
+        RUBY
+        md <<~'MD'
+          The connection id comes from the server. Right after the SSE handshake
+          opens, pgbus sends a `pgbus:connected` frame carrying a server-minted
+          connection id; `<pgbus-stream-source>` captures it onto its
+          `connection-id` attribute and re-dispatches it as a `pgbus:connected`
+          event (also present in `pgbus:open`'s detail). The page reads that id
+          and sends it back as the `X-Pgbus-Connection` header on the action
+          request that triggers the broadcast — the server then excludes it:
+        MD
+        DocsUI::Code(<<~JS, filename: "app/javascript/controllers/stream_controller.js", lexer: :javascript)
+          document.addEventListener("pgbus:connected", (event) => {
+            document.querySelector("meta[name='pgbus-connection-id']")
+              ?.setAttribute("content", event.detail.connectionId)
+          })
+
+          // On the next fetch/form submit:
+          fetch(url, {
+            method: "POST",
+            headers: { "X-Pgbus-Connection": connectionIdMetaTag() }
+          })
+        JS
+        DocsUI::Code(<<~RUBY, filename: "app/controllers/messages_controller.rb")
+          def create
+            @message = @room.messages.create!(message_params)
+            @room.broadcast_append_to(
+              :messages,
+              exclude: request.headers["X-Pgbus-Connection"]
+            )
+          end
+        RUBY
+        DocsUI::Callout(:note) do
+          plain "A nil or blank "
+          code { "exclude:" }
+          plain " is a no-op — the common path for background jobs and other server-initiated broadcasts with no originating connection."
+        end
+      end
+    end
+  end
+
+  def broadcast_render_section
+    DocsUI::Section("broadcast_render — render and broadcast in one call") do
+      md <<~'MD'
+        `Stream#broadcast_render` renders a component and broadcasts it as a
+        complete `<turbo-stream>` tag atomically, removing the off-request
+        render-context boilerplate every call site would otherwise hand-roll:
+      MD
+      DocsUI::Code(<<~'RUBY')
+        Pgbus.stream("chat", room).broadcast_render(
+          renderable: Chat::Message.new(chat_message: msg),
+          action: :append,
+          target: "chat-messages-#{room}",
+          exclude: connection_id   # composes with every option above
+        )
+      RUBY
+      DocsUI::Table(
+        [ "Renderable", "Resolution" ],
+        [
+          [ "String", "Used verbatim — already-rendered markup." ],
+          [ [ :md, "responds to `#call`" ], "Phlex component — calls it and stringifies the result." ],
+          [ [ :md, "responds to `#render_in`" ], [ :md, "ViewComponent / phlex-rails — calls `render_in(nil)` (no controller view context off-request)." ] ],
+          [ "else", [ :md, "falls back to `#to_s`." ] ]
+        ]
+      )
+      md <<~'MD'
+        `action` defaults to `:replace`; `target:` is required. Content-less
+        actions (`:remove`) emit no `<template>` wrapper and ignore `renderable:`.
+        `exclude:`, `visible_to:`, `durable:`, `event:`, and `coalesce:` all
+        forward to `#broadcast` unchanged.
+      MD
+      DocsUI::Callout(:tip) do
+        plain "A component that needs URL helpers or a full view context (e.g. "
+        code { "link_to" }
+        plain ") should be rendered by the app — which has the request context — with the resulting string passed as "
+        code { "renderable:" }
+        plain "."
+      end
+    end
+  end
+
+  def typed_events
+    DocsUI::Section("Typed SSE event names", description: "Route on a name instead of sniffing the HTML.") do
+      md <<~'MD'
+        A broadcast can set the SSE `event:` field while keeping the payload a
+        Turbo Stream, so clients route on a typed name instead of parsing the
+        markup:
+      MD
+      DocsUI::Code(<<~RUBY)
+        Pgbus.stream(name).broadcast(html, event: "presence")
+        Pgbus.stream(name).broadcast_render(renderable: component, target: "cursor", event: "reactive")
+      RUBY
+      md <<~'MD'
+        The default (`nil` or `"turbo-stream"`) is never written into the JSONB
+        payload — it's implicit — but it's still set on the SSE frame's `event:`
+        line (falling back to `turbo-stream`), so default consumers are
+        unaffected either way.
+
+        On the client, `<pgbus-stream-source>` dispatches a typed broadcast two
+        ways:
+      MD
+      DocsUI::Table(
+        [ "Event", "Detail", "Use for" ],
+        [
+          [ [ :code, "pgbus:event" ], [ :code, "{ event, data, msgId }" ], "One listener that handles every typed event." ],
+          [ [ :code, "pgbus:<event>" ], [ :code, "{ data, msgId }" ], [ :md, "`addEventListener(\"pgbus:presence\", …)` ergonomics." ] ]
+        ]
+      )
+      DocsUI::Code(<<~JS, lexer: :javascript)
+        document.addEventListener("pgbus:presence", (event) => {
+          const { data, msgId } = event.detail
+          // ...
+        })
+      JS
+      DocsUI::Callout(:warning) do
+        plain "Native "
+        code { "EventSource" }
+        plain " (the reconnect path) only invokes listeners registered by name, so declare every typed event name you use on the element's "
+        code { "listen-events" }
+        plain " attribute (comma- or space-separated) — otherwise a typed broadcast is silently dropped after a reconnect, even though it worked on the first connection (which uses "
+        code { "fetch()" }
+        plain " and routes any event generically):"
+      end
+      DocsUI::Code(<<~ERB, lexer: :erb)
+        <%= pgbus_stream_from @room, "listen-events": "presence reactive" %>
+      ERB
+    end
+  end
+
+  def coalescing
+    DocsUI::Section("coalesce: — publish-side debounce", description: "Batch high-frequency broadcasts to the latest frame per target.") do
+      md <<~'MD'
+        A chatty component — a live cursor, a typing indicator, a progress bar —
+        can fan out many small broadcasts per second. Pass `coalesce:` (a window
+        in milliseconds, or `true` for the 50ms default) together with `target:`
+        to batch broadcasts per `(stream, target)` and publish only the *latest*
+        frame within the window:
+      MD
+      DocsUI::Code(<<~'RUBY')
+        Pgbus.stream(name).broadcast_render(
+          renderable: CursorPosition.new(x:, y:),
+          target: "cursor-#{user_id}",
+          coalesce: true          # or coalesce: 100 for a 100ms window
+        )
+      RUBY
+      md <<~'MD'
+        Superseded frames never hit the bus at all — no PGMQ insert, no NOTIFY,
+        no fan-out. This is last-write-wins, so it's only safe for **idempotent
+        replace/update of a stable target** (exactly the high-frequency case
+        above) — never for actions where every intermediate frame matters (an
+        `append` to a running log, for instance).
+
+        Semantics: the first submit for a `(stream, target)` schedules the flush
+        one window later; every subsequent submit within that window only
+        overwrites the buffered payload. Latency is bounded to one window, and a
+        continuous stream of updates can't starve the flush indefinitely
+        (trailing-edge-with-max-wait, not a resettable debounce). The flush
+        re-enters the normal broadcast path, so a coalesced frame still composes
+        with `visible_to:`, `exclude:`, `event:`, and `durable:`.
+      MD
+      DocsUI::Callout(:note) do
+        plain "Coalescing is process-wide and in-memory. Behind multiple Puma workers or Falcon processes, each process debounces its own submissions independently."
+      end
+    end
+  end
+
   def presence
     DocsUI::Section("Presence", description: "\"X people are in this room.\"") do
       md <<~'MD'
-        Track who is subscribed to a stream with a presence table. Join and leave
-        are explicit — the controller decides who is present — and the block you
-        pass is rendered and broadcast to every connected client:
+        Track who is subscribed to a stream with a presence table. Two modes
+        are available and can be mixed: the **manual API** below (explicit
+        join/leave, full control over when someone counts as "present") and
+        **connection-driven presence** (automatic, opt-in per stream pattern).
       MD
       DocsUI::Code(<<~SHELL, lexer: :shell)
         rails generate pgbus:add_presence && rails db:migrate
@@ -131,6 +339,131 @@ class Views::Docs::Pages::Streams < DocsUI::Page
         Pgbus.stream(@room).presence.members # => [{ "id" => "7", "metadata" => {...} }, …]
         Pgbus.stream(@room).presence.count   # => 5
       RUBY
+
+      DocsUI::Section("Connection-driven presence (opt-in)", description: "Auto-join on connect, auto-leave on disconnect — no explicit wiring.") do
+        md <<~'MD'
+          Streams matching `config.streams_presence_patterns` (an exact string
+          or a `Regexp`, mirroring `streams_durable_patterns`) automatically
+          join a member when an SSE connection opens, leave when it closes, and
+          refresh `last_seen_at` on every keepalive heartbeat tick — no explicit
+          `join`/`leave`/sweeper calls required:
+        MD
+        DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+          Pgbus.configure do |c|
+            c.streams_presence_patterns = [/^room:/, "lobby"]
+          end
+        RUBY
+        md <<~'MD'
+          Identity comes from the connection's authorize-hook context (the
+          value your `StreamApp` `authorize:` callable returns). The built-in
+          extractor handles the common shapes without any configuration:
+        MD
+        DocsUI::Table(
+          [ "Context shape", "Extracted member" ],
+          [
+            [ [ :md, "`Hash` with `:member_id` or `:id`" ], [ :md, "`{ id:, metadata: }` — `:metadata` optional, defaults to `{}`" ] ],
+            [ [ :md, "any object responding to `#id`" ], [ :md, "`{ id: object.id, metadata: {} }`" ] ]
+          ]
+        )
+        md <<~'MD'
+          For anything else, provide a custom extractor — a `->(context) { { id:, metadata: } }`
+          callable returning `nil` for a context with no derivable identity
+          (anonymous connections are simply skipped, not an error):
+        MD
+        DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+          Pgbus.configure do |c|
+            c.streams_presence_patterns = [/^room:/]
+            c.streams_presence_member = ->(user) {
+              { id: user.id, metadata: { name: user.name, avatar: user.avatar_url } } if user
+            }
+          end
+        RUBY
+        DocsUI::Callout(:note) do
+          plain "Membership work runs on the dispatcher thread and presence failures are logged and swallowed — a presence-table hiccup can never knock a live SSE connection out of the registry."
+        end
+      end
+    end
+  end
+
+  def stream_keys
+    DocsUI::Section("stream_key idempotency", description: "Hold one key value and reuse it safely.") do
+      md <<~'MD'
+        `Pgbus.stream_key` treats a single `String` argument as an already-built
+        pgbus stream key and returns it unchanged (after the queue-name budget
+        check), instead of tripping the colon-separator guard. This lets a
+        consumer hold one `stream_key` value and pass it to both
+        `turbo_stream_from`/`pgbus_stream_from` and the broadcaster:
+      MD
+      DocsUI::Code(<<~RUBY)
+        key = Pgbus.stream_key(chat, :messages)  # => "ai_chat_a3f8c1e9d2b47610:messages"
+
+        # Both calls accept the same pre-built key without raising:
+        pgbus_stream_from(key)
+        Pgbus.stream(key).broadcast(html)
+      RUBY
+      md <<~'MD'
+        `Pgbus.stream_key!(key)` accepts a pre-built key explicitly — `String`
+        required, budget still enforced — for call sites that want to be
+        explicit that no re-keying should happen.
+
+        The guard is still enforced for the cases that are genuinely ambiguous:
+      MD
+      DocsUI::Table(
+        [ "Call", "Behavior" ],
+        [
+          [ [ :code, 'stream_key("chat:lobby")' ], "OK — single pre-built key, idempotent." ],
+          [ [ :code, 'stream_key("a:b", :c)' ], [ :md, "Raises `ArgumentError` — an ambiguous multi-fragment join (`\"a:b\"` + `:c` could mean `stream_key(\"a\", \"b:c\")` too)." ] ],
+          [ [ :code, "stream_key(:'a:b')" ], [ :md, "Raises `ArgumentError` — a colon in a `Symbol`/record fragment never came from `stream_key` and is treated as a mistake." ] ]
+        ]
+      )
+    end
+  end
+
+  def reconciliation
+    DocsUI::Section("msg_id reconciliation for optimistic UI", description: "Reconcile out-of-order or duplicate delivery on the client.") do
+      md <<~'MD'
+        Every delivered frame carries its monotonic PGMQ `msg_id` as the SSE
+        `id:` line — this is the same watermark that powers reconnect replay.
+        `<pgbus-stream-source>` surfaces it to the client two ways:
+      MD
+      DocsUI::Table(
+        [ "Event", "Detail", "Use for" ],
+        [
+          [ [ :code, "message" ], [ :md, "standard `MessageEvent`, `lastEventId` set to the msg_id" ], [ :md, "Turbo ignores it; a reactive runtime listening for `message` reads the revision with no pgbus-specific API." ] ],
+          [ [ :code, "pgbus:message" ], [ :code, "{ msgId, data }" ], "Optimistic-UI reconciliation — msgId is a Number when numeric." ]
+        ]
+      )
+      md <<~'MD'
+        A negative `msgId` marks an ephemeral frame (one that bypassed PGMQ —
+        an ephemeral-mode broadcast) rather than a durable, archived one.
+
+        **The reconciliation recipe:** track the highest applied `msgId` per
+        render target; when a frame arrives, skip the morph if you've already
+        applied a newer revision for that target. This stops a late echo — a
+        broadcast that was in flight when a newer one landed — from clobbering
+        a newer optimistic edit:
+      MD
+      DocsUI::Code(<<~JS, lexer: :javascript)
+        const appliedRevision = new Map() // target -> highest applied msgId
+
+        document.addEventListener("pgbus:message", (event) => {
+          const { msgId, data } = event.detail
+          const target = extractTargetFrom(data) // however your markup encodes it
+
+          const highest = appliedRevision.get(target) ?? -Infinity
+          if (msgId != null && msgId < highest) return // stale — skip the morph
+
+          appliedRevision.set(target, msgId)
+          applyMorph(target, data)
+        })
+      JS
+      DocsUI::Callout(:note) do
+        plain "This complements "
+        code { "exclude:" }
+        plain ": "
+        code { "exclude:" }
+        plain " handles the actor (never receives its own echo at all); msg_id reconciliation handles out-of-order delivery for everyone else."
+      end
     end
   end
 
