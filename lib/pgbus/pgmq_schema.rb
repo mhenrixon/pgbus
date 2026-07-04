@@ -112,7 +112,11 @@ module Pgbus
               EXECUTE 'DROP FUNCTION IF EXISTS ' || r.func_sig || ' CASCADE';
             END LOOP;
 
-            -- Drop custom types in pgmq schema
+            -- Drop custom composite types in pgmq schema (e.g. message_record,
+            -- queue_record, metrics_result). Standalone `CREATE TYPE ... AS (...)`
+            -- types get a pg_class shell with relkind = 'c'; only skip row-types
+            -- backed by an actual relation (table/view/etc.), which must be
+            -- dropped via DROP TABLE rather than DROP TYPE.
             FOR r IN
               SELECT n.nspname || '.' || t.typname AS type_name
               FROM pg_catalog.pg_type t
@@ -122,6 +126,7 @@ module Pgbus
                 AND NOT EXISTS (
                   SELECT 1 FROM pg_catalog.pg_class c
                   WHERE c.reltype = t.oid
+                    AND c.relkind <> 'c'
                 )
             LOOP
               EXECUTE 'DROP TYPE IF EXISTS ' || r.type_name || ' CASCADE';
