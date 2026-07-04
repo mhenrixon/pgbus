@@ -105,6 +105,294 @@
 - **Stalled dispatcher and scheduler are no longer reported healthy on the processes page.** `Web::DataSource#derive_process_status` evaluated the loop beacon only for workers, returning `:healthy` for every other kind, and neither the dispatcher (`{ pid }`) nor the scheduler (`{ pid, tasks }`) heartbeat carried a beacon. Because heartbeats run on an independent `Concurrent::TimerTask` thread, a dispatcher wedged inside `run_maintenance` (e.g. a stuck vacuum in `run_table_maintenance`) or a scheduler stuck in `tick` kept heartbeating and showed healthy forever while doing no work. Both processes now stamp a wall-clock loop beacon (`@loop_tick_at`, a `Concurrent::AtomicReference`) at the top of each main-loop iteration and pass `loop_tick_supplier:` to their heartbeat, mirroring `Worker#stamp_loop_tick`; the heartbeat persists it as `metadata.loop_tick_at` on every beat. `derive_process_status` now evaluates the beacon for `"dispatcher"` and `"scheduler"` too, with kind-aware thresholds that account for each loop's sleep — workers keep `config.stall_threshold` (90s), dispatcher uses `stall_threshold + config.dispatch_interval`, scheduler uses `stall_threshold + config.recurring_schedule_interval` — so a beacon older than the threshold renders the `:stalled` badge. A missing beacon (an older process during a rolling deploy) stays `:healthy`, and `stall_threshold = nil` disables the check as before. Worker stall detection is unchanged. Refs #222.
 - **Config hardening: three silent-failure holes closed.** (1) `Configuration#validate!` now validates `statsd_host`/`statsd_port`/`health_bind` unconditionally alongside the other keys added in the same window — a typo'd host or an out-of-range port previously passed boot and only failed later when the UDP socket opened or the health server bound. (2) `ConfigLoader.sectioned?` no longer misclassifies a legitimate flat `pgbus.yml` whose every top-level setting happens to be Hash-valued (`connection_params:`, `streams_retention:`, `recurring_tasks:`, …) as "sectioned" — it now also checks whether any top-level key is a real `Configuration` setter (env section names like `production` never are), and `ConfigLoader.load` logs a warning naming the current env and the available sections whenever a genuinely sectioned file has no matching section, instead of silently applying nothing. (3) `Pgbus::Generators::ConfigConverter::DEPRECATED_SETTINGS` no longer lists `pool_size` — it is a live `Configuration#pool_size` accessor operators set to override auto-tuning, not a removed setting, so `rails generate pgbus:update` no longer silently drops a deliberate override when converting legacy YAML. Refs #276.
 
+## [0.9.7] - 2026-06-29
+
+### Security
+
+- **Dashboard: filter sensitive data in payload display.** New `Pgbus::Web::PayloadFilter` redacts sensitive keys (password, token, secret, api_key, etc.) as `[FILTERED]` in rendered job payloads; configurable via `dashboard_filter_parameters` and `dashboard_filter_sensitive`. Refs #186.
+
+## [0.9.6] - 2026-06-28
+
+### Added
+
+- **AppSignal: magic dashboard definitions for auto-detected metrics.** Ships `dashboard.json` (main overview) plus health, throughput, and streams dashboards in `public_config` format so AppSignal auto-creates pgbus dashboards. Refs #185.
+- **Metrics: `pgbus_queue_latency` gauge (oldest message age in ms) and `hostname` tag on all probe gauges.** Hostname tagging matches the Sidekiq/Puma convention. Refs #185.
+
+### Changed
+
+- **Dashboard: insights default time range is now 1h (with a new 4h option) instead of 30d,** better suited to post-deploy monitoring. Refs #184.
+- **Dashboard: DLQ page gains pagination** with "Showing X–Y of N", prev/next controls, and a total-count badge. Refs #184.
+- **Dashboard: UX polish** — Failed/DLQ stats card labels each number, truncated error messages show full text on hover, and queue detail pages get back-to-queues navigation. Refs #184.
+
+## [0.9.5] - 2026-06-28
+
+### Added
+
+- **MCP: read-only MCP diagnostic server.** `pgbus mcp` (stdio) exposes 12 read-only tools over `Web::DataSource` (headline `pgbus_health` returns OK/DEGRADED/STALLED); payloads redacted by default, optional `PGBUS_MCP_TOKEN` gate. Refs #182.
+- **Worker: liveness probe to detect and heal stalled claim loops.** Workers stamp a `loop_tick_at` beacon; a supervisor watchdog SIGKILLs and re-forks workers whose loop stalls past `stall_threshold` (default 90s), and client reads are wrapped in `read_timeout` (default 30s) raising `Pgbus::ReadTimeoutError`. Adds a three-state process status (healthy/stalled/stale) to the dashboard. Refs #181, #179.
+
+## [0.9.4] - 2026-06-24
+
+### Added
+
+- **Streams: forward `exclude:`/`visible_to:`/`event:` through Turbo broadcast helpers.** Turbo `broadcast_*_to` helpers now thread all four pgbus opts (durable, exclude, visible_to, event) to `Pgbus.stream.broadcast`, completing the actor-echo suppression loop for gems that broadcast via standard Turbo helpers. Refs #178.
+
+## [0.9.3] - 2026-06-22
+
+### Added
+
+- **Worker: NOTIFY-gated worker wakeups.** Each worker fork owns a dedicated PG connection (`NotifyListener`) that LISTENs on its queues' INSERT channels and wakes the worker immediately on insert instead of waiting for the next polling tick. On by default when `listen_notify` is enabled; configurable via `worker_notify_wakeup`, `worker_notify_host`, `worker_notify_port`, `worker_notify_database_url`. Refs #174.
+
+### Fixed
+
+- **Worker: prevent silent poll stall.** When `evict_missing_queues` removed all queues from a worker's list, it left an empty list that silently skipped every read forever; the list now recovers from the initial configured set. Added diagnostic logging when circuit-breaker filtering removes all active queues (previously silent), and mutex-guarded `NotifyListener` shared state with hardened reconnect. Refs #174.
+
+## [0.9.2] - 2026-06-22
+
+### Added
+
+- **Streams: reactive primitives for phlex-reactive.** Idempotent `stream_key` for pre-built keys (+ `stream_key!`), actor-echo suppression via `exclude:` on broadcasts, `Stream#broadcast_render` (render + broadcast in one call), client-exposed `msg_id` revision for optimistic UI (`pgbus:message`), optional connection-driven presence (`streams_presence_patterns`), typed SSE `event:` names, and publish-side coalescing for high-frequency broadcasts (`coalesce:`). Refs #165, #166, #167, #168, #169, #170, #171, #173.
+
+### Security
+
+- **Streams: sanitize typed SSE event names.** `Envelope.message` strips CR/LF from `event` and the dispatcher drops non-string/blank/CRLF values, preventing forged `id:`/`data:` SSE field injection via a crafted event name. Refs #173.
+
+### Fixed
+
+- **Async: replace blocking sleep with IO pipe wake in reactor.** The reactor no longer polls with `Kernel#sleep`, which starved the Async scheduler and silently stalled all queue processing ~20-30s after boot under load; `post`/`shutdown`/`restore_capacity` now write a wake byte for sub-millisecond fiber-aware wake. Refs #174.
+- **Dashboard: add `turbo_frame: _top` to batch links.** Batch links now break out of the enclosing Turbo frame. Refs #172.
+
+## [0.9.0] - 2026-06-19
+
+### Added
+
+- **PGMQ v1.11 features via pgmq-ruby upgrade.** `Client` gains grouped reads (`read_grouped`, `read_grouped_rr`, `read_grouped_head`), FIFO index management (`create_fifo_index`, `create_fifo_indexes_all`), `wait_for_notify`, notify-insert throttle controls, and `convert_archive_partitioned` (pg_partman); new `pgbus:queues` / `pgbus:archives` rake tasks and group-mode config. Refs #161.
+- **Dashboard Batches tab.** New `BatchesController` (index + show) with progress bars, status badges, job counts, and callback info; `Web::DataSource` batch methods, a `pgbus_batch_status_badge` helper, a nav link between Events and DLQ, and i18n for all 12 locales. Refs #162.
+
+### Changed
+
+- **Pin released pgmq-ruby v0.7.0** (`~> 0.7.0`), dropping the git-master pin. `Client#tune_autovacuum` now delegates to pgmq-ruby's `tune_autovacuum`, applying the same queue/archive vacuum and fillfactor settings in one pooled checkout. Refs #163.
+
+## [0.8.4] - 2026-05-21
+
+### Added
+
+- **Streams: `streams_host` / `streams_port` / `streams_database_url` connection overrides.** Point only the Streamer's dedicated LISTEN/NOTIFY connection at a direct Postgres port while the rest of pgbus stays on a transaction-pool pooler (e.g. PgBouncer, PlanetScale Postgres), which otherwise silently drops live SSE delivery; `streams_database_url` wins over the host/port surgicals. Refs #160.
+
+## [0.8.3] - 2026-05-20
+
+### Fixed
+
+- **Streams: release ActiveRecord connections after each dispatcher iteration.** The `StreamEventDispatcher` fiber kept its AR connection leased while parked on `@queue.pop`, so the next code reload's `clear_reloadable_connections!` blocked for the full rack-timeout (10s); it now calls `clear_active_connections!` in an ensure block per loop iteration. Refs #158.
+
+## [0.8.2] - 2026-05-14
+
+### Added
+
+- **Streams: per-Turbo-helper durable opt-in.** All Turbo broadcast helpers now accept a `durable:` kwarg (e.g. `broadcasts_to :account, durable: true`, `broadcast_replace_to(record, durable: true)`) to control durable mode at the call site; omitting it falls back to `streams_durable_patterns` → `streams_default_broadcast_mode`. Refs #154, #153.
+- **Streams: in-memory counters and auto-enabled stats for ephemeral broadcasts.** Adds always-on `StreamCounter` (broadcasts, active/total connections per stream, via `Concurrent::AtomicFixnum`) surfaced as "Live Stream Counters" in the Insights dashboard, and ephemeral broadcasts now always write `pgbus_stream_stats` regardless of `streams_stats_enabled`. Refs #156.
+
+### Fixed
+
+- **Streams: ephemeral broadcasts now reach browsers.** Ephemeral envelopes (negative `msg_id`) bypassed the durable-replay cursor check so every fresh SSE connection (since_id=0) rejected them; they now skip the cursor filter and do not advance `last_msg_id_sent`. Also fixes duplicate `DisconnectMessage`s over-decrementing `active_connections` by only decrementing when `Registry#unregister` actually removes a connection. Refs #157.
+- **Client: wrap `notify_stream` in `with_stale_connection_retry`.** Stream wake-up notifications now survive a stale database connection. Refs #155.
+
+## [0.8.1] - 2026-05-08
+
+### Added
+
+- **Streams: per-broadcast and per-stream durable opt-in.** `stream.broadcast(html, durable: true/false)` overrides the mode for a single call, and `config.streams_durable_patterns` (Array of exact strings or Regexps) resolves the mode for `Pgbus.stream(name)` before falling back to `streams_default_broadcast_mode`; `Pgbus.stream`'s `durable:` default changed from `true` to `nil` so the resolver runs. Refs #152.
+
+## [0.8.0] - 2026-05-08
+
+### Fixed
+
+- **Streams: Turbo broadcasts default to ephemeral mode (PG NOTIFY only), preventing orphan PGMQ queues from accumulating unread messages.** Adds `durable: true/false` on `Stream#broadcast`, an hourly dispatcher sweep of empty stream queues, batched dashboard queue metrics, and `streams_default_broadcast_mode`/`streams_orphan_threshold`/`streams_orphan_sweep_interval` config. Refs #151, #149.
+- **Streams: inline SSE `<script>` tag now carries a CSP nonce when available, fixing broken real-time updates under `script-src` nonce policies.** Falls back gracefully when the nonce is unavailable. Refs #150.
+
+## [0.7.9] - 2026-05-06
+
+### Added
+
+- **Integrations: native AppSignal integration.** Passive `pgbus.*` subscriber (ActiveJob runs + event-bus handler invocations as background-job transactions, counters, distributions), a minutely probe reporting queue depth, oldest-message age, DLQ size, failed-events, dead tuples, MVCC horizon age, active processes, and stream stats, plus three importable dashboards (throughput/latency, health, streams). Gated on `defined?(::Appsignal)` via an Engine initializer; opt out with `config.appsignal_enabled` / `config.appsignal_probe_enabled`. Refs #148.
+- **Instrumentation: new `AS::Notifications` events** — `pgbus.job_dead_lettered`, `pgbus.event_failed`, `pgbus.stream.broadcast`, `pgbus.outbox.publish`, `pgbus.recurring.enqueue`, `pgbus.worker.recycle`. Existing executor/handler instrument calls enriched with `job_id`, `provider_job_id`, `enqueued_at`, `arguments`, `routing_key`, `exception_object`; usable by Datadog/New Relic/OTel subscribers too. Refs #148.
+
+## [0.7.8] - 2026-04-29
+
+### Fixed
+
+- **Event bus: `Handler#process` now runs inside the Rails executor** so ActiveRecord connections are checked back into the pool after each handler run, preventing connection leaks under sustained event processing. Refs #147.
+
+## [0.7.7] - 2026-04-25
+
+### Fixed
+
+- **Executor: jobs now pick up code changes in development.** The executor wraps jobs in `Rails.application.reloader.wrap` in dev/test (and `executor.wrap` in production) instead of always using `executor.wrap`, so workers no longer run stale class definitions. Supports `enable_reloading` (Rails 7.1+) and `cache_classes` (older). Refs #146, closes #145.
+
+## [0.7.6] - 2026-04-23
+
+### Fixed
+
+- **Client: wrap all PGMQ calls in stale-connection retry.** Added SSL-layer EOF variants ("PQconsumeInput() SSL error: unexpected eof while reading", "SSL SYSCALL error") to `STALE_CONNECTION_PATTERNS`, and extended `with_stale_connection_retry` to every `@pgmq.*` call site — reads (consumer path), ack/nack (delete/archive/set_vt), admin/dashboard ops (metrics/list/purge/drop), `ensure_queue`, and stream setup — so transient Postgres/SSL drops no longer crash worker loops or leak job redeliveries. Refs #143, #144.
+
+## [0.7.5] - 2026-04-19
+
+### Added
+
+- **Maintenance: proactive table maintenance to reduce PGMQ bloat.** `fillfactor=70` on queue tables, dispatcher-driven targeted `VACUUM` via `pg_stat_user_tables` above a 10% dead-tuple threshold, and `REINDEX TABLE CONCURRENTLY`; existing installs upgrade via `rails generate pgbus:tune_fillfactor`. Refs #141.
+- **Recurring: support multiple recurring task files.** Refs #142.
+
+### Fixed
+
+- **Client: retry enqueue once when a pooled pgmq connection was killed.** `send_message`, `send_batch`, and `publish_to_topic` now rescue `PGMQ::Errors::ConnectionError` and retry once when the pooled `PG::Connection` was closed server-side (e.g. behind PgBouncer); other variants propagate unchanged. Refs #140.
+
+## [0.7.4] - 2026-04-14
+
+### Added
+
+- **Dashboard: pending event management.** Discard, edit-and-retry, reroute, mark-handled, and bulk-discard stuck/misrouted events in handler queues from the Events page. Refs #138.
+
+### Fixed
+
+- **Event bus: embed `routing_key` in the Publisher message body** so non-wildcard pattern handlers are actually invoked; previously they were silently skipped. Refs #137, closes #136.
+
+## [0.7.3] - 2026-04-12
+
+### Added
+
+- **Testing: EventBus test primitives.** `Pgbus::Testing` with `:fake`/`:inline`/`:disabled` modes, a thread-safe `EventStore`, shared assertions (`assert_pgbus_published`, `perform_published_events`), RSpec `have_published_event` matchers (`.with_payload`/`.with_headers`/`.exactly`), and Minitest auto-setup/teardown; Zeitwerk-ignored so it never leaks into production. Refs #132, #131.
+
+### Fixed
+
+- **Streams: `streams_test_mode` prevents rack.hijack DB connection leaks in tests.** StreamApp returns a stub SSE response without hijacking or spawning polling threads; entering EventBus `fake!`/`inline!` toggles it automatically and restores it on scoped-block exit. Refs #134, #133.
+
+## [0.7.2] - 2026-04-11
+
+### Added
+
+- **Observability: executor lifecycle logging and zombie message detection.** The ActiveJob executor now emits lifecycle log lines and the worker detects zombie messages, with a new configuration option and failed-event recording. Refs #130.
+
+## [0.7.1] - 2026-04-11
+
+### Fixed
+
+- **Executor: fiber interrupts no longer silently leak uniqueness locks.** Under `execution_mode: :async` with `:fiber` isolation, `Async::Stop`/`Async::Cancel` (which inherit from `Exception`, not `StandardError`) propagated past the `rescue StandardError` in `Executor#execute` and `AsyncPool#perform`, skipping `release_lock` and stranding the key in `pgbus_uniqueness_keys` until VT expiry. Both rescues now catch `Exception` (still re-raising `SystemExit`/`Interrupt`/`SignalException`/`NoMemoryError`/`SystemStackError`), producing a visible `:failed` result, a `pgbus_failed_events` row, and a `pgbus.job_failed` notification; debug-level phase markers added for diagnosis. Refs #126, #129.
+- **Bootstrap: `enable_notify_insert` is now idempotent to prevent fork deadlocks.** Multiple forked children racing `bootstrap_queues` triggered concurrent DROP+CREATE of the pgmq notify trigger under `AccessExclusiveLock`, deadlocking on the same queue table. A new `notify_trigger_current?` check skips the destructive path when the trigger already exists at the correct interval, and the supervisor now bootstraps queues in the parent before forking. Refs #125, #128.
+
+## [0.7.0] - 2026-04-11
+
+### Added
+
+- **Streams: short-name helpers and tighter queue-name budget.** New `Pgbus::Streams::Key` (`stream_key`, `short_id`, `normalize`, hashing AR models to a 64-bit SHA-256 suffix), `Pgbus::Streams::Streamable` AR mixin, and top-level `Pgbus.stream_key(*parts)`; `MAX_QUEUE_NAME_LENGTH` dropped to 47 to match pgmq-ruby's runtime ceiling, and over-long names now raise `Pgbus::Streams::StreamNameTooLong` at stream construction before PGMQ is touched. Refs #120.
+- **Error reporters: route caught exceptions to APM services.** New `Pgbus::ErrorReporter` and `config.error_reporters` array wired into all critical rescue sites (executor, worker, dispatcher, circuit breaker, supervisor, outbox, failed-event recording) so exceptions can reach Appsignal/Sentry instead of only being logged. Refs #121.
+- **JSON log formatter and structured logging.** New `Pgbus::LogFormatter` with Text and JSON formatters; set `config.log_format = :json` for structured lines with separate timestamp/pid/tid/severity/component fields plus thread-local `ctx`. Refs #121.
+
+### Fixed
+
+- **Worker: cap `read_multi` total so multi-queue fetch cannot overflow the pool.** pgmq-ruby treats `qty:` as per-queue, so multi-queue capsules could fetch `queue_count * qty` messages and overflow the fixed-size execution pool, crash-looping the worker fork; `limit:` is now threaded through `Client#read_multi` and capped at pool capacity. Refs #124, #123.
+
+## [0.6.9] - 2026-04-11
+
+### Fixed
+
+- **Generators: `--database` routing now honors `migrations_paths`.** All 14 migration generators previously hardcoded `db/pgbus_migrate/`, ignoring the path configured in `database.yml`; they now delegate to Rails' `db_migrate_path` via a shared `MigrationPath` module. Refs #119.
+- **Schema: autovacuum tuning is reapplied after `db:schema:load`.** Ruby-format `schema.rb` drops `ALTER TABLE ... SET (reloptions)`, so fresh setups lost queue-table tuning; a new idempotent `pgbus:tune_autovacuum` task is hooked into `db:schema:load` (and `db:schema:load:pgbus`) to restore it. Refs #119.
+
+## [0.6.8] - 2026-04-11
+
+### Added
+
+- **Dashboard: queue health observability and worker pool utilization.** Surfaces PostgreSQL vacuum stats, dead tuple counts, per-table bloat, MVCC horizon age, and worker pool utilization in the dashboard, queue detail views, and Prometheus endpoint (new `pgbus_table_dead_tuples`, `pgbus_table_bloat_ratio`, `pgbus_table_last_vacuum_age_seconds`, `pgbus_oldest_transaction_age_seconds`, `pgbus_worker_pool_capacity`, `pgbus_worker_pool_busy`, `pgbus_worker_pool_utilization` gauges). Refs #117.
+- **Schema: autovacuum tuning for high-churn PGMQ and pgbus tables.** New `Pgbus::AutovacuumTuning` module and `pgbus:tune_autovacuum` generator apply aggressive vacuum settings to queue, archive, `pgbus_semaphores`, `pgbus_uniqueness_keys`, and `pgbus_processed_events` tables; applied on queue creation and auto-detected by `pgbus:update`. Refs #117.
+
+### Fixed
+
+- **i18n: fill in missing Swedish dashboard translations.** Refs #118.
+
+## [0.6.7] - 2026-04-11
+
+### Fixed
+
+- **Streams: `pgbus_stream_from` now works from Rack middleware contexts.** `TurboStreamOverride` includes `Pgbus::StreamsHelper` so the helper is reachable when host tools (e.g. hotwire-livereload) call it via `ActionController::Base.helpers` outside engine views. Refs #116.
+- **Streams: `stream_source_element.js` auto-loads for host apps.** The JS ships in `app/assets/javascripts/pgbus/` (Propshaft/Sprockets) with engine auto-precompile and importmap auto-pin, and `pgbus_stream_from` emits a module import tag so the `<pgbus-stream-source>` element activates and opens its SSE connection. Refs #116.
+- **Streams: script + element output preserves `html_safe`.** Concatenation no longer collapses to a plain String, so the tags render instead of being HTML-escaped as visible text. Refs #116.
+- **Streams: asset-pipeline JS imports from `@hotwired/turbo-rails`.** Matches the importmap pin name, fixing the browser `TypeError` from the unmapped `@hotwired/turbo` specifier. Refs #116.
+- **Streams: SSE reconnect bugs fixed.** Reattached elements reconnect (`closed` reset in `connectedCallback`), a gracefully-ended fetch stream falls through to `EventSource`, and the initial `EventSource` URL carries a `?since=` watermark since the constructor cannot send `Last-Event-ID`. Refs #116.
+
+## [0.6.6] - 2026-04-10
+
+### Fixed
+
+- **Streams: `turbo_stream_from` now uses the pgbus SSE transport.** `TurboStreamOverride` prepends onto `Turbo::StreamsHelper` and delegates `turbo_stream_from` to `pgbus_stream_from` when `streams_enabled`, so third-party gems (e.g. hotwire-livereload) subscribe over PGMQ/SSE instead of ActionCable — matching the publish side and delivering broadcasts. Falls through to turbo-rails when streams are disabled. Refs #115.
+
+## [0.6.5] - 2026-04-10
+
+### Added
+
+- **Process: async/fiber execution mode for workers.** New `ExecutionPools` abstraction (`ThreadPool` + `AsyncPool`) runs jobs as bounded fibers on a single async reactor thread instead of a thread pool, cutting PostgreSQL connection usage for I/O-bound workloads; configurable via `config.execution_mode` (with per-worker override) and the CLI `--execution-mode` flag. Refs #112.
+- **Streams: Falcon-native streaming body support.** New `streams_falcon_streaming_body` flag makes `StreamApp` return a `Protocol::HTTP::Body::Writable` instead of hijacking the socket, giving Falcon proper fiber-driven SSE streaming (takes priority over `rack.hijack?`). Refs #113.
+- **Config: auto-tune pool size for async workers.** Pool-size auto-tuning now contributes 3 connections per async worker (reactor + polling + headroom) instead of one per fiber, and honors a global `config.execution_mode = :async` fallback. Refs #114.
+
+## [0.6.4] - 2026-04-10
+
+### Added
+
+- **Streams: `config.streams_path` decouples the SSE endpoint URL.** Point `<pgbus-stream-source>` elements at a public route when the engine is mounted behind an auth constraint; resolution order is `config.streams_path` > engine route helper > fallback. Refs #111.
+
+## [0.6.3] - 2026-04-10
+
+### Added
+
+- **Retry: exponential backoff for VT-based retries.** Failed jobs now back off exponentially via the visibility timeout instead of retrying at a fixed interval. Refs #110.
+- **Web: Prometheus metrics export endpoint.** New endpoint exposes pgbus metrics in Prometheus format for scraping. Refs #109.
+
+### Changed
+
+- **Streamer: renamed `Web::Streamer::Dispatcher` to `StreamEventDispatcher`.** Disambiguates from `Process::Dispatcher`; log tags shift from `[Pgbus::Streamer::Dispatcher]` to `[Pgbus::Streamer::StreamEventDispatcher]` — update pinned log filters. Refs #98, #107.
+
+### Fixed
+
+- **Streams: normalize queue names with hyphens/dots instead of rejecting them.** Refs #108.
+- **Streams: case-insensitive match for a missing PGMQ stream queue.** Refs #106.
+- **Stats: JobStat memoization survives transient connection errors.** A single PG blip during boot no longer permanently disables job stat and latency recording for the process lifetime — only successful probes are memoized. Refs #98, #105.
+
+## [0.6.2] - 2026-04-09
+
+### Fixed
+
+- **Streams: handle a missing PGMQ queue table on the first watermark read.** `Client::ReadAfter#stream_current_msg_id`, `#stream_oldest_msg_id`, and `#read_after` now rescue `PG::UndefinedTable` for the stream's own queue/archive table — treating "no queue" as "no messages" (watermark 0, oldest nil, empty replay) — so first-page renders of ephemeral per-subject streams no longer raise before the first broadcast lazily creates the table. Refs #101, #103.
+
+## [0.6.1] - 2026-04-09
+
+### Added
+
+- **Generators: `pgbus:update` auto-detects and installs missing migrations.** Inspects the live DB schema against known pgbus tables/columns/indexes and invokes the matching sub-generators (e.g. `add_presence`, `add_stream_stats`) in one pass; auto-passes `--database=<name>` when a separate database is configured. Refs #100.
+
+### Changed
+
+- **Web: dashboard pagination and failed-archive pushed to SQL.** Moves paging and the failed-events archive off in-memory handling and into SQL queries. Refs #95.
+
+### Fixed
+
+- **Streams: rename `StreamStat` scopes to avoid turbo-rails collision.** `broadcasts`/`connects`/`disconnects` renamed to `broadcast_events`/`connect_events`/`disconnect_events`; the `broadcasts` scope collided with `Turbo::Broadcastable`'s class macro and crashed eager-load in any app combining streams with turbo-rails. `.summary` keys unchanged. Refs #94.
+- **Generators: `pgbus:update` no longer leaks env-specific settings across all environments.** A setting present in only some environments (e.g. `polling_interval: 0.01` under `test:`) was emitted as an unconditional initializer line, applying test tuning to dev and prod; now classified constant only when present in every env and agreeing. Refs #96.
+
+## [0.6.0] - 2026-04-09
+
+### Added
+
+- **Streams: SSE-based turbo-rails replacement.** New `Pgbus::Web::Streamer` subsystem — a threaded coordinator inside each Puma worker delivering Turbo Streams over SSE, fixing page-born-stale (rails/rails#52420) and lost-messages-on-reconnect (hotwired/turbo#1261). Adds 11 `streams_*` configuration options, `streams_helper`, `TurboBroadcastable`, watermark cache middleware, and a Puma plugin. Refs #73, #75, #76, #77.
+- **Streams: transactional broadcasts.** Broadcasts enqueued inside a DB transaction only fire on commit. Refs #81.
+- **Streams: Falcon server support.** `stream_app` runs under Falcon in addition to Puma. Refs #83.
+- **Streams: `broadcasts_with_replay` via `replay:` helper option.** Late subscribers receive missed messages on connect. Refs #84.
+- **Streams: server-side audience filtering.** New `Pgbus::Streams::Filters` scopes broadcasts per connection at the dispatcher. Refs #85.
+- **Streams: presence tracking.** New `Pgbus::Streams::Presence` plus `add_presence` generator and migration. Refs #87.
+- **Streams: opt-in stream stats + Insights integration.** New `StreamStat` model surfaced in the Insights dashboard. Refs #91.
+
+### Changed
+
+- **Streams: wake coalescing + Stream caching.** Dispatcher coalesces wake-ups and caches Stream lookups; adds a `streams_bench` benchmark harness. Refs #88.
+
 ## [0.5.1] - 2026-04-08
 
 ### Fixed
