@@ -1056,8 +1056,19 @@ RSpec.describe Pgbus::Process::Worker do
       end
 
       it "uses the current queues, not the initial set (post-eviction safe)" do
-        events_worker = described_class.new(queues: %w[events], threads: 5)
-        expect(events_worker.send(:physical_queue_names)).to eq(["#{prefix}_events"])
+        # Build with two queues so @initial_queues stays %w[default events], then
+        # drive a real eviction of `default` so @queues diverges to %w[events].
+        # physical_queue_names must reflect the CURRENT list, not the frozen
+        # initial set — reading @initial_queues here would wrongly include default.
+        evicting_worker = described_class.new(queues: %w[default events], threads: 5)
+        allow(mock_client).to receive(:read_multi).and_raise(
+          StandardError,
+          "ERROR:  relation \"pgmq.q_#{prefix}_default\" does not exist"
+        )
+        evicting_worker.send(:fetch_messages, 5)
+
+        expect(evicting_worker.queues).to eq(%w[events])
+        expect(evicting_worker.send(:physical_queue_names)).to eq(["#{prefix}_events"])
       end
     end
 
