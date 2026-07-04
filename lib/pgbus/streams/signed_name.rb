@@ -14,10 +14,10 @@ module Pgbus
     # `"gid://app/Order/42:messages"`). Verification returns that string;
     # tampered or unsigned input raises `InvalidSignedName`.
     module SignedName
-      class InvalidSignedName < StandardError
+      class InvalidSignedName < Pgbus::Error
       end
 
-      class MissingSecret < StandardError
+      class MissingSecret < Pgbus::Error
       end
 
       def self.verify!(token)

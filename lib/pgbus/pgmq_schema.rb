@@ -11,7 +11,7 @@ module Pgbus
   # Vendored SQL files live in lib/pgbus/pgmq_schema/pgmq_v{VERSION}.sql
   # and are exact copies of the upstream pgmq-extension/sql/pgmq.sql at each release.
   module PgmqSchema
-    class VersionNotFoundError < StandardError; end
+    class VersionNotFoundError < Pgbus::Error; end
 
     SCHEMA_DIR = File.expand_path("pgmq_schema", __dir__).freeze
 

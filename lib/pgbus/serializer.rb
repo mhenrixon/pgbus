@@ -55,21 +55,21 @@ module Pgbus
     # can be resolved — prevents loading arbitrary objects from crafted payloads.
     def locate_global_id(gid_string)
       gid = GlobalID.parse(gid_string)
-      raise ArgumentError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
+      raise Pgbus::SerializationError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
 
       allowed = Pgbus.configuration.allowed_global_id_models
       if allowed && allowed.empty?
-        raise ArgumentError,
+        raise Pgbus::SerializationError,
               "GlobalID deserialization is disabled (allowed_global_id_models is empty). " \
               "Set to nil to allow all models, or add permitted classes."
       end
       if allowed&.any? { |entry| !entry.is_a?(Class) && !entry.is_a?(Module) }
-        raise ArgumentError,
+        raise Pgbus::SerializationError,
               "allowed_global_id_models must contain Class/Module objects, " \
               "got: #{allowed.map(&:class).uniq.join(", ")}"
       end
       if allowed&.none? { |klass| gid.model_class <= klass }
-        raise ArgumentError,
+        raise Pgbus::SerializationError,
               "GlobalID model #{gid.model_class} is not in allowed_global_id_models. " \
               "Add it to Pgbus.configuration.allowed_global_id_models to permit deserialization."
       end

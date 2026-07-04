@@ -41,7 +41,7 @@ RSpec.describe "Security" do
 
         expect do
           Pgbus::Serializer.locate_global_id("gid://pgbus-test/Secret/1")
-        end.to raise_error(ArgumentError, /not in allowed_global_id_models/)
+        end.to raise_error(Pgbus::SerializationError, /not in allowed_global_id_models/)
       end
     end
 
@@ -52,7 +52,7 @@ RSpec.describe "Security" do
       it "rejects all GlobalID models with a clear message" do
         expect do
           Pgbus::Serializer.locate_global_id(gid_uri)
-        end.to raise_error(ArgumentError, /deserialization is disabled/)
+        end.to raise_error(Pgbus::SerializationError, /deserialization is disabled/)
       end
     end
 
@@ -63,14 +63,14 @@ RSpec.describe "Security" do
       it "raises with a clear type error" do
         expect do
           Pgbus::Serializer.locate_global_id(gid_uri)
-        end.to raise_error(ArgumentError, %r{must contain Class/Module objects})
+        end.to raise_error(Pgbus::SerializationError, %r{must contain Class/Module objects})
       end
     end
 
     it "raises on invalid GlobalID strings" do
       expect do
         Pgbus::Serializer.locate_global_id("not-a-gid")
-      end.to raise_error(ArgumentError, /Invalid GlobalID/)
+      end.to raise_error(Pgbus::SerializationError, /Invalid GlobalID/)
     end
   end
 

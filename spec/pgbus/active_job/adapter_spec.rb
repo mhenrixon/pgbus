@@ -180,7 +180,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       it "raises an error" do
         allow(mock_client).to receive(:send_batch).and_return([1])
 
-        expect { adapter.enqueue_all([job, job2]) }.to raise_error(RuntimeError, /batch enqueue failed/)
+        expect { adapter.enqueue_all([job, job2]) }.to raise_error(Pgbus::EnqueueError, /batch enqueue failed/)
       end
     end
   end

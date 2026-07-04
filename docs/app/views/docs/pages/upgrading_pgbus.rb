@@ -172,16 +172,17 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
   end
 
   def v100_stub
-    DocsUI::Section("0.9.8 → 1.0.0", description: "Forward-looking — this section is a stub.") do
-      DocsUI::Callout(:warning, title: "Stub section") do
-        plain "1.0.0 hasn't shipped yet. The renames and removals below are "
-        plain "tracked by the two API-freeze issues that own this scope — "
+    DocsUI::Section("0.9.8 → 1.0.0", description: "The error hierarchy has landed; config renames still pending.") do
+      DocsUI::Callout(:warning, title: "Partial — 1.0.0 hasn't shipped yet") do
+        plain "The unified error hierarchy below is "
+        strong { "shipped" }
+        plain " (issue "
         a(href: "https://github.com/mhenrixon/pgbus/issues/282", class: "link") { "#282" }
-        plain " (error hierarchy) and "
+        plain ") and describes real current behavior on the unreleased 1.0 line. "
+        plain "The config renames and dead-surface removal further down are still "
+        plain "tracked by "
         a(href: "https://github.com/mhenrixon/pgbus/issues/283", class: "link") { "#283" }
-        plain " (config renames + dead-surface removal) — and "
-        strong { "must be updated by those issues as they land" }
-        plain ". Treat everything here as a plan, not a shipped behavior."
+        plain " and remain a plan until that issue lands."
       end
       md <<~'MD'
         ### The 1.0.0 commitment
@@ -195,14 +196,14 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         (the error hierarchy) or because it's free to rename now and expensive to
         rename after (config keys, dead code).
 
-        ### Planned: unified error hierarchy (tracked by #282)
+        ### Breaking: unified error hierarchy (#282)
 
-        Today, `Pgbus::Error` exists with well-formed subclasses, but several
-        call sites still raise bare stdlib errors instead of a `Pgbus::Error`
-        descendant. 1.0.0 is expected to close that gap:
+        Every operational error pgbus raises now descends from `Pgbus::Error`, so
+        `rescue Pgbus::Error` catches them all. Four call sites that previously
+        raised bare stdlib errors changed:
       MD
       DocsUI::Table(
-        [ "Raises today", "Becomes in 1.0.0", "Where" ],
+        [ "Raised before", "Raises now", "Where" ],
         [
           [ [ :code, "ArgumentError" ], [ :code, "Pgbus::ConfigurationError" ], "Configuration#validate! and its setters" ],
           [ [ :code, "RuntimeError" ], [ :code, "Pgbus::ExecutionPoolError" ], [ :code, "AsyncPool" ] ],
@@ -211,19 +212,32 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         ]
       )
       md <<~'MD'
-        A handful of error classes that bypass `Pgbus::Error` entirely today
-        (`PgmqSchema::VersionNotFoundError`, `Streams::SignedName::InvalidSignedName`,
-        `Generators::ConfigConverter::Error`, and others) are also expected to be
-        re-parented underneath it. Classes that reject a malformed *argument
+        Four error classes that bypassed `Pgbus::Error` entirely
+        (`PgmqSchema::VersionNotFoundError`, `Streams::SignedName::InvalidSignedName`
+        and `MissingSecret`, `Generators::ConfigConverter::Error`) are now
+        re-parented underneath it. Three classes that reject a malformed *argument
         shape* — `CapsuleDSL::ParseError`, `Streams::Cursor::InvalidCursor`,
-        `Streams::StreamNameTooLong` — are expected to stay `ArgumentError`
-        subclasses by design, since that's what `ArgumentError` means.
+        `Streams::StreamNameTooLong` — deliberately stay `ArgumentError`
+        subclasses, since that's what `ArgumentError` means. The policy
+        ("argument-shape errors are `ArgumentError`, operational errors are
+        `Pgbus::Error`") is documented at the top of `lib/pgbus.rb`.
 
-        **Deprecation path:** if you `rescue ArgumentError` around
-        `Pgbus.configure` or a job's config access today, that rescue will stop
-        catching config errors once this lands — switch to
-        `rescue Pgbus::Error` (which will catch both the old and new shape
-        during any transition window #282 defines).
+        **The one breaking change for existing code:** if you `rescue ArgumentError`
+        around `Pgbus.configure` or a boot-time config read, that rescue no longer
+        catches config errors — `Configuration#validate!` and its setters now raise
+        `Pgbus::ConfigurationError`, which is **not** an `ArgumentError`. Switch to:
+      MD
+      DocsUI::Code(<<~'RUBY', filename: "config/initializers/pgbus.rb")
+        begin
+          Pgbus.configure { |c| c.visibility_timeout = 0 }
+        rescue Pgbus::Error => e   # was: rescue ArgumentError
+          Rails.logger.error("pgbus config invalid: #{e.message}")
+          raise
+        end
+      RUBY
+      md <<~'MD'
+        Error *messages* are unchanged, so any `rescue ... => e` that only reads
+        `e.message` keeps working. Only the rescued *class* changed.
 
         ### Planned: config renames and dead-surface removal (tracked by #283)
 

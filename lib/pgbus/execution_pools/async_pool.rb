@@ -25,7 +25,7 @@ module Pgbus
 
       def post(&block)
         raise_if_fatal!
-        raise "Execution pool is shutting down" if shutdown?
+        raise Pgbus::ExecutionPoolError, "Execution pool is shutting down" if shutdown?
 
         reserved = false
         reserve_capacity!
@@ -193,7 +193,7 @@ module Pgbus
 
       def reserve_capacity!
         @mutex.synchronize do
-          raise "Execution pool is at capacity" if @available_capacity <= 0
+          raise Pgbus::ExecutionPoolError, "Execution pool is at capacity" if @available_capacity <= 0
 
           @available_capacity -= 1
         end

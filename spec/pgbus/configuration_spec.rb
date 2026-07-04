@@ -356,7 +356,7 @@ RSpec.describe Pgbus::Configuration do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: "5" }]
         expect { config.resolved_pool_size }.to raise_error(
-          ArgumentError,
+          Pgbus::ConfigurationError,
           /worker.*threads.*positive integer/
         )
       end
@@ -365,7 +365,7 @@ RSpec.describe Pgbus::Configuration do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: 0.5 }]
         expect { config.resolved_pool_size }.to raise_error(
-          ArgumentError,
+          Pgbus::ConfigurationError,
           /worker.*threads.*positive integer/
         )
       end
@@ -374,7 +374,7 @@ RSpec.describe Pgbus::Configuration do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: 0 }]
         expect { config.resolved_pool_size }.to raise_error(
-          ArgumentError,
+          Pgbus::ConfigurationError,
           /worker.*threads.*positive integer/
         )
       end
@@ -383,7 +383,7 @@ RSpec.describe Pgbus::Configuration do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: -1 }]
         expect { config.resolved_pool_size }.to raise_error(
-          ArgumentError,
+          Pgbus::ConfigurationError,
           /worker.*threads.*positive integer/
         )
       end
@@ -393,7 +393,7 @@ RSpec.describe Pgbus::Configuration do
         config.workers = nil
         config.event_consumers = [{ topics: %w[orders.#], threads: "abc" }]
         expect { config.resolved_pool_size }.to raise_error(
-          ArgumentError,
+          Pgbus::ConfigurationError,
           /event_consumer.*threads.*positive integer/
         )
       end
@@ -401,7 +401,7 @@ RSpec.describe Pgbus::Configuration do
       it "includes the offending value in the error message" do
         config.pool_size = nil
         config.workers = [{ queues: %w[default], threads: "abc" }]
-        expect { config.resolved_pool_size }.to raise_error(ArgumentError, /"abc"/)
+        expect { config.resolved_pool_size }.to raise_error(Pgbus::ConfigurationError, /"abc"/)
       end
     end
   end
@@ -467,9 +467,9 @@ RSpec.describe Pgbus::Configuration do
                                      ])
       end
 
-      it "raises ArgumentError when an entry is not a Hash" do
+      it "raises Pgbus::ConfigurationError when an entry is not a Hash" do
         expect { config.workers = [%w[not a hash]] }.to raise_error(
-          ArgumentError, /worker entry must be a Hash/
+          Pgbus::ConfigurationError, /worker entry must be a Hash/
         )
       end
     end
@@ -526,12 +526,12 @@ RSpec.describe Pgbus::Configuration do
     end
 
     context "when given anything else" do
-      it "raises ArgumentError for an Integer" do
-        expect { config.workers = 5 }.to raise_error(ArgumentError, /String.*Array|Array.*String/)
+      it "raises Pgbus::ConfigurationError for an Integer" do
+        expect { config.workers = 5 }.to raise_error(Pgbus::ConfigurationError, /String.*Array|Array.*String/)
       end
 
-      it "raises ArgumentError for a Hash" do
-        expect { config.workers = { queues: %w[default] } }.to raise_error(ArgumentError, /String.*Array|Array.*String/)
+      it "raises Pgbus::ConfigurationError for a Hash" do
+        expect { config.workers = { queues: %w[default] } }.to raise_error(Pgbus::ConfigurationError, /String.*Array|Array.*String/)
       end
     end
   end
@@ -555,9 +555,9 @@ RSpec.describe Pgbus::Configuration do
       expect(config.event_consumers).to be_nil
     end
 
-    it "raises ArgumentError when an entry is not a Hash" do
+    it "raises Pgbus::ConfigurationError when an entry is not a Hash" do
       expect { config.event_consumers = ["not a hash"] }.to raise_error(
-        ArgumentError, /event_consumer entry must be a Hash/
+        Pgbus::ConfigurationError, /event_consumer entry must be a Hash/
       )
     end
   end
@@ -604,25 +604,25 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:critical, queues: %w[critical], threads: 5)
       expect do
         config.capsule(:critical, queues: %w[urgent], threads: 3)
-      end.to raise_error(ArgumentError, /:critical.*already defined/)
+      end.to raise_error(Pgbus::ConfigurationError, /:critical.*already defined/)
     end
 
     it "rejects nil queues" do
       expect do
         config.capsule(:bad, queues: nil, threads: 5)
-      end.to raise_error(ArgumentError, /queues/)
+      end.to raise_error(Pgbus::ConfigurationError, /queues/)
     end
 
     it "rejects empty queues" do
       expect do
         config.capsule(:bad, queues: [], threads: 5)
-      end.to raise_error(ArgumentError, /queues/)
+      end.to raise_error(Pgbus::ConfigurationError, /queues/)
     end
 
     it "rejects non-positive threads" do
       expect do
         config.capsule(:bad, queues: %w[a], threads: 0)
-      end.to raise_error(ArgumentError, /threads/)
+      end.to raise_error(Pgbus::ConfigurationError, /threads/)
     end
 
     it "raises if a queue overlaps with an already-defined capsule" do
@@ -630,7 +630,7 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:a, queues: %w[shared], threads: 5)
       expect do
         config.capsule(:b, queues: %w[shared], threads: 5)
-      end.to raise_error(ArgumentError, /shared.*already.*capsule/i)
+      end.to raise_error(Pgbus::ConfigurationError, /shared.*already.*capsule/i)
     end
   end
 
@@ -677,7 +677,7 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:critical, queues: %w[critical], threads: 5)
       expect do
         config.capsule("critical", queues: %w[urgent], threads: 3)
-      end.to raise_error(ArgumentError, /already defined/)
+      end.to raise_error(Pgbus::ConfigurationError, /already defined/)
     end
 
     it "string DSL stores auto-generated names as strings" do
@@ -710,7 +710,7 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:critical, queues: %w[critical], threads: 3)
       expect do
         config.capsule(:catch_all, queues: ["*"], threads: 5)
-      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+      end.to raise_error(Pgbus::ConfigurationError, /already.*capsule|wildcard/i)
     end
 
     it "rejects adding a named capsule when an existing NAMED wildcard capsule exists" do
@@ -718,7 +718,7 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:catch_all, queues: ["*"], threads: 5)
       expect do
         config.capsule(:critical, queues: %w[critical], threads: 3)
-      end.to raise_error(ArgumentError, /already.*capsule|wildcard/i)
+      end.to raise_error(Pgbus::ConfigurationError, /already.*capsule|wildcard/i)
     end
   end
 
@@ -739,7 +739,7 @@ RSpec.describe Pgbus::Configuration do
       config.capsule(:foo, queues: %w[shared], threads: 5)
       expect do
         config.capsule(:bar, queues: %w[shared], threads: 5)
-      end.to raise_error(ArgumentError, /shared.*already.*capsule/i)
+      end.to raise_error(Pgbus::ConfigurationError, /shared.*already.*capsule/i)
     end
   end
 
@@ -805,12 +805,12 @@ RSpec.describe Pgbus::Configuration do
       expect(config.roles).to eq(%i[workers dispatcher])
     end
 
-    it "raises ArgumentError for an unknown role (typo protection)" do
-      expect { config.roles = [:workres] }.to raise_error(ArgumentError, /invalid role.*workres/i)
+    it "raises Pgbus::ConfigurationError for an unknown role (typo protection)" do
+      expect { config.roles = [:workres] }.to raise_error(Pgbus::ConfigurationError, /invalid role.*workres/i)
     end
 
     it "lists valid roles in the error message" do
-      expect { config.roles = [:bogus] }.to raise_error(ArgumentError, /workers.*dispatcher.*scheduler/i)
+      expect { config.roles = [:bogus] }.to raise_error(Pgbus::ConfigurationError, /workers.*dispatcher.*scheduler/i)
     end
 
     it "does not raise for any of the supported roles" do
@@ -911,26 +911,26 @@ RSpec.describe Pgbus::Configuration do
       expect(config.recurring_execution_retention).to eq(7 * 24 * 3600)
     end
 
-    it "raises ArgumentError immediately when assigned a negative number" do
+    it "raises Pgbus::ConfigurationError immediately when assigned a negative number" do
       duration_settings.each do |setting|
         expect { config.public_send("#{setting}=", -1) }.to raise_error(
-          ArgumentError, /#{setting}.*positive/
+          Pgbus::ConfigurationError, /#{setting}.*positive/
         )
       end
     end
 
-    it "raises ArgumentError immediately when assigned zero" do
+    it "raises Pgbus::ConfigurationError immediately when assigned zero" do
       duration_settings.each do |setting|
         expect { config.public_send("#{setting}=", 0) }.to raise_error(
-          ArgumentError, /#{setting}.*positive/
+          Pgbus::ConfigurationError, /#{setting}.*positive/
         )
       end
     end
 
-    it "raises ArgumentError immediately when assigned a non-numeric value" do
+    it "raises Pgbus::ConfigurationError immediately when assigned a non-numeric value" do
       duration_settings.each do |setting|
         expect { config.public_send("#{setting}=", "five seconds") }.to raise_error(
-          ArgumentError, /#{setting}.*Numeric.*Duration/
+          Pgbus::ConfigurationError, /#{setting}.*Numeric.*Duration/
         )
       end
     end
@@ -963,7 +963,7 @@ RSpec.describe Pgbus::Configuration do
   describe "#validate!" do
     it "rejects invalid prefetch_limit" do
       config.prefetch_limit = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /prefetch_limit/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /prefetch_limit/)
     end
 
     it "accepts nil health_port (standalone server disabled)" do
@@ -978,12 +978,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects a non-integer health_port" do
       config.health_port = "9394"
-      expect { config.validate! }.to raise_error(ArgumentError, /health_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /health_port/)
     end
 
     it "rejects an out-of-range health_port" do
       config.health_port = 70_000
-      expect { config.validate! }.to raise_error(ArgumentError, /health_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /health_port/)
     end
 
     it "accepts valid prefetch_limit" do
@@ -993,12 +993,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects non-numeric stall_threshold" do
       config.stall_threshold = "90"
-      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stall_threshold/)
     end
 
     it "rejects zero stall_threshold" do
       config.stall_threshold = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stall_threshold/)
     end
 
     it "accepts nil stall_threshold (disabled)" do
@@ -1008,17 +1008,17 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects false stall_threshold" do
       config.stall_threshold = false
-      expect { config.validate! }.to raise_error(ArgumentError, /stall_threshold/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stall_threshold/)
     end
 
     it "rejects non-numeric read_timeout" do
       config.read_timeout = "30"
-      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /read_timeout/)
     end
 
     it "rejects zero read_timeout" do
       config.read_timeout = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /read_timeout/)
     end
 
     it "accepts nil read_timeout (disabled)" do
@@ -1028,22 +1028,22 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects false read_timeout" do
       config.read_timeout = false
-      expect { config.validate! }.to raise_error(ArgumentError, /read_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /read_timeout/)
     end
 
     it "rejects zero stats_flush_size" do
       config.stats_flush_size = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stats_flush_size/)
     end
 
     it "rejects negative stats_flush_size" do
       config.stats_flush_size = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stats_flush_size/)
     end
 
     it "rejects non-integer stats_flush_size" do
       config.stats_flush_size = 100.5
-      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_size/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stats_flush_size/)
     end
 
     it "accepts a positive stats_flush_size" do
@@ -1053,12 +1053,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects zero stats_flush_interval" do
       config.stats_flush_interval = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_interval/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stats_flush_interval/)
     end
 
     it "rejects negative stats_flush_interval" do
       config.stats_flush_interval = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /stats_flush_interval/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /stats_flush_interval/)
     end
 
     it "accepts a positive stats_flush_interval" do
@@ -1068,12 +1068,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects invalid priority_levels" do
       config.priority_levels = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /priority_levels/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /priority_levels/)
     end
 
     it "rejects priority_levels > 10" do
       config.priority_levels = 11
-      expect { config.validate! }.to raise_error(ArgumentError, /priority_levels/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /priority_levels/)
     end
 
     it "accepts valid priority_levels" do
@@ -1097,7 +1097,7 @@ RSpec.describe Pgbus::Configuration do
     end
 
     it "rejects invalid group_mode" do
-      expect { config.group_mode = :invalid }.to raise_error(ArgumentError, /group_mode/)
+      expect { config.group_mode = :invalid }.to raise_error(Pgbus::ConfigurationError, /group_mode/)
     end
 
     it "coerces string group_mode to symbol" do
@@ -1105,19 +1105,19 @@ RSpec.describe Pgbus::Configuration do
       expect(config.group_mode).to eq(:fifo)
     end
 
-    it "raises ArgumentError (not NoMethodError) for non-string/symbol types" do
-      expect { config.group_mode = 1 }.to raise_error(ArgumentError, /type/)
-      expect { config.group_mode = true }.to raise_error(ArgumentError, /type/)
+    it "raises Pgbus::ConfigurationError (not NoMethodError) for non-string/symbol types" do
+      expect { config.group_mode = 1 }.to raise_error(Pgbus::ConfigurationError, /type/)
+      expect { config.group_mode = true }.to raise_error(Pgbus::ConfigurationError, /type/)
     end
 
     it "rejects non-positive insights_default_minutes" do
       config.insights_default_minutes = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /insights_default_minutes/)
     end
 
     it "rejects negative insights_default_minutes" do
       config.insights_default_minutes = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /insights_default_minutes/)
     end
 
     it "accepts nil workers (workerless modes like scheduler-only or dispatcher-only)" do
@@ -1127,22 +1127,22 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects fractional insights_default_minutes" do
       config.insights_default_minutes = 90.5
-      expect { config.validate! }.to raise_error(ArgumentError, /insights_default_minutes/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /insights_default_minutes/)
     end
 
     it "rejects negative retry_backoff" do
       config.retry_backoff = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff must be > 0/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /retry_backoff must be > 0/)
     end
 
     it "rejects nil retry_backoff_max" do
       config.retry_backoff_max = nil
-      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff_max must be > 0/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /retry_backoff_max must be > 0/)
     end
 
     it "rejects jitter > 1" do
       config.retry_backoff_jitter = 1.5
-      expect { config.validate! }.to raise_error(ArgumentError, /retry_backoff_jitter must be between 0 and 1/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /retry_backoff_jitter must be between 0 and 1/)
     end
 
     it "accepts valid backoff settings" do
@@ -1154,7 +1154,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects invalid global execution_mode" do
       config.execution_mode = :bogus
-      expect { config.validate! }.to raise_error(ArgumentError, /execution_mode/i)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /execution_mode/i)
     end
 
     it "accepts valid execution_mode values" do
@@ -1166,7 +1166,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects invalid per-worker execution_mode" do
       config.workers = [{ queues: %w[default], threads: 5, execution_mode: :bogus }]
-      expect { config.validate! }.to raise_error(ArgumentError, /execution_mode/i)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /execution_mode/i)
     end
 
     it "accepts per-worker execution_mode override" do
@@ -1196,12 +1196,12 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects an unknown metrics_backend symbol" do
       config.metrics_backend = :bogus
-      expect { config.validate! }.to raise_error(ArgumentError, /metrics_backend/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /metrics_backend/)
     end
 
     it "rejects a non-backend metrics_backend object" do
       config.metrics_backend = "prometheus"
-      expect { config.validate! }.to raise_error(ArgumentError, /metrics_backend/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /metrics_backend/)
     end
 
     it "accepts the default statsd_host, statsd_port, and health_bind" do
@@ -1210,17 +1210,17 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects a non-String statsd_host" do
       config.statsd_host = 123
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_host/)
     end
 
     it "rejects an empty statsd_host" do
       config.statsd_host = ""
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_host/)
     end
 
     it "rejects a nil statsd_host" do
       config.statsd_host = nil
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_host/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_host/)
     end
 
     it "accepts a valid statsd_host" do
@@ -1230,27 +1230,27 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects a non-Integer statsd_port" do
       config.statsd_port = "8125"
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_port/)
     end
 
     it "rejects a zero statsd_port" do
       config.statsd_port = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_port/)
     end
 
     it "rejects a negative statsd_port" do
       config.statsd_port = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_port/)
     end
 
     it "rejects an out-of-range statsd_port" do
       config.statsd_port = 70_000
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_port/)
     end
 
     it "rejects a nil statsd_port" do
       config.statsd_port = nil
-      expect { config.validate! }.to raise_error(ArgumentError, /statsd_port/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /statsd_port/)
     end
 
     it "accepts a valid statsd_port" do
@@ -1260,17 +1260,17 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects a non-String health_bind" do
       config.health_bind = 123
-      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /health_bind/)
     end
 
     it "rejects an empty health_bind" do
       config.health_bind = ""
-      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /health_bind/)
     end
 
     it "rejects a nil health_bind" do
       config.health_bind = nil
-      expect { config.validate! }.to raise_error(ArgumentError, /health_bind/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /health_bind/)
     end
 
     it "accepts a valid health_bind" do
@@ -1538,37 +1538,37 @@ RSpec.describe Pgbus::Configuration do
   describe "#validate! with streams settings" do
     it "rejects negative streams_default_retention" do
       config.streams_default_retention = -1
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_default_retention/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_default_retention/)
     end
 
     it "rejects non-positive streams_max_connections" do
       config.streams_max_connections = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_max_connections/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_max_connections/)
     end
 
     it "rejects non-positive streams_heartbeat_interval" do
       config.streams_heartbeat_interval = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_heartbeat_interval/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_heartbeat_interval/)
     end
 
     it "rejects non-Hash streams_retention" do
       config.streams_retention = "nope"
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_retention/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_retention/)
     end
 
     it "rejects non-positive streams_idle_timeout" do
       config.streams_idle_timeout = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_idle_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_idle_timeout/)
     end
 
     it "rejects non-positive streams_listen_health_check_ms" do
       config.streams_listen_health_check_ms = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_listen_health_check_ms/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_listen_health_check_ms/)
     end
 
     it "rejects non-positive streams_write_deadline_ms" do
       config.streams_write_deadline_ms = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_write_deadline_ms/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_write_deadline_ms/)
     end
 
     it "accepts a valid streams config" do
@@ -1682,16 +1682,16 @@ RSpec.describe Pgbus::Configuration do
   describe "Pgbus.configure eager validation" do
     after { Pgbus.reset! }
 
-    it "raises ArgumentError when an invalid value is set in the block" do
+    it "raises Pgbus::ConfigurationError when an invalid value is set in the block" do
       expect do
         Pgbus.configure { |c| c.visibility_timeout = 0 }
-      end.to raise_error(ArgumentError, /visibility_timeout/)
+      end.to raise_error(Pgbus::ConfigurationError, /visibility_timeout/)
     end
 
     it "raises for a value that only validate! catches (not caught by the setter)" do
       expect do
         Pgbus.configure { |c| c.polling_interval = 0 }
-      end.to raise_error(ArgumentError, /polling_interval/)
+      end.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
     end
 
     it "passes for a valid configure block" do
@@ -1729,7 +1729,7 @@ RSpec.describe Pgbus::Configuration do
     it "still allows explicit validate! after opting out" do
       Pgbus.configuration.eager_validation = false
       Pgbus.configure { |c| c.polling_interval = 0 }
-      expect { Pgbus.configuration.validate! }.to raise_error(ArgumentError, /polling_interval/)
+      expect { Pgbus.configuration.validate! }.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
     end
   end
 end

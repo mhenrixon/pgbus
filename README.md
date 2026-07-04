@@ -136,7 +136,7 @@ end
 
 The capsule string DSL is the shortest form for the common case. Use `c.capsule` when you need named capsules with advanced options like `single_active_consumer` or `consumer_priority`. See [Routing and ordering](#routing-and-ordering) for the full set.
 
-Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#validate!` right after your block yields, so an invalid value (`visibility_timeout = 0`, for example) raises `ArgumentError` at boot instead of failing later inside a worker. Set `c.eager_validation = false` for the rare setup that intentionally holds a transiently-invalid config across sequential `configure` calls.
+Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#validate!` right after your block yields, so an invalid value (`visibility_timeout = 0`, for example) raises `Pgbus::ConfigurationError` at boot instead of failing later inside a worker. Set `c.eager_validation = false` for the rare setup that intentionally holds a transiently-invalid config across sequential `configure` calls.
 
 > **Upgrading from an older pgbus?** Run `rails generate pgbus:update`. It does two things in one pass:
 >
@@ -778,6 +778,25 @@ Each reporter receives `(exception, context_hash)`. The context hash includes ke
 Reporters are wired into all critical rescue paths: job execution failures, worker fetch/process errors, dispatcher maintenance, supervisor fork failures, circuit breaker trips, outbox publish errors, and failed event recording. Non-critical paths (dashboard queries, stat recording) remain log-only.
 
 `ErrorReporter.report` is guaranteed to never raise — if a reporter or the logger itself throws, the error is swallowed silently. This preserves fault-tolerance invariants at every rescue site.
+
+### Error hierarchy
+
+Every operational error Pgbus raises descends from `Pgbus::Error`, so a single rescue catches them all:
+
+```ruby
+begin
+  Pgbus.configure { |c| c.visibility_timeout = 0 }
+rescue Pgbus::Error => e
+  # ConfigurationError, EnqueueError, ExecutionPoolError, SerializationError,
+  # QueueNotFoundError, SchemaNotReady, ... all land here
+end
+```
+
+The named subclasses (a partial list): `Pgbus::ConfigurationError` (`validate!` and config setters), `Pgbus::SerializationError` (payload / GlobalID rejection), `Pgbus::EnqueueError` (batch enqueue integrity), `Pgbus::ExecutionPoolError` (pool shutting down / at capacity), `Pgbus::QueueNotFoundError`, `Pgbus::DeadLetterError`, `Pgbus::JobNotUnique`, `Pgbus::SchemaNotReady`, `Pgbus::ReadTimeoutError`, and `Pgbus::ConnectionCircuitOpenError`.
+
+**One deliberate exception to the rule:** errors that reject a malformed *argument shape* stay `ArgumentError` subclasses, because that's what `ArgumentError` means — `Pgbus::Streams::StreamNameTooLong`, `Pgbus::Streams::Cursor::InvalidCursor`, and `Pgbus::Configuration::CapsuleDSL::ParseError`. Rescue those with `ArgumentError` (or the specific class), not `Pgbus::Error`.
+
+If you upgraded from 0.9.x and previously did `rescue ArgumentError` around `Pgbus.configure`, switch it to `rescue Pgbus::Error` — config validation now raises `Pgbus::ConfigurationError`, which is not an `ArgumentError`.
 
 ### AppSignal integration
 
@@ -2033,7 +2052,7 @@ PostgreSQL + PGMQ
 | `statsd_port` | `8125` | StatsD UDP port (used when `metrics_backend = :statsd`) |
 | `health_port` | `nil` | Port for standalone HTTP liveness/readiness probes served by the supervisor; nil disables |
 | `health_bind` | `"127.0.0.1"` | Bind address for the standalone health server |
-| `eager_validation` | `true` | Run `Configuration#validate!` automatically after `Pgbus.configure` / `ConfigLoader.apply`; an invalid value raises `ArgumentError` at boot. Set `false` to suppress and validate manually. |
+| `eager_validation` | `true` | Run `Configuration#validate!` automatically after `Pgbus.configure` / `ConfigLoader.apply`; an invalid value raises `Pgbus::ConfigurationError` at boot. Set `false` to suppress and validate manually. |
 
 ## Development
 

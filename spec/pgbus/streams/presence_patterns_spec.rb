@@ -12,7 +12,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects non-Array values" do
       config.streams_presence_patterns = "chat"
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_presence_patterns/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_presence_patterns/)
     end
 
     it "accepts an array of strings and regex" do
@@ -36,7 +36,7 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects a non-callable value at boot (fail fast)" do
       config.streams_presence_member = "not callable"
-      expect { config.validate! }.to raise_error(ArgumentError, /streams_presence_member must respond to #call/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_presence_member must respond to #call/)
     end
   end
 
