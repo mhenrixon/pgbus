@@ -1,0 +1,108 @@
+# frozen_string_literal: true
+
+# The pub/sub event bus: publishing topics, subscribing with patterns, and the
+# idempotency that makes handlers safe to re-run. The fanout diagram anchors it.
+class Views::Docs::Pages::EventBus < DocsUI::Page
+  title "Event bus"
+  eyebrow "Guide"
+
+  def lead = "Publish a topic once; AMQP-style patterns fan it out to idempotent subscribers."
+
+  def content
+    publishing
+    subscribing
+    routing
+    idempotency
+  end
+
+  private
+
+  def publishing
+    DocsUI::Section("Publish an event") do
+      md <<~'MD'
+        An event is a routing key plus a payload. Publish it now, or schedule it
+        with a delay:
+      MD
+      DocsUI::Code(<<~RUBY)
+        Pgbus::EventBus::Publisher.publish(
+          "orders.created",
+          { order_id: order.id, total: order.total }
+        )
+
+        Pgbus::EventBus::Publisher.publish_later(
+          "invoices.due",
+          { invoice_id: invoice.id },
+          delay: 30.days
+        )
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "The payload is JSON. Keep it to data a subscriber can act on — ids, "
+        plain "amounts, timestamps — not whole objects."
+      end
+    end
+  end
+
+  def subscribing
+    DocsUI::Section("Subscribe with a handler") do
+      md <<~'MD'
+        A handler subclasses `Pgbus::EventBus::Handler` and implements `#handle`.
+        Register it against a pattern in an initializer:
+      MD
+      DocsUI::Code(<<~RUBY, filename: "app/handlers/order_created_handler.rb")
+        class OrderCreatedHandler < Pgbus::EventBus::Handler
+          idempotent! # deduplicate by (event_id, handler_class)
+
+          def handle(event)
+            order_id = event.payload["order_id"]
+            Analytics.track_order(order_id)
+            InventoryService.reserve(order_id)
+          end
+        end
+      RUBY
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus::EventBus::Registry.instance.subscribe("orders.created", OrderCreatedHandler)
+      RUBY
+    end
+  end
+
+  def routing
+    DocsUI::Section("Topic routing", description: "AMQP-style patterns: * for one segment, # for many.") do
+      md <<~'MD'
+        Patterns match dotted routing keys the way AMQP topic exchanges do: `*`
+        matches exactly one segment, `#` matches zero or more. One publish fans out
+        to every subscriber whose pattern matches.
+      MD
+      render Components::Diagrams::EventFanout.new
+      DocsUI::Table(
+        [ "Pattern", "Matches", "Doesn't match" ],
+        [
+          [ [ :code, "orders.created" ], [ :code, "orders.created" ], [ :code, "orders.updated" ] ],
+          [ [ :code, "orders.*" ], [ :md, "`orders.created`, `orders.updated`" ], [ :code, "orders.line.added" ] ],
+          [ [ :code, "orders.#" ], [ :md, "`orders.created`, `orders.line.added`" ], [ :code, "payments.captured" ] ]
+        ]
+      )
+      DocsUI::Code(<<~RUBY)
+        # Audit everything under the orders.* namespace, at any depth:
+        Pgbus::EventBus::Registry.instance.subscribe("orders.#", OrderAuditHandler)
+      RUBY
+    end
+  end
+
+  def idempotency
+    DocsUI::Section("Idempotent handlers", description: "Safe to re-run — deduplicated by (event_id, handler).") do
+      md <<~'MD'
+        At-least-once delivery means a handler can be invoked more than once for the
+        same event (a retry after a crash mid-handle). Declaring `idempotent!`
+        records each `(event_id, handler_class)` in `pgbus_processed_events` with a
+        unique index — a second delivery of the same event to the same handler is
+        skipped, backed by an in-memory cache to avoid the round trip when it can.
+      MD
+      DocsUI::Callout(:tip) do
+        plain "How long processed-event records are kept is "
+        code { "idempotency_ttl" }
+        plain " (default 7 days). The dispatcher purges older rows. "
+        plain "Set it long enough to cover your worst-case retry window."
+      end
+    end
+  end
+end
