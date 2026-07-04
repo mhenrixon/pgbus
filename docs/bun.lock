@@ -4,9 +4,9 @@
   "workspaces": {
     "": {
       "devDependencies": {
-        "@tailwindcss/cli": "^4.1.18",
-        "daisyui": "^5.6.0",
-        "tailwindcss": "^4.1.18",
+        "@tailwindcss/cli": "latest",
+        "daisyui": "latest",
+        "tailwindcss": "latest",
       },
     },
   },
