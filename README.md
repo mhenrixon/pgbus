@@ -297,36 +297,33 @@ end
 
 #### Lock lifecycle
 
-The lock is **never released by a timer**. It is held as long as the job exists in the system:
+The lock is **never released by a timer**. It is held as long as the job's message exists in the queue:
 
 ```text
-Enqueue ──→ pgbus_job_locks (state: queued, owner_pid: nil)
+Enqueue ──→ pgbus_uniqueness_keys (lock_key, queue_name, msg_id)
                   │
-  Worker picks up job
-                  │
-                  ▼
-           claim_for_execution! (state: executing, owner_pid: PID)
+  Worker picks up and runs the job
                   │
           ┌───────┴───────┐
           ▼               ▼
       Success           Crash
-      release!        (lock orphaned)
-      (row deleted)       │
+      release!        (lock orphaned —
+      (row deleted)    message still tracked
+                        by lock_key/queue_name/msg_id)
+                          │
                           ▼
                     Reaper checks:
-                    Is owner_pid in pgbus_processes
-                    with fresh heartbeat?
+                    Does the referenced message
+                    still exist in the PGMQ queue?
                           │
                     ┌─────┴─────┐
-                    No          Yes
+                   Gone       Present
                     ▼            ▼
                 release!      (keep lock,
-                (orphaned)     job is running)
+                (orphaned)     job still in flight)
 ```
 
-**Crash recovery** works through the reaper (runs every 5 minutes in the dispatcher). It cross-references `owner_pid` in `pgbus_job_locks` against `pgbus_processes` heartbeats. If the owning worker has no fresh heartbeat, the lock is orphaned and released — the PGMQ message's visibility timeout will expire and the job will be retried by another worker.
-
-A last-resort TTL (default 24 hours) handles the case where the entire pgbus supervisor is dead and the reaper itself can't run.
+**Crash recovery** works through the reaper (runs periodically in the dispatcher's `cleanup_job_locks`). It checks whether the message referenced by each lock (`queue_name` + `msg_id`) still exists in the PGMQ queue via `Client#message_exists?`. If the message is gone (delivered, expired, or the queue was truncated) and the lock is older than `2 * visibility_timeout` — to avoid racing a lock whose `send_message` hasn't committed yet — the lock is released. A lock backed by a message still in the queue is never touched, even if it looks old, so a recurring job that fails and retries can hold its lock for hours.
 
 #### Uniqueness vs concurrency controls
 
@@ -348,8 +345,8 @@ A last-resort TTL (default 24 hours) handles the case where the entire pgbus sup
 #### Setup
 
 ```bash
-rails generate pgbus:add_job_locks                  # Add the migration
-rails generate pgbus:add_job_locks --database=pgbus # For separate database
+rails generate pgbus:add_uniqueness_keys                   # Add the migration
+rails generate pgbus:add_uniqueness_keys --database=pgbus   # For separate database
 ```
 
 ### Concurrency controls
@@ -1656,7 +1653,7 @@ Pgbus uses these tables (created via PGMQ and migrations):
 | `pgbus_semaphores` | Concurrency control counting semaphores |
 | `pgbus_blocked_executions` | Jobs waiting for a concurrency semaphore slot |
 | `pgbus_batches` | Batch tracking with job counters and callback config |
-| `pgbus_job_locks` | Job uniqueness locks (state, owner_pid, reaper correlation) |
+| `pgbus_uniqueness_keys` | Job uniqueness locks (lock_key, queue_name, msg_id) |
 | `pgbus_job_stats` | Job execution metrics (class, queue, status, duration) |
 | `pgbus_queue_states` | Queue pause/resume and circuit breaker state |
 | `pgbus_outbox_entries` | Transactional outbox entries pending publication |
