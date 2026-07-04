@@ -44,4 +44,9 @@ group :development, :test do
   gem "globalid", ">= 1.0"
   gem "mcp", "~> 0.22"
   gem "pg", "~> 1.5"
+
+  # Coverage measurement — a dev tool, not a gemspec runtime dep.
+  # Loaded at the top of spec/spec_helper.rb before "pgbus" so lib files
+  # are instrumented before they load.
+  gem "simplecov", require: false
 end

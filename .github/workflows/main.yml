@@ -94,7 +94,14 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run unit tests
-        run: bundle exec rspec spec/pgbus/
+        run: bundle exec rspec spec/pgbus/ spec/generators/
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-ruby-${{ matrix.ruby }}
+          path: coverage/
+          if-no-files-found: warn
 
   integration:
     runs-on: ubuntu-latest
