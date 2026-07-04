@@ -8,6 +8,29 @@ module Components
     # theme switcher — no per-theme asset. Mixed into each diagram, which draws
     # inside an <svg> block yielded as `s`.
     module SvgHelpers
+      # The shared diagram canvas: the <svg> wrapper every flow diagram uses
+      # (100%-wide, currentColor-tinted, system font), with the arrowhead markers
+      # already defined. A diagram passes its viewbox and draws inside the block,
+      # which yields the svg builder `s`.
+      #
+      # aria-hidden: the enclosing Figure div carries role="img" + an aria-label
+      # describing the whole diagram, so the SVG's decorative <text> nodes must
+      # not be re-announced (role="img" descendant suppression is inconsistent
+      # across screen readers, so we hide the subtree explicitly).
+      def diagram_svg(viewbox:, &block)
+        svg(
+          viewbox: viewbox,
+          width: "100%",
+          xmlns: "http://www.w3.org/2000/svg",
+          class: "text-base-content",
+          font_family: "ui-sans-serif, system-ui, sans-serif",
+          aria: { hidden: "true" }
+        ) do |s|
+          arrow_markers(s)
+          block.call(s)
+        end
+      end
+
       # The two arrowhead markers most diagrams use — a primary and an accent
       # tip. Call once inside the diagram's <defs>.
       def arrow_markers(s)

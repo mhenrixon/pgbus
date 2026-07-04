@@ -34,9 +34,12 @@ RSpec.describe "MCP endpoint", type: :request do
       expect(text).to include("overview").and include("/docs/overview")
     end
 
-    it "get_page returns one page as Markdown by slug" do
+    it "get_page returns the requested page's own Markdown by slug" do
       text = tool_text("get_page", { slug: "overview" })
-      expect(text).to include("/docs/overview").or include("Overview")
+      # Assert on content unique to the Overview page (its title + a phrase from
+      # its lead), so the tool must return THIS page, not just any non-empty body.
+      expect(text).to include("Overview")
+      expect(text).to include("PostgreSQL-native")
     end
 
     it "search_docs ranks hits for a query" do

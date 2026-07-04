@@ -16,14 +16,7 @@ module Components
           label: "Outbox flow: a transaction writes the business row and outbox " \
                  "row together; on commit a poller publishes to PGMQ, on rollback nothing leaks."
         ) do
-          svg(
-            viewbox: "0 0 920 340",
-            width: "100%",
-            xmlns: "http://www.w3.org/2000/svg",
-            class: "text-base-content",
-            font_family: "ui-sans-serif, system-ui, sans-serif"
-          ) do |s|
-            arrow_markers(s)
+          diagram_svg(viewbox: "0 0 920 340") do |s|
             transaction(s)
             commit_path(s)
             rollback_path(s)

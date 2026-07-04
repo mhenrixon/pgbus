@@ -17,14 +17,7 @@ module Components
           label: "Architecture: Rails app through Pgbus::Client into PGMQ queue " \
                  "tables, read by supervised workers, surfaced by the dashboard."
         ) do
-          svg(
-            viewbox: "0 0 920 380",
-            width: "100%",
-            xmlns: "http://www.w3.org/2000/svg",
-            class: "text-base-content",
-            font_family: "ui-sans-serif, system-ui, sans-serif"
-          ) do |s|
-            arrow_markers(s)
+          diagram_svg(viewbox: "0 0 920 380") do |s|
             producers(s)
             client(s)
             pgmq(s)

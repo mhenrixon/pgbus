@@ -79,6 +79,11 @@ RUN apt-get update -qq && \
 COPY --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
 COPY --from=build /app /app
 
+# The CSS is precompiled into app/assets/builds by assets:precompile, so the JS
+# toolchain and its deps aren't needed at runtime — drop node_modules to shrink
+# the image and cut attack surface.
+RUN rm -rf /app/docs/node_modules
+
 # Non-root runtime user; owns the writable dirs.
 RUN groupadd --system --gid 1000 rails && \
     useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \

@@ -17,14 +17,7 @@ module Components
           label: "Event fanout: publish a topic, match subscription patterns, " \
                  "deliver to subscriber queues, dedupe via processed_events."
         ) do
-          svg(
-            viewbox: "0 0 920 340",
-            width: "100%",
-            xmlns: "http://www.w3.org/2000/svg",
-            class: "text-base-content",
-            font_family: "ui-sans-serif, system-ui, sans-serif"
-          ) do |s|
-            arrow_markers(s)
+          diagram_svg(viewbox: "0 0 920 340") do |s|
             publish(s)
             router(s)
             subscribers(s)

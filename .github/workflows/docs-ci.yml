@@ -18,6 +18,12 @@ on:
 permissions:
   contents: read
 
+# Cancel an in-flight run when a newer commit lands on the same ref, so rapid
+# pushes on docs/** don't queue redundant full builds (Ruby + Bun + CSS + tests).
+concurrency:
+  group: docs-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: docs

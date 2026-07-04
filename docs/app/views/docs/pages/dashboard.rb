@@ -61,7 +61,7 @@ class Views::Docs::Pages::Dashboard < DocsUI::Page
       MD
       DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
         Pgbus.configure do |config|
-          config.web_auth = ->(request) { request.env["warden"].user&.admin? }
+          config.web_auth = ->(request) { request.env["warden"]&.user&.admin? }
         end
       RUBY
       md <<~'MD'
