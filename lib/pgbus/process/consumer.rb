@@ -8,12 +8,16 @@ module Pgbus
       include SignalHandler
 
       attr_reader :topics, :threads, :config, :execution_mode,
-                  :queue_names, :wake_signal, :notify_retry_backoff
+                  :queue_names, :wake_signal, :notify_retry_backoff, :circuit_breaker
       # notify_listener is writable so tests can simulate a start_notify_listener
       # success from inside a stub (production sets it in start_notify_listener).
       # notify_retry_at is writable so a test can re-arm the backoff window
       # between successive ensure_notify_listener calls.
       attr_accessor :notify_listener, :notify_retry_at
+      # stat_buffer is writable so a test can swap in a buffer double after
+      # construction and assert graceful_shutdown / check_recycle / shutdown flush
+      # it (mirrors Worker#stat_buffer).
+      attr_accessor :stat_buffer
 
       def shutting_down?
         @shutting_down
@@ -50,7 +54,8 @@ module Pgbus
       # ivars. All default to the values production initializes to; `queue_names`
       # defaults to nil, meaning "derive from the registry in setup_subscriptions".
       def initialize(topics:, threads: 3, config: Pgbus.configuration, execution_mode: :threads,
-                     queue_names: nil, notify_listener: nil, notify_retry_at: 0.0,
+                     queue_names: nil, liveness_pipe: nil, stat_buffer: :default,
+                     notify_listener: nil, notify_retry_at: 0.0,
                      notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
                      started_at_monotonic: nil)
         @topics = Array(topics)
@@ -60,6 +65,7 @@ module Pgbus
         @shutting_down = false
         @recycling = false
         @jobs_processed = Concurrent::AtomicFixnum.new(0)
+        @loop_tick_at = Concurrent::AtomicReference.new(nil)
         @started_at_monotonic = started_at_monotonic || monotonic_now
         @wake_signal = WakeSignal.new
         @pool = ExecutionPools.build(
@@ -68,10 +74,36 @@ module Pgbus
           on_state_change: -> { @wake_signal.notify! }
         )
         @registry = EventBus::Registry.instance
+        @circuit_breaker = Pgbus::CircuitBreaker.new(config: config)
+        # stat_buffer: :default means "build one iff config.stats_enabled";
+        # passing an explicit value (including nil) overrides that for tests.
+        @stat_buffer =
+          if stat_buffer == :default
+            if config.stats_enabled
+              Pgbus::StatBuffer.new(
+                flush_size: config.stats_flush_size,
+                flush_interval: config.stats_flush_interval
+              )
+            end
+          else
+            stat_buffer
+          end
         @queue_names = queue_names
         @notify_listener = notify_listener
         @notify_retry_at = notify_retry_at
         @notify_retry_backoff = notify_retry_backoff
+        # OS-level liveness channel to the supervisor watchdog. nil unless the
+        # supervisor forked us with one. Written from stamp_loop_tick so the
+        # watchdog can detect a wedged consumer even when the database is down.
+        @liveness_pipe = liveness_pipe
+      end
+
+      # The last wall-clock loop-tick stamp (Time.now.to_f) fed to the
+      # heartbeat's loop_tick_supplier. Wall-clock so it stays comparable across
+      # the process boundary the supervisor watchdog reads it over. nil until the
+      # first stamp_loop_tick.
+      def last_loop_tick
+        @loop_tick_at.get
       end
 
       def run
@@ -85,6 +117,7 @@ module Pgbus
         end
 
         loop do
+          stamp_loop_tick
           process_signals
           check_recycle
           ensure_notify_listener
@@ -92,6 +125,7 @@ module Pgbus
           break if @shutting_down
 
           consume
+          @stat_buffer&.flush_if_due
         end
 
         shutdown
@@ -99,6 +133,11 @@ module Pgbus
 
       def graceful_shutdown
         @shutting_down = true
+        # Flush buffered stats at drain entry so the window since the last flush
+        # isn't lost if the supervisor watchdog SIGKILLs a stalled consumer
+        # before shutdown runs. Same-thread (signals dispatched via
+        # process_signals, not trap context), so the DB write is safe.
+        @stat_buffer&.flush
         @wake_signal.notify!
       end
 
@@ -121,12 +160,7 @@ module Pgbus
         idle = @pool.available_capacity
         return @wake_signal.wait(timeout: wake_timeout) if idle <= 0
 
-        tagged_messages = if @queue_names.size == 1
-                            queue = @queue_names.first
-                            (Pgbus.client.read_batch(queue, qty: idle) || []).map { |m| [queue, m] }
-                          else
-                            fetch_multi_consumer(idle)
-                          end
+        tagged_messages = fetch_messages(idle)
 
         if tagged_messages.empty?
           @wake_signal.wait(timeout: wake_timeout)
@@ -138,10 +172,38 @@ module Pgbus
         end
       end
 
+      # Returns an array of [queue_name, message] pairs. Queues whose circuit
+      # breaker has tripped are skipped so a poison queue is left to cool down
+      # instead of being hammered every tick (mirrors Worker#fetch_messages).
+      def fetch_messages(qty)
+        active_queues = @queue_names.reject { |q| @circuit_breaker.paused?(q) }
+        return [] if active_queues.empty?
+
+        if active_queues.size == 1
+          queue = active_queues.first
+          (Pgbus.client.read_batch(queue, qty: qty) || []).map { |m| [queue, m] }
+        else
+          fetch_multi_consumer(active_queues, qty)
+        end
+      rescue Pgbus::ConnectionCircuitOpenError
+        # The client-level connection breaker is open: the database has failed
+        # enough consecutive connection attempts that reads fail fast. Idle this
+        # poll without an ErrorReporter call so the whole consumer pool doesn't
+        # flood the error tracker for the duration of a database outage. The
+        # open/close transitions are logged once by the client, not per poll.
+        []
+      rescue StandardError => e
+        ErrorReporter.report(e, { action: "fetch_messages", queues: active_queues })
+        []
+      end
+
       def handle_message(message, queue_name)
+        execution_start = monotonic_now
+
         if message.read_ct.to_i > config.max_retries
           Pgbus.logger.warn { "[Pgbus] Consumer moving message #{message.msg_id} to DLQ after #{message.read_ct} reads" }
           Pgbus.client.move_to_dead_letter(queue_name, message)
+          record_stat(message, queue_name, "dead_lettered", execution_start)
           return
         end
 
@@ -155,11 +217,15 @@ module Pgbus
         end
 
         Pgbus.client.archive_message(queue_name, message.msg_id.to_i)
+        @circuit_breaker.record_success(queue_name)
+        record_stat(message, queue_name, "success", execution_start)
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus] Consumer error: #{e.class}: #{e.message}" }
         # Message stays in queue; VT will expire and it becomes available again.
         # read_ct tracks delivery attempts — when it exceeds max_retries,
         # the next read will route to DLQ above.
+        @circuit_breaker.record_failure(queue_name)
+        record_stat(message, queue_name, "failed", execution_start)
       ensure
         # Count every message the consumer handles — success, DLQ-routed, AND
         # rescued failure — mirroring Worker#process_message, which increments
@@ -169,16 +235,40 @@ module Pgbus
         @jobs_processed.increment
       end
 
+      # Record a job stat for the handled message, mirroring the shape the
+      # executor pushes (Executor#record_stat) so consumer and worker throughput
+      # land in the same pgbus_job_stats table. No-op unless stats are enabled.
+      def record_stat(message, queue_name, status, start_time)
+        return unless config.stats_enabled
+
+        attrs = {
+          job_class: "EventConsumer",
+          queue_name: queue_name,
+          status: status,
+          duration_ms: ((monotonic_now - start_time) * 1000).round,
+          enqueue_latency_ms: nil,
+          retry_count: [message.read_ct.to_i - 1, 0].max
+        }
+
+        if @stat_buffer
+          @stat_buffer.push(attrs)
+        else
+          JobStat.record!(**attrs)
+        end
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Consumer stat recording failed: #{e.message}" }
+      end
+
       # `qty` is the total pool capacity. pgmq-ruby treats `qty:` as per-queue,
       # so we also pass `limit: qty` to cap the total across all queues —
       # otherwise we get `queue_count * qty` messages and overflow the
       # execution pool, crashing the consumer fork (issue #123).
-      def fetch_multi_consumer(qty)
-        messages = Pgbus.client.read_multi(@queue_names, qty: qty, limit: qty) || []
+      def fetch_multi_consumer(active_queues, qty)
+        messages = Pgbus.client.read_multi(active_queues, qty: qty, limit: qty) || []
         prefix = "#{config.queue_prefix}_"
 
         messages.map do |m|
-          logical = m.queue_name&.delete_prefix(prefix) || @queue_names.first
+          logical = m.queue_name&.delete_prefix(prefix) || active_queues.first
           [logical, m]
         end
       end
@@ -203,6 +293,9 @@ module Pgbus
 
         @recycling = true
         @shutting_down = true
+        # Flush buffered stats on recycle-triggered drain for the same reason as
+        # graceful_shutdown: shrink the SIGKILL loss window. Same-thread, safe.
+        @stat_buffer&.flush
         Pgbus::Instrumentation.instrument(
           "pgbus.consumer.recycle",
           reason: reason,
@@ -324,15 +417,36 @@ module Pgbus
       def start_heartbeat
         @heartbeat = Heartbeat.new(
           kind: "consumer",
-          metadata: { topics: topics, threads: threads, pid: ::Process.pid }
+          metadata: { topics: topics, threads: threads, pid: ::Process.pid },
+          on_beat: -> { on_heartbeat },
+          loop_tick_supplier: -> { @loop_tick_at.get }
         )
         @heartbeat.start
+      end
+
+      # Runs once per heartbeat interval (not per message), so it's the right
+      # place to emit connection-pool observability without touching any per-job
+      # hot path. Reading the pool must never crash the beat — pool_stats already
+      # rescues to {}, and this whole method is guarded so an unexpected error
+      # can't take down the heartbeat thread (mirrors Worker#on_heartbeat).
+      def on_heartbeat
+        emit_pool_stats
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Consumer heartbeat hook error: #{e.class}: #{e.message}" }
+      end
+
+      def emit_pool_stats
+        stats = Pgbus.client.pool_stats
+        return if stats.empty?
+
+        Pgbus::Instrumentation.instrument("pgbus.client.pool", stats)
       end
 
       def shutdown
         @notify_listener&.stop
         @pool.shutdown
         @pool.wait_for_termination(30)
+        @stat_buffer&.stop
         @heartbeat&.stop
         restore_signals
         Pgbus.logger.info { "[Pgbus] Consumer stopped. Processed: #{@jobs_processed.value}" }
@@ -340,6 +454,21 @@ module Pgbus
 
       def monotonic_now
         ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
+      end
+
+      # Stamp the loop-progress beacon with a wall-clock timestamp (required
+      # because the supervisor watchdog reads it cross-fork and the dashboard
+      # reads it cross-host). Also pokes the OS-level liveness pipe when the
+      # supervisor forked us with one, giving the watchdog a database-independent
+      # signal. The write is non-blocking and never raises in the hot path
+      # (mirrors Worker#stamp_loop_tick).
+      def stamp_loop_tick
+        @loop_tick_at.set(Time.now.to_f)
+        return unless @liveness_pipe
+
+        @liveness_pipe.write_nonblock("\0", exception: false)
+      rescue Errno::EPIPE, IOError, Errno::EBADF
+        nil
       end
     end
   end

@@ -381,22 +381,43 @@ module Pgbus
         topics = consumer_config[:topics]
         threads = consumer_config[:threads] || 3
 
+        # OS-level liveness channel: the consumer writes a byte each loop
+        # iteration, the parent drains the reader in monitor_loop. This lets the
+        # watchdog detect a wedged consumer without the database (issue #274),
+        # exactly as fork_worker does for workers.
+        liveness_reader, liveness_writer = IO.pipe
+
         pid = fork do
+          # Child owns the writer end. Close every earlier sibling's inherited
+          # liveness reader and this fork's own reader copy before becoming a
+          # Consumer (see fork_worker for the full rationale).
+          close_inherited_liveness_readers
+          liveness_reader.close
           restore_signals
           setup_child_process
           load_rails_app
-          consumer = Consumer.new(topics: topics, threads: threads, config: config)
+          consumer = Consumer.new(topics: topics, threads: threads, config: config, liveness_pipe: liveness_writer)
           consumer.run
         end
 
         unless pid
+          close_pipe(liveness_reader)
+          close_pipe(liveness_writer)
           Pgbus.logger.error { "[Pgbus] Failed to fork consumer for topics=#{topics.join(",")}" }
           return
         end
 
-        @forks[pid] = { type: :consumer, config: consumer_config, slot: slot, spawned_at: monotonic_now }
+        # Parent keeps the reader, discards its writer copy so the pipe reaches
+        # EOF once the (sole remaining) child writer closes.
+        close_pipe(liveness_writer)
+        @forks[pid] = {
+          type: :consumer, config: consumer_config, slot: slot, spawned_at: monotonic_now,
+          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false
+        }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
+        close_pipe(liveness_reader)
+        close_pipe(liveness_writer)
         ErrorReporter.report(e, { action: "fork_consumer", topics: topics })
       end
 
@@ -525,12 +546,14 @@ module Pgbus
         threshold = config.stall_threshold
         return unless threshold&.positive?
 
-        worker_pids = @forks.select { |_, info| info[:type] == :worker }.keys
-        return if worker_pids.empty?
+        # Workers AND consumers both stamp a loop beacon and carry a liveness
+        # pipe (issue #274), so both are watched for a wedged claim/consume loop.
+        watched_pids = @forks.select { |_, info| %i[worker consumer].include?(info[:type]) }.keys
+        return if watched_pids.empty?
 
-        db_ages = db_loop_tick_ages(worker_pids)
+        db_ages = db_loop_tick_ages(watched_pids)
 
-        worker_pids.each do |pid|
+        watched_pids.each do |pid|
           info = @forks[pid]
           next unless info
 
@@ -540,13 +563,13 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Supervisor watchdog check failed: #{e.message}" }
       end
 
-      # Read each worker's loop_tick_at from the process table and return a
-      # {pid => wall-clock age in seconds} map. Isolated in its own rescue so a
+      # Read each watched fork's loop_tick_at from the process table and return
+      # a {pid => wall-clock age in seconds} map. Isolated in its own rescue so a
       # database outage degrades to the OS-pipe fallback instead of skipping
       # the whole watchdog — the exact failure this pipe channel exists to fix.
       def db_loop_tick_ages(worker_pids)
         ages = {}
-        ProcessEntry.where(kind: "worker", pid: worker_pids).to_a.each do |entry|
+        ProcessEntry.where(kind: %w[worker consumer], pid: worker_pids).to_a.each do |entry|
           meta = entry.metadata
           next unless meta.is_a?(Hash)
 

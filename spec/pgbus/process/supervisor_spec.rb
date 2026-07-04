@@ -359,6 +359,44 @@ RSpec.describe Pgbus::Process::Supervisor do
       end
     end
 
+    # Consumer forks get the same OS-pipe liveness channel as workers (issue
+    # #274) so the watchdog can detect a wedged consumer without the database.
+    describe "fork_consumer (issue #274)" do
+      let(:consumer_config) { { topics: ["orders.#"], threads: 3 } }
+
+      it "stores an open liveness_reader IO for the forked consumer" do
+        supervisor.send(:fork_consumer, consumer_config, slot: 0)
+
+        info = supervisor.forks[7001]
+        expect(info[:type]).to eq(:consumer)
+        expect(info[:liveness_reader]).to be_a(IO)
+        expect(info[:liveness_reader]).not_to be_closed
+      end
+
+      it "seeds last_pipe_tick_at (monotonic) and leaves pipe_seen unarmed" do
+        supervisor.send(:fork_consumer, consumer_config, slot: 0)
+
+        info = supervisor.forks[7001]
+        expect(info[:last_pipe_tick_at]).to be_a(Float)
+        expect(info[:pipe_seen]).to be(false)
+      end
+
+      it "closes both pipe ends and stores no reader when the fork fails (nil pid)" do
+        allow(supervisor).to receive(:fork).and_return(nil)
+        created = []
+        allow(IO).to receive(:pipe).and_wrap_original do |orig|
+          pair = orig.call
+          created.concat(pair)
+          pair
+        end
+
+        supervisor.send(:fork_consumer, consumer_config, slot: 0)
+
+        expect(supervisor.forks).not_to have_key(7001)
+        expect(created).to all(be_closed)
+      end
+    end
+
     describe "reap_children closes the liveness reader" do
       let(:status_double) { instance_double(Process::Status, exitstatus: 0, success?: true) }
 
