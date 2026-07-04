@@ -64,7 +64,7 @@ module ConfigReference
       { name: "recurring_tasks_file", type: "String, nil", default: "nil", desc: "Path to a recurring.yml file." },
       { name: "recurring_schedule_interval", type: "Numeric", default: "1.0", desc: "Seconds between scheduler ticks." },
       { name: "recurring_execution_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep recurring execution history." },
-      { name: "skip_recurring", type: "Boolean", default: "false", desc: "Disable the recurring scheduler entirely." }
+      { name: "recurring_enabled", type: "Boolean", default: "true", desc: "Run the recurring scheduler (set false to disable it entirely). Replaces the deprecated skip_recurring." }
     ],
     "Job stats" => [
       { name: "stats_enabled", type: "Boolean", default: "true", desc: "Record job execution stats for insights." },
@@ -79,6 +79,8 @@ module ConfigReference
       { name: "web_refresh_interval", type: "Integer", default: "5000", desc: "Dashboard auto-refresh interval (ms)." },
       { name: "web_live_updates", type: "Boolean", default: "true", desc: "Enable Turbo Frames auto-refresh." },
       { name: "web_per_page", type: "Integer", default: "25", desc: "Dashboard pagination size." },
+      { name: "web_filter_sensitive", type: "Boolean", default: "true", desc: "Redact sensitive values in dashboard payload views. Replaces the deprecated dashboard_filter_sensitive." },
+      { name: "web_filter_parameters", type: "Array, nil", default: "nil (auto)", desc: "Parameter-name patterns to redact; nil auto-detects from Rails. Replaces the deprecated dashboard_filter_parameters." },
       { name: "metrics_enabled", type: "Boolean", default: "true", desc: "Expose Prometheus gauges on the dashboard." }
     ],
     "Metrics & logging" => [
@@ -125,6 +127,7 @@ module ConfigReference
   INTERNAL_ONLY = %w[
     logger
     web_data_source
+    skip_recurring
     dashboard_filter_parameters
     dashboard_filter_sensitive
     insights_default_minutes

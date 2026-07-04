@@ -89,7 +89,7 @@ module Pgbus
     attr_reader :event_consumers
 
     # Recurring jobs
-    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_tasks_file, :skip_recurring
+    attr_accessor :recurring_tasks, :recurring_schedule_interval, :recurring_enabled, :recurring_tasks_file
     attr_writer :recurring_tasks_files
     attr_reader :recurring_execution_retention # rubocop:disable Style/AccessorGrouping
 
@@ -110,7 +110,7 @@ module Pgbus
     attr_accessor :web_auth, :web_refresh_interval, :web_per_page, :web_live_updates, :web_data_source,
                   :insights_default_minutes, :base_controller_class, :return_to_app_url,
                   :metrics_enabled,
-                  :dashboard_filter_parameters, :dashboard_filter_sensitive
+                  :web_filter_parameters, :web_filter_sensitive
 
     # HTTP health endpoints (liveness/readiness for orchestrators like
     # Kubernetes). `health_port` nil (default) leaves the standalone server in
@@ -224,7 +224,7 @@ module Pgbus
       @recurring_schedule_interval = 1.0
       @recurring_tasks_file = nil
       @recurring_tasks_files = nil
-      @skip_recurring = false
+      @recurring_enabled = true
       @recurring_execution_retention = 7 * 24 * 3600 # 7 days
 
       @zombie_detection = true
@@ -248,8 +248,9 @@ module Pgbus
       @base_controller_class = "::ActionController::Base"
       @return_to_app_url = nil
       @metrics_enabled = true
-      @dashboard_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
-      @dashboard_filter_sensitive = true
+      @web_filter_parameters = nil # nil = auto-detect from Rails, then fall back to defaults
+      @web_filter_sensitive = true
+      @deprecation_warned = Set.new
 
       # HTTP health endpoints — nil port disables the standalone server.
       @health_port = nil
@@ -764,10 +765,56 @@ module Pgbus
       @recurring_execution_retention = coerce_duration!(value, :recurring_execution_retention)
     end
 
+    # recurring_tasks_file (singular) is deprecated in favor of the plural
+    # recurring_tasks_files. The engine still writes the singular internally to
+    # record which default file was loaded, so it stays a plain accessor; the
+    # deprecation warning fires only when a user has set BOTH — the case where
+    # the singular is silently ignored — pointing them at the plural.
     def recurring_tasks_files
-      return @recurring_tasks_files if @recurring_tasks_files
+      if @recurring_tasks_files
+        if @recurring_tasks_file
+          warn_deprecated_config(
+            :recurring_tasks_file,
+            "recurring_tasks_files is set, so recurring_tasks_file is ignored — " \
+            "consolidate onto recurring_tasks_files (plural)"
+          )
+        end
+        return @recurring_tasks_files
+      end
 
-      recurring_tasks_file ? [recurring_tasks_file] : nil
+      @recurring_tasks_file ? [@recurring_tasks_file] : nil
+    end
+
+    # --- Deprecated config aliases (renamed at 1.0.0, removed at 2.0.0) ---
+
+    # skip_recurring was the only negative-polarity toggle among the *_enabled
+    # switches. It now aliases recurring_enabled with inverted polarity.
+    def skip_recurring # rubocop:disable Naming/PredicateMethod
+      !recurring_enabled
+    end
+
+    def skip_recurring=(value)
+      warn_deprecated_config(:skip_recurring, "use recurring_enabled (positive polarity) instead")
+      self.recurring_enabled = !value
+    end
+
+    # dashboard_filter_* unify onto the incumbent web_ prefix.
+    def dashboard_filter_parameters
+      web_filter_parameters
+    end
+
+    def dashboard_filter_parameters=(value)
+      warn_deprecated_config(:dashboard_filter_parameters, "use web_filter_parameters instead")
+      self.web_filter_parameters = value
+    end
+
+    def dashboard_filter_sensitive
+      web_filter_sensitive
+    end
+
+    def dashboard_filter_sensitive=(value)
+      warn_deprecated_config(:dashboard_filter_sensitive, "use web_filter_sensitive instead")
+      self.web_filter_sensitive = value
     end
 
     # Returns the connection pool size to use for the PGMQ client.
@@ -902,6 +949,19 @@ module Pgbus
     end
 
     private
+
+    # Log a one-time deprecation warning for a renamed config key. Deduped per
+    # key on this Configuration instance so a setter called on every request
+    # (or a reader hit in a hot loop) warns once, not on every access.
+    def warn_deprecated_config(key, guidance)
+      @deprecation_warned ||= Set.new
+      return unless @deprecation_warned.add?(key)
+
+      Pgbus.logger.warn do
+        "[Pgbus] Configuration `#{key}` is deprecated and will be removed in 2.0 — #{guidance}. " \
+          "See https://pgbus.dev/docs/upgrading-pgbus"
+      end
+    end
 
     # Built-in presence-member extractor used when no custom
     # `streams_presence_member` is configured. Returns a { id:, metadata: }

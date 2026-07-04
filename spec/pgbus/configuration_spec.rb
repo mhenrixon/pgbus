@@ -1732,4 +1732,110 @@ RSpec.describe Pgbus::Configuration do
       expect { Pgbus.configuration.validate! }.to raise_error(Pgbus::ConfigurationError, /polling_interval/)
     end
   end
+
+  describe "recurring_enabled (renamed from skip_recurring)" do
+    it "defaults to true" do
+      expect(config.recurring_enabled).to be(true)
+    end
+
+    it "controls recurring with positive polarity" do
+      config.recurring_enabled = false
+      expect(config.recurring_enabled).to be(false)
+    end
+
+    describe "deprecated skip_recurring alias" do
+      it "maps skip_recurring = true to recurring_enabled = false (inverted polarity)" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = true
+        expect(config.recurring_enabled).to be(false)
+      end
+
+      it "maps skip_recurring = false to recurring_enabled = true" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = false
+        expect(config.recurring_enabled).to be(true)
+      end
+
+      it "reads back the inverted recurring_enabled value" do
+        config.recurring_enabled = false
+        expect(config.skip_recurring).to be(true)
+      end
+
+      it "warns once about the deprecation when the writer is used" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.skip_recurring = true
+        config.skip_recurring = false
+        expect(Pgbus.logger).to have_received(:warn).once
+      end
+
+      it "names the replacement in the warning" do
+        warned = nil
+        allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+        config.skip_recurring = true
+        expect(warned).to match(/skip_recurring.*recurring_enabled/)
+      end
+    end
+  end
+
+  describe "web_filter_parameters / web_filter_sensitive (renamed from dashboard_filter_*)" do
+    it "defaults web_filter_sensitive to true and web_filter_parameters to nil" do
+      expect(config.web_filter_sensitive).to be(true)
+      expect(config.web_filter_parameters).to be_nil
+    end
+
+    it "stores web_filter_parameters and web_filter_sensitive" do
+      config.web_filter_parameters = %w[ssn token]
+      config.web_filter_sensitive = false
+      expect(config.web_filter_parameters).to eq(%w[ssn token])
+      expect(config.web_filter_sensitive).to be(false)
+    end
+
+    describe "deprecated dashboard_filter_* aliases" do
+      it "routes dashboard_filter_parameters to web_filter_parameters" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_parameters = %w[ssn]
+        expect(config.web_filter_parameters).to eq(%w[ssn])
+        expect(config.dashboard_filter_parameters).to eq(%w[ssn])
+      end
+
+      it "routes dashboard_filter_sensitive to web_filter_sensitive" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_sensitive = false
+        expect(config.web_filter_sensitive).to be(false)
+        expect(config.dashboard_filter_sensitive).to be(false)
+      end
+
+      it "warns once per deprecated key" do
+        allow(Pgbus.logger).to receive(:warn)
+        config.dashboard_filter_parameters = %w[a]
+        config.dashboard_filter_parameters = %w[b]
+        expect(Pgbus.logger).to have_received(:warn).once
+      end
+
+      it "names the replacement in the warning" do
+        warned = nil
+        allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+        config.dashboard_filter_sensitive = false
+        expect(warned).to match(/dashboard_filter_sensitive.*web_filter_sensitive/)
+      end
+    end
+  end
+
+  describe "recurring_tasks_file (singular) deprecation" do
+    it "warns once and prefers the plural when both singular and plural are set" do
+      warned = nil
+      allow(Pgbus.logger).to receive(:warn) { |&block| warned = block.call }
+      config.recurring_tasks_files = ["config/plural.yml"]
+      config.recurring_tasks_file = "config/singular.yml"
+      expect(config.recurring_tasks_files).to eq(["config/plural.yml"])
+      expect(warned).to match(/recurring_tasks_file.*recurring_tasks_files/)
+    end
+
+    it "still wraps a lone singular value into the plural array without warning" do
+      allow(Pgbus.logger).to receive(:warn)
+      config.recurring_tasks_file = "config/only.yml"
+      expect(config.recurring_tasks_files).to eq(["config/only.yml"])
+      expect(Pgbus.logger).not_to have_received(:warn)
+    end
+  end
 end
