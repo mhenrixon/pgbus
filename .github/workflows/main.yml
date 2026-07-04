@@ -44,7 +44,15 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
       - name: RuboCop
-        run: bundle exec rubocop
+        # Lint the gem's own source explicitly rather than a bare `rubocop` that
+        # auto-discovers the tree. The docs site (docs/) is a self-contained
+        # nested Rails app with its own bundle and .rubocop.yml (inheriting
+        # rubocop-rails-omakase + docs_kit/rubocop). RuboCop's target finder loads
+        # a directory's .rubocop.yml while scanning it — before AllCops/Exclude
+        # applies — so a bare run at the repo root loads docs/.rubocop.yml and
+        # crashes on gems absent from the gem's bundle (rubocop-rake, docs_kit).
+        # docs/ lints itself in the Docs site workflow.
+        run: bundle exec rubocop app benchmarks config lib spec Gemfile Rakefile pgbus.gemspec
       - name: Herb (HTML+ERB linter)
         run: bun run lint:herb
       - name: Verify gem builds
