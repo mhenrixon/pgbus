@@ -108,6 +108,36 @@ RSpec.describe Pgbus::Streams::TurboBroadcastable do
       expect(Pgbus).to have_received(:stream).with("room:42", durable: true)
     end
 
+    it "routes durable when the stream name matches streams_durable_patterns" do
+      allow(Pgbus.configuration).to receive_messages(
+        streams_default_broadcast_mode: :ephemeral,
+        streams_durable_patterns: [/\Areps_workout:/]
+      )
+      Turbo::StreamsChannel.broadcast_stream_to("reps_workout:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("reps_workout:42", durable: true)
+    end
+
+    it "stays ephemeral when the stream name does not match streams_durable_patterns" do
+      allow(Pgbus.configuration).to receive_messages(
+        streams_default_broadcast_mode: :ephemeral,
+        streams_durable_patterns: [/\Areps_workout:/]
+      )
+      Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("room:42", durable: false)
+    end
+
+    it "thread-local override wins over a matching durable pattern" do
+      allow(Pgbus.configuration).to receive(:streams_durable_patterns).and_return([/\Areps_workout:/])
+      Thread.current[:pgbus_broadcast_durable] = false
+      Turbo::StreamsChannel.broadcast_stream_to("reps_workout:42", content: "<turbo-stream/>")
+
+      expect(Pgbus).to have_received(:stream).with("reps_workout:42", durable: false)
+    ensure
+      Thread.current[:pgbus_broadcast_durable] = nil
+    end
+
     it "uses thread-local durable override when set" do
       Thread.current[:pgbus_broadcast_durable] = true
       Turbo::StreamsChannel.broadcast_stream_to("room:42", content: "<turbo-stream/>")
