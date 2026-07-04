@@ -13,6 +13,15 @@ AllCops:
     # .rubocop.yml (docs-kit's shipped cops + rubocop-rails-omakase). It lints
     # itself in its own CI job; the gem's cops (and the local ./lib/rubocop/pgbus
     # require) don't apply to it.
+    #
+    # BOTH patterns are required. `docs/**/*` excludes the files from inspection,
+    # but RuboCop's target finder still DESCENDS into docs/ and loads
+    # docs/.rubocop.yml — which `require`s gems (docs_kit/rubocop, rubocop-rake via
+    # rubocop-rails-omakase) that aren't in the gem's bundle, crashing the whole
+    # run before a single file is inspected (green locally only if those gems
+    # happen to be installed globally). The bare `docs` entry prunes the directory
+    # from traversal so its config is never read. See PR #269 / issue #266.
+    - "docs"
     - "docs/**/*"
 
 # Custom cop: Timeout.timeout uses Thread#raise and can corrupt a pooled
