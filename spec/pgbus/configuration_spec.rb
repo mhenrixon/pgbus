@@ -1895,6 +1895,16 @@ RSpec.describe Pgbus::Configuration do
       expect(logger.formatter).to be(custom)
     end
 
+    it "replaces a framework-default formatter (not a deliberate choice)" do
+      logger = Logger.new(IO::NULL)
+      logger.formatter = Logger::Formatter.new
+      config.logger = logger
+
+      config.log_format = :json
+
+      expect(logger.formatter).to be_a(Pgbus::LogFormatter::JSON)
+    end
+
     it "still validates the format regardless of the formatter guard" do
       expect { config.log_format = :xml }.to raise_error(ArgumentError, /log_format/)
     end

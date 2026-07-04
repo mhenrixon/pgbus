@@ -968,12 +968,20 @@ module Pgbus
     private
 
     # True when log_format= may install its own formatter: no formatter set yet
-    # (nil), or the current one is a pgbus formatter we installed. A custom
-    # formatter (any other object) is left untouched.
+    # (nil), a pgbus formatter we installed, or a framework DEFAULT formatter
+    # (Ruby's Logger::Formatter, Rails' SimpleFormatter) that the app didn't
+    # deliberately choose. A genuinely custom formatter — a Proc, or any other
+    # class — is a deliberate choice and is left untouched.
     def pgbus_installable_formatter?(formatter)
-      formatter.nil? ||
-        formatter.is_a?(LogFormatter::Text) ||
-        formatter.is_a?(LogFormatter::JSON)
+      return true if formatter.nil?
+      return true if formatter.is_a?(LogFormatter::Text) || formatter.is_a?(LogFormatter::JSON)
+
+      # instance_of? (not is_a?) so a user subclass of these still counts as custom.
+      return true if formatter.instance_of?(::Logger::Formatter)
+      return true if defined?(::ActiveSupport::Logger::SimpleFormatter) &&
+                     formatter.instance_of?(::ActiveSupport::Logger::SimpleFormatter)
+
+      false
     end
 
     # Log a one-time deprecation warning for a renamed config key. Deduped per
