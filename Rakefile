@@ -8,7 +8,16 @@ end
 
 require "rubocop/rake_task"
 
-RuboCop::RakeTask.new
+# Lint only the gem's own source — NOT the nested docs/ site. docs/ is a separate
+# consuming app with its own bundle and .rubocop.yml (it inherit_gems
+# rubocop-rails-omakase and requires docs_kit/rubocop, both absent from the gem's
+# bundle). RuboCop loads a directory's .rubocop.yml while scanning it — before
+# AllCops/Exclude applies — so a bare run discovers docs/.rubocop.yml and crashes
+# on the unresolvable gem inheritance. Passing explicit paths stops the
+# discovery. docs/ lints itself in the Docs site workflow. (Same fix as docs-kit.)
+RuboCop::RakeTask.new do |task|
+  task.patterns = %w[app benchmarks config lib spec Gemfile Rakefile pgbus.gemspec]
+end
 
 namespace :bench do
   bench_dir = "benchmarks"
