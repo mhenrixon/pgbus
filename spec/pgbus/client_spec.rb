@@ -6,10 +6,9 @@ RSpec.describe Pgbus::Client do
   # Stub pgmq-ruby so it never loads the real gem
   subject(:client) do
     allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-    c = described_class.new(config)
-    # Pre-mark PGMQ schema as ensured for most tests.
-    # Schema installation tests override this.
-    c.instance_variable_set(:@schema_ensured, true)
+    # Pre-mark PGMQ schema as ensured for most tests via the constructor seam.
+    # Schema installation tests build their own client with schema_ensured: false.
+    c = described_class.new(config, schema_ensured: true)
     # Stub autovacuum tuning — runs raw SQL which needs a real PG connection.
     allow(c).to receive(:tune_autovacuum)
     # Stub notify trigger check — runs raw SQL which needs a real PG connection.
@@ -19,7 +18,10 @@ RSpec.describe Pgbus::Client do
   end
 
   before do
-    allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
+    # `require "pgmq"` fires inside Client#initialize before the instance exists,
+    # so stub it at the module boundary rather than on any instance.
+    allow(Kernel).to receive(:require).and_call_original
+    allow(Kernel).to receive(:require).with("pgmq").and_return(true)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)
@@ -34,10 +36,19 @@ RSpec.describe Pgbus::Client do
   let(:mock_pgmq) { build_mock_pgmq }
 
   describe "#ensure_pgmq_schema (via ensure_queue)" do
+    # Override the shared subject to leave the schema UN-ensured so ensure_queue
+    # actually runs the install path (the default subject pre-marks it ensured).
+    subject(:client) do
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      c = described_class.new(config, schema_ensured: false)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
     let(:raw_conn) { double("raw_conn") }
 
     before do
-      client.instance_variable_set(:@schema_ensured, false)
       allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
     end
 
@@ -580,7 +591,7 @@ RSpec.describe Pgbus::Client do
 
   describe "#configured_queues" do
     it "returns the logical queues derived from the configuration" do
-      config.instance_variable_set(:@workers, [{ queues: %w[critical mailers], threads: 2 }])
+      config.workers = [{ queues: %w[critical mailers], threads: 2 }]
 
       expect(client.configured_queues).to contain_exactly("default", "critical", "mailers")
     end
@@ -753,8 +764,7 @@ RSpec.describe Pgbus::Client do
       subject(:shared_client) do
         allow(config).to receive(:connection_options).and_return(-> { conn })
         allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-        c = described_class.new(config)
-        c.instance_variable_set(:@schema_ensured, true)
+        c = described_class.new(config, schema_ensured: true)
         allow(c).to receive(:tune_autovacuum)
         c
       end
@@ -762,7 +772,7 @@ RSpec.describe Pgbus::Client do
       before { allow(mock_pgmq).to receive(:with_connection).and_yield(conn) }
 
       it "uses a Mutex to serialize the single-slot pool" do
-        expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+        expect(shared_client.shared_connection?).to be(true)
       end
 
       it "completes the trigger check without a nested pool checkout / deadlock" do
@@ -812,9 +822,11 @@ RSpec.describe Pgbus::Client do
     it "removes the queue from the created cache" do
       client.ensure_queue("default")
       client.drop_queue("default")
+      # Observable proof the cache entry was evicted: the next ensure_queue must
+      # re-create the queue rather than short-circuiting on a stale cache hit.
+      client.ensure_queue("default")
 
-      # Verify the queue is no longer in the cache
-      expect(client.instance_variable_get(:@queues_created)["pgbus_test_default"]).to be_nil
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_default").twice
     end
   end
 
@@ -1215,8 +1227,7 @@ RSpec.describe Pgbus::Client do
     describe "backoff does not hold the connection mutex (shared-connection path)" do
       subject(:shared_client) do
         allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-        c = described_class.new(shared_config)
-        c.instance_variable_set(:@schema_ensured, true)
+        c = described_class.new(shared_config, schema_ensured: true)
         allow(c).to receive(:notify_trigger_current?).and_return(false)
         c
       end
@@ -1239,13 +1250,12 @@ RSpec.describe Pgbus::Client do
       end
 
       it "runs the shared-connection path (mutex is a real Mutex)" do
-        expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+        expect(shared_client.shared_connection?).to be(true)
       end
 
-      it "does not hold @pgmq_mutex while sleeping between retries" do
-        mutex = shared_client.instance_variable_get(:@pgmq_mutex)
+      it "does not hold the connection mutex while sleeping between retries" do
         locked_during_sleep = []
-        allow(shared_client).to receive(:sleep) { locked_during_sleep << mutex.locked? }
+        allow(shared_client).to receive(:sleep) { locked_during_sleep << shared_client.synchronizing? }
 
         call_count = 0
         allow(mock_pgmq).to receive(:produce) do
@@ -1353,8 +1363,8 @@ RSpec.describe Pgbus::Client do
 
           nil
         end
-        # Reset the queues_created memo so ensure_queue actually calls @pgmq.create
-        client.instance_variable_get(:@queues_created).clear
+        # A freshly-built client has an empty queue cache, so ensure_queue really
+        # calls @pgmq.create (proven by create_count == 2 below).
 
         expect(client.send_message("default", { "k" => "v" })).to eq(1)
         expect(create_count).to eq(2)
@@ -1368,8 +1378,6 @@ RSpec.describe Pgbus::Client do
 
           nil
         end
-        client.instance_variable_get(:@queues_created).clear
-
         expect(client.send_batch("default", [{ "k" => "v" }])).to eq([1, 2])
         expect(create_count).to eq(2)
       end
@@ -1383,8 +1391,6 @@ RSpec.describe Pgbus::Client do
 
           nil
         end
-        client.instance_variable_get(:@queues_created).clear
-
         expect(client.send_message("default", { "k" => "v" })).to eq(1)
         expect(create_count).to eq(2)
       end
@@ -1417,7 +1423,6 @@ RSpec.describe Pgbus::Client do
 
           nil
         end
-        client.instance_variable_get(:@queues_created).clear
 
         client.bind_topic("orders.*", "default")
 
@@ -1635,11 +1640,14 @@ RSpec.describe Pgbus::Client do
 
           true
         end
-        client.instance_variable_get(:@queues_created)["pgbus_test_default"] = true
+        # Populate the created-cache the public way.
+        client.ensure_queue("default")
 
         expect(client.drop_queue("default")).to be(true)
         expect(call_count).to eq(2)
-        expect(client.instance_variable_get(:@queues_created)["pgbus_test_default"]).to be_nil
+        # Memo cleared: the next ensure_queue re-creates rather than cache-hitting.
+        client.ensure_queue("default")
+        expect(mock_pgmq).to have_received(:create).with("pgbus_test_default").twice
       end
     end
   end
@@ -1786,8 +1794,7 @@ RSpec.describe Pgbus::Client do
       config.pool_size = 5
 
       # With dedicated connections, operations should not go through the mutex.
-      # We test this by verifying that the client does not have a @pgmq_mutex.
-      expect(client.instance_variable_get(:@pgmq_mutex)).to be_nil
+      expect(client.shared_connection?).to be(false)
     end
 
     it "uses mutex synchronization when falling back to shared (Proc) connections" do
@@ -1805,10 +1812,9 @@ RSpec.describe Pgbus::Client do
       stub_const("ActiveRecord::Base", ar_base)
 
       allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
-      shared_client = described_class.new(lambda_config)
-      shared_client.instance_variable_set(:@schema_ensured, true)
+      shared_client = described_class.new(lambda_config, schema_ensured: true)
 
-      expect(shared_client.instance_variable_get(:@pgmq_mutex)).to be_a(Mutex)
+      expect(shared_client.shared_connection?).to be(true)
     end
   end
 
@@ -1898,8 +1904,7 @@ RSpec.describe Pgbus::Client do
     end
 
     def build_client(config)
-      c = described_class.new(config)
-      c.instance_variable_set(:@schema_ensured, true)
+      c = described_class.new(config, schema_ensured: true)
       allow(c).to receive(:notify_trigger_current?).and_return(false)
       c
     end
