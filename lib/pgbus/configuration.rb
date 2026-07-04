@@ -451,7 +451,7 @@ module Pgbus
       unless read_timeout.nil? || (read_timeout.is_a?(Numeric) && read_timeout.positive?)
         raise Pgbus::ConfigurationError, "read_timeout must be a positive number or nil to disable"
       end
-      raise ArgumentError, "drain_timeout must be > 0" unless drain_timeout.is_a?(Numeric) && drain_timeout.positive?
+      raise Pgbus::ConfigurationError, "drain_timeout must be > 0" unless drain_timeout.is_a?(Numeric) && drain_timeout.positive?
 
       unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
         raise Pgbus::ConfigurationError, "stats_flush_size must be a positive integer"

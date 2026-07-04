@@ -1037,17 +1037,17 @@ RSpec.describe Pgbus::Configuration do
 
     it "rejects non-numeric drain_timeout" do
       config.drain_timeout = "30"
-      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
     end
 
     it "rejects zero drain_timeout" do
       config.drain_timeout = 0
-      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
     end
 
     it "rejects negative drain_timeout" do
       config.drain_timeout = -5
-      expect { config.validate! }.to raise_error(ArgumentError, /drain_timeout/)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /drain_timeout/)
     end
 
     it "accepts a positive drain_timeout" do
@@ -1906,7 +1906,7 @@ RSpec.describe Pgbus::Configuration do
     end
 
     it "still validates the format regardless of the formatter guard" do
-      expect { config.log_format = :xml }.to raise_error(ArgumentError, /log_format/)
+      expect { config.log_format = :xml }.to raise_error(Pgbus::ConfigurationError, /log_format/)
     end
   end
 end

@@ -94,7 +94,7 @@ module Pgbus
     def check_configuration
       @config.validate!
       Check.new(name: "Configuration", status: :ok, detail: "valid")
-    rescue ArgumentError => e
+    rescue Pgbus::ConfigurationError, ArgumentError => e
       Check.new(name: "Configuration", status: :fail, detail: e.message)
     rescue StandardError => e
       Check.new(name: "Configuration", status: :fail, detail: "#{e.class}: #{e.message}")

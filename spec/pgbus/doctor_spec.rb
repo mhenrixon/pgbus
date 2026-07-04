@@ -100,6 +100,17 @@ RSpec.describe Pgbus::Doctor do
       expect(check[:status]).to eq(:fail)
       expect(check[:detail]).to include("pool_timeout")
     end
+
+    it "renders the bare validate! message (no ClassName: prefix) for a ConfigurationError" do
+      # validate! raises Pgbus::ConfigurationError (#282); the check must catch
+      # it in the clean-message rescue, not fall through to the StandardError
+      # fallback that prefixes the error class.
+      config.pool_timeout = -1
+
+      detail = config_check(doctor.run)[:detail]
+      expect(detail).not_to include("Pgbus::ConfigurationError")
+      expect(detail).to start_with("pool_timeout")
+    end
   end
 
   describe "the database connectivity check" do
