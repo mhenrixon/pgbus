@@ -15,20 +15,19 @@ RSpec.describe Pgbus::Process::Supervisor do
       supervisor = described_class.new
 
       expect(supervisor.config).to eq(config)
-      expect(supervisor.instance_variable_get(:@forks)).to eq({})
-      expect(supervisor.instance_variable_get(:@shutting_down)).to be false
+      expect(supervisor.forks).to eq({})
+      expect(supervisor.shutting_down?).to be false
     end
   end
 
   describe "#graceful_shutdown" do
     it "sets shutting_down and signals children with TERM" do
-      supervisor = described_class.new
-      supervisor.instance_variable_set(:@forks, { 1001 => { type: :worker }, 1002 => { type: :dispatcher } })
+      supervisor = described_class.new(forks: { 1001 => { type: :worker }, 1002 => { type: :dispatcher } })
 
       allow(Process).to receive(:kill)
       supervisor.graceful_shutdown
 
-      expect(supervisor.instance_variable_get(:@shutting_down)).to be true
+      expect(supervisor.shutting_down?).to be true
       expect(Process).to have_received(:kill).with("TERM", 1001)
       expect(Process).to have_received(:kill).with("TERM", 1002)
     end
@@ -36,21 +35,19 @@ RSpec.describe Pgbus::Process::Supervisor do
 
   describe "#immediate_shutdown" do
     it "sets shutting_down and signals children with QUIT" do
-      supervisor = described_class.new
-      supervisor.instance_variable_set(:@forks, { 2001 => { type: :worker } })
+      supervisor = described_class.new(forks: { 2001 => { type: :worker } })
 
       allow(Process).to receive(:kill)
       supervisor.immediate_shutdown
 
-      expect(supervisor.instance_variable_get(:@shutting_down)).to be true
+      expect(supervisor.shutting_down?).to be true
       expect(Process).to have_received(:kill).with("QUIT", 2001)
     end
   end
 
   describe "signal_children (private)" do
     it "handles Errno::ESRCH when a child process is already gone" do
-      supervisor = described_class.new
-      supervisor.instance_variable_set(:@forks, { 9999 => { type: :worker } })
+      supervisor = described_class.new(forks: { 9999 => { type: :worker } })
 
       allow(Process).to receive(:kill).with("TERM", 9999).and_raise(Errno::ESRCH)
 
@@ -59,12 +56,10 @@ RSpec.describe Pgbus::Process::Supervisor do
   end
 
   describe "reap_children (private)" do
-    let(:supervisor) { described_class.new }
-    let(:status_double) { instance_double(Process::Status, exitstatus: 1, success?: false) }
-
-    before do
-      supervisor.instance_variable_set(:@forks, { 3001 => { type: :worker, config: { queues: ["default"] } } })
+    let(:supervisor) do
+      described_class.new(forks: { 3001 => { type: :worker, config: { queues: ["default"] } } })
     end
+    let(:status_double) { instance_double(Process::Status, exitstatus: 1, success?: false) }
 
     it "restarts a child when not shutting down" do
       allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, status_double], nil)
@@ -76,13 +71,15 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
 
     it "does NOT restart a child when shutting_down is true" do
-      supervisor.instance_variable_set(:@shutting_down, true)
+      supervisor = described_class.new(
+        forks: { 3001 => { type: :worker, config: { queues: ["default"] } } },
+        shutting_down: true
+      )
       allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, status_double], nil)
 
       supervisor.send(:reap_children)
 
-      forks = supervisor.instance_variable_get(:@forks)
-      expect(forks).not_to have_key(3001)
+      expect(supervisor.forks).not_to have_key(3001)
     end
   end
 
@@ -92,24 +89,25 @@ RSpec.describe Pgbus::Process::Supervisor do
   # get an exponentially backed-off restart; stable children and clean
   # exits (worker recycling) restart immediately.
   describe "restart backoff for crash-looping children" do
-    let(:supervisor) { described_class.new }
+    # Each example seeds a distinct set of child forks; inject them via the
+    # constructor and re-apply the standard fork/log stubs via build_supervisor.
     let(:crash_status) { instance_double(Process::Status, exitstatus: 1, success?: false) }
     let(:clean_status) { instance_double(Process::Status, exitstatus: 0, success?: true) }
     let(:worker_config) { { queues: ["default"], threads: 5 } }
+
+    def build_supervisor(forks)
+      described_class.new(forks: forks).tap do |s|
+        allow(s).to receive(:fork).and_return(6001)
+        allow(Pgbus.logger).to receive(:warn)
+      end
+    end
 
     def now
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     end
 
-    before do
-      allow(supervisor).to receive(:fork).and_return(6001)
-      allow(Pgbus.logger).to receive(:warn)
-    end
-
     it "restarts immediately when the crashed child had a stable uptime" do
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 120 } }
-      )
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: now - 120 })
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
 
       supervisor.send(:reap_children)
@@ -118,9 +116,7 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
 
     it "restarts immediately on a clean exit even with short uptime (worker recycling)" do
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: now - 5 } }
-      )
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: now - 5 })
       allow(Process).to receive(:waitpid2).and_return([3001, clean_status], nil)
 
       supervisor.send(:reap_children)
@@ -130,10 +126,8 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     it "delays the restart when the child crashed shortly after forking" do
       base = now
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: base - 1 })
       allow(supervisor).to receive(:monotonic_now).and_return(base)
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base - 1 } }
-      )
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
 
       supervisor.send(:reap_children)
@@ -144,21 +138,20 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     it "keeps separate crash streaks for identically-configured sibling workers" do
       messages = []
+      base = now
+      supervisor = build_supervisor(sibling_forks(base))
       allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
       allow(supervisor).to receive(:fork).and_return(6001, 6002, 6003)
-
-      base = now
       allow(supervisor).to receive(:monotonic_now).and_return(base)
-      supervisor.instance_variable_set(:@forks, sibling_forks(base))
 
-      reap(3002, crash_status) # slot 1 crashes fast — crash #1, 1s backoff
-      reap(3001, clean_status) # slot 0 recycles cleanly — must NOT reset slot 1's streak
+      reap(supervisor, 3002, crash_status) # slot 1 crashes fast — crash #1, 1s backoff
+      reap(supervisor, 3001, clean_status) # slot 0 recycles cleanly — must NOT reset slot 1's streak
 
       # Slot 1's restart fires, then it crashes fast again — crash #2, 2s backoff.
       allow(supervisor).to receive(:monotonic_now).and_return(base + 61)
       supervisor.send(:process_pending_restarts)
-      restarted_pid = supervisor.instance_variable_get(:@forks).find { |_, i| i[:slot] == 1 }.first
-      reap(restarted_pid, crash_status)
+      restarted_pid = supervisor.forks.find { |_, i| i[:slot] == 1 }.first
+      reap(supervisor, restarted_pid, crash_status)
 
       expect(messages.join("\n")).to include("restarting in 2s")
     end
@@ -168,21 +161,22 @@ RSpec.describe Pgbus::Process::Supervisor do
         3002 => { type: :worker, config: worker_config, slot: 1, spawned_at: base } }
     end
 
-    def reap(pid, status)
+    def reap(supervisor, pid, status)
       allow(Process).to receive(:waitpid2).and_return([pid, status], nil)
       supervisor.send(:reap_children)
     end
 
     it "fires due pending restarts from the monitor loop" do
+      supervisor = described_class.new(pending_restarts: [{ info: { type: :dispatcher }, at: now - 1 }])
       allow(supervisor).to receive(:fork).and_return(7001)
+      allow(Pgbus.logger).to receive(:warn)
       allow(Process).to receive(:waitpid2).and_return(nil)
-      supervisor.instance_variable_set(
-        :@pending_restarts, [{ info: { type: :dispatcher }, at: now - 1 }]
-      )
-      # Stop the loop after one pass.
+      # Stop the loop after one pass: flip shutdown, and let reap_children clear
+      # the just-restarted fork so the `@shutting_down && @forks.empty?` guard
+      # trips (mirrors the real path where the exited child is reaped).
       allow(supervisor).to receive(:interruptible_sleep) do
-        supervisor.instance_variable_set(:@shutting_down, true)
-        supervisor.instance_variable_set(:@forks, {})
+        supervisor.graceful_shutdown
+        allow(supervisor).to receive(:reap_children) { supervisor.forks.clear }
       end
       allow(supervisor).to receive(:check_stalled_workers)
 
@@ -192,14 +186,13 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
 
     it "does not fire pending restarts once shutting down" do
+      supervisor = described_class.new(
+        forks: { 8001 => { type: :worker, config: worker_config, spawned_at: now } },
+        shutting_down: true,
+        pending_restarts: [{ info: { type: :dispatcher }, at: now - 1 }]
+      )
       allow(supervisor).to receive(:fork)
-      supervisor.instance_variable_set(:@shutting_down, true)
-      supervisor.instance_variable_set(
-        :@forks, { 8001 => { type: :worker, config: worker_config, spawned_at: now } }
-      )
-      supervisor.instance_variable_set(
-        :@pending_restarts, [{ info: { type: :dispatcher }, at: now - 1 }]
-      )
+      allow(Pgbus.logger).to receive(:warn)
       allow(Process).to receive(:waitpid2).and_return([8001, crash_status], nil)
       allow(supervisor).to receive(:interruptible_sleep)
 
@@ -210,10 +203,8 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     it "runs the pending restart once its backoff has elapsed" do
       base = now
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: base })
       allow(supervisor).to receive(:monotonic_now).and_return(base)
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
-      )
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
 
       supervisor.send(:reap_children)
@@ -227,13 +218,10 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     it "escalates the backoff on consecutive rapid crashes" do
       messages = []
-      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
-
       base = now
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: base })
+      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
       allow(supervisor).to receive(:monotonic_now).and_return(base)
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
-      )
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
       supervisor.send(:reap_children)
 
@@ -250,13 +238,10 @@ RSpec.describe Pgbus::Process::Supervisor do
 
     it "resets the crash streak after a stable run" do
       messages = []
-      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
-
       base = now
+      supervisor = build_supervisor(3001 => { type: :worker, config: worker_config, spawned_at: base })
+      allow(Pgbus.logger).to receive(:warn) { |&blk| messages << blk.call }
       allow(supervisor).to receive(:monotonic_now).and_return(base)
-      supervisor.instance_variable_set(
-        :@forks, { 3001 => { type: :worker, config: worker_config, spawned_at: base } }
-      )
       allow(Process).to receive(:waitpid2).and_return([3001, crash_status], nil)
       supervisor.send(:reap_children)
 
@@ -289,32 +274,32 @@ RSpec.describe Pgbus::Process::Supervisor do
       info = { type: :worker, config: { queues: ["default"], threads: 5 } }
       supervisor.send(:restart_child, info)
 
-      expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
-      expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:worker)
+      expect(supervisor.forks).to have_key(5001)
+      expect(supervisor.forks[5001][:type]).to eq(:worker)
     end
 
     it "routes :dispatcher to fork_dispatcher" do
       info = { type: :dispatcher }
       supervisor.send(:restart_child, info)
 
-      expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
-      expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:dispatcher)
+      expect(supervisor.forks).to have_key(5001)
+      expect(supervisor.forks[5001][:type]).to eq(:dispatcher)
     end
 
     it "routes :consumer to fork_consumer" do
       info = { type: :consumer, config: { topics: ["orders.#"], threads: 3 } }
       supervisor.send(:restart_child, info)
 
-      expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
-      expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:consumer)
+      expect(supervisor.forks).to have_key(5001)
+      expect(supervisor.forks[5001][:type]).to eq(:consumer)
     end
 
     it "routes :scheduler to fork_scheduler" do
       info = { type: :scheduler }
       supervisor.send(:restart_child, info)
 
-      expect(supervisor.instance_variable_get(:@forks)).to have_key(5001)
-      expect(supervisor.instance_variable_get(:@forks)[5001][:type]).to eq(:scheduler)
+      expect(supervisor.forks).to have_key(5001)
+      expect(supervisor.forks[5001][:type]).to eq(:scheduler)
     end
   end
 
@@ -332,7 +317,7 @@ RSpec.describe Pgbus::Process::Supervisor do
       it "stores a liveness_reader IO for the forked worker" do
         supervisor.send(:fork_worker, worker_config, slot: 0)
 
-        info = supervisor.instance_variable_get(:@forks)[7001]
+        info = supervisor.forks[7001]
         expect(info[:liveness_reader]).to be_a(IO)
         expect(info[:liveness_reader]).not_to be_closed
       end
@@ -340,7 +325,7 @@ RSpec.describe Pgbus::Process::Supervisor do
       it "seeds last_pipe_tick_at (monotonic) and leaves pipe_seen unarmed" do
         supervisor.send(:fork_worker, worker_config, slot: 0)
 
-        info = supervisor.instance_variable_get(:@forks)[7001]
+        info = supervisor.forks[7001]
         expect(info[:last_pipe_tick_at]).to be_a(Float)
         expect(info[:pipe_seen]).to be(false)
       end
@@ -356,7 +341,7 @@ RSpec.describe Pgbus::Process::Supervisor do
 
         supervisor.send(:fork_worker, worker_config, slot: 0)
 
-        expect(supervisor.instance_variable_get(:@forks)).not_to have_key(7001)
+        expect(supervisor.forks).not_to have_key(7001)
         expect(created).to all(be_closed)
       end
 
@@ -380,18 +365,17 @@ RSpec.describe Pgbus::Process::Supervisor do
       it "closes the reader and drops the fork on reap" do
         reader, writer = IO.pipe
         writer.close
-        supervisor.instance_variable_set(:@forks, {
-                                           3001 => { type: :worker, config: worker_config,
-                                                     spawned_at: 0.0, liveness_reader: reader,
-                                                     last_pipe_tick_at: 0.0, pipe_seen: true }
-                                         })
-        supervisor.instance_variable_set(:@shutting_down, true)
+        supervisor = described_class.new(
+          forks: { 3001 => { type: :worker, config: worker_config, spawned_at: 0.0,
+                             liveness_reader: reader, last_pipe_tick_at: 0.0, pipe_seen: true } },
+          shutting_down: true
+        )
         allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, status_double], nil)
 
         supervisor.send(:reap_children)
 
         expect(reader).to be_closed
-        expect(supervisor.instance_variable_get(:@forks)).not_to have_key(3001)
+        expect(supervisor.forks).not_to have_key(3001)
       end
     end
 
@@ -399,10 +383,9 @@ RSpec.describe Pgbus::Process::Supervisor do
       it "closes any un-reaped worker readers" do
         reader, writer = IO.pipe
         writer.close
-        supervisor.instance_variable_set(:@forks, {
-                                           3001 => { type: :worker, config: worker_config,
-                                                     liveness_reader: reader }
-                                         })
+        supervisor = described_class.new(
+          forks: { 3001 => { type: :worker, config: worker_config, liveness_reader: reader } }
+        )
         allow(supervisor).to receive(:reap_children)
         allow(supervisor).to receive(:interruptible_sleep)
         allow(Process).to receive(:kill)

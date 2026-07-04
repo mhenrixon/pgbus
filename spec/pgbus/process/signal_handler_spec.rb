@@ -36,8 +36,7 @@ RSpec.describe Pgbus::Process::SignalHandler do
 
     it "stores previous signal handlers for restoration" do
       handler.setup_signals
-      previous = handler.instance_variable_get(:@previous_handlers)
-      expect(previous.keys).to contain_exactly("INT", "TERM", "QUIT")
+      expect(handler.handled_signals).to contain_exactly("INT", "TERM", "QUIT")
     end
   end
 

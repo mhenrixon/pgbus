@@ -7,6 +7,12 @@ module Pgbus
         base.attr_reader :signal_queue
       end
 
+      # The signals setup_signals has installed handlers for (and will restore on
+      # restore_signals). Empty until setup_signals runs.
+      def handled_signals
+        (@previous_handlers || {}).keys
+      end
+
       def setup_signals
         @signal_queue = Queue.new
         @previous_handlers = {}

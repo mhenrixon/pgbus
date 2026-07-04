@@ -35,7 +35,10 @@ RSpec.describe Pgbus::Streams::TurboStreamOverride do
 
   before do
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
-    allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id).and_return(42)
+    # Stub the reachable Pgbus.stream factory (the override's turbo_stream_from
+    # → pgbus_stream_from → fetch_watermark path) instead of any_instance.
+    allow(Pgbus).to receive(:stream)
+      .and_return(instance_double(Pgbus::Streams::Stream, current_msg_id: 42))
     Thread.current[:pgbus_streams_watermark_cache] = nil
   end
 

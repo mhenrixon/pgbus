@@ -11,7 +11,9 @@ RSpec.describe Pgbus::Client::ReadAfter do
   end
 
   before do
-    allow_any_instance_of(Pgbus::Client).to receive(:require).with("pgmq").and_return(true)
+    # Stub the class method that loads pgmq so the faked PGMQ::Client stands;
+    # a clean per-example stub, unlike stubbing global Kernel#require.
+    allow(Pgbus::Client).to receive(:load_pgmq_gem!)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)

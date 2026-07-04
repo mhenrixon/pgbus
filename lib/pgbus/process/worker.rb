@@ -7,11 +7,30 @@ module Pgbus
     class Worker
       include SignalHandler
 
-      attr_reader :queues, :threads, :config, :execution_mode
+      attr_reader :queues, :threads, :config, :execution_mode,
+                  :rate_counter, :wake_signal, :restore_streak, :lifecycle
+      # stat_buffer is writable so a test can swap in a buffer double after
+      # construction to assert graceful_shutdown / check_recycle flush it. The
+      # executor captured the original buffer at construction, but these paths
+      # flush @stat_buffer directly, so the swap is observable.
+      attr_accessor :stat_buffer
+      # notify_listener / notify_retry_at / notify_retry_backoff are writable so
+      # tests can seed the self-healing listener state, re-arm the backoff window
+      # between calls, and simulate start_notify_listener assigning the listener
+      # from inside a stub (production mutates all three in the run loop).
+      attr_accessor :notify_listener, :notify_retry_at, :notify_retry_backoff
 
+      # The collaborators below (rate_counter, wake_signal, stat_buffer) and the
+      # recycle clock (started_at_monotonic) accept injected seeds so tests can
+      # observe or stub them without poking private ivars. All default to the
+      # exact values production constructs, so behavior is unchanged.
       def initialize(queues:, threads: 5, config: Pgbus.configuration,
                      single_active_consumer: false, consumer_priority: 0,
-                     execution_mode: :threads, group_mode: nil, liveness_pipe: nil)
+                     execution_mode: :threads, group_mode: nil, liveness_pipe: nil,
+                     rate_counter: nil, wake_signal: nil, stat_buffer: :default,
+                     notify_listener: nil, notify_retry_at: 0.0,
+                     notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
+                     started_at_monotonic: nil)
         @queues = Array(queues)
         @initial_queues = @queues.dup.freeze
         @wildcard = @queues.include?("*")
@@ -38,18 +57,24 @@ module Pgbus
         @jobs_failed = Concurrent::AtomicFixnum.new(0)
         @in_flight = Concurrent::AtomicFixnum.new(0)
         @loop_tick_at = Concurrent::AtomicReference.new(nil)
-        @rate_counter = RateCounter.new(:processed, :failed, :dequeued)
+        @rate_counter = rate_counter || RateCounter.new(:processed, :failed, :dequeued)
         @started_at = Time.current
-        @started_at_monotonic = monotonic_now
+        @started_at_monotonic = started_at_monotonic || monotonic_now
+        # stat_buffer: :default means "build one iff config.stats_enabled";
+        # passing an explicit value (including nil) overrides that for tests.
         @stat_buffer =
-          if config.stats_enabled
-            Pgbus::StatBuffer.new(
-              flush_size: config.stats_flush_size,
-              flush_interval: config.stats_flush_interval
-            )
+          if stat_buffer == :default
+            if config.stats_enabled
+              Pgbus::StatBuffer.new(
+                flush_size: config.stats_flush_size,
+                flush_interval: config.stats_flush_interval
+              )
+            end
+          else
+            stat_buffer
           end
         @executor = Pgbus::ActiveJob::Executor.new(stat_buffer: @stat_buffer)
-        @wake_signal = WakeSignal.new
+        @wake_signal = wake_signal || WakeSignal.new
         @pool = ExecutionPools.build(
           mode: @execution_mode,
           capacity: threads,
@@ -65,9 +90,9 @@ module Pgbus
         @last_evicted_at = nil
         @deferral_warned = false
         @queue_lock = QueueLock.new if @single_active_consumer
-        @notify_listener = nil
-        @notify_retry_at = 0.0
-        @notify_retry_backoff = NOTIFY_RETRY_BASE_SECONDS
+        @notify_listener = notify_listener
+        @notify_retry_at = notify_retry_at
+        @notify_retry_backoff = notify_retry_backoff
         # OS-level liveness channel to the supervisor watchdog. Optional: nil
         # unless the supervisor forked us with one. Written from stamp_loop_tick
         # so the watchdog can detect a wedged worker even when the database (and
@@ -88,6 +113,26 @@ module Pgbus
           rates: @rate_counter.rates,
           started_at: @started_at
         }.merge(@pool.metadata)
+      end
+
+      # Test seams for the atomic counters recycle logic and prefetch
+      # flow-control consult. Production only increments these during message
+      # handling; seeding them lets a test cross a threshold without running
+      # thousands of real jobs.
+      def jobs_processed=(count)
+        @jobs_processed.value = count
+      end
+
+      def in_flight=(count)
+        @in_flight.value = count
+      end
+
+      # The last wall-clock loop-tick stamp (Time.now.to_f) fed to the
+      # heartbeat's loop_tick_supplier. Wall-clock — NOT monotonic — so it stays
+      # comparable across the process boundary the supervisor watchdog reads it
+      # over. nil until the first stamp_loop_tick.
+      def last_loop_tick
+        @loop_tick_at.get
       end
 
       NOTIFY_FALLBACK_POLL_SECONDS = 15

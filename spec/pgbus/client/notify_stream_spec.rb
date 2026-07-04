@@ -11,7 +11,9 @@ RSpec.describe Pgbus::Client::NotifyStream do
   end
 
   before do
-    allow_any_instance_of(Pgbus::Client).to receive(:require).with("pgmq").and_return(true)
+    # Stub the class method that loads pgmq so the faked PGMQ::Client stands;
+    # a clean per-example stub, unlike stubbing global Kernel#require.
+    allow(Pgbus::Client).to receive(:load_pgmq_gem!)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)
@@ -69,7 +71,7 @@ RSpec.describe Pgbus::Client::NotifyStream do
 
     context "with stale pgmq connection recovery" do
       before do
-        stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError)) unless defined?(PGMQ::Errors::ConnectionError)
+        real_pgmq_connection_error
         # Stale retries now back off between attempts; stub the delay so the
         # suite doesn't actually sleep.
         allow(client).to receive(:sleep)

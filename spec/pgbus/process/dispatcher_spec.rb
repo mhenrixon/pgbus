@@ -75,14 +75,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#graceful_shutdown" do
     it "sets shutting_down flag" do
       dispatcher.graceful_shutdown
-      expect(dispatcher.instance_variable_get(:@shutting_down)).to be true
+      expect(dispatcher.shutting_down?).to be true
     end
   end
 
   describe "#immediate_shutdown" do
     it "sets shutting_down flag" do
       dispatcher.immediate_shutdown
-      expect(dispatcher.instance_variable_get(:@shutting_down)).to be true
+      expect(dispatcher.shutting_down?).to be true
     end
   end
 
@@ -151,7 +151,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:cleanup_processed_events)
       allow(dispatcher).to receive(:reap_stale_processes)
 
-      dispatcher.instance_variable_set(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
+      dispatcher.set_maintenance_timestamp(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_processed_events)
@@ -161,7 +161,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:cleanup_processed_events)
       allow(dispatcher).to receive(:reap_stale_processes)
 
-      dispatcher.instance_variable_set(:@last_reap_at, past_monotonic(described_class::REAP_INTERVAL + 1))
+      dispatcher.set_maintenance_timestamp(:@last_reap_at, past_monotonic(described_class::REAP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:reap_stale_processes)
@@ -170,7 +170,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs concurrency cleanup when concurrency interval has elapsed" do
       allow(dispatcher).to receive(:cleanup_concurrency)
 
-      dispatcher.instance_variable_set(:@last_concurrency_at, past_monotonic(described_class::CONCURRENCY_INTERVAL + 1))
+      dispatcher.set_maintenance_timestamp(:@last_concurrency_at, past_monotonic(described_class::CONCURRENCY_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_concurrency)
@@ -179,14 +179,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs batch cleanup when batch interval has elapsed" do
       allow(dispatcher).to receive(:cleanup_batches)
 
-      dispatcher.instance_variable_set(:@last_batch_cleanup_at, past_monotonic(described_class::BATCH_CLEANUP_INTERVAL + 1))
+      dispatcher.set_maintenance_timestamp(:@last_batch_cleanup_at, past_monotonic(described_class::BATCH_CLEANUP_INTERVAL + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:cleanup_batches)
     end
 
     it "rescues errors from maintenance methods" do
-      dispatcher.instance_variable_set(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
+      dispatcher.set_maintenance_timestamp(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
       expect { dispatcher.send(:run_maintenance) }.not_to raise_error
     end
@@ -436,7 +436,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "runs compact_archives when interval has elapsed" do
       allow(dispatcher).to receive(:compact_archives)
 
-      dispatcher.instance_variable_set(:@last_archive_compaction_at, past_monotonic(3601))
+      dispatcher.set_maintenance_timestamp(:@last_archive_compaction_at, past_monotonic(3601))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:compact_archives)
@@ -545,7 +545,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:run_table_maintenance)
 
       interval = Pgbus::Process::Dispatcher::TABLE_MAINTENANCE_INTERVAL
-      dispatcher.instance_variable_set(:@last_table_maintenance_at, past_monotonic(interval + 1))
+      dispatcher.set_maintenance_timestamp(:@last_table_maintenance_at, past_monotonic(interval + 1))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).to have_received(:run_table_maintenance)
@@ -554,7 +554,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "skips table maintenance when interval has not elapsed" do
       allow(dispatcher).to receive(:run_table_maintenance)
 
-      dispatcher.instance_variable_set(:@last_table_maintenance_at, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+      dispatcher.set_maintenance_timestamp(:@last_table_maintenance_at, Process.clock_gettime(Process::CLOCK_MONOTONIC))
       dispatcher.send(:run_maintenance)
 
       expect(dispatcher).not_to have_received(:run_table_maintenance)
@@ -590,7 +590,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
   describe "#stamp_loop_tick (private)" do
     it "advances the beacon on each call" do
       dispatcher.send(:stamp_loop_tick)
-      first = dispatcher.instance_variable_get(:@loop_tick_at).get
+      first = dispatcher.last_loop_tick
       expect(first).to be_within(1).of(Time.now.to_f)
     end
   end
@@ -640,14 +640,14 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
     # Make only the listed timestamp ivars due as of the current stubbed clock.
     def force_due(ivars)
-      ivars.each { |ivar| dispatcher.instance_variable_set(ivar, clock - 1_000_000) }
+      ivars.each { |ivar| dispatcher.set_maintenance_timestamp(ivar, clock - 1_000_000) }
     end
 
     # Reset every timestamp ivar to now, so no task is due until forced.
     # (initialize runs before monotonic_now is stubbed, so the ivars start at
     # the real monotonic clock — normalize them here.)
     def reset_all_not_due
-      tasks.each_key { |ivar| dispatcher.instance_variable_set(ivar, clock) }
+      tasks.each_key { |ivar| dispatcher.set_maintenance_timestamp(ivar, clock) }
     end
 
     # Stub every task method: fail the named tasks (default: all), succeed the rest.
@@ -686,7 +686,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       run_cycle
 
       expect(logger).to have_received(:warn).once
-      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(2)
+      expect(dispatcher.maintenance_failure_streak).to eq(2)
     end
 
     it "suppresses per-task ErrorReporter calls once in backoff" do
@@ -726,7 +726,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       force_all_due
       run_cycle
 
-      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
+      expect(dispatcher.maintenance_failure_streak).to eq(0)
       expect(logger).not_to have_received(:warn)
     end
 
@@ -740,8 +740,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
       force_all_due
       run_cycle
 
-      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
-      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to be_nil
+      expect(dispatcher.maintenance_failure_streak).to eq(0)
+      expect(dispatcher.maintenance_backoff_until).to be_nil
     end
 
     it "exits backoff as soon as a maintenance task succeeds again" do
@@ -751,13 +751,13 @@ RSpec.describe Pgbus::Process::Dispatcher do
       force_all_due
       run_cycle # in backoff
 
-      backoff_end = dispatcher.instance_variable_get(:@maintenance_backoff_until)
+      backoff_end = dispatcher.maintenance_backoff_until
       task_methods.each { |method| allow(dispatcher).to receive(method) } # all succeed
       force_all_due
       run_cycle(now: backoff_end + 1)
 
-      expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(0)
-      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to be_nil
+      expect(dispatcher.maintenance_failure_streak).to eq(0)
+      expect(dispatcher.maintenance_backoff_until).to be_nil
     end
 
     it "doubles the backoff window per consecutive failed cycle" do
@@ -769,13 +769,13 @@ RSpec.describe Pgbus::Process::Dispatcher do
       run_cycle(now: clock)
       force_all_due
       run_cycle(now: clock)
-      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(clock + base)
+      expect(dispatcher.maintenance_backoff_until).to eq(clock + base)
 
       # Next failing cycle after window: streak 3 -> base * 2**1.
       later = clock + base + 1
       force_all_due
       run_cycle(now: later)
-      expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(later + (base * 2))
+      expect(dispatcher.maintenance_backoff_until).to eq(later + (base * 2))
     end
 
     it "caps the backoff window at MAINTENANCE_BACKOFF_MAX" do
@@ -789,7 +789,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       20.times do
         force_all_due
         run_cycle(now: now)
-        deadline = dispatcher.instance_variable_get(:@maintenance_backoff_until)
+        deadline = dispatcher.maintenance_backoff_until
         window = deadline - now if deadline
         now = (deadline || now) + 1
       end
@@ -804,7 +804,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
       # otherwise a real outage (where those rescues fire) would never trip
       # backoff.
       it "normalizes a returned StandardError to a :failed result" do
-        dispatcher.instance_variable_set(:@last_cleanup_at, clock - 1_000_000)
+        dispatcher.set_maintenance_timestamp(:@last_cleanup_at, clock - 1_000_000)
         result = dispatcher.send(:run_if_due, clock, :@last_cleanup_at, described_class::CLEANUP_INTERVAL) do
           StandardError.new("db down")
         end
@@ -812,7 +812,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
         expect(result.status).to eq(:failed)
         expect(result.error).to be_a(StandardError)
         # Timestamp must NOT advance on failure, so the next tick retries.
-        expect(dispatcher.instance_variable_get(:@last_cleanup_at)).to eq(clock - 1_000_000)
+        expect(dispatcher.maintenance_timestamp(:@last_cleanup_at)).to eq(clock - 1_000_000)
       end
 
       it "enters backoff during a real outage where the task rescues fire" do
@@ -834,8 +834,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
         force_due(due)
         run_cycle # second failing cycle: streak -> 2, enter backoff
 
-        expect(dispatcher.instance_variable_get(:@maintenance_failure_streak)).to eq(2)
-        expect(dispatcher.instance_variable_get(:@maintenance_backoff_until)).to eq(clock + described_class::MAINTENANCE_BACKOFF_BASE)
+        expect(dispatcher.maintenance_failure_streak).to eq(2)
+        expect(dispatcher.maintenance_backoff_until).to eq(clock + described_class::MAINTENANCE_BACKOFF_BASE)
       end
     end
   end

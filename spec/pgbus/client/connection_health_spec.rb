@@ -11,8 +11,7 @@ RSpec.describe Pgbus::Client::ConnectionHealth do
   let(:clock_at) { [1000.0] }
 
   before do
-    stub_const("PGMQ::Errors", Module.new)
-    stub_const("PGMQ::Errors::ConnectionError", Class.new(StandardError))
+    real_pgmq_connection_error
   end
 
   # Advance the injected monotonic clock by `seconds`.

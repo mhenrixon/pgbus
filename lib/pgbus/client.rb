@@ -27,15 +27,26 @@ module Pgbus
     # re-running the trigger DDL on every queue.
     NOTIFY_THROTTLE_MS = 250
 
-    def initialize(config = Pgbus.configuration)
-      # Define the PGMQ module before requiring the gem so that Zeitwerk's
-      # eager_load (called inside pgmq.rb) can resolve the constant.
-      # Without this, Ruby 4.0 + Zeitwerk 2.7.5 raises NameError because
-      # eager_load runs const_get(:Client) on PGMQ before the module is defined.
+    # Load the pgmq-ruby gem, defining the PGMQ module before requiring it so
+    # Zeitwerk's eager_load (called inside pgmq.rb) can resolve the constant.
+    # Without the pre-definition, Ruby 4.0 + Zeitwerk 2.7.5 raises NameError
+    # because eager_load runs const_get(:Client) on PGMQ before the module is
+    # defined. Extracted as a class method so unit specs that fake PGMQ::Client
+    # can stub *this* (a per-example class-method stub, torn down cleanly)
+    # instead of the global Kernel#require, which — if stubbed before pgmq is
+    # genuinely loaded — permanently prevents the real gem from ever loading.
+    def self.load_pgmq_gem!
       PGMQ_REQUIRE_MUTEX.synchronize do
         Object.const_set(:PGMQ, Module.new) unless defined?(::PGMQ)
         require "pgmq"
       end
+    end
+
+    # `schema_ensured:` lets a caller (in practice, tests) skip the one-time
+    # PGMQ schema install probe by asserting the schema already exists. Defaults
+    # to false so production always runs the check on first queue access.
+    def initialize(config = Pgbus.configuration, schema_ensured: false)
+      self.class.load_pgmq_gem!
       @config = config
       conn_opts = config.connection_options
       @shared_connection = conn_opts.is_a?(Proc)
@@ -69,7 +80,7 @@ module Pgbus
       @queues_created = Concurrent::Map.new
       @stream_indexes_created = Concurrent::Map.new
       @queue_strategy = QueueFactory.for(config)
-      @schema_ensured = false
+      @schema_ensured = schema_ensured
       @connection_health = ConnectionHealth.new(
         on_open: method(:log_circuit_open),
         on_close: method(:log_circuit_close)
@@ -81,6 +92,22 @@ module Pgbus
       # linked libpq version are all fixed for a Client's lifetime.
       @libpq_read_bounds_effective = libpq_read_bounds_effective?
       warn_shared_connection_read_bounds
+    end
+
+    # True when this client shares ActiveRecord's connection (the Proc
+    # connection_options path): pool_size is forced to 1 and every operation is
+    # serialized through @pgmq_mutex. False on the dedicated-connection path,
+    # where pgmq-ruby owns its own pool and no mutex is needed.
+    def shared_connection?
+      @shared_connection
+    end
+
+    # Whether the shared-connection serialization mutex is currently held. False
+    # on the dedicated-connection path (no mutex). Lets callers assert that a
+    # code path (e.g. a retry backoff sleep) runs OUTSIDE the mutex without
+    # reaching into the mutex object itself.
+    def synchronizing?
+      @pgmq_mutex ? @pgmq_mutex.locked? : false
     end
 
     # Actively open a database connection and run `SELECT 1` so a bad

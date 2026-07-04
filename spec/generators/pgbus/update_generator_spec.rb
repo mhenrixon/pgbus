@@ -114,8 +114,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "prints the fresh-install redirect when the detector reports FRESH_INSTALL" do
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return([Pgbus::Generators::MigrationDetector::FRESH_INSTALL])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: [Pgbus::Generators::MigrationDetector::FRESH_INSTALL]))
 
       generator = build_generator(quiet: false)
       allow(generator).to receive(:invoke)
@@ -125,8 +125,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "logs 'up to date' and does nothing when the detector returns an empty list" do
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return([])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: []))
 
       generator = build_generator(quiet: false)
       allow(generator).to receive(:invoke)
@@ -136,8 +136,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "invokes each missing migration's generator in order" do
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return(%i[add_presence add_stream_stats])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: %i[add_presence add_stream_stats]))
 
       generator = build_generator(dry_run: false)
       allow(generator).to receive(:invoke)
@@ -149,8 +149,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "skips invocation on dry_run and prints 'would invoke'" do
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return(%i[add_presence])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: %i[add_presence]))
 
       generator = build_generator(dry_run: true, quiet: false)
       allow(generator).to receive(:invoke)
@@ -162,8 +162,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     end
 
     it "passes --database through when explicitly set via options" do
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return(%i[add_presence])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: %i[add_presence]))
 
       generator = build_generator(dry_run: false, database: "queue_db")
       allow(generator).to receive(:invoke)
@@ -176,8 +176,8 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     it "auto-detects --database from Pgbus.configuration.connects_to" do
       allow(Pgbus.configuration).to receive(:connects_to).and_return(database: { writing: :pgbus })
       allow(Pgbus::BusRecord).to receive(:connection).and_return(mock_connection)
-      allow_any_instance_of(Pgbus::Generators::MigrationDetector).to receive(:missing_migrations)
-        .and_return(%i[add_presence])
+      allow(Pgbus::Generators::MigrationDetector).to receive(:new)
+        .and_return(instance_double(Pgbus::Generators::MigrationDetector, missing_migrations: %i[add_presence]))
 
       generator = build_generator(dry_run: false)
       allow(generator).to receive(:invoke)
