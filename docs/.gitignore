@@ -4,6 +4,10 @@
 # belong in git's global ignore instead:
 # `$XDG_CONFIG_HOME/git/ignore` or `~/.config/git/ignore`
 
+# The gem's root .gitignore ignores Gemfile.lock (correct for a gem). But this is
+# a real deployable app — commit its lock for reproducible CI + Docker builds.
+!Gemfile.lock
+
 # Ignore bundler config.
 /.bundle
 

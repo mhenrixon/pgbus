@@ -44,19 +44,25 @@ RUN apt-get update -qq && \
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
 
 # Copy the WHOLE repo first (gem at /app, docs app at /app/docs). The gem is a
-# path dependency whose gemspec runs `git ls-files`, so the full checkout (incl.
-# .git) must be present before bundle install resolves it.
+# path dependency whose gemspec runs `git ls-files` with NO glob fallback, so the
+# full checkout (incl. .git) must be present before bundle install resolves it —
+# the repo-root .dockerignore deliberately keeps .git in the context.
 COPY . /app/
 
 # Frozen off: the path-gem's git-ls-files gemspec digest can't be pinned across
-# commits; the lockfile still pins every other gem.
+# commits; the lockfile still pins every other gem. Prune the bundler cache +
+# any git-sourced gem checkouts so they don't bloat the layer the final stage
+# copies.
 RUN bundle config set frozen false && bundle install && \
-    rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache
+    rm -rf ~/.bundle/ "${BUNDLE_PATH}"/ruby/*/cache "${BUNDLE_PATH}"/ruby/*/bundler/gems/*/.git
 
 # JS deps (Tailwind CLI + daisyUI), then assets:precompile — enhanced by the
 # css:build rake task so it runs `bun run build:css` before propshaft fingerprints.
+# Drop node_modules + the bun/asset caches afterwards — only the built CSS is
+# kept, so the final stage's COPY of /app never carries the JS deps.
 RUN bun install --frozen-lockfile
-RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
+RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile && \
+    rm -rf node_modules /usr/local/bun tmp/cache
 
 
 # --- Final stage --------------------------------------------------------------
@@ -79,11 +85,6 @@ RUN apt-get update -qq && \
 COPY --from=build "${BUNDLE_PATH}" "${BUNDLE_PATH}"
 COPY --from=build /app /app
 
-# The CSS is precompiled into app/assets/builds by assets:precompile, so the JS
-# toolchain and its deps aren't needed at runtime — drop node_modules to shrink
-# the image and cut attack surface.
-RUN rm -rf /app/docs/node_modules
-
 # Non-root runtime user; owns the writable dirs.
 RUN groupadd --system --gid 1000 rails && \
     useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \
@@ -91,4 +92,12 @@ RUN groupadd --system --gid 1000 rails && \
 USER 1000:1000
 
 EXPOSE 3000
-CMD ["./bin/rails", "server", "-b", "0.0.0.0"]
+# Thruster fronts Puma (HTTP caching + compression + X-Sendfile). It listens on
+# HTTP_PORT and proxies to Puma on TARGET_PORT (it sets PORT for the child, which
+# config/puma.rb reads). HTTP_PORT MUST be the port traffic is routed to (Kamal's
+# `app_port: 3000` in config/deploy.yml, the EXPOSE above) — Thruster's default
+# is 80, which the non-root user can't reliably bind AND which kamal-proxy would
+# never route to, silently bypassing Thruster straight into Puma.
+ENV HTTP_PORT="3000" \
+    TARGET_PORT="3001"
+CMD ["./bin/thrust", "./bin/rails", "server"]

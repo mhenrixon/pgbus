@@ -1,11 +1,11 @@
 source "https://rubygems.org"
 
-# docs-kit shared docs chrome + its runtime deps. Pinned to a released tag (not
-# the default branch ref the scaffolder wrote) so a docs-kit change can't silently
-# reshape this site on the next bundle. Referenced from GitHub — docs-kit is not
-# on rubygems, and the Docker build context (the pgbus repo root) can't see the
-# sibling checkout a path: dep would need.
-gem "docs-kit", github: "mhenrixon/docs-kit", tag: "v1.0.2", require: "docs_kit"
+# docs-kit shared docs chrome + its runtime deps. Pinned to a released version so
+# a docs-kit change can't silently reshape this site on the next bundle. Pulled
+# from RubyGems now that the gem is published there — the old GitHub ref (needed
+# when docs-kit wasn't on rubygems and the Docker build context couldn't see a
+# sibling checkout) is obsolete.
+gem "docs-kit", "~> 1.0.3", require: "docs_kit"
 gem "daisyui", require: "daisy_ui"
 gem "phlex-rails"
 gem "rails_icons", "~> 1.1"
