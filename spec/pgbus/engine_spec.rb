@@ -1,0 +1,224 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+require "tmpdir"
+
+# Two-layer coverage for lib/pgbus/engine.rb:
+#
+#   1. Post-boot assertions against the already-booted spec/dummy app
+#      (mounted by rails_helper). These verify the initializers ran with
+#      their real effects: middleware installed, i18n paths appended, web
+#      constants required, logger defaulted.
+#
+#   2. Isolated initializer-block tests: each `initializer "name" do |app|`
+#      block is fetched from Pgbus::Engine.initializers and invoked directly
+#      with a stub app rooted at a tmpdir. This exercises the branchy blocks
+#      (pgbus.recurring fallbacks, pgbus.configure, pgbus.db, AppSignal guard)
+#      without rebooting Rails or touching the dummy app's real config dir.
+RSpec.describe Pgbus::Engine do
+  # Fetch a named initializer's block so it can be invoked in isolation.
+  def initializer_block(name)
+    described_class.initializers.find { |i| i.name == name.to_sym || i.name == name }.instance_variable_get(:@block)
+  end
+
+  # Restore the suite baseline config after any example that mutates or
+  # resets it, so random-order runs don't leak state into later specs.
+  def restore_baseline_config
+    Pgbus.reset!
+    Pgbus.configure do |c|
+      c.logger = Logger.new(IO::NULL)
+      c.queue_prefix = "pgbus_test"
+      c.default_queue = "default"
+    end
+  end
+
+  describe "post-boot state" do
+    it "installs the watermark cache middleware when streams are enabled" do
+      expect(Pgbus.configuration.streams_enabled).to be(true)
+      names = Rails.application.middleware.map(&:name)
+      expect(names).to include("Pgbus::Streams::WatermarkCacheMiddleware")
+    end
+
+    it "appends the engine's locale files to the i18n load path" do
+      pgbus_locales = I18n.load_path.select do |path|
+        path.include?("pgbus") && path.include?("locales") && path.end_with?(".yml")
+      end
+      expect(pgbus_locales).not_to be_empty
+    end
+
+    it "requires the web authentication and data source constants" do
+      expect(defined?(Pgbus::Web::Authentication)).to eq("constant")
+      expect(defined?(Pgbus::Web::DataSource)).to eq("constant")
+    end
+
+    it "defaults the configuration logger" do
+      expect(Pgbus.configuration.logger).not_to be_nil
+    end
+  end
+
+  describe "pgbus.active_job initializer" do
+    # The dummy app does not require active_job/railtie, so the on_load(:active_job)
+    # hook has not fired against ActiveJob::Base at boot. Load ActiveJob here and
+    # run the hooks to prove the initializer includes both concerns.
+    it "includes Concurrency and Uniqueness on ActiveJob::Base" do
+      require "active_job"
+
+      # Ensure the engine's on_load block is registered, then flush the hooks.
+      initializer_block("pgbus.active_job").call
+      ActiveSupport.run_load_hooks(:active_job, ActiveJob::Base)
+
+      expect(ActiveJob::Base.include?(Pgbus::Concurrency)).to be(true)
+      expect(ActiveJob::Base.include?(Pgbus::Uniqueness)).to be(true)
+    end
+  end
+
+  describe "pgbus.configure initializer" do
+    subject(:block) { initializer_block("pgbus.configure") }
+
+    let(:tmpdir) { Dir.mktmpdir }
+    let(:app) { instance_double(Rails::Application, root: Pathname.new(tmpdir)) }
+
+    before { FileUtils.mkdir_p(File.join(tmpdir, "config")) }
+
+    after do
+      FileUtils.remove_entry(tmpdir)
+      restore_baseline_config
+    end
+
+    it "loads config/pgbus.yml when present" do
+      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: from_yaml\n")
+
+      block.call(app)
+
+      expect(Pgbus.configuration.default_queue).to eq("from_yaml")
+    end
+
+    it "is a no-op when config/pgbus.yml is absent" do
+      expect { block.call(app) }.not_to raise_error
+    end
+  end
+
+  describe "pgbus.recurring initializer" do
+    subject(:block) { initializer_block("pgbus.recurring") }
+
+    let(:tmpdir) { Dir.mktmpdir }
+    let(:app) { instance_double(Rails::Application, root: Pathname.new(tmpdir)) }
+    let(:default_path) { File.join(tmpdir, "config", "recurring.yml") }
+    let(:task_yaml) do
+      <<~YAML
+        cleanup:
+          class: CleanupJob
+          schedule: "every hour"
+      YAML
+    end
+
+    before do
+      FileUtils.mkdir_p(File.join(tmpdir, "config"))
+      restore_baseline_config
+    end
+
+    after do
+      FileUtils.remove_entry(tmpdir)
+      restore_baseline_config
+    end
+
+    it "skips when recurring_tasks is already set" do
+      Pgbus.configuration.recurring_tasks = { "existing" => { "class" => "X" } }
+
+      block.call(app)
+
+      expect(Pgbus.configuration.recurring_tasks).to eq("existing" => { "class" => "X" })
+    end
+
+    it "loads explicit recurring_tasks_files when they contain tasks" do
+      explicit = File.join(tmpdir, "config", "explicit.yml")
+      File.write(explicit, task_yaml)
+      Pgbus.configuration.recurring_tasks_files = [explicit]
+
+      block.call(app)
+
+      expect(Pgbus.configuration.recurring_tasks).to include("cleanup")
+    end
+
+    it "falls back to default recurring.yml when explicit files are empty" do
+      empty = File.join(tmpdir, "config", "empty.yml")
+      File.write(empty, "{}\n")
+      File.write(default_path, task_yaml)
+      Pgbus.configuration.recurring_tasks_files = [empty]
+
+      block.call(app)
+
+      expect(Pgbus.configuration.recurring_tasks).to include("cleanup")
+      expect(Pgbus.configuration.recurring_tasks_file).to eq(default_path)
+    end
+
+    it "loads the default recurring.yml when no explicit files are configured" do
+      File.write(default_path, task_yaml)
+
+      block.call(app)
+
+      expect(Pgbus.configuration.recurring_tasks).to include("cleanup")
+      expect(Pgbus.configuration.recurring_tasks_file).to eq(default_path)
+    end
+
+    it "is a no-op when neither explicit files nor a default exist" do
+      block.call(app)
+
+      expect(Pgbus.configuration.recurring_tasks).to be_nil
+    end
+  end
+
+  describe "pgbus.db initializer" do
+    after { restore_baseline_config }
+
+    let(:block) { initializer_block("pgbus.db") }
+
+    it "wires BusRecord.connects_to when configuration.connects_to is set" do
+      connects = { database: { writing: :pgbus } }
+      Pgbus.configuration.connects_to = connects
+      allow(Pgbus::BusRecord).to receive(:connects_to)
+
+      block.call
+      ActiveSupport.run_load_hooks(:active_record, ActiveRecord::Base)
+
+      # on_load(:active_record) fires the block once per already-loaded model
+      # plus the explicit run above, so assert the contract (called with the
+      # configured args) rather than a brittle exact call count.
+      expect(Pgbus::BusRecord).to have_received(:connects_to).with(**connects).at_least(:once)
+    end
+
+    it "does not call connects_to when configuration.connects_to is nil" do
+      Pgbus.configuration.connects_to = nil
+      allow(Pgbus::BusRecord).to receive(:connects_to)
+
+      block.call
+      ActiveSupport.run_load_hooks(:active_record, ActiveRecord::Base)
+
+      expect(Pgbus::BusRecord).not_to have_received(:connects_to)
+    end
+  end
+
+  describe "pgbus.integrations.appsignal initializer" do
+    subject(:block) { initializer_block("pgbus.integrations.appsignal") }
+
+    after { restore_baseline_config }
+
+    it "is a no-op when Appsignal is undefined" do
+      skip "Appsignal is loaded in this environment" if defined?(Appsignal)
+
+      block.call
+      expect { ActiveSupport.run_load_hooks(:after_initialize, Rails.application) }.not_to raise_error
+    end
+
+    it "is a no-op when appsignal_enabled is false" do
+      Pgbus.configuration.appsignal_enabled = false
+      allow(Pgbus::Integrations::Appsignal).to receive(:install!) if defined?(Pgbus::Integrations::Appsignal)
+
+      block.call
+      ActiveSupport.run_load_hooks(:after_initialize, Rails.application)
+
+      expect(Pgbus::Integrations::Appsignal).not_to have_received(:install!) if defined?(Pgbus::Integrations::Appsignal)
+    end
+  end
+end
