@@ -181,8 +181,11 @@ module Pgbus
       def recurring_migrations
         # pgbus_recurring_tasks + pgbus_recurring_executions are the two
         # tables the recurring generator creates. If BOTH exist, nothing
-        # to do. If either is missing, we need the generator (which is
-        # idempotent via if_not_exists on both tables).
+        # to do. If either is missing, we queue the generator. The
+        # add_recurring template uses plain create_table (no if_not_exists),
+        # so idempotency is provided by this detector, not the template:
+        # the migration is only queued while a table is absent, and never
+        # re-invoked once both tables are present.
         return [] if table_exists?("pgbus_recurring_tasks") && table_exists?("pgbus_recurring_executions")
 
         [:add_recurring]
