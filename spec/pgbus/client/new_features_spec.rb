@@ -14,7 +14,10 @@ RSpec.describe Pgbus::Client do
     end
 
     before do
-      allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
+      # require "pgmq" fires inside Client#initialize before the instance exists,
+      # so stub it at the module boundary rather than on any instance.
+      allow(Kernel).to receive(:require).and_call_original
+      allow(Kernel).to receive(:require).with("pgmq").and_return(true)
       stub_const("PGMQ::Client", Class.new do
         def initialize(*args, **kwargs); end
       end)
@@ -267,7 +270,10 @@ RSpec.describe Pgbus::Client do
     end
 
     before do
-      allow_any_instance_of(described_class).to receive(:require).with("pgmq").and_return(true)
+      # require "pgmq" fires inside Client#initialize before the instance exists,
+      # so stub it at the module boundary rather than on any instance.
+      allow(Kernel).to receive(:require).and_call_original
+      allow(Kernel).to receive(:require).with("pgmq").and_return(true)
       stub_const("PGMQ::Client", Class.new do
         def initialize(*args, **kwargs); end
       end)

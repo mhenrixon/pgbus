@@ -11,7 +11,10 @@ RSpec.describe Pgbus::Client::NotifyStream do
   end
 
   before do
-    allow_any_instance_of(Pgbus::Client).to receive(:require).with("pgmq").and_return(true)
+    # require "pgmq" fires inside Client#initialize before the instance exists,
+    # so stub it at the module boundary rather than on any instance.
+    allow(Kernel).to receive(:require).and_call_original
+    allow(Kernel).to receive(:require).with("pgmq").and_return(true)
     stub_const("PGMQ::Client", Class.new do
       def initialize(*args, **kwargs); end
     end)

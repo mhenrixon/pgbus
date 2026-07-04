@@ -16,14 +16,16 @@ RSpec.describe Pgbus::StreamsHelper do
   end
   let(:view) { view_class.new }
 
+  # The helper's watermark lookup goes through Pgbus.stream(name).current_msg_id
+  # (app/helpers/pgbus/streams_helper.rb#fetch_watermark). Stub the reachable
+  # module factory to a verifying instance_double so the helper never reaches the
+  # real Pgbus::Client / database. Pgbus.stream only memoises its *result* in
+  # @stream_cache; stubbing the method bypasses the cache entirely.
+  let(:stream_double) { instance_double(Pgbus::Streams::Stream, current_msg_id: 1247) }
+
   before do
     Pgbus.configuration.streams_signed_name_secret = "a" * 64
-    # Intercept the watermark lookup so the helper doesn't reach the
-    # real Pgbus::Client (which tries to hit the database). Stubbing
-    # at the Stream instance level is more robust than stubbing
-    # Pgbus.stream — the latter is a module method that gets memoised
-    # in surprising ways under Zeitwerk.
-    allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id).and_return(1247)
+    allow(Pgbus).to receive(:stream).and_return(stream_double)
     Thread.current[:pgbus_streams_watermark_cache] = nil
   end
 
@@ -77,20 +79,12 @@ RSpec.describe Pgbus::StreamsHelper do
     end
 
     it "caches the watermark per-thread across multiple calls in the same render" do
-      # Count how many times current_msg_id is called. any_instance_of's
-      # have_received doesn't track calls across instances, so we reach
-      # for a side-effect counter instead.
-      call_count = 0
-      allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id) do
-        call_count += 1
-        1247
-      end
-
       view.pgbus_stream_from("chat")
       view.pgbus_stream_from("chat")
       view.pgbus_stream_from("chat")
 
-      expect(call_count).to eq(1)
+      # The per-thread cache means current_msg_id is consulted exactly once.
+      expect(stream_double).to have_received(:current_msg_id).once
     end
 
     it "passes through arbitrary HTML attributes" do
@@ -217,7 +211,7 @@ RSpec.describe Pgbus::StreamsHelper do
     end
 
     it "clamps replay: N to 0 when N > current_msg_id (fresh queue with a huge replay)" do
-      allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id).and_return(5)
+      allow(stream_double).to receive(:current_msg_id).and_return(5)
       html = view.pgbus_stream_from("chat", replay: 1000)
       expect(html).to include('since-id="0"')
     end
@@ -248,17 +242,13 @@ RSpec.describe Pgbus::StreamsHelper do
     end
 
     it "caches the watermark lookup when used with replay: (avoids double-query)" do
-      call_count = 0
-      allow_any_instance_of(Pgbus::Streams::Stream).to receive(:current_msg_id) do
-        call_count += 1
-        1247
-      end
-
       view.pgbus_stream_from("chat", replay: 10)
       view.pgbus_stream_from("chat", replay: :all)
       view.pgbus_stream_from("chat") # watermark path
 
-      expect(call_count).to eq(1)
+      # replay: :all short-circuits to 0 without touching the watermark, so the
+      # lookup fires exactly once across the replay: 10 and watermark paths.
+      expect(stream_double).to have_received(:current_msg_id).once
     end
   end
 end
