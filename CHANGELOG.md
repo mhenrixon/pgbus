@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- **`Pgbus::MCP.rack_app` now returns a clean 401 on auth failure instead of a 500.** The `RackApp` auth gate returned a *frozen* `UNAUTHORIZED` response triple; once mounted in Rails, response-mutating middleware downstream (`Rack::TempfileReaper` assigns `response[2]`, `Rack::ETag` adds a header) raised `FrozenError`, so every request with a missing/mismatched `PGBUS_MCP_TOKEN` surfaced as an opaque 500 in the host app's error tracker rather than the intended 401. The gate now builds a fresh, mutable array and headers hash per call (only the JSON body string stays memoized+frozen). A request-level spec drives the app through the real `TempfileReaper`/`ETag` stack to guard against regression. Refs #304.
+
 ### Security
 
 ## [0.9.8.1] - 2026-07-04

@@ -22,11 +22,12 @@ module Pgbus
     # / behind your VPN, never internet-exposed.
     class RackApp
       BEARER_PREFIX = "Bearer "
-      UNAUTHORIZED = [
-        401,
-        { "Content-Type" => "application/json", "WWW-Authenticate" => "Bearer" },
-        [{ jsonrpc: "2.0", id: nil, error: { code: -32_001, message: "Unauthorized" } }.to_json]
-      ].freeze
+      # Only the JSON body string is frozen and reused. The outer response triple
+      # and its headers hash MUST be built fresh per call (#unauthorized) so
+      # downstream Rack middleware can mutate them — Rack::TempfileReaper assigns
+      # response[2] and Rack::ETag adds headers. Returning a frozen array/hash
+      # raised FrozenError → 500 instead of 401 (issue #304).
+      UNAUTHORIZED_BODY = { jsonrpc: "2.0", id: nil, error: { code: -32_001, message: "Unauthorized" } }.to_json.freeze
 
       # @param data_source [Pgbus::Web::DataSource] read layer the tools query.
       #   Built once and shared: DataSource acquires Pgbus::BusRecord.connection
@@ -55,12 +56,21 @@ module Pgbus
       # the gem's transport has no auth of its own.
       def call(env)
         request = Rack::Request.new(env)
-        return UNAUTHORIZED unless authorized?(request)
+        return unauthorized unless authorized?(request)
 
         @transport.handle_request(request)
       end
 
       private
+
+      # A fresh, mutable 401 response triple each call. See UNAUTHORIZED_BODY.
+      def unauthorized
+        [
+          401,
+          { "Content-Type" => "application/json", "WWW-Authenticate" => "Bearer" },
+          [UNAUTHORIZED_BODY]
+        ]
+      end
 
       # An explicit auth callable wins; otherwise fall back to the bearer token;
       # otherwise (neither configured) allow — the constructor already warned.
