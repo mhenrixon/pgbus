@@ -12,7 +12,7 @@ module Pgbus
 
       source_root File.expand_path("templates", __dir__)
 
-      desc "Install Pgbus: create migration, config file, and binstub"
+      desc "Install Pgbus: create migration, initializer, and binstub"
 
       class_option :pgmq_schema_mode,
                    type: :string,
@@ -32,7 +32,7 @@ module Pgbus
       end
 
       def create_config_file
-        template "pgbus.yml.erb", "config/pgbus.yml"
+        template "initializer.rb.erb", "config/initializers/pgbus.rb"
       end
 
       def create_binstub
@@ -100,7 +100,7 @@ module Pgbus
         say ""
         say "Next steps:"
         say "  1. Run: rails db:migrate#{":#{database_name}" if separate_database?}"
-        say "  2. Edit config/pgbus.yml to configure workers"
+        say "  2. Edit config/initializers/pgbus.rb to configure workers"
         say "  3. Start processing: bin/pgbus start"
         say ""
       end

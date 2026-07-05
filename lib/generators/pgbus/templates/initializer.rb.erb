@@ -1,0 +1,62 @@
+# frozen_string_literal: true
+
+# Pgbus configuration — https://github.com/mhenrixon/pgbus
+#
+# This is the real config surface. Every setting has a sensible default, so an
+# empty block gives you a working install; uncomment and edit what you need.
+# Values below that are commented out show the gem default for reference.
+Pgbus.configure do |c|
+  # --- Queues -------------------------------------------------------------
+  # c.queue_prefix   = "pgbus"      # prefix for every PGMQ queue
+  # c.default_queue  = "default"    # queue used when a job names none
+
+  # --- Connection pool ----------------------------------------------------
+  # pool_size auto-tunes from your worker/consumer thread counts:
+  #   sum(workers.threads) + sum(event_consumers.threads) + 2
+  # Set it explicitly only to force a tighter or looser pool than that.
+  # c.pool_size    = 5
+  # c.pool_timeout = 5
+
+  # --- Wake-up + visibility ----------------------------------------------
+  # c.listen_notify      = true     # LISTEN/NOTIFY for instant job wake-up
+  # c.visibility_timeout = 30       # seconds a message stays invisible after a read
+
+  # --- Retries + idempotency ---------------------------------------------
+  # c.max_retries    = 5            # reads before a message goes to its DLQ
+  # c.idempotency_ttl = 7.days      # event dedup TTL
+
+  # --- Workers ------------------------------------------------------------
+  # Named capsules, each draining an explicit, non-overlapping set of queues.
+  # Tune the queue names and thread counts to your app.
+  #
+  # `c.workers = []` first clears the built-in default capsule
+  # (queues: %w[default], threads: 5) that pgbus seeds for a zero-config
+  # install; without it the named capsules below would be *appended* and the
+  # "default" queue would be drained twice.
+  c.workers = []
+  c.capsule :default,  queues: %w[critical default], threads: 5
+  c.capsule :low,      queues: %w[low],              threads: 2
+
+  # --- Worker recycling (prevents memory bloat) --------------------------
+  c.max_jobs_per_worker = 10_000
+  c.max_memory_mb       = 512
+  # c.max_worker_lifetime = 3600   # seconds
+
+  # --- Dispatcher (maintenance tasks) ------------------------------------
+  # c.dispatch_interval = 1.0
+
+  # --- Realtime broadcast isolation (turbo-rails) ------------------------
+  # Route turbo-rails' async render+broadcast jobs to a dedicated queue so a
+  # browser SSE update never waits behind long-running jobs (#311). The
+  # `realtime` capsule below drains it — keep both, or drop both, together.
+  # `pgbus doctor` warns if this queue has no worker to drain it.
+  c.streams_broadcast_queue = "realtime"
+  c.capsule :realtime, queues: %w[realtime], threads: 3
+
+  # --- Event consumers (event bus) ---------------------------------------
+  # Uncomment to consume routing-key topics off the bus.
+  # c.event_consumers = [
+  #   { topics: ["orders.#"],        threads: 3 },
+  #   { topics: ["notifications.#"], threads: 1 }
+  # ]
+end

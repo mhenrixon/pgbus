@@ -14,7 +14,7 @@ require "tmpdir"
 #   2. Isolated initializer-block tests: each `initializer "name" do |app|`
 #      block is fetched from Pgbus::Engine.initializers and invoked directly
 #      with a stub app rooted at a tmpdir. This exercises the branchy blocks
-#      (pgbus.recurring fallbacks, pgbus.configure, pgbus.db, AppSignal guard)
+#      (pgbus.recurring fallbacks, pgbus.db, AppSignal guard)
 #      without rebooting Rails or touching the dummy app's real config dir.
 RSpec.describe Pgbus::Engine do
   # Fetch a named initializer's block so it can be invoked in isolation.
@@ -57,6 +57,40 @@ RSpec.describe Pgbus::Engine do
     end
   end
 
+  describe ".warn_if_legacy_yaml_config" do
+    let(:tmpdir) { Dir.mktmpdir }
+    let(:logger) { instance_spy(Logger) }
+
+    before { FileUtils.mkdir_p(File.join(tmpdir, "config")) }
+    after { FileUtils.remove_entry(tmpdir) }
+
+    it "warns, pointing at the docs, when config/pgbus.yml is present" do
+      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: legacy\n")
+
+      described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), logger)
+
+      expect(logger).to have_received(:warn) do |&block|
+        message = block.call
+        expect(message).to include("config/pgbus.yml")
+        expect(message).to include("no longer loaded")
+        expect(message).to include("config/initializers/pgbus.rb")
+        expect(message).to match(%r{https?://\S+})
+      end
+    end
+
+    it "is silent when config/pgbus.yml is absent" do
+      described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), logger)
+
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it "does not raise when the logger is nil" do
+      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: legacy\n")
+
+      expect { described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), nil) }.not_to raise_error
+    end
+  end
+
   describe "pgbus.active_job initializer" do
     # The dummy app does not require active_job/railtie, so the on_load(:active_job)
     # hook has not fired against ActiveJob::Base at boot. Load ActiveJob here and
@@ -70,32 +104,6 @@ RSpec.describe Pgbus::Engine do
 
       expect(ActiveJob::Base.include?(Pgbus::Concurrency)).to be(true)
       expect(ActiveJob::Base.include?(Pgbus::Uniqueness)).to be(true)
-    end
-  end
-
-  describe "pgbus.configure initializer" do
-    subject(:block) { initializer_block("pgbus.configure") }
-
-    let(:tmpdir) { Dir.mktmpdir }
-    let(:app) { instance_double(Rails::Application, root: Pathname.new(tmpdir)) }
-
-    before { FileUtils.mkdir_p(File.join(tmpdir, "config")) }
-
-    after do
-      FileUtils.remove_entry(tmpdir)
-      restore_baseline_config
-    end
-
-    it "loads config/pgbus.yml when present" do
-      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: from_yaml\n")
-
-      block.call(app)
-
-      expect(Pgbus.configuration.default_queue).to eq("from_yaml")
-    end
-
-    it "is a no-op when config/pgbus.yml is absent" do
-      expect { block.call(app) }.not_to raise_error
     end
   end
 
