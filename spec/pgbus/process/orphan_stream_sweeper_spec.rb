@@ -30,12 +30,58 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_orphan/), anything)
-        .and_return({ "queue_length" => "0" })
+        .and_return({ "queue_length" => "0", "age_sec" => "10" })
 
       dispatcher.send(:sweep_orphan_streams)
 
       expect(mock_client).to have_received(:drop_queue)
         .with("pgbus_test_stream_orphan", prefixed: false)
+    end
+
+    it "drops non-empty stream queues older than the threshold (durable leak fix)" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_test_stream_leaked])
+
+      # Non-empty but 25h old (threshold is 24h) — the durable-stream leak case.
+      allow(conn).to receive(:select_one)
+        .with(a_string_matching(/q_pgbus_test_stream_leaked/), anything)
+        .and_return({ "queue_length" => "42", "age_sec" => (25 * 3600).to_s })
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).to have_received(:drop_queue)
+        .with("pgbus_test_stream_leaked", prefixed: false)
+    end
+
+    it "keeps non-empty stream queues younger than the threshold" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_test_stream_fresh])
+
+      # Non-empty and only 1h old — inside the replay window, must survive.
+      allow(conn).to receive(:select_one)
+        .with(a_string_matching(/q_pgbus_test_stream_fresh/), anything)
+        .and_return({ "queue_length" => "42", "age_sec" => (1 * 3600).to_s })
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).not_to have_received(:drop_queue)
+    end
+
+    it "keeps a non-empty young queue even when created_at is unknown (nil age)" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_test_stream_noage])
+
+      # A missing created_at (nil age_sec) must NOT be treated as infinitely old.
+      allow(conn).to receive(:select_one)
+        .with(a_string_matching(/q_pgbus_test_stream_noage/), anything)
+        .and_return({ "queue_length" => "3", "age_sec" => nil })
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).not_to have_received(:drop_queue)
     end
 
     it "keeps stream queues that have messages" do
@@ -45,7 +91,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_chat/), anything)
-        .and_return({ "queue_length" => "5" })
+        .and_return({ "queue_length" => "5", "age_sec" => "60" })
 
       dispatcher.send(:sweep_orphan_streams)
 
@@ -81,7 +127,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       allow(conn).to receive(:select_one)
         .with(a_string_matching(/q_pgbus_test_stream_stale/), anything)
-        .and_return({ "queue_length" => "100" })
+        .and_return({ "queue_length" => "100", "age_sec" => "300" })
 
       dispatcher.send(:sweep_orphan_streams)
 

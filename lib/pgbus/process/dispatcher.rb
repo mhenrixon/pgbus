@@ -539,17 +539,29 @@ module Pgbus
           break if interrupted?("Orphan stream sweep", index, queue_names.size)
           next unless full_name.start_with?("#{prefix}_")
 
+          safe_name = QueueNameValidator.sanitize!(full_name)
           row = conn.select_one(<<~SQL, "Pgbus Orphan Check")
-            SELECT count(*) AS queue_length
-            FROM pgmq.q_#{QueueNameValidator.sanitize!(full_name)}
+            SELECT
+              (SELECT count(*) FROM pgmq.q_#{safe_name}) AS queue_length,
+              (SELECT EXTRACT(epoch FROM (NOW() - created_at))::int
+                 FROM pgmq.meta WHERE queue_name = '#{safe_name}') AS age_sec
           SQL
 
           next unless row
-          next if row["queue_length"].to_i.positive?
+
+          empty = !row["queue_length"].to_i.positive?
+          # Durable stream q_ tables are never drained by delivery (non-consuming
+          # peek), so a non-empty queue that has aged past the threshold is a
+          # leak, not a live stream — drop it. A nil age_sec (unknown created_at)
+          # is treated as young, never as infinitely old.
+          age_sec = row["age_sec"]
+          stale = !age_sec.nil? && age_sec.to_i >= threshold.to_i
+          next unless empty || stale
 
           Pgbus.client.drop_queue(full_name, prefixed: false)
           dropped += 1
-          Pgbus.logger.info { "[Pgbus] Dropped orphan stream queue: #{full_name}" }
+          reason = empty ? "empty" : "aged past #{threshold.to_i}s threshold"
+          Pgbus.logger.info { "[Pgbus] Dropped orphan stream queue (#{reason}): #{full_name}" }
           outcome.record_success
         rescue StandardError => e
           Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed for #{full_name}: #{e.message}" }
