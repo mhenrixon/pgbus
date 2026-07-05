@@ -11,11 +11,17 @@ module Pgbus
       # pattern.
       #
       # The write loop uses write_nonblock + IO.select so a slow client at most
-      # stalls *its own* mutex-protected write for `deadline_ms`, never the
-      # dispatcher or heartbeat thread. When the deadline expires with bytes
-      # still pending, we return :blocked; the caller (Connection#enqueue or
-      # Connection#write_comment) translates that into mark_dead!, and the
-      # heartbeat sweep eventually unregisters the connection.
+      # stalls the CALLING thread's mutex-protected write for `deadline_ms`.
+      # During fanout the dispatcher IS that caller, writing to each connection
+      # serially, so K slow-but-not-yet-dead clients stack the deadline
+      # (~K * deadline_ms) before each is marked dead — the head-of-line block.
+      # Fanout writes therefore pass the SHORT streams_fanout_write_deadline_ms
+      # (not streams_write_deadline_ms) to bound that stall (issue #315 item 3).
+      # When the deadline expires with bytes still pending, we return :blocked;
+      # the caller (Connection#enqueue or Connection#write_comment) translates
+      # that into mark_dead!, and the heartbeat sweep unregisters the
+      # connection — the client then reconnects and replays the gap from the
+      # durable archive.
       #
       # Returns:
       #   :ok       — all bytes written

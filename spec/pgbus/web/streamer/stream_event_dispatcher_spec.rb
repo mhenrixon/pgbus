@@ -23,7 +23,9 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     instance_double(
       Pgbus::Configuration,
       streams_stats_enabled: false,
-      stream_presence?: false
+      stream_presence?: false,
+      streams_fanout_write_deadline_ms: 250,
+      streams_write_deadline_ms: 5_000
     )
   end
 
@@ -46,7 +48,7 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
   let(:conn_class) do
     Class.new do
       attr_accessor :last_msg_id_sent, :presence_member
-      attr_reader :id, :stream_name, :enqueued, :context
+      attr_reader :id, :stream_name, :enqueued, :context, :enqueue_deadlines
 
       def initialize(id:, stream_name:, last_msg_id_sent: 0, context: nil)
         @id = id
@@ -54,11 +56,16 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
         @last_msg_id_sent = last_msg_id_sent
         @context = context
         @enqueued = []
+        # Records the deadline_ms the dispatcher passed on each enqueue so
+        # tests can assert fanout uses the short deadline and connect-replay
+        # the full one (issue #315 item 3).
+        @enqueue_deadlines = []
         @dead = false
         @presence_member = nil
       end
 
-      def enqueue(envelopes)
+      def enqueue(envelopes, deadline_ms: nil)
+        @enqueue_deadlines << deadline_ms
         @enqueued.concat(envelopes)
         envelopes.each { |e| @last_msg_id_sent = e.msg_id if e.msg_id > @last_msg_id_sent }
         envelopes
@@ -122,6 +129,119 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       msg = dispatch_queue.pop
       expect(msg).to be_a(described_class::DisconnectMessage)
       expect(msg.connection).to be(c1)
+    end
+  end
+
+  describe "per-phase write deadline (issue #315 item 3)" do
+    it "fans out a durable wake with the SHORT fanout deadline" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(c1.enqueue_deadlines).to eq([250])
+    end
+
+    it "fans out an ephemeral wake with the SHORT fanout deadline, written inline (not dropped)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      payload = JSON.generate({ "html" => "<turbo-stream>ephemeral</turbo-stream>" })
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat", payload: payload))
+
+      # The ephemeral frame reached the connection (no B1-style silent drop),
+      # and it used the short fanout deadline.
+      expect(c1.enqueued.length).to eq(1)
+      expect(c1.enqueue_deadlines).to eq([250])
+    end
+
+    it "replays a new connection with the FULL write deadline, not the short fanout one" do
+      conn = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      dispatcher.send(:handle, described_class::ConnectMessage.new(connection: conn))
+
+      # handle_connect steps 3 (archive replay) and 4 (in-flight drain) both
+      # use the full deadline; a fresh client catching up must not be killed
+      # by the 250ms fanout budget. The in-flight drain is a no-op empty
+      # buffer here, so only the non-empty step-3 write is recorded.
+      expect(conn.enqueue_deadlines).to all(eq(5_000))
+      expect(conn.enqueue_deadlines).not_to include(250)
+    end
+  end
+
+  describe "head-of-line blocking is bounded (issue #315 item 3)" do
+    # A connection whose enqueue blocks for `stall` seconds then marks itself
+    # dead — models a slow client whose fanout write hit the deadline. The
+    # dispatcher's registered.each loop must continue to the next connection
+    # after each stall, so K slow clients cost ~K*stall (bounded), and a fast
+    # client on the same stream is still serviced in the same wake.
+    let(:slow_conn_class) do
+      Class.new do
+        attr_accessor :last_msg_id_sent, :presence_member
+        attr_reader :id, :stream_name, :enqueued, :context, :enqueue_deadlines
+
+        def initialize(id:, stall:)
+          @id = id
+          @stream_name = "chat"
+          @last_msg_id_sent = 0
+          @stall = stall
+          @enqueued = []
+          @enqueue_deadlines = []
+          @dead = false
+          @presence_member = nil
+        end
+
+        def enqueue(envelopes, deadline_ms: nil)
+          @enqueue_deadlines << deadline_ms
+          sleep(@stall) # models the write blocking up to the fanout deadline
+          mark_dead!    # a :blocked write marks the connection dead
+          @enqueued.concat(envelopes)
+          []
+        end
+
+        def dead? = @dead
+        def mark_dead! = @dead = true
+      end
+    end
+
+    it "services a fast client on the same stream after a slow client stalls (loop advances)" do
+      slow = slow_conn_class.new(id: "slow", stall: 0.05)
+      fast = build_conn(id: "fast", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(slow)
+      registry.register(fast)
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      # The fast client received the frame despite the slow client stalling
+      # first — proof the fanout loop is not abandoned by one slow client.
+      expect(fast.enqueued.map(&:msg_id)).to eq([10])
+      # The slow client was marked dead (its blocked write hit the deadline)
+      # and a DisconnectMessage was posted for it via prune_dead.
+      expect(slow.dead?).to be true
+      disconnects = []
+      disconnects << dispatch_queue.pop until dispatch_queue.empty?
+      expect(disconnects.map(&:connection)).to include(slow)
+    end
+
+    it "bounds total stall to ~K*stall for K slow clients, not K*full_deadline" do
+      k = 3
+      stall = 0.02
+      slow_conns = Array.new(k) { |i| slow_conn_class.new(id: "slow-#{i}", stall: stall) }
+      slow_conns.each { |c| registry.register(c) }
+      allow(client).to receive(:read_after).and_return([build_envelope(10)])
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      # Serial stalls sum to ~K*stall. Generous ceiling (K*stall + slack) to
+      # stay non-flaky; the point is it scales with the SHORT deadline, and
+      # every slow client was serviced-then-pruned in the one pass.
+      expect(elapsed).to be < (k * stall) + 0.5
+      expect(slow_conns).to all(be_dead)
     end
   end
 
@@ -559,7 +679,12 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     # Config that turns on presence for the "room" stream and derives the
     # member from a Hash context's :member_id.
     let(:presence_config) do
-      instance_double(Pgbus::Configuration, streams_stats_enabled: false).tap do |c|
+      instance_double(
+        Pgbus::Configuration,
+        streams_stats_enabled: false,
+        streams_fanout_write_deadline_ms: 250,
+        streams_write_deadline_ms: 5_000
+      ).tap do |c|
         allow(c).to receive(:stream_presence?) { |name| name == "room" }
         allow(c).to receive(:presence_member_for) do |ctx|
           ctx.is_a?(Hash) && ctx[:member_id] ? { id: ctx[:member_id].to_s, metadata: ctx[:metadata] || {} } : nil
@@ -757,7 +882,13 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
 
     context "when streams_stats_enabled is true" do
       let(:dispatcher_config) do
-        instance_double(Pgbus::Configuration, streams_stats_enabled: true, stream_presence?: false)
+        instance_double(
+          Pgbus::Configuration,
+          streams_stats_enabled: true,
+          stream_presence?: false,
+          streams_fanout_write_deadline_ms: 250,
+          streams_write_deadline_ms: 5_000
+        )
       end
 
       it "records a broadcast with fanout = registered + in-flight subscriber count" do

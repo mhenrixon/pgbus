@@ -181,6 +181,15 @@ RSpec.describe Pgbus::Web::Streamer::Connection do
       expect(writer.writes.first[:deadline_ms]).to eq(5_000)
     end
 
+    it "forwards an explicit deadline_ms override to the writer (issue #315 item 3)" do
+      # The dispatcher passes the short fanout deadline for hot-loop writes;
+      # the override must reach the writer instead of the connection default.
+      # (The default-deadline case is covered by "passes the configured write
+      # deadline through to the writer" above.)
+      conn.enqueue([build_envelope(msg_id: 1248)], deadline_ms: 250)
+      expect(writer.writes.first[:deadline_ms]).to eq(250)
+    end
+
     it "accepts an empty array as a no-op" do
       expect { conn.enqueue([]) }.not_to raise_error
       expect(writer.writes).to be_empty

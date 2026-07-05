@@ -195,6 +195,59 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
     end
   end
 
+  describe "bounded dispatch queue drop (issue #315 item 3)" do
+    # handle_notify is exercised directly: the drop decision is pure and does
+    # not need the wait_for_notify thread machinery.
+    def build_listener(dispatch_queue_limit:)
+      described_class.new(
+        pg_connection: fake_pg,
+        dispatch_queue: dispatch_queue,
+        health_check_ms: 50,
+        logger: logger,
+        connection_factory: -> { factory_conns.shift },
+        dispatch_queue_limit: dispatch_queue_limit
+      )
+    end
+
+    it "enqueues every wake when the limit is 0 (unbounded, the default)" do
+      l = build_listener(dispatch_queue_limit: 0)
+      10.times { l.send(:handle_notify, "pgmq.q_chat.INSERT") }
+      expect(dispatch_queue.size).to eq(10)
+    end
+
+    it "drops a durable wake (payload nil) when the queue is at/over the limit" do
+      l = build_listener(dispatch_queue_limit: 2)
+      dispatch_queue << :filler_one
+      dispatch_queue << :filler_two # queue size now 2 == limit
+
+      l.send(:handle_notify, "pgmq.q_chat.INSERT") # durable, no payload
+
+      expect(dispatch_queue.size).to eq(2) # dropped, not enqueued
+      expect(l.dropped_wakes).to eq(1)
+    end
+
+    it "still enqueues durable wakes while below the limit" do
+      l = build_listener(dispatch_queue_limit: 5)
+      3.times { l.send(:handle_notify, "pgmq.q_chat.INSERT") }
+      expect(dispatch_queue.size).to eq(3)
+      expect(l.dropped_wakes).to eq(0)
+    end
+
+    it "NEVER drops an ephemeral wake (payload present) even at the limit" do
+      l = build_listener(dispatch_queue_limit: 1)
+      dispatch_queue << :filler # size 1 == limit
+
+      l.send(:handle_notify, "pgmq.q_chat.INSERT", '{"html":"<x/>"}')
+
+      expect(dispatch_queue.size).to eq(2) # ephemeral got through
+      dispatch_queue.pop # discard the filler
+      msg = dispatch_queue.pop
+      expect(msg).to be_a(described_class::WakeMessage)
+      expect(msg.payload).to eq('{"html":"<x/>"}')
+      expect(l.dropped_wakes).to eq(0)
+    end
+  end
+
   describe "health check" do
     it "runs SELECT 1 when wait_for_notify times out" do
       listener.start

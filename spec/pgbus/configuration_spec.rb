@@ -1550,6 +1550,14 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_write_deadline_ms).to eq(5_000)
     end
 
+    it "has a 250ms fanout write deadline (short, to bound head-of-line blocking)" do
+      expect(config.streams_fanout_write_deadline_ms).to eq(250)
+    end
+
+    it "leaves the dispatch queue unbounded by default (0 = unbounded)" do
+      expect(config.streams_dispatch_queue_limit).to eq(0)
+    end
+
     it "sizes the dedicated streams DB pool at 5 by default" do
       expect(config.streams_pool_size).to eq(5)
     end
@@ -1601,6 +1609,36 @@ RSpec.describe Pgbus::Configuration do
     it "rejects non-positive streams_write_deadline_ms" do
       config.streams_write_deadline_ms = 0
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_write_deadline_ms/)
+    end
+
+    it "rejects non-positive streams_fanout_write_deadline_ms" do
+      config.streams_fanout_write_deadline_ms = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_fanout_write_deadline_ms/)
+    end
+
+    it "rejects a non-integer streams_fanout_write_deadline_ms" do
+      config.streams_fanout_write_deadline_ms = 25.5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_fanout_write_deadline_ms/)
+    end
+
+    it "accepts streams_dispatch_queue_limit of 0 (the unbounded sentinel)" do
+      config.streams_dispatch_queue_limit = 0
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a positive streams_dispatch_queue_limit" do
+      config.streams_dispatch_queue_limit = 5_000
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a negative streams_dispatch_queue_limit" do
+      config.streams_dispatch_queue_limit = -1
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_dispatch_queue_limit/)
+    end
+
+    it "rejects a non-integer streams_dispatch_queue_limit" do
+      config.streams_dispatch_queue_limit = 2.5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_dispatch_queue_limit/)
     end
 
     it "rejects non-positive streams_pool_size" do

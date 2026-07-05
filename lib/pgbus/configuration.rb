@@ -133,7 +133,8 @@ module Pgbus
                   :streams_durable_patterns, :streams_broadcast_queue,
                   :streams_presence_patterns, :streams_presence_member,
                   :streams_host, :streams_port, :streams_database_url,
-                  :streams_pool_size, :streams_pool_timeout
+                  :streams_pool_size, :streams_pool_timeout,
+                  :streams_fanout_write_deadline_ms, :streams_dispatch_queue_limit
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
@@ -314,6 +315,30 @@ module Pgbus
       # PG keepalive interval.
       @streams_listen_health_check_ms = 250
       @streams_write_deadline_ms = 5_000
+      # Deadline (ms) for a socket write made INSIDE the dispatcher's
+      # serial fanout loop (handle_durable_wake / handle_ephemeral_wake).
+      # Kept far below streams_write_deadline_ms (5s) because these writes
+      # run one after another on the single dispatcher thread: K
+      # slow-but-not-yet-dead clients stack the stall, so the whole-thread
+      # worst case is ~K * this_value before each is marked dead
+      # (issue #315 item 3). A slow-but-alive client that can't absorb a
+      # fanout frame in this window is marked dead and reconnects — its
+      # EventSource Last-Event-ID then replays the missed frames from the
+      # durable archive (or triggers a fresh re-render for ephemeral
+      # streams, which have no archive). Connect-replay writes keep the
+      # full streams_write_deadline_ms. Set this equal to
+      # streams_write_deadline_ms to restore the pre-#315 timing.
+      @streams_fanout_write_deadline_ms = 250
+      # Optional cap on dispatch-queue depth checked by the Listener before
+      # it pushes a durable WakeMessage. 0 (default) = unbounded — today's
+      # behavior. A positive value makes the Listener DROP a durable wake
+      # when the queue is at/over the cap; this is safe because the next
+      # durable wake for that stream re-reads from the min cursor. It
+      # bounds DISTINCT-STREAM backlog only — a single hot stream's wakes
+      # coalesce (drain_wakes_for) so its depth stays low regardless.
+      # Ephemeral wakes (which carry the only copy of their HTML) and
+      # Connect/Disconnect messages are NEVER dropped (issue #315 item 3).
+      @streams_dispatch_queue_limit = 0
       # EXPERIMENTAL — exempt from the 1.0 stability promise.
       @streams_falcon_streaming_body = false
       # Opt-in: when true, the Dispatcher writes one row to
@@ -552,6 +577,15 @@ module Pgbus
 
       unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
         raise Pgbus::ConfigurationError, "streams_write_deadline_ms must be a positive integer"
+      end
+
+      unless streams_fanout_write_deadline_ms.is_a?(Integer) && streams_fanout_write_deadline_ms.positive?
+        raise Pgbus::ConfigurationError, "streams_fanout_write_deadline_ms must be a positive integer"
+      end
+
+      # >= 0, NOT .positive? — 0 is the valid "unbounded" sentinel.
+      unless streams_dispatch_queue_limit.is_a?(Integer) && streams_dispatch_queue_limit >= 0
+        raise Pgbus::ConfigurationError, "streams_dispatch_queue_limit must be a non-negative integer (0 = unbounded)"
       end
 
       unless streams_pool_size.is_a?(Integer) && streams_pool_size.positive?

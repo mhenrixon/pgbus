@@ -82,6 +82,37 @@ sizing Postgres/PgBouncer `max_connections`, budget `pool_size (or the
 auto-tuned resolved size) + streams_pool_size` per process rather than
 `pool_size` alone.
 
+### Fanout head-of-line blocking (issue #315 item 3)
+
+A single dispatcher thread per web-server process fans out every broadcast to
+every connected SSE client on the stream, writing to each socket **serially**.
+A slow client's socket write blocks that thread up to a deadline before the
+client is marked dead — and the connections queued behind it in the same wake
+wait. With the full `streams_write_deadline_ms` (5s) that meant K slow clients
+could stack a `K × 5s` stall on every other browser on the worker.
+
+Fanout writes now use a separate, shorter `config.streams_fanout_write_deadline_ms`
+(default **250 ms**), bounding the worst-case serial stall to `K × 250 ms`
+(~20× lower). A slow-but-alive client that can't absorb a fanout frame in that
+window is marked dead and reconnects; its `EventSource` `Last-Event-ID` then
+replays the gap from the durable archive (or triggers a fresh re-render for
+ephemeral streams). **Connect-replay** writes keep the full
+`streams_write_deadline_ms`, so a new client catching up a large backlog isn't
+evicted. Set `streams_fanout_write_deadline_ms = streams_write_deadline_ms` to
+restore the pre-fix timing.
+
+This is a **system-level** latency bound, not a per-write speedup: the fanout
+happy path (all-fast clients) is unchanged — the `deadline_ms` keyword is a
+zero-allocation pass-through (`streams_fanout_bench.rb`: 585k vs 583k i/s,
+within noise; 0 retained/op). `config.streams_dispatch_queue_limit` (default
+`0` = unbounded) optionally caps distinct-stream wake backlog by dropping
+durable wakes (never ephemeral/connect) when the Listener sees the queue at the
+cap — safe because the next durable wake re-reads from the min cursor.
+
+Deferred to a follow-up: a per-connection writer offload (moving the socket
+write off the dispatcher thread entirely), which needs an ack/replay path for
+ephemeral frames before it's safe.
+
 ### Reading the output
 
 `benchmark-ips` reports **i/s** (iterations per second — higher is better).
