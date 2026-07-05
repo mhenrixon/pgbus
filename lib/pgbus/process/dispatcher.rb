@@ -445,6 +445,10 @@ module Pgbus
         cutoff = Time.current - retention
         batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         prefix = config.queue_prefix
+        # Stream queues share the job prefix but are pruned separately by
+        # prune_stream_archives (per-stream retention). Skip them here so a
+        # stream archive is compacted by exactly one path, not both.
+        stream_names = current_stream_queue_names
 
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
@@ -453,6 +457,7 @@ module Pgbus
         queue_names.each_with_index do |full_name, index|
           break if interrupted?("Archive compaction", index, queue_names.size)
           next unless full_name.start_with?("#{prefix}_")
+          next if stream_names.include?(full_name)
 
           stripped = full_name.delete_prefix("#{prefix}_")
           deleted = Pgbus.client.purge_archive(stripped, older_than: cutoff, batch_size: batch_size)
@@ -475,8 +480,8 @@ module Pgbus
       # Lookup order for a given queue: exact string match, then regex
       # match, then streams_default_retention (5 minutes by default).
       def prune_stream_archives
-        prefix = config.streams_queue_prefix
-        return if prefix.nil? || prefix.empty?
+        stream_names = current_stream_queue_names
+        return if stream_names.empty?
 
         batch_size = ARCHIVE_COMPACTION_BATCH_SIZE
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
@@ -485,7 +490,7 @@ module Pgbus
         outcome = LoopOutcome.new
         queue_names.each_with_index do |full_name, index|
           break if interrupted?("Stream archive compaction", index, queue_names.size)
-          next unless full_name.start_with?("#{prefix}_")
+          next unless stream_names.include?(full_name)
 
           retention = retention_for_stream_queue(full_name)
           next unless retention.positive?
@@ -524,11 +529,11 @@ module Pgbus
       end
 
       def sweep_orphan_streams
-        prefix = config.streams_queue_prefix
-        return if prefix.nil? || prefix.empty?
-
         threshold = config.streams_orphan_threshold
         return unless threshold
+
+        stream_names = current_stream_queue_names
+        return if stream_names.empty?
 
         conn = config.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         queue_names = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
@@ -537,7 +542,7 @@ module Pgbus
         outcome = LoopOutcome.new
         queue_names.each_with_index do |full_name, index|
           break if interrupted?("Orphan stream sweep", index, queue_names.size)
-          next unless full_name.start_with?("#{prefix}_")
+          next unless stream_names.include?(full_name)
 
           safe_name = QueueNameValidator.sanitize!(full_name)
           row = conn.select_one(<<~SQL, "Pgbus Orphan Check")
@@ -573,6 +578,16 @@ module Pgbus
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed: #{e.message}" }
         e
+      end
+
+      # Fresh set of physical stream-queue names for this maintenance pass.
+      # Reset first so a stream created since the last hourly pass is picked
+      # up without a process restart. Empty on unmigrated installs (registry
+      # table absent) — callers then treat every queue as a job queue, which
+      # is the pre-registry behavior.
+      def current_stream_queue_names
+        Pgbus::StreamQueue.reset_cache!
+        Pgbus::StreamQueue.all_names
       end
 
       def cleanup_recurring_executions

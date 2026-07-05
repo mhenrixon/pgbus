@@ -38,6 +38,8 @@ module Pgbus
         # requires a roundtrip and a brief ACCESS SHARE lock on the archive
         # table. Broadcast-per-after_commit loops can hit this 1000x/sec on
         # the same stream, so memoize per-process after the first success.
+        # The StreamQueue registration shares this memo — both are one-time
+        # per stream per process and must both survive a first-broadcast.
         return if @stream_indexes_created[stream_name]
 
         sanitized = QueueNameValidator.sanitize!(full_name)
@@ -51,6 +53,11 @@ module Pgbus
             conn.exec(sql)
           end
         end
+
+        # Record the physical queue name so maintenance (stream-archive prune,
+        # orphan sweep, compact_archives) and wildcard workers can tell this
+        # queue apart from a job queue. No-ops on unmigrated installs.
+        Pgbus::StreamQueue.record!(full_name)
 
         @stream_indexes_created[stream_name] = true
       end

@@ -84,9 +84,10 @@ module Pgbus
       # See issues #101 and #104. The comparison is case-insensitive because
       # Postgres downcases unquoted identifiers in its error output, while
       # `sanitized` can contain uppercase characters for GlobalID-keyed streams
-      # (e.g. `pgbus_stream_Z2lkOi8vY29zbW9zL1VzZXIvMQ` from
-      # `pgbus_stream_from Current.user`). A case-sensitive substring match
-      # would miss the downcased relation name and let the exception escape.
+      # (e.g. `pgbus_Z2lkOi8vY29zbW9zL1VzZXIvMQ` from
+      # `pgbus_stream_from Current.user` — stream queues share the job prefix,
+      # see Configuration#queue_name). A case-sensitive substring match would
+      # miss the downcased relation name and let the exception escape.
       #
       # The regex uses `\b` word boundaries so `pgmq.q_<needle>` doesn't
       # accidentally match longer related identifiers like

@@ -147,6 +147,19 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     add_index :pgbus_recurring_executions, :run_at,
       name: "idx_pgbus_recurring_executions_cleanup"
 
+    # Stream queue registry — records which PGMQ queues back streams (vs jobs).
+    # Stream and job queues share the pgbus_ namespace, so maintenance
+    # (per-stream retention, orphan sweep) and wildcard workers rely on this
+    # table to tell them apart. Populated by ensure_stream_queue on first
+    # broadcast. See issues #308, #309.
+    create_table :pgbus_stream_queues do |t|
+      t.string :queue_name, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_stream_queues, :queue_name,
+      unique: true, name: "idx_pgbus_stream_queues_queue_name"
+
     # Create default queues via PGMQ
     execute "SELECT pgmq.create('pgbus_default')"
     execute "SELECT pgmq.create('pgbus_default_dlq')"
@@ -167,6 +180,7 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
     execute "SELECT pgmq.drop_queue('pgbus_default_dlq')"
     execute "SELECT pgmq.drop_queue('pgbus_default')"
 
+    drop_table :pgbus_stream_queues
     drop_table :pgbus_recurring_executions
     drop_table :pgbus_recurring_tasks
     drop_table :pgbus_batches

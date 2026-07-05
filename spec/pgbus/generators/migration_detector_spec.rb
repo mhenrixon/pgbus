@@ -157,6 +157,18 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
     end
 
+    context "with stream queue registry detection" do
+      it "queues add_stream_queues when pgbus_stream_queues is missing" do
+        expect(detector.missing_migrations).to include(:add_stream_queues)
+      end
+
+      it "does not queue add_stream_queues when the table already exists" do
+        add_table("pgbus_stream_queues")
+
+        expect(detector.missing_migrations).not_to include(:add_stream_queues)
+      end
+    end
+
     context "with presence detection" do
       it "queues add_presence when pgbus_presence_members is missing" do
         expect(detector.missing_migrations).to include(:add_presence)
@@ -360,6 +372,7 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
           :add_job_stats_latency,
           :add_job_stats_queue_index,
           :add_stream_stats,
+          :add_stream_queues,
           :add_presence,
           :add_queue_states,
           :add_outbox,

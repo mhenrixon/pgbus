@@ -1,0 +1,11 @@
+class AddPgbusStreamQueues < ActiveRecord::Migration<%= migration_version %>
+  def change
+    create_table :pgbus_stream_queues do |t|
+      t.string :queue_name, null: false
+      t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+    end
+
+    add_index :pgbus_stream_queues, :queue_name,
+      unique: true, name: "idx_pgbus_stream_queues_queue_name"
+  end
+end
