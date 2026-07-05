@@ -1214,7 +1214,6 @@ Without the plugin, Puma closes hijacked SSE sockets abruptly during graceful re
 ```ruby
 Pgbus.configure do |c|
   c.streams_enabled                = true          # default
-  c.streams_queue_prefix           = "pgbus_stream"
   c.streams_default_retention      = 5 * 60        # 5 minutes
   c.streams_retention              = {             # per-stream overrides
     /^chat_/        => 7 * 24 * 3600,              # 7 days for chat history
@@ -1243,7 +1242,7 @@ Without the flag (default), Falcon uses the same `rack.hijack` path as Puma via 
 
 ### How it works
 
-Stream broadcasts are stored in PGMQ queues prefixed `pgbus_stream_*`. Each broadcast is assigned a monotonic `msg_id` by PGMQ. The `pgbus_stream_from` helper captures the current `MAX(msg_id)` at render time and embeds it in the HTML as `since-id`. When the SSE client connects, it sends that cursor as `?since=` on the first request and as `Last-Event-ID` on reconnects. The streamer replays from `pgmq.q_*` (live) UNION `pgmq.a_*` (archive) for any `msg_id > cursor`, then switches to LISTEN/NOTIFY for the live path. There is no message identity gap between the render and the subscribe — the cursor model guarantees every broadcast is delivered exactly once, in order, even across reconnects.
+Stream broadcasts are stored in PGMQ queues named `#{queue_prefix}_<stream>` (e.g. `pgbus_chat_42`), the same namespace as job queues; the `pgbus_stream_queues` registry records which of those queues back streams so maintenance and wildcard workers can tell them apart. Each broadcast is assigned a monotonic `msg_id` by PGMQ. The `pgbus_stream_from` helper captures the current `MAX(msg_id)` at render time and embeds it in the HTML as `since-id`. When the SSE client connects, it sends that cursor as `?since=` on the first request and as `Last-Event-ID` on reconnects. The streamer replays from `pgmq.q_*` (live) UNION `pgmq.a_*` (archive) for any `msg_id > cursor`, then switches to LISTEN/NOTIFY for the live path. There is no message identity gap between the render and the subscribe — the cursor model guarantees every broadcast is delivered exactly once, in order, even across reconnects.
 
 One Puma worker (or Falcon reactor) hosts one `Pgbus::Web::Streamer::Instance` singleton with three threads (Listener / Dispatcher / Heartbeat) and one dedicated PG connection for LISTEN. Hijacked SSE sockets are held outside the web server's thread pool on Puma (confirmed by an integration test that fires 20 concurrent hijacked connections and observes them complete in parallel on an 8-thread Puma server, [puma/puma#1009](https://github.com/puma/puma/issues/1009)) and inside a fiber on Falcon (one fiber per hijacked connection, scheduler-backed non-blocking IO).
 

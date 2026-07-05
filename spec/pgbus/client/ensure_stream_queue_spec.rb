@@ -21,6 +21,7 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
     allow(client).to receive(:ensure_queue)
     # Stub notify trigger check — runs raw SQL which needs a real PG connection.
     allow(client).to receive(:notify_trigger_current?).and_return(false)
+    allow(Pgbus::StreamQueue).to receive(:record!)
   end
 
   let(:config) do
@@ -36,6 +37,21 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
     it "delegates queue creation to ensure_queue" do
       client.ensure_stream_queue("chat")
       expect(client).to have_received(:ensure_queue).with("chat")
+    end
+
+    it "records the physical queue name in the StreamQueue registry" do
+      client.ensure_stream_queue("chat")
+
+      expect(Pgbus::StreamQueue).to have_received(:record!).with("pgbus_test_chat")
+    end
+
+    it "records the registry entry only once per stream per process" do
+      allow(raw_conn).to receive(:exec)
+
+      client.ensure_stream_queue("chat")
+      client.ensure_stream_queue("chat")
+
+      expect(Pgbus::StreamQueue).to have_received(:record!).with("pgbus_test_chat").once
     end
 
     it "creates the msg_id index on the archive table" do

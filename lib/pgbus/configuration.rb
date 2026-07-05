@@ -263,6 +263,11 @@ module Pgbus
 
       @streams_enabled = true
       @streams_path = nil
+      # Retained for backward compatibility only — NO LONGER USED for queue
+      # naming or stream detection. Stream queues are named like job queues
+      # (`#{queue_prefix}_<name>`, see #queue_name) and are identified via the
+      # `pgbus_stream_queues` registry (Pgbus::StreamQueue), not by this prefix.
+      # Setting it has no effect. See issue #308.
       @streams_queue_prefix = "pgbus_stream"
       # Streamer-only connection overrides. The Streamer's Listener owns a
       # dedicated long-lived `wait_for_notify` PG connection that can't go

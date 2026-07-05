@@ -890,6 +890,21 @@ RSpec.describe Pgbus::Process::Worker do
 
     before do
       allow(ActiveRecord::Base).to receive(:connection).and_return(conn)
+      # Default: no registered streams, so wildcard resolution is unchanged.
+      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, all_names: Set.new)
+    end
+
+    it "excludes registered stream queues (issue #309)" do
+      # A stream queue is named like a job queue (pgbus_<name>); only the
+      # registry distinguishes it. A wildcard worker must NOT adopt it, or it
+      # would claim durable broadcasts and DLQ-move them.
+      allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(["#{prefix}_chat_42"]))
+      allow(conn).to receive(:select_values)
+        .and_return(["#{prefix}_default", "#{prefix}_chat_42", "#{prefix}_events"])
+
+      worker.send(:resolve_wildcard_queues)
+
+      expect(worker.queues).to eq(%w[default events])
     end
 
     it "is a no-op for non-wildcard workers" do

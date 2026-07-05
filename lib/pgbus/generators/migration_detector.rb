@@ -71,6 +71,7 @@ module Pgbus
         add_job_stats_latency: "pgbus:add_job_stats_latency",
         add_job_stats_queue_index: "pgbus:add_job_stats_queue_index",
         add_stream_stats: "pgbus:add_stream_stats",
+        add_stream_queues: "pgbus:add_stream_queues",
         add_presence: "pgbus:add_presence",
         add_queue_states: "pgbus:add_queue_states",
         add_outbox: "pgbus:add_outbox",
@@ -88,6 +89,7 @@ module Pgbus
         add_job_stats_latency: "job stats latency columns (enqueue_latency_ms, retry_count)",
         add_job_stats_queue_index: "job stats (queue_name, created_at) index",
         add_stream_stats: "stream stats table (opt-in real-time Insights)",
+        add_stream_queues: "stream queue registry (per-stream retention, orphan sweep, wildcard-worker safety)",
         add_presence: "presence members table (Turbo Streams presence)",
         add_queue_states: "queue states table (pause/resume)",
         add_outbox: "outbox entries table (transactional outbox)",
@@ -112,6 +114,7 @@ module Pgbus
           *uniqueness_key_migrations,
           *job_stats_migrations,
           *stream_stats_migrations,
+          *stream_queues_migrations,
           *presence_migrations,
           *queue_states_migrations,
           *outbox_migrations,
@@ -164,6 +167,10 @@ module Pgbus
 
       def stream_stats_migrations
         table_exists?("pgbus_stream_stats") ? [] : [:add_stream_stats]
+      end
+
+      def stream_queues_migrations
+        table_exists?("pgbus_stream_queues") ? [] : [:add_stream_queues]
       end
 
       def presence_migrations
