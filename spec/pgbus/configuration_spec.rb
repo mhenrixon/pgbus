@@ -1558,6 +1558,14 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_dispatch_queue_limit).to eq(0)
     end
 
+    it "runs fanout writes inline by default (0 writer threads)" do
+      expect(config.streams_writer_threads).to eq(0)
+    end
+
+    it "leaves the per-connection writer buffer unbounded by default (0 = unbounded)" do
+      expect(config.streams_writer_buffer_limit).to eq(0)
+    end
+
     it "sizes the dedicated streams DB pool at 5 by default" do
       expect(config.streams_pool_size).to eq(5)
     end
@@ -1639,6 +1647,46 @@ RSpec.describe Pgbus::Configuration do
     it "rejects a non-integer streams_dispatch_queue_limit" do
       config.streams_dispatch_queue_limit = 2.5
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_dispatch_queue_limit/)
+    end
+
+    it "accepts streams_writer_threads of 0 (the inline sentinel)" do
+      config.streams_writer_threads = 0
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a positive streams_writer_threads" do
+      config.streams_writer_threads = 2
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a negative streams_writer_threads" do
+      config.streams_writer_threads = -1
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_writer_threads/)
+    end
+
+    it "rejects a non-integer streams_writer_threads" do
+      config.streams_writer_threads = 1.5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_writer_threads/)
+    end
+
+    it "accepts streams_writer_buffer_limit of 0 (the unbounded sentinel)" do
+      config.streams_writer_buffer_limit = 0
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a positive streams_writer_buffer_limit" do
+      config.streams_writer_buffer_limit = 1_000
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a negative streams_writer_buffer_limit" do
+      config.streams_writer_buffer_limit = -1
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_writer_buffer_limit/)
+    end
+
+    it "rejects a non-integer streams_writer_buffer_limit" do
+      config.streams_writer_buffer_limit = 2.5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_writer_buffer_limit/)
     end
 
     it "rejects non-positive streams_pool_size" do

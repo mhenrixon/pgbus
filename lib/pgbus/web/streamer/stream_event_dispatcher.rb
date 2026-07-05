@@ -35,6 +35,13 @@ module Pgbus
         WakeMessage          = Listener::WakeMessage
         ConnectMessage       = Data.define(:connection)
         DisconnectMessage    = Data.define(:connection)
+        # Posted by the OutboundPump (issue #321) after a successful off-thread
+        # durable fanout write, carrying the highest msg_id the writer actually
+        # committed for the connection. The dispatcher — the sole owner of
+        # @scanned_cursor — drains these via apply_acks and advances the scan
+        # cursor by accepted_max, so a failed/partial write never advances the
+        # cursor past a frame that didn't reach the socket.
+        WriteAckMessage      = Data.define(:connection, :accepted_max)
         # Posted by the Heartbeat once per tick with the current presence
         # connections, so the touch (a last_seen_at refresh) runs on the
         # dispatcher thread where AR connections are released each pass.
@@ -68,13 +75,21 @@ module Pgbus
         def initialize(client:, registry:, listener:, dispatch_queue:,
                        logger: Pgbus.logger, read_limit: DEFAULT_READ_LIMIT,
                        filters: nil, config: nil, stream_counter: nil,
-                       presence_provider: nil)
+                       presence_provider: nil, pump: nil, ack_queue: nil)
           @client = client
           @registry = registry
           @listener = listener
           @queue = dispatch_queue
           @logger = logger
           @read_limit = read_limit
+          # Off-thread durable fanout (issue #321). When @pump is non-nil
+          # (streams_writer_threads > 0), handle_durable_wake hands each
+          # registered-connection write to the pump instead of writing inline;
+          # the pump reports back an accepted-max on @ack_queue, which the
+          # dispatcher drains in apply_acks to advance @scanned_cursor. When
+          # nil (default), fanout writes stay inline — the pre-#321 behavior.
+          @pump = pump
+          @ack_queue = ack_queue
           # Vends a presence handle for a logical stream name. Injected so
           # tests can record join/leave/touch without a DB. Production
           # defaults to the real per-stream Presence via Pgbus.stream.
@@ -157,6 +172,12 @@ module Pgbus
 
         def run_loop
           while @running
+            # Apply any writer acks before doing anything else, so the scan
+            # cursor is current for the wake we're about to process — without
+            # this top-of-loop drain a wake burst would compute minimum_cursor
+            # from a stale floor and re-read/re-filter the whole un-acked
+            # window every wake (the re-read storm, issue #321).
+            apply_acks
             msg = @queue.pop
             break if msg == :__stop__
 
@@ -235,6 +256,9 @@ module Pgbus
         end
 
         def handle_durable_wake(stream, registered, in_flight_pairs, started_at)
+          # Drain writer acks before computing the read floor so a burst of
+          # wakes doesn't re-read the un-acked window (issue #321).
+          apply_acks
           min_seen = minimum_cursor(registered, in_flight_pairs)
           raw_envelopes = @client.read_after(stream, after_id: min_seen, limit: @read_limit)
           return if raw_envelopes.empty?
@@ -243,8 +267,18 @@ module Pgbus
           max_msg_id = envelopes.map(&:msg_id).max
 
           registered.each do |conn|
-            safe_enqueue(conn, visible_envelopes_for(envelopes, conn))
-            advance_scanned_cursor(conn, max_msg_id)
+            visible = visible_envelopes_for(envelopes, conn)
+            if @pump
+              # Off-thread: hand the write to the pump and DEFER the scan-cursor
+              # advance to the ack (which carries the writer's accepted max).
+              # Post even when `visible` is empty, with batch max, so an
+              # audience-filtered-away batch still advances the cursor past the
+              # hidden window (issue #321 B2). The pump raises on ephemerals.
+              @pump.post(conn, visible, max_msg_id, deadline_ms: @fanout_write_deadline_ms)
+            else
+              safe_enqueue(conn, visible)
+              advance_scanned_cursor(conn, max_msg_id)
+            end
           end
           in_flight_pairs.each do |(conn, buffer)|
             buffer.concat(visible_envelopes_for(envelopes, conn))
@@ -451,6 +485,36 @@ module Pgbus
 
           current = @scanned_cursor[connection] || 0
           @scanned_cursor[connection] = msg_id if msg_id > current
+        end
+
+        # Drain every pending writer ack and advance the scan cursor by the
+        # writer's accepted max (issue #321). Runs ONLY on the dispatcher
+        # thread, so @scanned_cursor keeps its single-owner invariant — the
+        # pump only reports a value via @ack_queue, it never mutates cursor
+        # state. Non-blocking: stops when the queue is empty. A no-op when
+        # offload is off (@ack_queue nil). advance_scanned_cursor is
+        # monotonic-max-guarded, so a re-applied or cross-connection-reordered
+        # ack is idempotent.
+        #
+        # Drops a stale ack for a connection that is no longer registered: the
+        # ack queue is drained independently of DisconnectMessages, so a
+        # successful-write ack can arrive AFTER handle_disconnect has already
+        # deleted @scanned_cursor[conn] (e.g. the heartbeat swept an idle client
+        # mid-write). Advancing the cursor then would resurrect the connection
+        # in @scanned_cursor and leak that entry forever. The equal? check also
+        # rejects an ack for a since-replaced connection object sharing the same
+        # id.
+        def apply_acks
+          return unless @ack_queue
+
+          loop do
+            ack = @ack_queue.pop(true)
+            next unless @registry.lookup(ack.connection.id).equal?(ack.connection)
+
+            advance_scanned_cursor(ack.connection, ack.accepted_max)
+          rescue ThreadError
+            break # queue drained
+          end
         end
 
         # deadline_ms defaults to the SHORT fanout deadline: every hot-loop

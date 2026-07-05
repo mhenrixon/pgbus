@@ -13,17 +13,29 @@ module Pgbus
       # cursor only for envelopes that actually wrote successfully. This is
       # the client-side leg of the replay-race fix (§6.5 of the design doc).
       class Connection
-        attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
+        attr_reader :id, :stream_name, :io, :mutex, :context
         # The presence member id this connection auto-joined as, or nil for
         # non-presence streams / anonymous connections. Set by the
         # Dispatcher on connect; read on disconnect and heartbeat touch.
         attr_accessor :presence_member
 
+        # last_msg_id_sent is the ONE field whose writer can cross threads: with
+        # streams_writer_threads > 0 (issue #321) the OutboundPump worker thread
+        # advances it inside #enqueue, while the dispatcher thread reads it via
+        # cursor_for / handle_connect. A Concurrent::AtomicReference gives a real
+        # happens-before on every Ruby engine (not just MRI's GVL) at ~ns cost —
+        # one worker only ever writes a given connection's field (stable
+        # partition), so there's no writer-writer contention. Inline mode
+        # (default) reads/writes it single-threaded, semantically identical.
+        def last_msg_id_sent
+          @last_msg_id_sent.get
+        end
+
         def initialize(id:, stream_name:, io:, since_id:, writer:, write_deadline_ms:, context: nil)
           @id = id
           @stream_name = stream_name
           @io = io
-          @last_msg_id_sent = since_id.to_i
+          @last_msg_id_sent = Concurrent::AtomicReference.new(since_id.to_i)
           @writer = writer
           @write_deadline_ms = write_deadline_ms
           @mutex = Mutex.new
@@ -48,7 +60,7 @@ module Pgbus
           written = []
           envelopes.each do |envelope|
             ephemeral = envelope.msg_id.negative?
-            next if !ephemeral && envelope.msg_id <= @last_msg_id_sent
+            next if !ephemeral && envelope.msg_id <= @last_msg_id_sent.get
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
@@ -58,7 +70,7 @@ module Pgbus
 
             result = @writer.write(self, bytes, deadline_ms: deadline_ms)
             if result == :ok
-              @last_msg_id_sent = envelope.msg_id unless ephemeral
+              @last_msg_id_sent.set(envelope.msg_id) unless ephemeral
               @last_write_at = monotonic
               written << envelope
             else

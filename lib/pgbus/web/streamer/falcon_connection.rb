@@ -12,15 +12,23 @@ module Pgbus
       # directly to body.write which is backed by Thread::Queue and
       # is fiber-safe under Falcon's scheduler.
       class FalconConnection
-        attr_reader :id, :stream_name, :io, :mutex, :last_msg_id_sent, :context
+        attr_reader :id, :stream_name, :io, :mutex, :context
         attr_accessor :presence_member
+
+        # last_msg_id_sent mirrors Connection's cross-thread cursor (issue #321):
+        # a Concurrent::AtomicReference so the OutboundPump worker's advance and
+        # the dispatcher's read have a happens-before on every Ruby engine. See
+        # the note on Connection#last_msg_id_sent.
+        def last_msg_id_sent
+          @last_msg_id_sent.get
+        end
 
         def initialize(id:, stream_name:, body:, since_id:, write_deadline_ms:, context: nil)
           @id = id
           @stream_name = stream_name
           @body = body
           @io = body
-          @last_msg_id_sent = since_id.to_i
+          @last_msg_id_sent = Concurrent::AtomicReference.new(since_id.to_i)
           @write_deadline_ms = write_deadline_ms
           @mutex = Mutex.new
           @dead = false
@@ -38,7 +46,7 @@ module Pgbus
         def enqueue(envelopes, deadline_ms: @write_deadline_ms) # rubocop:disable Lint/UnusedMethodArgument
           written = []
           envelopes.each do |envelope|
-            next if envelope.msg_id <= @last_msg_id_sent
+            next if envelope.msg_id <= @last_msg_id_sent.get
 
             bytes = Pgbus::Streams::Envelope.message(
               id: envelope.msg_id,
@@ -48,7 +56,7 @@ module Pgbus
 
             result = write_to_body(bytes)
             if result == :ok
-              @last_msg_id_sent = envelope.msg_id
+              @last_msg_id_sent.set(envelope.msg_id)
               @last_write_at = monotonic
               written << envelope
             else

@@ -245,6 +245,127 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
     end
   end
 
+  describe "durable fanout offload (issue #321)" do
+    # A spy pump records post() calls instead of writing. The dispatcher, when
+    # given a pump, must route durable fanout writes to it (not inline) and
+    # advance the scan cursor only when it drains a WriteAckMessage.
+    subject(:dispatcher) do
+      described_class.new(
+        client: client, registry: registry, listener: listener,
+        dispatch_queue: dispatch_queue, logger: logger, read_limit: 500,
+        config: dispatcher_config, pump: pump, ack_queue: ack_queue
+      )
+    end
+
+    let(:pump) do
+      Class.new do
+        attr_reader :posts
+
+        def initialize = @posts = []
+
+        def post(connection, envelopes, batch_max, deadline_ms:)
+          @posts << { connection: connection, envelopes: envelopes, batch_max: batch_max, deadline_ms: deadline_ms }
+        end
+      end.new
+    end
+    let(:ack_queue) { Queue.new }
+
+    it "routes a durable wake to the pump instead of writing inline" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      allow(client).to receive(:read_after).and_return([build_envelope(10), build_envelope(11)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(pump.posts.size).to eq(1)
+      expect(pump.posts.first[:connection]).to be(c1)
+      expect(pump.posts.first[:envelopes].map(&:msg_id)).to eq([10, 11])
+      expect(pump.posts.first[:batch_max]).to eq(11)
+      expect(pump.posts.first[:deadline_ms]).to eq(250) # short fanout deadline
+      # No inline enqueue happened (the fake conn records enqueue_deadlines).
+      expect(c1.enqueue_deadlines).to be_empty
+    end
+
+    it "does NOT advance the scan cursor at post time (deferred to the ack, B2)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      allow(client).to receive(:read_after).and_return([build_envelope(10), build_envelope(11)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      # minimum_cursor for the next read should still see cursor 0 (nothing
+      # acked yet), NOT 11 — proving the dispatcher didn't speculatively advance.
+      expect(dispatcher.send(:cursor_for, c1)).to eq(0)
+    end
+
+    it "advances the scan cursor by the ACCEPTED max when it drains an ack (B2)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      ack_queue << described_class::WriteAckMessage.new(connection: c1, accepted_max: 10)
+
+      dispatcher.send(:apply_acks)
+
+      expect(dispatcher.send(:cursor_for, c1)).to eq(10)
+    end
+
+    it "drops a late ack for an already-disconnected connection (no @scanned_cursor resurrection)" do
+      # Race: the pump acks a successful write, but a DisconnectMessage for the
+      # same connection was processed first (heartbeat idle-sweep). The late ack
+      # must NOT reinsert the connection into @scanned_cursor — that entry would
+      # leak forever since handle_disconnect never runs for it again.
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      # Disconnect first: unregisters + deletes @scanned_cursor[c1].
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c1))
+      # Then a stale ack arrives for the now-gone connection.
+      ack_queue << described_class::WriteAckMessage.new(connection: c1, accepted_max: 10)
+
+      dispatcher.send(:apply_acks)
+
+      scanned = dispatcher.instance_variable_get(:@scanned_cursor)
+      expect(scanned).not_to have_key(c1)
+    end
+
+    it "drains pending acks before computing minimum_cursor on a wake (apply_acks graft)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      # An ack for 10 is queued; the next wake must apply it FIRST so read_after
+      # is called with after_id: 10, not 0 (the re-read storm guard).
+      ack_queue << described_class::WriteAckMessage.new(connection: c1, accepted_max: 10)
+      allow(client).to receive(:read_after).and_return([])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(client).to have_received(:read_after).with("chat", after_id: 10, limit: 500)
+    end
+
+    it "keeps EPHEMERAL fanout INLINE even when the pump is present (B1)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      payload = JSON.generate({ "html" => "<turbo-stream>ephemeral</turbo-stream>" })
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat", payload: payload))
+
+      # The pump was NOT used for the ephemeral; it was written inline.
+      expect(pump.posts).to be_empty
+      expect(c1.enqueued.map(&:payload)).to eq(["<turbo-stream>ephemeral</turbo-stream>"])
+    end
+
+    it "still posts (with batch_max) when the filtered batch is empty so the cursor advances (B2b)" do
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      # An audience filter that hides everything.
+      allow(dispatcher).to receive(:visible_envelopes_for).and_return([])
+      allow(client).to receive(:read_after).and_return([build_envelope(12)])
+
+      dispatcher.send(:handle, described_class::WakeMessage.new(queue_name: "chat"))
+
+      expect(pump.posts.size).to eq(1)
+      expect(pump.posts.first[:envelopes]).to be_empty
+      expect(pump.posts.first[:batch_max]).to eq(12)
+    end
+  end
+
   describe "ConnectMessage — the 5-step race-free replay sequence" do
     let(:connection) { build_conn(id: "new", stream_name: "chat", last_msg_id_sent: 1247) }
 
