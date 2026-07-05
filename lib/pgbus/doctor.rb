@@ -5,7 +5,7 @@ require "pgbus/mcp/health_analyzer"
 
 module Pgbus
   # Preflight diagnostics for a pgbus deployment — the single command that
-  # answers "is this environment healthy enough to run?". Runs seven checks and
+  # answers "is this environment healthy enough to run?". Runs eight checks and
   # returns a machine-readable result plus a human report, so `pgbus doctor`
   # and `rake pgbus:doctor` can gate a deploy or CI run (exit 0 on success,
   # 1 on any failure).
@@ -41,7 +41,8 @@ module Pgbus
         check_queues,
         check_notify,
         check_processes,
-        check_allowed_global_id_models
+        check_allowed_global_id_models,
+        check_broadcast_queue
       ].map(&:to_h)
     end
 
@@ -208,6 +209,29 @@ module Pgbus
                 detail: @config.allowed_global_id_models.nil? ? "allow-all (non-production)" : "allowlist configured")
     rescue StandardError => e
       Check.new(name: "GlobalID allowlist", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # 8. Broadcast-queue isolation — latency. With turbo-rails loaded, the
+    # default broadcasts_to/broadcasts_refreshes path enqueues render+broadcast
+    # ActiveJobs on the DEFAULT queue, so a browser SSE update can wait behind
+    # long-running jobs (#311). Setting streams_broadcast_queue routes those
+    # jobs to a dedicated queue an operator can back with its own capsule. Warn
+    # only in production (where the blast radius is real) and only when Turbo is
+    # actually loaded; a warning, never a failure.
+    def check_broadcast_queue
+      relevant = @config.streams_enabled && defined?(::Turbo::Broadcastable) && production?
+
+      if relevant && @config.streams_broadcast_queue.nil?
+        return Check.new(name: "Broadcast queue", status: :warn,
+                         detail: "streams_broadcast_queue is nil — turbo-rails broadcast jobs share the " \
+                                 "default queue and can wait behind long-running jobs; set a dedicated queue " \
+                                 "(e.g. \"realtime\") and back it with a worker capsule")
+      end
+
+      Check.new(name: "Broadcast queue", status: :ok,
+                detail: @config.streams_broadcast_queue ? "dedicated: #{@config.streams_broadcast_queue}" : "n/a")
+    rescue StandardError => e
+      Check.new(name: "Broadcast queue", status: :fail, detail: "#{e.class}: #{e.message}")
     end
 
     # Physical queue names known to PGMQ. list_queues rows may be Hashes (with a

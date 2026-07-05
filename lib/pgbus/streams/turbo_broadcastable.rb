@@ -62,5 +62,28 @@ module Pgbus
 
       ::Turbo::StreamsChannel.singleton_class.prepend(TurboBroadcastable)
     end
+
+    # turbo-rails' async broadcast helpers (`broadcast_*_later_to`, the
+    # default for `broadcasts_to`/`broadcasts_refreshes`) enqueue these three
+    # ActiveJobs, which ship with no `queue_as` and so land on the default
+    # queue — where a render+broadcast can wait behind long-running jobs
+    # before the browser sees the update (#311). When the operator sets
+    # `config.streams_broadcast_queue`, route them to that dedicated queue so
+    # a `realtime:`-style worker capsule can isolate broadcast latency from job
+    # throughput. Called from the engine's turbo_broadcastable initializer.
+    # No-op when the queue is nil or turbo-rails is not loaded.
+    def self.install_broadcast_queue!(queue_name)
+      return if queue_name.nil?
+
+      %w[
+        Turbo::Streams::ActionBroadcastJob
+        Turbo::Streams::BroadcastJob
+        Turbo::Streams::BroadcastStreamJob
+      ].each do |const_name|
+        next unless Object.const_defined?(const_name)
+
+        Object.const_get(const_name).queue_as(queue_name)
+      end
+    end
   end
 end

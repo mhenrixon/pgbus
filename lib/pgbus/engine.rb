@@ -154,6 +154,12 @@ module Pgbus
           if defined?(::Turbo::Broadcastable)
             _autoload_trigger_broadcastable = Pgbus::Streams::BroadcastableOverride
             Pgbus::Streams::BroadcastableOverride.install!(::Turbo::Broadcastable)
+
+            # Route turbo-rails' async broadcast jobs to a dedicated queue when
+            # configured, so a broadcasts_to render+broadcast doesn't wait
+            # behind long-running jobs on the default queue (#311). No-op when
+            # streams_broadcast_queue is nil.
+            Pgbus::Streams.install_broadcast_queue!(Pgbus.configuration.streams_broadcast_queue)
           end
 
           # Subscribe-side patch: override turbo_stream_from to render

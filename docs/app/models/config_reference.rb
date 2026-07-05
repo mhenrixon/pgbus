@@ -112,7 +112,8 @@ module ConfigReference
       { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
       { name: "streams_test_mode", type: "Boolean", default: "false", desc: "Return a stub SSE response (auto-enabled by the test helpers)." },
       { name: "streams_presence_patterns", type: "Array", default: "[]", desc: "Streams (exact string or Regexp) that get connection-driven presence: auto-join on connect, auto-leave on disconnect, heartbeat touch. Experimental — exempt from the 1.0 stability promise." },
-      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor. Experimental — exempt from the 1.0 stability promise." }
+      { name: "streams_presence_member", type: "Callable, nil", default: "nil", desc: "Custom `->(context) { { id:, metadata: } }` extractor for connection-driven presence; nil uses the built-in Hash/#id extractor. Experimental — exempt from the 1.0 stability promise." },
+      { name: "streams_broadcast_queue", type: "String, nil", default: "nil", desc: "Dedicated queue for turbo-rails' async broadcast jobs. nil leaves them on the default queue (a broadcasts_to render+broadcast can wait behind long-running jobs). Set a queue name and back it with a worker capsule to isolate broadcast latency." }
     ],
     "Validation" => [
       { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },

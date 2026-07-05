@@ -41,8 +41,8 @@ RSpec.describe Pgbus::Doctor do
   end
 
   describe "#run" do
-    it "runs seven checks" do
-      expect(doctor.run.size).to eq(7)
+    it "runs eight checks" do
+      expect(doctor.run.size).to eq(8)
     end
 
     it "returns hashes with :name, :status, :detail keys" do
@@ -266,6 +266,51 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  describe "the streams broadcast-queue isolation check (#311)" do
+    before do
+      config.streams_enabled = true
+      stub_const("Turbo::Broadcastable", Module.new)
+    end
+
+    it "warns in production when streams are on, Turbo is loaded, and no dedicated broadcast queue is set" do
+      config.streams_broadcast_queue = nil
+      allow(doctor).to receive(:production?).and_return(true)
+
+      check = broadcast_queue_check(doctor.run)
+      expect(check[:status]).to eq(:warn)
+      expect(check[:detail]).to include("streams_broadcast_queue")
+    end
+
+    it "is :ok when a dedicated broadcast queue is configured" do
+      config.streams_broadcast_queue = "realtime"
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(broadcast_queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "is :ok outside production even without a dedicated broadcast queue" do
+      config.streams_broadcast_queue = nil
+      allow(doctor).to receive(:production?).and_return(false)
+
+      expect(broadcast_queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "is :ok when turbo-rails is not loaded (no broadcast jobs to isolate)" do
+      hide_const("Turbo::Broadcastable")
+      config.streams_broadcast_queue = nil
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(broadcast_queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "does not fail the run — a warning never blocks a deploy" do
+      config.streams_broadcast_queue = nil
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(doctor.success?).to be(true)
+    end
+  end
+
   describe "#report" do
     it "renders one line per check" do
       report = doctor.report
@@ -348,4 +393,5 @@ RSpec.describe Pgbus::Doctor do
   def notify_check(checks)  = checks.find { |c| c[:name].match?(/notify/i) }
   def process_check(checks) = checks.find { |c| c[:name].match?(/process|liveness|health/i) }
   def gid_check(checks)     = checks.find { |c| c[:name].match?(/globalid|allowlist/i) }
+  def broadcast_queue_check(checks) = checks.find { |c| c[:name].match?(/broadcast queue/i) }
 end
