@@ -27,8 +27,14 @@ module Pgbus
 
         upsert({ queue_name: queue_name }, unique_by: :queue_name)
         # Keep the in-process cache consistent with the write so a subsequent
-        # stream? check reflects this registration without a re-query.
-        (@all_names ||= Set.new).add(queue_name)
+        # stream? check reflects this registration without a re-query. Only
+        # update an ALREADY-LOADED cache — if @all_names is still nil (this
+        # process hasn't queried the registry yet), seeding it here would
+        # fabricate a one-entry set and silently hide every other
+        # already-registered stream until the next reset_cache!. Leaving it
+        # nil lets the next all_names call do a real load, which already
+        # includes this row since the upsert above has committed.
+        @all_names&.add(queue_name)
         nil
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus] Failed to record stream queue #{queue_name}: #{e.message}" }

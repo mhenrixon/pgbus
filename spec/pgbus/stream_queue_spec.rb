@@ -33,10 +33,37 @@ RSpec.describe Pgbus::StreamQueue do
       expect { described_class.record!("pgbus_chat_42") }.not_to raise_error
     end
 
-    it "adds the name to the in-process cache without a re-query" do
+    it "adds the name to an already-warm cache without a re-query" do
+      relation = instance_double(ActiveRecord::Relation, pluck: [])
+      allow(described_class).to receive(:all).and_return(relation)
+      described_class.all_names # warm the cache first
+
       described_class.record!("pgbus_chat_42")
 
       expect(described_class.stream?("pgbus_chat_42")).to be(true)
+      expect(described_class).to have_received(:all).once
+    end
+
+    it "falls through to a real load on a cold cache, rather than fabricating a one-entry set" do
+      # @all_names has never been loaded in this process. Seeding it here
+      # with just the recorded name would silently hide every other
+      # already-registered stream (see the regression test below) — so
+      # record! must leave a cold cache cold and let the next read query.
+      relation = instance_double(ActiveRecord::Relation, pluck: %w[pgbus_chat_42])
+      allow(described_class).to receive(:all).and_return(relation)
+
+      described_class.record!("pgbus_chat_42")
+
+      expect(described_class.stream?("pgbus_chat_42")).to be(true)
+    end
+
+    it "still finds other already-registered streams after a first-touch record! (regression)" do
+      relation = instance_double(ActiveRecord::Relation, pluck: %w[pgbus_room_1])
+      allow(described_class).to receive(:all).and_return(relation)
+
+      described_class.record!("pgbus_chat_42")
+
+      expect(described_class.stream?("pgbus_room_1")).to be(true)
     end
   end
 
