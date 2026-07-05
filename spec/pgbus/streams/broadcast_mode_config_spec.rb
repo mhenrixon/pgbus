@@ -17,6 +17,32 @@ RSpec.describe Pgbus::Configuration do
     it "defaults streams_orphan_threshold to 86400 (24 hours)" do
       expect(config.streams_orphan_threshold).to eq(86_400)
     end
+
+    it "defaults streams_broadcast_queue to nil (Turbo broadcast jobs share the default queue)" do
+      expect(config.streams_broadcast_queue).to be_nil
+    end
+  end
+
+  describe "#streams_broadcast_queue" do
+    it "accepts a queue-name String" do
+      config.streams_broadcast_queue = "realtime"
+      expect(config.streams_broadcast_queue).to eq("realtime")
+    end
+
+    it "accepts nil (default: no dedicated queue)" do
+      config.streams_broadcast_queue = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects an empty string" do
+      config.streams_broadcast_queue = ""
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_broadcast_queue/)
+    end
+
+    it "rejects a non-string, non-nil value" do
+      config.streams_broadcast_queue = 42
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_broadcast_queue/)
+    end
   end
 
   describe "#streams_default_broadcast_mode=" do

@@ -1225,8 +1225,37 @@ Pgbus.configure do |c|
   c.streams_listen_health_check_ms = 250           # PG LISTEN keepalive + ensure_listening ack budget
   c.streams_write_deadline_ms      = 5_000         # write_nonblock deadline
   c.streams_falcon_streaming_body  = false         # opt-in: Falcon-native streaming body
+  c.streams_broadcast_queue        = nil           # dedicated queue for turbo-rails broadcast jobs (see below)
 end
 ```
+
+#### Realtime broadcast isolation
+
+The default `broadcasts_to` / `broadcasts_refreshes` model macros use turbo-rails' `broadcast_*_later_to` helpers, which enqueue the render+broadcast as a **background job** on the default queue. Delivery is isolated (the streamer runs in the web process with its own LISTEN connection), but the *enqueue-render hop* is not: under worker saturation, a broadcast job waits behind long-running jobs, so the browser sees the update only after a worker thread frees up.
+
+**New installs get this out of the box:** `rails generate pgbus:install` ships `config/pgbus.yml` with `streams_broadcast_queue: realtime` and a dedicated `realtime` worker capsule. The code default is `nil` (so a programmatic `Pgbus.configure` and existing installs are unchanged) — the generated config is where the recommended setup lives.
+
+Two ways to keep broadcasts off the critical path:
+
+1. **Dedicated broadcast queue (recommended for `broadcasts_to`).** Route turbo-rails' broadcast jobs to their own queue and back it with a dedicated worker capsule:
+
+   ```ruby
+   c.streams_broadcast_queue = "realtime"
+   c.workers = [
+     { queues: ["realtime"], threads: 3 },   # broadcasts get their own pool
+     { queues: ["*"],        threads: 10 }    # everything else
+   ]
+   ```
+
+   pgbus applies the queue to `Turbo::Streams::ActionBroadcastJob`, `BroadcastJob`, and `BroadcastStreamJob` at boot. **The queue is only useful if a worker drains it** — `pgbus doctor` warns if `streams_broadcast_queue` is set but no capsule reads it (broadcasts would pile up unread), and warns in production if you use streams with turbo-rails but leave it unset.
+
+2. **Synchronous broadcast (`durable:`).** Passing any non-nil `durable:` to the macros renders and broadcasts in the request thread — no queue hop at all — at the cost of the render happening on the web request:
+
+   ```ruby
+   class Message < ApplicationRecord
+     broadcasts_to :room, durable: true   # sync: renders + broadcasts inline
+   end
+   ```
 
 #### Falcon-native streaming body (opt-in)
 

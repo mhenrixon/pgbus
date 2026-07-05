@@ -130,7 +130,7 @@ module Pgbus
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
                   :streams_stats_enabled, :streams_test_mode,
                   :streams_orphan_sweep_interval, :streams_orphan_threshold,
-                  :streams_durable_patterns,
+                  :streams_durable_patterns, :streams_broadcast_queue,
                   :streams_presence_patterns, :streams_presence_member,
                   :streams_host, :streams_port, :streams_database_url
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
@@ -316,6 +316,14 @@ module Pgbus
       @streams_orphan_sweep_interval = 3600    # 1 hour
       @streams_orphan_threshold = 86_400       # 24 hours
       @streams_durable_patterns = []
+      # Dedicated queue for turbo-rails' async broadcast jobs
+      # (Turbo::Streams::ActionBroadcastJob and siblings). nil (default) leaves
+      # them on the default queue, where a `broadcasts_to`/`broadcasts_refreshes`
+      # render+broadcast can wait behind long-running jobs before the browser
+      # sees the update. Set to a queue name (e.g. "realtime") and back it with
+      # a dedicated worker capsule to isolate broadcast latency from job
+      # throughput. Applied at engine boot when turbo-rails is loaded. See #311.
+      @streams_broadcast_queue = nil
       # EXPERIMENTAL (both presence settings) — exempt from the 1.0 stability
       # promise. Streams matching these patterns get connection-driven presence:
       # auto-join on SSE connect, auto-leave on disconnect, touch on the
@@ -534,6 +542,12 @@ module Pgbus
       end
 
       raise Pgbus::ConfigurationError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
+
+      unless streams_broadcast_queue.nil? ||
+             (streams_broadcast_queue.is_a?(String) && !streams_broadcast_queue.empty?)
+        raise Pgbus::ConfigurationError,
+              "streams_broadcast_queue must be a non-empty String (a queue name) or nil to disable"
+      end
 
       if streams_orphan_sweep_interval && !(streams_orphan_sweep_interval.is_a?(Numeric) && streams_orphan_sweep_interval.positive?)
         raise Pgbus::ConfigurationError, "streams_orphan_sweep_interval must be a positive number or nil to disable"

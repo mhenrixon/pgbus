@@ -52,6 +52,26 @@ class Views::Docs::Pages::Streams < DocsUI::Page
         plain " in config/puma.rb. Streams need Puma 6.1+ or Falcon (they use rack.hijack), "
         plain "and HTTP/2 in production to lift the 6-connection-per-origin SSE limit."
       end
+      DocsUI::Callout(:tip) do
+        plain "The default "
+        code { "broadcasts_to" }
+        plain " path enqueues the render+broadcast as a background job on the default queue, "
+        plain "so a broadcast can wait behind long-running jobs. To keep broadcasts off the "
+        plain "critical path, set "
+        code { "config.streams_broadcast_queue" }
+        plain " and back it with a dedicated worker capsule, or pass "
+        code { "durable: true" }
+        plain " to broadcast synchronously in the request thread."
+      end
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |c|
+          c.streams_broadcast_queue = "realtime"
+          c.workers = [
+            { queues: ["realtime"], threads: 3 },  # broadcasts get their own pool
+            { queues: ["*"],        threads: 10 }   # everything else
+          ]
+        end
+      RUBY
     end
   end
 
