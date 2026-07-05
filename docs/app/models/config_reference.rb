@@ -107,6 +107,8 @@ module ConfigReference
       { name: "streams_heartbeat_interval", type: "Numeric", default: "15", desc: "SSE heartbeat interval (seconds)." },
       { name: "streams_max_connections", type: "Integer", default: "2000", desc: "Max SSE connections per web-server process." },
       { name: "streams_idle_timeout", type: "Numeric", default: "3600", desc: "Close idle SSE connections after N seconds." },
+      { name: "streams_pool_size", type: "Integer", default: "5", desc: "Dedicated DB pool for durable-stream publish + replay, isolated from the job pool so a saturated worker pool can't delay broadcasts. Ignored on the shared-ActiveRecord connection path." },
+      { name: "streams_pool_timeout", type: "Numeric", default: "5", desc: "Seconds to wait for a connection from the dedicated streams pool." },
       { name: "streams_path", type: "String, nil", default: "nil", desc: "Custom SSE endpoint path (auto-detected from mount)." },
       { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack. Experimental — exempt from the 1.0 stability promise." },
       { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
