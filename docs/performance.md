@@ -53,7 +53,7 @@ rake bench:one[streams_read_pool_bench]  # streamer replay-read pool (requires P
   a fresh `PG.connect` per call (the pre-#315 `with_raw_connection` behavior) to
   the dedicated streams pool.
 
-#### Streamer connection model (issue #315)
+### Streamer connection model (issue #315)
 
 The durable-stream publish and replay hot paths run on a **dedicated streams
 DB pool** (`config.streams_pool_size` / `streams_pool_timeout`), separate from
@@ -73,6 +73,14 @@ On the shared-ActiveRecord (Proc) connection path no separate pool is created
 (libpq isn't thread-safe): streams share the single serialized connection, so
 the isolation applies only to the dedicated `database_url` / `connection_params`
 config.
+
+**Capacity planning:** on the dedicated path this streams pool is *in addition*
+to the job pool, and every forked process (worker, dispatcher, scheduler,
+consumer) builds its own — even `--workers-only` processes that rarely stream.
+Both pools are lazy, so an idle process holds few real connections, but when
+sizing Postgres/PgBouncer `max_connections`, budget `pool_size (or the
+auto-tuned resolved size) + streams_pool_size` per process rather than
+`pool_size` alone.
 
 ### Reading the output
 

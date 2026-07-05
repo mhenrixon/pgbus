@@ -894,6 +894,15 @@ module Pgbus
     # timeouts under load). Setting pool_size explicitly is still supported
     # for advanced cases where you need a tighter or looser pool than the
     # default formula provides.
+    #
+    # NOTE: this covers the JOB pool only. On the dedicated-connection path
+    # (database_url / connection_params) every Client also opens a separate
+    # streams pool of +streams_pool_size+ (default 5) for durable-stream
+    # publish + replay (issue #315). Both pools are lazy, so an idle process
+    # holds few real connections, but when budgeting Postgres/PgBouncer
+    # max_connections, size for +resolved_pool_size + streams_pool_size+ per
+    # process — every forked worker/dispatcher/scheduler/consumer builds its
+    # own streams pool even if it rarely touches streams.
     POOL_SIZE_WARN_THRESHOLD = 50
 
     # Connections needed per async worker: one for the reactor's serial
