@@ -14,65 +14,19 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
 
     it "has a description" do
       expect(described_class.desc).to include("Upgrade pgbus")
-      expect(described_class.desc).to include("YAML")
       expect(described_class.desc).to include("migrations")
     end
 
-    it "exposes a --source option defaulting to config/pgbus.yml" do
-      option = described_class.class_options[:source]
-      expect(option).not_to be_nil
-      expect(option.default).to eq("config/pgbus.yml")
-    end
-
-    it "exposes a --destination option defaulting to config/initializers/pgbus.rb" do
-      option = described_class.class_options[:destination]
-      expect(option).not_to be_nil
-      expect(option.default).to eq("config/initializers/pgbus.rb")
-    end
-
-    it "exposes --skip-config, --skip-migrations, --database, --dry-run, and --quiet options" do
-      %i[skip_config skip_migrations database dry_run quiet].each do |opt|
+    it "exposes --skip-migrations, --database, --dry-run, and --quiet options" do
+      %i[skip_migrations database dry_run quiet].each do |opt|
         expect(described_class.class_options[opt]).not_to be_nil, "missing #{opt} option"
       end
     end
-  end
 
-  describe "end-to-end YAML conversion" do
-    let(:tmpdir) { Dir.mktmpdir }
-    let(:source_path) { File.join(tmpdir, "config/pgbus.yml") }
-    let(:dest_path) { File.join(tmpdir, "config/initializers/pgbus.rb") }
-
-    before do
-      FileUtils.mkdir_p(File.dirname(source_path))
-      File.write(source_path, <<~YAML)
-        production:
-          visibility_timeout: 600
-          workers:
-            - queues: ["*"]
-              threads: 5
-      YAML
-    end
-
-    after { FileUtils.rm_rf(tmpdir) }
-
-    it "writes the converted Ruby source to config/initializers/pgbus.rb" do
-      # skip_migrations: the converter test focuses on the YAML->Ruby
-      # path; the migration detector path is covered by its own tests.
-      generator = described_class.new(
-        [],
-        destination: dest_path,
-        source: source_path,
-        skip_migrations: true,
-        quiet: true
-      )
-      generator.destination_root = tmpdir
-      capture_io { generator.invoke_all }
-
-      expect(File.exist?(dest_path)).to be(true)
-      content = File.read(dest_path)
-      expect(content).to include("Pgbus.configure do |c|")
-      expect(content).to include("c.visibility_timeout = 10.minutes")
-      expect(content).to include('c.workers = "*: 5"')
+    it "no longer exposes the removed YAML-conversion options" do
+      %i[source destination skip_config].each do |opt|
+        expect(described_class.class_options[opt]).to be_nil, "unexpected #{opt} option still present"
+      end
     end
   end
 
@@ -107,7 +61,7 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
     after { FileUtils.rm_rf(tmpdir) }
 
     def build_generator(opts = {})
-      defaults = { skip_config: true, skip_migrations: false, dry_run: true, quiet: true }
+      defaults = { skip_migrations: false, dry_run: true, quiet: true }
       gen = described_class.new([], defaults.merge(opts))
       gen.destination_root = tmpdir
       gen
@@ -198,17 +152,5 @@ RSpec.describe Pgbus::Generators::UpdateGenerator do
       end.to output(/ActiveRecord not loaded/).to_stdout
       expect(generator).not_to have_received(:invoke)
     end
-  end
-
-  def capture_io
-    original_stdout = $stdout
-    original_stderr = $stderr
-    $stdout = StringIO.new
-    $stderr = StringIO.new
-    yield
-    [$stdout.string, $stderr.string]
-  ensure
-    $stdout = original_stdout
-    $stderr = original_stderr
   end
 end

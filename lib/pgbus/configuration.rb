@@ -156,8 +156,8 @@ module Pgbus
     #   a Pgbus::Metrics::Backend instance — a custom backend
     attr_accessor :metrics_backend, :statsd_host, :statsd_port
 
-    # When true (default), Pgbus.configure and ConfigLoader.apply run
-    # validate! after applying settings, so an invalid value fails loud at
+    # When true (default), Pgbus.configure runs validate! after the block
+    # yields, so an invalid value fails loud at
     # boot instead of dormant until a worker path consumes it. Set false to
     # opt out (exotic setups that intentionally hold a transiently-invalid
     # config); explicit validate! still works.
@@ -701,9 +701,9 @@ module Pgbus
                  end
     end
 
-    # Event consumer configs arrive with symbol keys (Ruby DSL) or string keys
-    # (YAML via ConfigLoader). Normalize once here so every read site uses
-    # symbol access only. nil passes through (no consumers configured).
+    # Event consumer configs arrive with symbol keys (Ruby DSL) or, from an
+    # explicit Array literal, string keys. Normalize once here so every read
+    # site uses symbol access only. nil passes through (no consumers configured).
     def event_consumers=(value)
       @event_consumers =
         case value
@@ -1106,8 +1106,8 @@ module Pgbus
     end
 
     # Symbolize the top-level keys of a worker/consumer config entry so every
-    # downstream read site can use symbol access only. YAML (via ConfigLoader)
-    # yields string keys; the Ruby DSL and +capsule+ builder yield symbols.
+    # downstream read site can use symbol access only. An explicit Array literal
+    # may carry string keys; the Ruby DSL and +capsule+ builder yield symbols.
     # Entries are flat hashes with array/scalar values — no deep recursion.
     def normalize_entry(entry, group:)
       raise Pgbus::ConfigurationError, "#{group} entry must be a Hash, got #{entry.class}: #{entry.inspect}" unless entry.is_a?(Hash)
