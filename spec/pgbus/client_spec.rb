@@ -1034,6 +1034,20 @@ RSpec.describe Pgbus::Client do
   end
 
   describe "#send_stream_message (durable stream broadcasts)" do
+    # Durable broadcasts publish through the dedicated streams pool
+    # (@streams_pgmq), so this block wires two distinct PGMQ::Client doubles
+    # and asserts on the streams one (issue #315).
+    subject(:client) do
+      allow(PGMQ::Client).to receive(:new).and_return(job_pgmq, streams_pgmq)
+      c = described_class.new(config, schema_ensured: true)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    let(:job_pgmq) { build_mock_pgmq }
+    let(:streams_pgmq) { build_mock_pgmq }
+
     before do
       allow(client).to receive_messages(ensure_stream_queue: nil)
     end
@@ -1041,7 +1055,7 @@ RSpec.describe Pgbus::Client do
     it "targets the bare queue when priority is disabled" do
       client.send_stream_message("chat_42", { "html" => "<p>hi</p>" })
 
-      expect(mock_pgmq).to have_received(:produce).with(
+      expect(streams_pgmq).to have_received(:produce).with(
         "pgbus_test_chat_42",
         '{"html":"<p>hi</p>"}',
         headers: nil,
@@ -1059,13 +1073,13 @@ RSpec.describe Pgbus::Client do
         # never receives it. Streams are peek-based; priority is meaningless.
         client.send_stream_message("chat_42", { "html" => "<p>hi</p>" })
 
-        expect(mock_pgmq).to have_received(:produce).with(
+        expect(streams_pgmq).to have_received(:produce).with(
           "pgbus_test_chat_42",
           anything,
           headers: nil,
           delay: 0
         )
-        expect(mock_pgmq).not_to have_received(:produce).with(
+        expect(streams_pgmq).not_to have_received(:produce).with(
           a_string_matching(/_p\d+$/), any_args
         )
       end
@@ -1075,6 +1089,117 @@ RSpec.describe Pgbus::Client do
       client.send_stream_message("chat_42", { "html" => "x" })
 
       expect(client).to have_received(:ensure_stream_queue).with("chat_42")
+    end
+
+    it "produces via the dedicated streams pool, not the job pool (issue #315)" do
+      # The publish INSERT must draw from @streams_pgmq so a saturated job
+      # pool can't block a broadcast on job-pool checkout.
+      client.send_stream_message("chat_42", { "html" => "x" })
+
+      expect(streams_pgmq).to have_received(:produce)
+      expect(job_pgmq).not_to have_received(:produce)
+    end
+  end
+
+  describe "dedicated streams DB pool (issue #315)" do
+    # Two distinct PGMQ::Client doubles: the job pool and the streams pool.
+    # Client#initialize calls PGMQ::Client.new twice on the dedicated
+    # (String/Hash) connection path — once for @pgmq, once for @streams_pgmq.
+    subject(:client) do
+      allow(PGMQ::Client).to receive(:new).and_return(job_pgmq, streams_pgmq)
+      c = described_class.new(config, schema_ensured: true)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      allow(c).to receive(:ensure_stream_queue)
+      c
+    end
+
+    let(:job_pgmq) { build_mock_pgmq }
+    let(:streams_pgmq) { build_mock_pgmq }
+
+    it "builds a second PGMQ::Client sized by streams_pool_size / streams_pool_timeout" do
+      config.streams_pool_size = 8
+      config.streams_pool_timeout = 3
+      client # force construction
+
+      expect(PGMQ::Client).to have_received(:new).with(anything, pool_size: 8, pool_timeout: 3)
+    end
+
+    describe "#read_after over the streams pool" do
+      let(:conn) { double("PG::Connection") }
+
+      before do
+        allow(streams_pgmq).to receive(:with_connection).and_yield(conn)
+      end
+
+      it "reads through the pooled streams connection, never a per-call PG.connect" do
+        allow(conn).to receive(:exec_params).and_return([])
+        allow(client).to receive(:with_raw_connection).and_call_original
+
+        client.read_after("chat_42", after_id: 0)
+
+        expect(streams_pgmq).to have_received(:with_connection)
+        expect(client).not_to have_received(:with_raw_connection)
+      end
+
+      it "routes stream_current_msg_id through the pooled streams connection too" do
+        allow(conn).to receive(:exec).and_return([{ "max" => "7" }])
+
+        expect(client.stream_current_msg_id("chat_42")).to eq(7)
+        expect(streams_pgmq).to have_received(:with_connection)
+      end
+
+      it "still swallows a missing-queue UndefinedTable to an empty result" do
+        skip "PG not loaded" unless defined?(PG::UndefinedTable)
+
+        allow(conn).to receive(:exec_params)
+          .and_raise(PG::UndefinedTable.new('relation "pgmq.q_pgbus_test_chat_42" does not exist'))
+
+        expect(client.read_after("chat_42", after_id: 0)).to eq([])
+      end
+    end
+
+    describe "#streams_pool_stats" do
+      it "returns the streams pgmq pool stats merged with streams_pool_timeout" do
+        allow(streams_pgmq).to receive(:stats).and_return({ size: 5, available: 2 })
+
+        expect(client.streams_pool_stats).to eq(size: 5, available: 2, pool_timeout: config.streams_pool_timeout)
+      end
+    end
+
+    context "with the shared-ActiveRecord (Proc) connection path" do
+      subject(:shared_client) do
+        allow(config).to receive(:connection_options).and_return(-> { proc_conn })
+        allow(PGMQ::Client).to receive(:new).and_return(job_pgmq)
+        c = described_class.new(config, schema_ensured: true)
+        allow(c).to receive(:tune_autovacuum)
+        allow(c).to receive(:notify_trigger_current?).and_return(false)
+        allow(c).to receive(:ensure_stream_queue)
+        c
+      end
+
+      let(:proc_conn) { double("PG::Connection") }
+
+      it "does NOT build a second pool (libpq is not thread-safe)" do
+        shared_client # force construction
+
+        expect(PGMQ::Client).to have_received(:new).once
+      end
+
+      it "routes send_stream_message through the single serialized job pool" do
+        shared_client.send_stream_message("chat_42", { "html" => "x" })
+
+        expect(job_pgmq).to have_received(:produce)
+      end
+
+      it "reads via with_raw_connection (the shared serialized connection)" do
+        allow(shared_client).to receive(:with_raw_connection).and_yield(proc_conn)
+        allow(proc_conn).to receive(:exec_params).and_return([])
+
+        shared_client.read_after("chat_42", after_id: 0)
+
+        expect(shared_client).to have_received(:with_raw_connection)
+      end
     end
   end
 
@@ -1769,6 +1894,28 @@ RSpec.describe Pgbus::Client do
 
       expect(mock_pgmq).to have_received(:close)
     end
+
+    it "closes the dedicated streams pool too so its connections don't leak (issue #315)" do
+      job_pgmq = build_mock_pgmq
+      streams_pgmq = build_mock_pgmq
+      allow(PGMQ::Client).to receive(:new).and_return(job_pgmq, streams_pgmq)
+      dedicated = described_class.new(config, schema_ensured: true)
+
+      dedicated.close
+
+      expect(job_pgmq).to have_received(:close)
+      expect(streams_pgmq).to have_received(:close)
+    end
+
+    it "does not double-close on the shared-AR path where the streams pool aliases the job pool" do
+      allow(config).to receive(:connection_options).and_return(-> { double("PG::Connection") })
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      shared = described_class.new(config, schema_ensured: true)
+
+      shared.close
+
+      expect(mock_pgmq).to have_received(:close).once
+    end
   end
 
   describe "connection pooling strategy" do
@@ -1785,11 +1932,14 @@ RSpec.describe Pgbus::Client do
 
       # Connection bounds (statement_timeout + keepalives) are asserted in detail
       # in the "libpq connection bounds" describe below; here we only pin pool sizing.
+      # at_least(:once): the dedicated path builds two pools (job + streams,
+      # issue #315). Here streams_pool_size defaults to 5, colliding with the
+      # job pool_size, so both .new calls match this matcher.
       expect(PGMQ::Client).to have_received(:new).with(
         a_string_starting_with("postgres://localhost/pgbus_test?"),
         pool_size: 5,
         pool_timeout: url_config.pool_timeout
-      )
+      ).at_least(:once)
     end
 
     it "uses configured pool_size when connection_params is set (dedicated connections)" do
@@ -1967,6 +2117,7 @@ RSpec.describe Pgbus::Client do
         build_client(hash_config)
 
         # statement_timeout = read_timeout; tcp_user_timeout = read_timeout + slack (5s).
+        # at_least(:once): job + streams pools both get the same bounded opts.
         expect(PGMQ::Client).to have_received(:new).with(
           hash_including(
             host: "localhost",
@@ -1976,7 +2127,7 @@ RSpec.describe Pgbus::Client do
             tcp_user_timeout: 15_000
           ),
           anything
-        )
+        ).at_least(:once)
       end
 
       it "preserves a caller-supplied :options instead of clobbering it" do
@@ -1992,7 +2143,7 @@ RSpec.describe Pgbus::Client do
         expect(PGMQ::Client).to have_received(:new).with(
           hash_including(options: "-c search_path=myapp -c statement_timeout=10000"),
           anything
-        )
+        ).at_least(:once)
       end
     end
 
@@ -2012,7 +2163,7 @@ RSpec.describe Pgbus::Client do
         expect(PGMQ::Client).to have_received(:new).with(
           hash_including(options: "-c statement_timeout=5000"),
           anything
-        )
+        ).at_least(:once)
         expect(PGMQ::Client).not_to have_received(:new).with(
           hash_including(:tcp_user_timeout),
           anything
@@ -2031,7 +2182,7 @@ RSpec.describe Pgbus::Client do
         expect(PGMQ::Client).to have_received(:new).with(
           "postgres://localhost/pgbus_test?options=-c%20statement_timeout%3D5000",
           anything
-        )
+        ).at_least(:once)
       end
     end
 
@@ -2050,7 +2201,7 @@ RSpec.describe Pgbus::Client do
           "&keepalives_interval=10&keepalives_count=3&tcp_user_timeout=10000" \
           "&options=-c%20statement_timeout%3D5000",
           anything
-        )
+        ).at_least(:once)
       end
     end
 
@@ -2068,7 +2219,7 @@ RSpec.describe Pgbus::Client do
           a_string_starting_with("postgresql://localhost/pgbus_test?sslmode=require&keepalives=1")
             .and(ending_with("&options=-c%20statement_timeout%3D5000")),
           anything
-        )
+        ).at_least(:once)
       end
     end
 
@@ -2087,7 +2238,7 @@ RSpec.describe Pgbus::Client do
           "keepalives_interval=10 keepalives_count=3 tcp_user_timeout=10000 " \
           "options='-c statement_timeout=5000'",
           anything
-        )
+        ).at_least(:once)
       end
     end
 
@@ -2104,7 +2255,7 @@ RSpec.describe Pgbus::Client do
         expect(PGMQ::Client).to have_received(:new).with(
           "postgres://localhost/pgbus_test",
           anything
-        )
+        ).at_least(:once)
       end
     end
 

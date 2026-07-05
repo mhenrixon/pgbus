@@ -59,6 +59,12 @@ module Pgbus
         # operations through a mutex.
         @pgmq = PGMQ::Client.new(conn_opts, pool_size: 1, pool_timeout: config.pool_timeout)
         @pgmq_mutex = Mutex.new
+        # No dedicated streams pool on this path: a second PGMQ::Client would
+        # still funnel through the same non-thread-safe AR raw_connection.
+        # Stream publish + replay share the single serialized connection —
+        # @streams_pgmq aliases @pgmq so the code paths are uniform, and
+        # #with_streams_connection falls back to with_raw_connection.
+        @streams_pgmq = @pgmq
       else
         # With a String URL or Hash params, pgmq-ruby creates its own dedicated
         # PG::Connection per pool slot — no shared state with ActiveRecord.
@@ -75,6 +81,15 @@ module Pgbus
         conn_opts = apply_connection_bounds(conn_opts)
         @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.resolved_pool_size, pool_timeout: config.pool_timeout)
         @pgmq_mutex = nil
+        # Dedicated streams pool (issue #315): isolates the durable-stream
+        # publish INSERT (#send_stream_message) and the dispatcher's per-wake
+        # replay reads (#read_after) from the job pool, so a saturated worker
+        # pool can't delay a broadcast on pool checkout, and each wake reuses a
+        # persistent connection instead of a fresh PG.connect per call. Its own
+        # PGMQ::Client → its own connection_pool, sized independently of worker
+        # thread counts.
+        @streams_pgmq = PGMQ::Client.new(conn_opts, pool_size: config.streams_pool_size,
+                                                    pool_timeout: config.streams_pool_timeout)
       end
 
       @queues_created = Concurrent::Map.new
@@ -252,7 +267,13 @@ module Pgbus
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         with_stale_connection_retry do
           ensure_stream_queue(stream_name)
-          synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
+          # Publish through the dedicated streams pool (issue #315) so a
+          # saturated job pool can't block a broadcast on pool checkout. On the
+          # shared-AR path @streams_pgmq aliases @pgmq and synchronized still
+          # serializes on the mutex.
+          synchronized do
+            @streams_pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay)
+          end
         end
       end
     end
@@ -463,6 +484,16 @@ module Pgbus
       {}
     end
 
+    # Same shape as #pool_stats but for the dedicated streams pool (issue #315).
+    # On the shared-AR path @streams_pgmq aliases @pgmq, so this reports the job
+    # pool's counters — accurate, since streams share that connection there.
+    def streams_pool_stats
+      @streams_pgmq.stats.merge(pool_timeout: config.streams_pool_timeout)
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus::Client] streams_pool_stats unavailable: #{e.class}: #{e.message}" }
+      {}
+    end
+
     def list_queues
       with_stale_connection_retry do
         synchronized { @pgmq.list_queues }
@@ -659,7 +690,13 @@ module Pgbus
     end
 
     def close
-      synchronized { @pgmq.close }
+      synchronized do
+        @pgmq.close
+        # Close the dedicated streams pool too (issue #315) so its connections
+        # don't leak. On the shared-AR path @streams_pgmq aliases @pgmq — guard
+        # with equal? so we don't double-close the same pool.
+        @streams_pgmq.close unless @streams_pgmq.equal?(@pgmq)
+      end
     end
 
     private
@@ -791,6 +828,22 @@ module Pgbus
       yield conn
     ensure
       conn&.close if owned
+    end
+
+    # Yields a PG connection from the dedicated streams pool for the streamer's
+    # replay reads (read_after / stream_current_msg_id / stream_oldest_msg_id).
+    # On the dedicated (String/Hash) path this checks out a persistent pooled
+    # connection — no fresh PG.connect per call (issue #315). On the shared-AR
+    # (Proc) path there is no separate pool (@streams_pgmq aliases @pgmq and
+    # points at the non-thread-safe AR raw_connection), so we fall back to
+    # with_raw_connection, which reuses that same shared connection. Callers
+    # already wrap this in `synchronized`, so the shared path stays serialized.
+    def with_streams_connection(&)
+      if @shared_connection
+        with_raw_connection(&)
+      else
+        @streams_pgmq.with_connection(&)
+      end
     end
 
     def ensure_single_queue(full_name)

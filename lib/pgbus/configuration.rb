@@ -132,7 +132,8 @@ module Pgbus
                   :streams_orphan_sweep_interval, :streams_orphan_threshold,
                   :streams_durable_patterns, :streams_broadcast_queue,
                   :streams_presence_patterns, :streams_presence_member,
-                  :streams_host, :streams_port, :streams_database_url
+                  :streams_host, :streams_port, :streams_database_url,
+                  :streams_pool_size, :streams_pool_timeout
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
@@ -285,6 +286,18 @@ module Pgbus
       @streams_host = nil
       @streams_port = nil
       @streams_database_url = nil
+      # Dedicated DB connection pool for the streamer's publish + replay hot
+      # paths (Client#send_stream_message and read_after/stream_current_msg_id).
+      # Isolated from the job pool (`pool_size`) so a saturated worker pool
+      # can't delay broadcast INSERTs and the dispatcher's per-wake read_after
+      # reuses a persistent connection instead of a fresh PG.connect per call
+      # (issue #315). A small fixed default — streams fan out from one
+      # dispatcher thread per Puma worker, so a handful of connections is
+      # plenty; raise it only for very high broadcast concurrency. Ignored on
+      # the shared-ActiveRecord (Proc) connection path, where libpq isn't
+      # thread-safe and streams keep using the single serialized connection.
+      @streams_pool_size = 5
+      @streams_pool_timeout = 5
       @streams_signed_name_secret = nil
       @streams_default_retention = 5 * 60 # 5 minutes
       @streams_retention = {}
@@ -539,6 +552,14 @@ module Pgbus
 
       unless streams_write_deadline_ms.is_a?(Integer) && streams_write_deadline_ms.positive?
         raise Pgbus::ConfigurationError, "streams_write_deadline_ms must be a positive integer"
+      end
+
+      unless streams_pool_size.is_a?(Integer) && streams_pool_size.positive?
+        raise Pgbus::ConfigurationError, "streams_pool_size must be a positive integer"
+      end
+
+      unless streams_pool_timeout.is_a?(Numeric) && streams_pool_timeout.positive?
+        raise Pgbus::ConfigurationError, "streams_pool_timeout must be a positive number"
       end
 
       raise Pgbus::ConfigurationError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
@@ -873,6 +894,15 @@ module Pgbus
     # timeouts under load). Setting pool_size explicitly is still supported
     # for advanced cases where you need a tighter or looser pool than the
     # default formula provides.
+    #
+    # NOTE: this covers the JOB pool only. On the dedicated-connection path
+    # (database_url / connection_params) every Client also opens a separate
+    # streams pool of +streams_pool_size+ (default 5) for durable-stream
+    # publish + replay (issue #315). Both pools are lazy, so an idle process
+    # holds few real connections, but when budgeting Postgres/PgBouncer
+    # max_connections, size for +resolved_pool_size + streams_pool_size+ per
+    # process — every forked worker/dispatcher/scheduler/consumer builds its
+    # own streams pool even if it rarely touches streams.
     POOL_SIZE_WARN_THRESHOLD = 50
 
     # Connections needed per async worker: one for the reactor's serial

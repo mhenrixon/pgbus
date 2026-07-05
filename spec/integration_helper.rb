@@ -189,6 +189,12 @@ RSpec.configure do |config|
     c.pgmq_schema_mode = :embedded
     c.listen_notify = false
     c.streams_default_broadcast_mode = :durable
+    # Keep the per-client connection footprint small: the integration suite
+    # spins up many clients + streamers against a shared local Postgres, and
+    # the dedicated streams pool (issue #315) adds connections on top of the
+    # job pool. Cap both so the suite doesn't exhaust max_connections.
+    c.pool_size = 3
+    c.streams_pool_size = 2
   end
 
   # Bootstrap tables that may not exist in the CI database

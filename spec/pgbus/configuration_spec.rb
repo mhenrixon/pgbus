@@ -1550,6 +1550,14 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_write_deadline_ms).to eq(5_000)
     end
 
+    it "sizes the dedicated streams DB pool at 5 by default" do
+      expect(config.streams_pool_size).to eq(5)
+    end
+
+    it "has a 5 second streams pool checkout timeout by default" do
+      expect(config.streams_pool_timeout).to eq(5)
+    end
+
     it "does not opt into the Falcon streaming body code path by default" do
       expect(config.streams_falcon_streaming_body).to be false
     end
@@ -1593,6 +1601,21 @@ RSpec.describe Pgbus::Configuration do
     it "rejects non-positive streams_write_deadline_ms" do
       config.streams_write_deadline_ms = 0
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_write_deadline_ms/)
+    end
+
+    it "rejects non-positive streams_pool_size" do
+      config.streams_pool_size = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_size/)
+    end
+
+    it "rejects a non-integer streams_pool_size" do
+      config.streams_pool_size = 2.5
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_size/)
+    end
+
+    it "rejects non-positive streams_pool_timeout" do
+      config.streams_pool_timeout = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_timeout/)
     end
 
     it "accepts a valid streams config" do

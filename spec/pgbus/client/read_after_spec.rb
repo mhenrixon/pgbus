@@ -19,7 +19,10 @@ RSpec.describe Pgbus::Client::ReadAfter do
     end)
     stub_const("PG::UndefinedTable", Class.new(StandardError)) unless defined?(PG::UndefinedTable)
     stub_const("PG::ConnectionBad", Class.new(StandardError)) unless defined?(PG::ConnectionBad)
-    allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
+    # The streamer replay reads (read_after / stream_current_msg_id /
+    # stream_oldest_msg_id) now check out from the dedicated streams pool via
+    # with_streams_connection (issue #315), not a per-call with_raw_connection.
+    allow(client).to receive(:with_streams_connection).and_yield(raw_conn)
   end
 
   let(:config) do
