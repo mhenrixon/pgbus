@@ -84,7 +84,7 @@ RSpec.describe "Application boot (integration)", :integration do
   end
 
   describe "configuration" do
-    it "loads pgbus.yml when present" do
+    it "exposes queue_prefix and default_queue defaults" do
       config = Pgbus.configuration
       expect(config.queue_prefix).to be_present
       expect(config.default_queue).to be_present

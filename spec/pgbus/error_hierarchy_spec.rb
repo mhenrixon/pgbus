@@ -8,11 +8,6 @@ require "spec_helper"
 #   2. Argument-shape errors (malformed caller input) stay ArgumentError
 #      subclasses by design — that's what ArgumentError means.
 RSpec.describe Pgbus::Error do
-  # Generators live outside Zeitwerk (lib/pgbus.rb ignores lib/pgbus/generators),
-  # so ConfigConverter isn't autoloaded — require it so its Error is defined.
-  # The rest resolve lazily via const_get below.
-  before { require "pgbus/generators/config_converter" }
-
   describe "operational errors descend from Pgbus::Error" do
     [
       "Pgbus::ConfigurationError",
@@ -29,8 +24,7 @@ RSpec.describe Pgbus::Error do
       "Pgbus::Process::ReplicaConnectionError",
       "Pgbus::PgmqSchema::VersionNotFoundError",
       "Pgbus::Streams::SignedName::InvalidSignedName",
-      "Pgbus::Streams::SignedName::MissingSecret",
-      "Pgbus::Generators::ConfigConverter::Error"
+      "Pgbus::Streams::SignedName::MissingSecret"
     ].each do |const_name|
       it "#{const_name} < Pgbus::Error" do
         klass = Object.const_get(const_name)

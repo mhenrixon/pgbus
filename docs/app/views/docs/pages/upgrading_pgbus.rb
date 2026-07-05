@@ -49,9 +49,8 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         rails generate pgbus:update --dry-run
       SHELL
       md <<~'MD'
-        3. **Apply it** — drop `--dry-run` to create the migration files (and
-           convert a legacy `config/pgbus.yml` to a Ruby initializer, if one still
-           exists). The generator auto-detects a [separate database](/docs/separate-database)
+        3. **Apply it** — drop `--dry-run` to create the migration files. The
+           generator auto-detects a [separate database](/docs/separate-database)
            from `Pgbus.configuration.connects_to` or by scanning your initializer /
            `config/application.rb` — you don't need to pass `--database=pgbus`
            yourself unless auto-detection can't find it.
@@ -128,8 +127,7 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         ### Breaking: configuration is now validated eagerly at boot
 
         `Pgbus.configure` now calls `Configuration#validate!` automatically after
-        your block runs (and `ConfigLoader.apply` does the same for
-        `config/pgbus.yml`). An invalid value — `visibility_timeout = 0`, for
+        your block runs. An invalid value — `visibility_timeout = 0`, for
         example — now raises `ArgumentError` at boot instead of surfacing later,
         far from the misconfiguration, the first time a worker touches that
         setting.
@@ -211,9 +209,9 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         ]
       )
       md <<~'MD'
-        Four error classes that bypassed `Pgbus::Error` entirely
+        Three error classes that bypassed `Pgbus::Error` entirely
         (`PgmqSchema::VersionNotFoundError`, `Streams::SignedName::InvalidSignedName`
-        and `MissingSecret`, `Generators::ConfigConverter::Error`) are now
+        and `MissingSecret`) are now
         re-parented underneath it. Three classes that reject a malformed *argument
         shape* — `CapsuleDSL::ParseError`, `Streams::Cursor::InvalidCursor`,
         `Streams::StreamNameTooLong` — deliberately stay `ArgumentError`

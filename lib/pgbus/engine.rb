@@ -12,11 +12,6 @@ module Pgbus
       Pgbus.teardown_models_loader!
     end
 
-    initializer "pgbus.configure" do |app|
-      config_path = app.root.join("config", "pgbus.yml")
-      Pgbus::ConfigLoader.load(config_path) if config_path.exist?
-    end
-
     initializer "pgbus.recurring" do |app|
       next if Pgbus.configuration.recurring_tasks
 

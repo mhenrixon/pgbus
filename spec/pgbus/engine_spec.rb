@@ -14,7 +14,7 @@ require "tmpdir"
 #   2. Isolated initializer-block tests: each `initializer "name" do |app|`
 #      block is fetched from Pgbus::Engine.initializers and invoked directly
 #      with a stub app rooted at a tmpdir. This exercises the branchy blocks
-#      (pgbus.recurring fallbacks, pgbus.configure, pgbus.db, AppSignal guard)
+#      (pgbus.recurring fallbacks, pgbus.db, AppSignal guard)
 #      without rebooting Rails or touching the dummy app's real config dir.
 RSpec.describe Pgbus::Engine do
   # Fetch a named initializer's block so it can be invoked in isolation.
@@ -70,32 +70,6 @@ RSpec.describe Pgbus::Engine do
 
       expect(ActiveJob::Base.include?(Pgbus::Concurrency)).to be(true)
       expect(ActiveJob::Base.include?(Pgbus::Uniqueness)).to be(true)
-    end
-  end
-
-  describe "pgbus.configure initializer" do
-    subject(:block) { initializer_block("pgbus.configure") }
-
-    let(:tmpdir) { Dir.mktmpdir }
-    let(:app) { instance_double(Rails::Application, root: Pathname.new(tmpdir)) }
-
-    before { FileUtils.mkdir_p(File.join(tmpdir, "config")) }
-
-    after do
-      FileUtils.remove_entry(tmpdir)
-      restore_baseline_config
-    end
-
-    it "loads config/pgbus.yml when present" do
-      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: from_yaml\n")
-
-      block.call(app)
-
-      expect(Pgbus.configuration.default_queue).to eq("from_yaml")
-    end
-
-    it "is a no-op when config/pgbus.yml is absent" do
-      expect { block.call(app) }.not_to raise_error
     end
   end
 

@@ -138,12 +138,11 @@ The capsule string DSL is the shortest form for the common case. Use `c.capsule`
 
 Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#validate!` right after your block yields, so an invalid value (`visibility_timeout = 0`, for example) raises `Pgbus::ConfigurationError` at boot instead of failing later inside a worker. Set `c.eager_validation = false` for the rare setup that intentionally holds a transiently-invalid config across sequential `configure` calls.
 
-> **Upgrading from an older pgbus?** Run `rails generate pgbus:update`. It does two things in one pass:
+> **Upgrading from an older pgbus?** Run `rails generate pgbus:update`. It inspects your live database and adds any missing pgbus migrations to `db/migrate` (or `db/pgbus_migrate` if you use `connects_to`). The generator detects your separate-database config automatically from `Pgbus.configuration.connects_to` or by scanning the initializer / `config/application.rb`, so you don't have to re-specify `--database=pgbus` every time.
 >
-> - Converts any legacy `config/pgbus.yml` to a Ruby initializer at `config/initializers/pgbus.rb` (skipped if the initializer already exists).
-> - Inspects your live database and adds any missing pgbus migrations to `db/migrate` (or `db/pgbus_migrate` if you use `connects_to`). The generator detects your separate-database config automatically from `Pgbus.configuration.connects_to` or by scanning the initializer / `config/application.rb`, so you don't have to re-specify `--database=pgbus` every time.
+> Useful flags: `--dry-run` (print the plan without creating files), `--skip-migrations`, `--quiet`. Running it on a database with no pgbus tables at all will redirect you to `pgbus:install` instead of stacking individual add_* migrations.
 >
-> Useful flags: `--dry-run` (print the plan without creating files), `--skip-config`, `--skip-migrations`, `--quiet`. Running it on a database with no pgbus tables at all will redirect you to `pgbus:install` instead of stacking individual add_* migrations.
+> **YAML config was removed in 1.0.** `config/pgbus.yml` is no longer loaded at boot. If you still have one, port its settings into `config/initializers/pgbus.rb` as a `Pgbus.configure` block (see the example above) and delete the YAML — the last release to auto-convert it was 0.9.x via `pgbus:update`.
 >
 > For the full step-by-step procedure (including the vendored PGMQ schema check and post-upgrade verification with `pgbus doctor`) plus per-version breaking changes, see [Upgrading pgbus](https://pgbus.zoolutions.llc/docs/upgrading-pgbus).
 
@@ -2084,7 +2083,7 @@ PostgreSQL + PGMQ
 | `statsd_port` | `8125` | StatsD UDP port (used when `metrics_backend = :statsd`) |
 | `health_port` | `nil` | Port for standalone HTTP liveness/readiness probes served by the supervisor; nil disables |
 | `health_bind` | `"127.0.0.1"` | Bind address for the standalone health server |
-| `eager_validation` | `true` | Run `Configuration#validate!` automatically after `Pgbus.configure` / `ConfigLoader.apply`; an invalid value raises `Pgbus::ConfigurationError` at boot. Set `false` to suppress and validate manually. |
+| `eager_validation` | `true` | Run `Configuration#validate!` automatically after the `Pgbus.configure` block yields; an invalid value raises `Pgbus::ConfigurationError` at boot. Set `false` to suppress and validate manually. |
 
 ## Development
 

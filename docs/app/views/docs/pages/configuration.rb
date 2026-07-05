@@ -14,6 +14,7 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
     common_knobs
     eager_validation
     capsules
+    full_example
     upgrading
   end
 
@@ -73,8 +74,7 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
     DocsUI::Section("Configuration is validated eagerly", description: "A bad setting fails boot, not a worker mid-run.") do
       md <<~'MD'
         `Pgbus.configure` runs `configuration.validate!` right after your block
-        yields, and the engine's `pgbus.configure` initializer does the same after
-        loading `config/pgbus.yml`. An invalid value — `visibility_timeout = 0`, for
+        yields. An invalid value — `visibility_timeout = 0`, for
         example — now raises `ArgumentError` at Rails boot instead of sitting
         dormant until a worker code path finally consumes it, far from the
         misconfiguration. `validate!` stays DB-free, so eager validation adds no
@@ -99,8 +99,6 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
         code { "eager_validation" }
         plain " only suppresses the automatic call after "
         code { "configure" }
-        plain " / "
-        code { "ConfigLoader.apply" }
         plain "."
       end
     end
@@ -132,16 +130,90 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
     end
   end
 
+  def full_example
+    DocsUI::Section("A full initializer", description: "Every subsystem turned on, for reference.") do
+      md <<~'MD'
+        Most apps set a handful of these. This is the kitchen-sink version — an app
+        using separate databases, priority queues, the outbox, realtime streams, and
+        Prometheus metrics all at once — so you can see how the groups fit together.
+        Copy the lines you need; every setting has a working default if you omit it.
+      MD
+      DocsUI::Code(<<~'RUBY', filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |c|
+          # --- Database & connection pool ------------------------------------
+          c.queue_prefix = "myapp"
+          c.connects_to  = { database: { writing: :pgbus } }  # dedicated database
+          c.pool_timeout = 5                                    # pool_size auto-tunes from thread counts
+
+          # --- Wake-up, visibility, retries ----------------------------------
+          c.listen_notify      = true          # LISTEN/NOTIFY instant wake-up
+          c.visibility_timeout = 30.seconds
+          c.max_retries        = 5             # reads before the dead-letter queue
+          c.idempotency_ttl    = 7.days
+
+          # --- Priority queues -----------------------------------------------
+          c.priority_levels  = 3   # enable 3 priority sub-queues per queue
+          c.default_priority = 1
+
+          # --- Workers -------------------------------------------------------
+          c.capsule :default,  queues: %w[critical default], threads: 5
+          c.capsule :low,      queues: %w[low],              threads: 2
+          c.capsule :ordered,  queues: %w[ordered_events],   threads: 1, single_active_consumer: true
+
+          # --- Worker recycling ----------------------------------------------
+          c.max_jobs_per_worker = 10_000
+          c.max_memory_mb       = 512
+          c.max_worker_lifetime = 1.hour
+
+          # --- Event bus consumers -------------------------------------------
+          c.event_consumers = [
+            { topics: ["orders.#"],        threads: 3 },
+            { topics: ["notifications.#"], threads: 1 }
+          ]
+
+          # --- Transactional outbox ------------------------------------------
+          c.outbox_enabled       = true
+          c.outbox_poll_interval = 0.5
+          c.outbox_retention     = 1.day
+
+          # --- Realtime streams (turbo-rails) --------------------------------
+          c.streams_enabled         = true
+          c.streams_broadcast_queue = "realtime"                  # isolate broadcast jobs (#311)
+          c.capsule :realtime, queues: %w[realtime], threads: 3   # ...and a worker to drain them
+          c.streams_retention = {
+            "orders.*"        => 30.days,   # keep order streams for replay
+            "notifications.*" => 1.day      # ephemeral
+          }
+
+          # --- Metrics (Prometheus / StatsD) ---------------------------------
+          c.metrics_backend = :prometheus
+
+          # --- Recurring tasks -----------------------------------------------
+          c.recurring_enabled          = true
+          c.recurring_schedule_interval = 30.seconds
+        end
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "The exhaustive option list — every streams, health, and metrics knob — is on the "
+        a(href: "/docs/configuration-reference", class: "link") { "Configuration reference" }
+        plain "."
+      end
+    end
+  end
+
   def upgrading
     DocsUI::Section("Upgrading an existing install") do
       md <<~'MD'
-        `rails generate pgbus:update` does two things in one pass: it converts a
-        legacy `config/pgbus.yml` to a Ruby initializer, and it inspects your live
-        database and adds any missing pgbus migrations. It detects a separate
-        database automatically, so you don't re-specify `--database=pgbus`.
+        `rails generate pgbus:update` inspects your live database and adds any
+        missing pgbus migrations. It detects a separate database automatically, so
+        you don't re-specify `--database=pgbus`.
+
+        YAML config (`config/pgbus.yml`) was removed in 1.0 — if you still have
+        one, port its settings into `config/initializers/pgbus.rb` and delete the
+        YAML.
       MD
       DocsUI::Code(<<~SHELL, lexer: :shell)
-        rails generate pgbus:update            # convert config + add missing migrations
+        rails generate pgbus:update            # add missing migrations
         rails generate pgbus:update --dry-run  # print the plan, create nothing
       SHELL
     end
