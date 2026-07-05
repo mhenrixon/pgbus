@@ -88,6 +88,33 @@ RSpec.describe Pgbus::MCP::RackApp do
 
       expect(response.headers["WWW-Authenticate"]).to eq("Bearer")
     end
+
+    it "returns a fresh, mutable response array on each auth failure" do
+      app = described_class.new(data_source: data_source, token: "s3cret")
+      env = Rack::MockRequest.env_for("/", input: health_call, **json_headers)
+
+      first = app.call(env)
+      second = app.call(Rack::MockRequest.env_for("/", input: health_call, **json_headers))
+
+      expect(first).not_to be_frozen
+      expect(first[1]).not_to be_frozen
+      expect(first).not_to equal(second)
+    end
+
+    # Regression for #304: the frozen UNAUTHORIZED triple raised FrozenError once
+    # a downstream, response-mutating middleware ran — turning 401 into 500. Drive
+    # the app through the real Rack::TempfileReaper (assigns response[2]) and
+    # Rack::ETag (adds a header) to catch it the way Rails does.
+    it "answers 401 through response-mutating middleware without a FrozenError" do
+      require "rack/tempfile_reaper"
+      require "rack/etag"
+      stack = Rack::TempfileReaper.new(Rack::ETag.new(described_class.new(data_source: data_source, token: "s3cret")))
+
+      response = Rack::MockRequest.new(stack).post("/", input: health_call, **json_headers)
+
+      expect(response.status).to eq(401)
+      expect(JSON.parse(response.body).dig("error", "message")).to eq("Unauthorized")
+    end
   end
 
   describe "custom auth callable" do
