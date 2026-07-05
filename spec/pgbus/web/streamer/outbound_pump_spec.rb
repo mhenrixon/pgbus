@@ -9,13 +9,14 @@ RSpec.describe Pgbus::Web::Streamer::OutboundPump do
       ack_queue: ack_queue,
       on_dead: on_dead,
       buffer_limit: buffer_limit,
-      logger: Logger.new(IO::NULL)
+      logger: logger
     )
   end
 
   let(:threads)      { 2 }
   let(:buffer_limit) { 0 }
   let(:ack_queue)    { Queue.new }
+  let(:logger)       { Logger.new(IO::NULL) }
   let(:dead_conns)   { [] }
   let(:on_dead)      { ->(conn) { dead_conns << conn } }
 
@@ -254,6 +255,20 @@ RSpec.describe Pgbus::Web::Streamer::OutboundPump do
 
       expect(slow.written.map(&:msg_id)).to include(6) # newest kept (drop-oldest)
       expect(slow.written.size).to be < 6 # some oldest dropped
+    end
+
+    it "logs a throttled warning when it drops durable frames (not silent)" do
+      allow(logger).to receive(:warn)
+      pump.start
+      gate = Queue.new
+      slow = gated_slow_conn(gate)
+
+      6.times { |i| pump.post(slow, [envelope(i + 1)], i + 1, deadline_ms: 250) }
+      gate.close
+      wait_until { slow.written.size.positive? }
+      pump.stop
+
+      expect(logger).to have_received(:warn).at_least(:once)
     end
   end
 end

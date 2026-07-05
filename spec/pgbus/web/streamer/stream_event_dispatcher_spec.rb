@@ -308,6 +308,24 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       expect(dispatcher.send(:cursor_for, c1)).to eq(10)
     end
 
+    it "drops a late ack for an already-disconnected connection (no @scanned_cursor resurrection)" do
+      # Race: the pump acks a successful write, but a DisconnectMessage for the
+      # same connection was processed first (heartbeat idle-sweep). The late ack
+      # must NOT reinsert the connection into @scanned_cursor — that entry would
+      # leak forever since handle_disconnect never runs for it again.
+      c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
+      registry.register(c1)
+      # Disconnect first: unregisters + deletes @scanned_cursor[c1].
+      dispatcher.send(:handle, described_class::DisconnectMessage.new(connection: c1))
+      # Then a stale ack arrives for the now-gone connection.
+      ack_queue << described_class::WriteAckMessage.new(connection: c1, accepted_max: 10)
+
+      dispatcher.send(:apply_acks)
+
+      scanned = dispatcher.instance_variable_get(:@scanned_cursor)
+      expect(scanned).not_to have_key(c1)
+    end
+
     it "drains pending acks before computing minimum_cursor on a wake (apply_acks graft)" do
       c1 = build_conn(id: "a", stream_name: "chat", last_msg_id_sent: 0)
       registry.register(c1)

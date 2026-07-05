@@ -52,7 +52,7 @@ module Pgbus
           # per-connection buffer so the drop-oldest policy is per connection,
           # not per partition (a fast connection can't be starved by a slow one
           # sharing its worker beyond ordering).
-          @partitions = Array.new(threads) { Partition.new(buffer_limit) }
+          @partitions = Array.new(threads) { Partition.new(buffer_limit, @logger) }
           @threads = []
           @started = false
         end
@@ -65,6 +65,19 @@ module Pgbus
             @threads << Thread.new { run_worker(partition) }
           end
           self
+        end
+
+        # True while any writer thread is still alive. Lets callers assert the
+        # pump's OWN threads stopped after #stop without inspecting the global
+        # Thread.list (which is noisy and can't distinguish a pump leak from
+        # unrelated thread churn).
+        def alive?
+          @threads.any?(&:alive?)
+        end
+
+        # Snapshot of the pump's live writer threads — for test introspection.
+        def worker_threads
+          @threads.dup
         end
 
         # Hand a durable fanout write to the pump. Returns immediately — the
@@ -167,8 +180,13 @@ module Pgbus
         # frames are archive-recoverable on reconnect (issue #321). A drop is
         # logged (throttled) so it isn't silent.
         class Partition
-          def initialize(buffer_limit)
+          # Total durable frames this partition has dropped under buffer_limit.
+          # Monotonic; read by tests and folded into a throttled operator log.
+          attr_reader :dropped
+
+          def initialize(buffer_limit, logger)
             @buffer_limit = buffer_limit
+            @logger = logger
             @jobs = []                 # FIFO of WriteJob (and the DRAIN sentinel)
             @pending = Hash.new(0)     # connection.id → buffered frame count
             @mutex = Mutex.new
@@ -214,6 +232,8 @@ module Pgbus
 
           # Caller holds @mutex. Remove the oldest queued WriteJob for cid,
           # decrementing the pending count. Returns the dropped job or nil.
+          # A drop is logged (throttled to powers of two so a sustained
+          # overflow can't flood the log) so lost frames aren't silent.
           def drop_oldest_for(cid)
             idx = @jobs.index { |j| j != DRAIN && j.connection.id == cid }
             return nil unless idx
@@ -221,7 +241,16 @@ module Pgbus
             dropped = @jobs.delete_at(idx)
             @pending[cid] -= dropped.envelopes.size
             @dropped += 1
+            log_drop(cid) if @dropped.nobits?(@dropped - 1) # power-of-two throttle
             dropped
+          end
+
+          def log_drop(cid)
+            @logger.warn do
+              "[Pgbus::Streamer::OutboundPump] dropped #{@dropped} durable frame(s) " \
+                "under buffer_limit=#{@buffer_limit} (connection #{cid}) — the client " \
+                "replays them from the archive on reconnect"
+            end
           end
         end
         private_constant :Partition

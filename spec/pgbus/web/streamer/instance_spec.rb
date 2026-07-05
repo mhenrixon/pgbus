@@ -349,13 +349,16 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       end
 
       it "starts the pump and drains + stops it on shutdown (B3) with no thread leak" do
-        before_threads = Thread.list.size
         streamer.start
+        expect(streamer.pump.alive?).to be true # workers running while up
+
         fake_pg.push_timeout
         streamer.shutdown!
 
-        # The pump's writer threads are gone after shutdown.
-        expect(Thread.list.size).to be <= before_threads + 1 # tolerate a lingering listener join
+        # Assert on the pump's OWN writer threads, not the global Thread.list
+        # (which is noisy). After shutdown every writer thread has exited.
+        expect(streamer.pump.alive?).to be false
+        expect(streamer.pump.worker_threads).to all(satisfy { |t| !t.alive? })
       end
     end
   end

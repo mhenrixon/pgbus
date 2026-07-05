@@ -495,11 +495,22 @@ module Pgbus
         # offload is off (@ack_queue nil). advance_scanned_cursor is
         # monotonic-max-guarded, so a re-applied or cross-connection-reordered
         # ack is idempotent.
+        #
+        # Drops a stale ack for a connection that is no longer registered: the
+        # ack queue is drained independently of DisconnectMessages, so a
+        # successful-write ack can arrive AFTER handle_disconnect has already
+        # deleted @scanned_cursor[conn] (e.g. the heartbeat swept an idle client
+        # mid-write). Advancing the cursor then would resurrect the connection
+        # in @scanned_cursor and leak that entry forever. The equal? check also
+        # rejects an ack for a since-replaced connection object sharing the same
+        # id.
         def apply_acks
           return unless @ack_queue
 
           loop do
             ack = @ack_queue.pop(true)
+            next unless @registry.lookup(ack.connection.id).equal?(ack.connection)
+
             advance_scanned_cursor(ack.connection, ack.accepted_max)
           rescue ThreadError
             break # queue drained
