@@ -144,6 +144,8 @@ module ConfigReference
     streams_write_deadline_ms
     streams_fanout_write_deadline_ms
     streams_dispatch_queue_limit
+    streams_writer_threads
+    streams_writer_buffer_limit
     streams_orphan_sweep_interval
     streams_orphan_threshold
     streams_durable_patterns

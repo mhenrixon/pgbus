@@ -334,6 +334,32 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
     end
   end
 
+  describe "writer offload wiring (issue #321)" do
+    context "when streams_writer_threads is 0 (default)" do
+      it "builds no pump — fanout stays inline" do
+        expect(streamer.pump).to be_nil
+      end
+    end
+
+    context "when streams_writer_threads is positive" do
+      before { config.streams_writer_threads = 2 }
+
+      it "builds an OutboundPump and wires it into the dispatcher" do
+        expect(streamer.pump).to be_a(Pgbus::Web::Streamer::OutboundPump)
+      end
+
+      it "starts the pump and drains + stops it on shutdown (B3) with no thread leak" do
+        before_threads = Thread.list.size
+        streamer.start
+        fake_pg.push_timeout
+        streamer.shutdown!
+
+        # The pump's writer threads are gone after shutdown.
+        expect(Thread.list.size).to be <= before_threads + 1 # tolerate a lingering listener join
+      end
+    end
+  end
+
   describe "module-level Streamer.current / Streamer.reset!" do
     after { Pgbus::Web::Streamer.reset! }
 

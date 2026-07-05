@@ -134,7 +134,8 @@ module Pgbus
                   :streams_presence_patterns, :streams_presence_member,
                   :streams_host, :streams_port, :streams_database_url,
                   :streams_pool_size, :streams_pool_timeout,
-                  :streams_fanout_write_deadline_ms, :streams_dispatch_queue_limit
+                  :streams_fanout_write_deadline_ms, :streams_dispatch_queue_limit,
+                  :streams_writer_threads, :streams_writer_buffer_limit
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
@@ -339,6 +340,25 @@ module Pgbus
       # Ephemeral wakes (which carry the only copy of their HTML) and
       # Connect/Disconnect messages are NEVER dropped (issue #315 item 3).
       @streams_dispatch_queue_limit = 0
+      # Number of writer threads that flush durable-stream fanout socket writes
+      # OFF the single dispatcher thread (issue #321). 0 (default) = inline —
+      # byte-for-byte the pre-#321 behavior, no pump, no extra allocation. A
+      # positive value spawns N writer threads; each durable broadcast fanout
+      # write is handed to a writer (partitioned by connection.id.hash % N, so
+      # a connection's frames stay ordered and its per-io mutex is respected),
+      # freeing the dispatcher to service the next wake/connect. Fast clients
+      # then stop waiting behind slow ones. EPHEMERAL fanout and connect-replay
+      # writes always stay inline regardless of this value: ephemerals have no
+      # archive to replay, so they must not risk an async drop (see #321 B1).
+      @streams_writer_threads = 0
+      # Per-connection cap on the writer's outbound buffer when
+      # streams_writer_threads > 0. 0 (default) = unbounded. A positive value
+      # drops the OLDEST buffered durable frame for a connection whose writer
+      # can't keep up — safe because durable frames live in the a_<stream>
+      # archive and are re-read on reconnect via Last-Event-ID; it's a memory
+      # guard against a pathologically slow-but-alive client, not a delivery
+      # guarantee. Ignored when streams_writer_threads == 0 (issue #321).
+      @streams_writer_buffer_limit = 0
       # EXPERIMENTAL — exempt from the 1.0 stability promise.
       @streams_falcon_streaming_body = false
       # Opt-in: when true, the Dispatcher writes one row to
@@ -586,6 +606,16 @@ module Pgbus
       # >= 0, NOT .positive? — 0 is the valid "unbounded" sentinel.
       unless streams_dispatch_queue_limit.is_a?(Integer) && streams_dispatch_queue_limit >= 0
         raise Pgbus::ConfigurationError, "streams_dispatch_queue_limit must be a non-negative integer (0 = unbounded)"
+      end
+
+      # >= 0, NOT .positive? — 0 is the valid "inline" sentinel.
+      unless streams_writer_threads.is_a?(Integer) && streams_writer_threads >= 0
+        raise Pgbus::ConfigurationError, "streams_writer_threads must be a non-negative integer (0 = inline)"
+      end
+
+      # >= 0, NOT .positive? — 0 is the valid "unbounded" sentinel.
+      unless streams_writer_buffer_limit.is_a?(Integer) && streams_writer_buffer_limit >= 0
+        raise Pgbus::ConfigurationError, "streams_writer_buffer_limit must be a non-negative integer (0 = unbounded)"
       end
 
       unless streams_pool_size.is_a?(Integer) && streams_pool_size.positive?

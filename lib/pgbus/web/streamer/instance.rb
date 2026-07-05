@@ -20,7 +20,7 @@ module Pgbus
       # production the module-level Streamer.current(...) builds all of the
       # defaults from the configuration.
       class Instance
-        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue, :stream_counter
+        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue, :stream_counter, :pump
 
         def initialize(
           client: Pgbus.client,
@@ -57,6 +57,14 @@ module Pgbus
             # can inject its own factory to avoid touching real configuration.
             connection_factory: connection_factory || -> { build_raw_pg_connection }
           )
+          # Off-thread durable fanout writer (issue #321). Built only when
+          # streams_writer_threads > 0; nil means fanout writes stay inline on
+          # the dispatcher thread (the default, pre-#321 behavior). The pump
+          # reports write acks on @ack_queue (drained by the dispatcher) and
+          # posts a DisconnectMessage via on_dead when a write fails, so the
+          # dispatcher owns all cursor + registry cleanup on its own thread.
+          @ack_queue = Queue.new
+          @pump = build_pump
           @dispatcher = StreamEventDispatcher.new(
             client: @client,
             registry: @registry,
@@ -64,7 +72,9 @@ module Pgbus
             dispatch_queue: @dispatch_queue,
             logger: @logger,
             config: @config,
-            stream_counter: @stream_counter
+            stream_counter: @stream_counter,
+            pump: @pump,
+            ack_queue: @ack_queue
           )
           @heartbeat = Heartbeat.new(
             registry: @registry,
@@ -81,6 +91,9 @@ module Pgbus
           return if @started
 
           @started = true
+          # Pump first: it must be ready to accept writes before the dispatcher
+          # can post any (issue #321). No-op when offload is off (@pump nil).
+          @pump&.start
           @listener.start
           @dispatcher.start
           @heartbeat.start
@@ -117,9 +130,15 @@ module Pgbus
         #   2. Listener next (stop accepting new NOTIFYs)
         #   3. Dispatcher next (drain the queue; it's now finite because
         #      nothing else writes into it)
-        #   4. Send pgbus:shutdown sentinel to every connection and close
-        #      their sockets. We do this AFTER stopping the dispatcher so
-        #      no one else is writing to these IOs concurrently.
+        #   4. Writer pump next (issue #321): once the dispatcher — the pump's
+        #      only producer — is stopped, each partition is finite, so the
+        #      pump drains every accepted-but-unflushed durable frame and joins
+        #      its workers before we touch the sockets. No-op when offload is
+        #      off. Must come BEFORE close_all_connections so buffered frames
+        #      flush before their sockets close.
+        #   5. Send pgbus:shutdown sentinel to every connection and close
+        #      their sockets. We do this AFTER stopping the dispatcher AND the
+        #      pump so nothing else is writing to these IOs concurrently.
         #
         # Bounded by the configured write deadline per connection; a dead
         # client drops instantly, a slow one stalls for at most write_deadline_ms.
@@ -131,6 +150,7 @@ module Pgbus
             safely { @heartbeat.stop }
             safely { @listener.stop }
             safely { @dispatcher.stop }
+            safely { @pump&.stop }
             close_all_connections
           end
         end
@@ -141,6 +161,25 @@ module Pgbus
           yield
         rescue StandardError => e
           @logger.warn { "[Pgbus::Streamer::Instance] component stop raised: #{e.class}: #{e.message}" }
+        end
+
+        # Off-thread durable fanout writer (issue #321). nil (the default) keeps
+        # fanout writes inline on the dispatcher thread. When on_dead fires
+        # (a write failed), the pump posts a DisconnectMessage onto the shared
+        # dispatch queue — the SAME explicit protocol prune_dead and the
+        # heartbeat use — so the dispatcher thread owns the lockless cursor +
+        # registry cleanup and the pump never touches dispatcher state.
+        def build_pump
+          threads = @config.streams_writer_threads
+          return nil unless threads.positive?
+
+          OutboundPump.new(
+            threads: threads,
+            ack_queue: @ack_queue,
+            on_dead: ->(conn) { @dispatch_queue << StreamEventDispatcher::DisconnectMessage.new(connection: conn) },
+            buffer_limit: @config.streams_writer_buffer_limit,
+            logger: @logger
+          )
         end
 
         def close_all_connections

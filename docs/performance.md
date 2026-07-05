@@ -109,9 +109,45 @@ within noise; 0 retained/op). `config.streams_dispatch_queue_limit` (default
 durable wakes (never ephemeral/connect) when the Listener sees the queue at the
 cap — safe because the next durable wake re-reads from the min cursor.
 
-Deferred to a follow-up: a per-connection writer offload (moving the socket
-write off the dispatcher thread entirely), which needs an ack/replay path for
-ephemeral frames before it's safe.
+### Durable fanout offload (issue #321)
+
+The #315 deadline only *bounds* the serial stall (`K × 250 ms`); the dispatcher
+still writes to every client in turn. `config.streams_writer_threads` (default
+**0** = inline, the behavior above) moves the **durable** fanout socket write
+off the dispatcher into a pool of N writer threads. Each connection is pinned to
+one worker by `id.hash % N`, so its frames stay ordered and its per-io mutex is
+never cross-contended. The dispatcher hands the write to the pump and moves on;
+the pump reports back the highest msg_id it actually committed, and the
+dispatcher — still the **sole owner** of the read cursor — advances it only on
+that ack (so a blocked/partial write never advances the cursor past a frame that
+didn't reach the socket). A failed write posts a `DisconnectMessage`, and the
+dispatcher scrubs the connection on its own thread.
+
+Measured decoupling (`streams_writer_offload_bench.rb`, dispatcher
+`handle_durable_wake` wall time, 50 fast + K slow clients @ 50 ms each):
+
+| K slow clients | inline (OFF) | offload (ON, 2 writers) |
+|---|---|---|
+| 0 | 1.1 ms | 1.1 ms |
+| 1 | 55.6 ms | 0.2 ms |
+| 5 | 268 ms | 0.5 ms |
+| 20 | **1071 ms** | **0.09 ms** |
+
+Inline scales linearly with K (a slow client blocks the thread); offload stays
+flat — fast clients no longer wait behind slow ones. This is a **system-level
+latency win, not a per-write speedup**: total bytes written are unchanged and a
+slow client still takes its time on its own worker. The dispatcher does slightly
+more bookkeeping per wake under offload (the post + ack round-trip), which is why
+it stays **opt-in and default-off**; enable it only when slow-client
+head-of-line latency is a measured problem.
+
+**Ephemerals stay inline** regardless of `streams_writer_threads` — they have no
+archive to replay, so they must not risk an async drop (the pump raises if one is
+ever routed to it). `config.streams_writer_buffer_limit` (default `0` =
+unbounded) caps a connection's outbound buffer, dropping its **oldest** durable
+frame on overflow — safe because durable frames are re-read from the archive on
+reconnect; it's an OOM guard for a pathologically slow-but-alive client, not a
+delivery guarantee.
 
 ### Reading the output
 
