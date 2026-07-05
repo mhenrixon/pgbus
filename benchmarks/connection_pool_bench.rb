@@ -4,6 +4,14 @@
 # Measures peak active Postgres connections under varying concurrency
 # for ThreadPool vs AsyncPool execution modes.
 #
+# NOTE: this bench opens a RAW PG.connect per task and offers UNEQUAL load per
+# mode, so its "peak connections" reflects raw connect behavior, not how a
+# shared pool is consumed. For the fair, pool-aware threads-vs-async
+# connection-consumption comparison (equal offered load, real pool checkout,
+# sizing guidance), use `benchmarks/execution_modes_bench.rb`
+# (`rake bench:execution_modes`) — see docs/performance.md "Execution mode and
+# DB pool sizing". This bench is kept for its raw peak-connection matrix.
+#
 # REQUIRES: PGBUS_DATABASE_URL environment variable
 #
 # Usage:
