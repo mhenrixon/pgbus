@@ -96,6 +96,22 @@ RSpec.describe Pgbus::Generators::InstallGenerator do
       expect(broadcast_queue).to eq("realtime")
       expect(drains).to be true
     end
+
+    it "leaves no queue drained by more than one worker" do
+      # Guards against the built-in default capsule (seeded by
+      # Configuration#initialize) surviving alongside the generated named
+      # capsules, which would drain the "default" queue twice.
+      config = eval_initializer(initializer_path)
+      all_queues = Array(config.workers).flat_map { |w| Array(w[:queues] || w["queues"]) }
+      duplicated = all_queues.tally.select { |_queue, count| count > 1 }
+      expect(duplicated).to be_empty, "queues drained by multiple workers: #{duplicated.keys.inspect}"
+    end
+
+    it "keeps every worker a named capsule (the built-in anonymous default is cleared)" do
+      config = eval_initializer(initializer_path)
+      anonymous = Array(config.workers).reject { |w| w[:name] || w["name"] }
+      expect(anonymous).to be_empty, "unexpected anonymous worker entries: #{anonymous.inspect}"
+    end
   end
 
   describe "post-install messaging" do

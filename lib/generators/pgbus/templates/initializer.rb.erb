@@ -28,6 +28,12 @@ Pgbus.configure do |c|
   # --- Workers ------------------------------------------------------------
   # Named capsules, each draining an explicit, non-overlapping set of queues.
   # Tune the queue names and thread counts to your app.
+  #
+  # `c.workers = []` first clears the built-in default capsule
+  # (queues: %w[default], threads: 5) that pgbus seeds for a zero-config
+  # install; without it the named capsules below would be *appended* and the
+  # "default" queue would be drained twice.
+  c.workers = []
   c.capsule :default,  queues: %w[critical default], threads: 5
   c.capsule :low,      queues: %w[low],              threads: 2
 
