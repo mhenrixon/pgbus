@@ -12,6 +12,32 @@ module Pgbus
       Pgbus.teardown_models_loader!
     end
 
+    # config/pgbus.yml is no longer loaded (removed in 1.0). If an app still
+    # ships one, it's now silently inert — warn once at boot so the leftover
+    # file doesn't quietly diverge from the real (Ruby initializer) config.
+    initializer "pgbus.legacy_yaml_warning" do |app|
+      ActiveSupport.on_load(:after_initialize) do
+        Pgbus::Engine.warn_if_legacy_yaml_config(app.root, Pgbus.logger)
+      end
+    end
+
+    # Emits the legacy-YAML deprecation warning when +root+/config/pgbus.yml
+    # exists. Extracted so it can be unit-tested without booting Rails. A nil
+    # logger is a no-op (logger may be unset in a bare/embedded boot).
+    def self.warn_if_legacy_yaml_config(root, logger)
+      return if logger.nil?
+
+      config_path = root.join("config", "pgbus.yml")
+      return unless config_path.exist?
+
+      logger.warn do
+        "[Pgbus] config/pgbus.yml is no longer loaded (YAML config was removed in 1.0). " \
+          "Port its settings into config/initializers/pgbus.rb as a Pgbus.configure block " \
+          "and delete the YAML. See https://pgbus.zoolutions.llc/docs/configuration " \
+          "(the pgbus MCP server can also help port it)."
+      end
+    end
+
     initializer "pgbus.recurring" do |app|
       next if Pgbus.configuration.recurring_tasks
 

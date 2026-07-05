@@ -208,9 +208,9 @@ class Views::Docs::Pages::Configuration < DocsUI::Page
         missing pgbus migrations. It detects a separate database automatically, so
         you don't re-specify `--database=pgbus`.
 
-        YAML config (`config/pgbus.yml`) was removed in 1.0 — if you still have
-        one, port its settings into `config/initializers/pgbus.rb` and delete the
-        YAML.
+        YAML config (`config/pgbus.yml`) was removed in 1.0 — it is no longer
+        loaded, and pgbus warns once at boot if the file is still present. Port
+        its settings into `config/initializers/pgbus.rb` and delete the YAML.
       MD
       DocsUI::Code(<<~SHELL, lexer: :shell)
         rails generate pgbus:update            # add missing migrations

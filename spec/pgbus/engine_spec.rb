@@ -57,6 +57,40 @@ RSpec.describe Pgbus::Engine do
     end
   end
 
+  describe ".warn_if_legacy_yaml_config" do
+    let(:tmpdir) { Dir.mktmpdir }
+    let(:logger) { instance_spy(Logger) }
+
+    before { FileUtils.mkdir_p(File.join(tmpdir, "config")) }
+    after { FileUtils.remove_entry(tmpdir) }
+
+    it "warns, pointing at the docs, when config/pgbus.yml is present" do
+      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: legacy\n")
+
+      described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), logger)
+
+      expect(logger).to have_received(:warn) do |&block|
+        message = block.call
+        expect(message).to include("config/pgbus.yml")
+        expect(message).to include("no longer loaded")
+        expect(message).to include("config/initializers/pgbus.rb")
+        expect(message).to match(%r{https?://\S+})
+      end
+    end
+
+    it "is silent when config/pgbus.yml is absent" do
+      described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), logger)
+
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it "does not raise when the logger is nil" do
+      File.write(File.join(tmpdir, "config", "pgbus.yml"), "default_queue: legacy\n")
+
+      expect { described_class.warn_if_legacy_yaml_config(Pathname.new(tmpdir), nil) }.not_to raise_error
+    end
+  end
+
   describe "pgbus.active_job initializer" do
     # The dummy app does not require active_job/railtie, so the on_load(:active_job)
     # hook has not fired against ActiveJob::Base at boot. Load ActiveJob here and

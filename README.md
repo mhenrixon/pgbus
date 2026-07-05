@@ -142,7 +142,7 @@ Configuration is validated eagerly: `Pgbus.configure` runs `Configuration#valida
 >
 > Useful flags: `--dry-run` (print the plan without creating files), `--skip-migrations`, `--quiet`. Running it on a database with no pgbus tables at all will redirect you to `pgbus:install` instead of stacking individual add_* migrations.
 >
-> **YAML config was removed in 1.0.** `config/pgbus.yml` is no longer loaded at boot. If you still have one, port its settings into `config/initializers/pgbus.rb` as a `Pgbus.configure` block (see the example above) and delete the YAML — the last release to auto-convert it was 0.9.x via `pgbus:update`.
+> **YAML config was removed in 1.0.** `config/pgbus.yml` is no longer loaded at boot; if one is present, pgbus warns once at boot that it's inert. Port its settings into `config/initializers/pgbus.rb` as a `Pgbus.configure` block (see the example above) and delete the YAML — the last release to auto-convert it was 0.9.x via `pgbus:update`.
 >
 > For the full step-by-step procedure (including the vendored PGMQ schema check and post-upgrade verification with `pgbus doctor`) plus per-version breaking changes, see [Upgrading pgbus](https://pgbus.zoolutions.llc/docs/upgrading-pgbus).
 
