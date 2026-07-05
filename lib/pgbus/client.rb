@@ -240,6 +240,23 @@ module Pgbus
       end
     end
 
+    # Durable stream broadcast. Unlike #send_message, this ALWAYS targets the
+    # bare queue (config.queue_name) and never the priority strategy's
+    # _p0.._pN sub-queues: streams are delivered by a non-consuming peek
+    # (read_after) on the bare queue, and the streamer LISTENs on the bare
+    # channel, so a broadcast routed to _p1 would never reach the browser
+    # (issue #310). ensure_stream_queue creates the bare queue + NOTIFY
+    # trigger + archive index, mirroring this bare-name write path.
+    def send_stream_message(stream_name, payload, headers: nil, delay: 0)
+      target = config.queue_name(stream_name)
+      Instrumentation.instrument("pgbus.client.send_message", queue: target) do
+        with_stale_connection_retry do
+          ensure_stream_queue(stream_name)
+          synchronized { @pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay) }
+        end
+      end
+    end
+
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
       full_name = config.queue_name(queue_name)
       serialized, serialized_headers = serialize_batch(payloads, headers)

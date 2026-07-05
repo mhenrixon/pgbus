@@ -7,7 +7,7 @@ RSpec.describe Pgbus::Streams::Stream do
     instance_double(
       Pgbus::Client,
       ensure_stream_queue: nil,
-      send_message: 1248,
+      send_stream_message: 1248,
       stream_current_msg_id: 1247,
       read_after: [],
       notify_stream: nil,
@@ -31,7 +31,7 @@ RSpec.describe Pgbus::Streams::Stream do
 
     it "does NOT send a PGMQ message on broadcast" do
       stream.broadcast("<turbo-stream>X</turbo-stream>")
-      expect(client).not_to have_received(:send_message)
+      expect(client).not_to have_received(:send_stream_message)
     end
 
     it "sends a PG NOTIFY with the payload" do
@@ -69,7 +69,7 @@ RSpec.describe Pgbus::Streams::Stream do
 
     it "sends the message via PGMQ" do
       stream.broadcast("<turbo-stream>X</turbo-stream>")
-      expect(client).to have_received(:send_message).with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+      expect(client).to have_received(:send_stream_message).with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
     end
 
     it "does NOT use notify_stream" do
