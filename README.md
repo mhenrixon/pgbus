@@ -1233,6 +1233,8 @@ end
 
 The default `broadcasts_to` / `broadcasts_refreshes` model macros use turbo-rails' `broadcast_*_later_to` helpers, which enqueue the render+broadcast as a **background job** on the default queue. Delivery is isolated (the streamer runs in the web process with its own LISTEN connection), but the *enqueue-render hop* is not: under worker saturation, a broadcast job waits behind long-running jobs, so the browser sees the update only after a worker thread frees up.
 
+**New installs get this out of the box:** `rails generate pgbus:install` ships `config/pgbus.yml` with `streams_broadcast_queue: realtime` and a dedicated `realtime` worker capsule. The code default is `nil` (so a programmatic `Pgbus.configure` and existing installs are unchanged) — the generated config is where the recommended setup lives.
+
 Two ways to keep broadcasts off the critical path:
 
 1. **Dedicated broadcast queue (recommended for `broadcasts_to`).** Route turbo-rails' broadcast jobs to their own queue and back it with a dedicated worker capsule:
@@ -1245,7 +1247,7 @@ Two ways to keep broadcasts off the critical path:
    ]
    ```
 
-   pgbus applies the queue to `Turbo::Streams::ActionBroadcastJob`, `BroadcastJob`, and `BroadcastStreamJob` at boot. `pgbus doctor` warns in production if you use streams with turbo-rails but leave this unset.
+   pgbus applies the queue to `Turbo::Streams::ActionBroadcastJob`, `BroadcastJob`, and `BroadcastStreamJob` at boot. **The queue is only useful if a worker drains it** — `pgbus doctor` warns if `streams_broadcast_queue` is set but no capsule reads it (broadcasts would pile up unread), and warns in production if you use streams with turbo-rails but leave it unset.
 
 2. **Synchronous broadcast (`durable:`).** Passing any non-nil `durable:` to the macros renders and broadcasts in the request thread — no queue hop at all — at the cost of the render happening on the web request:
 

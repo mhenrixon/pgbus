@@ -211,17 +211,31 @@ module Pgbus
       Check.new(name: "GlobalID allowlist", status: :fail, detail: "#{e.class}: #{e.message}")
     end
 
-    # 8. Broadcast-queue isolation — latency. With turbo-rails loaded, the
-    # default broadcasts_to/broadcasts_refreshes path enqueues render+broadcast
-    # ActiveJobs on the DEFAULT queue, so a browser SSE update can wait behind
-    # long-running jobs (#311). Setting streams_broadcast_queue routes those
-    # jobs to a dedicated queue an operator can back with its own capsule. Warn
-    # only in production (where the blast radius is real) and only when Turbo is
-    # actually loaded; a warning, never a failure.
+    # 8. Broadcast-queue isolation — latency + correctness. With turbo-rails
+    # loaded, the default broadcasts_to/broadcasts_refreshes path enqueues
+    # render+broadcast ActiveJobs on the DEFAULT queue, so a browser SSE update
+    # can wait behind long-running jobs (#311). Two failure modes:
+    #
+    #   (a) streams_broadcast_queue is nil — broadcasts share the default queue
+    #       and can wait behind long jobs. A latency concern, so warn only in
+    #       production (where the blast radius is real).
+    #   (b) streams_broadcast_queue is set but NO worker capsule drains it —
+    #       broadcasts route there and pile up unread, so the browser never
+    #       updates. A correctness bug, so warn everywhere, not just production.
+    #
+    # Both are warnings, never failures. Only relevant when Turbo is loaded.
     def check_broadcast_queue
-      relevant = @config.streams_enabled && defined?(::Turbo::Broadcastable) && production?
+      broadcast_queue = @config.streams_broadcast_queue
+      turbo = @config.streams_enabled && defined?(::Turbo::Broadcastable)
 
-      if relevant && @config.streams_broadcast_queue.nil?
+      if turbo && broadcast_queue && !worker_drains?(broadcast_queue)
+        return Check.new(name: "Broadcast queue", status: :warn,
+                         detail: "streams_broadcast_queue is \"#{broadcast_queue}\" but no worker capsule " \
+                                 "drains it — broadcasts will pile up unread and never reach the browser; " \
+                                 "add a capsule for the \"#{broadcast_queue}\" queue (or a wildcard worker)")
+      end
+
+      if turbo && production? && broadcast_queue.nil?
         return Check.new(name: "Broadcast queue", status: :warn,
                          detail: "streams_broadcast_queue is nil — turbo-rails broadcast jobs share the " \
                                  "default queue and can wait behind long-running jobs; set a dedicated queue " \
@@ -229,9 +243,18 @@ module Pgbus
       end
 
       Check.new(name: "Broadcast queue", status: :ok,
-                detail: @config.streams_broadcast_queue ? "dedicated: #{@config.streams_broadcast_queue}" : "n/a")
+                detail: broadcast_queue ? "dedicated: #{broadcast_queue}" : "n/a")
     rescue StandardError => e
       Check.new(name: "Broadcast queue", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # True when some configured worker capsule drains the given queue — either
+    # by naming it explicitly or via a "*" wildcard (which drains every queue).
+    def worker_drains?(queue)
+      Array(@config.workers).any? do |w|
+        queues = w[:queues] || w["queues"] || []
+        queues.include?("*") || queues.include?(queue)
+      end
     end
 
     # Physical queue names known to PGMQ. list_queues rows may be Hashes (with a

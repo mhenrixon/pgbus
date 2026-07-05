@@ -281,11 +281,41 @@ RSpec.describe Pgbus::Doctor do
       expect(check[:detail]).to include("streams_broadcast_queue")
     end
 
-    it "is :ok when a dedicated broadcast queue is configured" do
+    it "is :ok when the broadcast queue is set AND a worker capsule drains it" do
       config.streams_broadcast_queue = "realtime"
+      config.workers = [{ queues: %w[realtime], threads: 3 }, { queues: %w[default], threads: 5 }]
       allow(doctor).to receive(:production?).and_return(true)
 
       expect(broadcast_queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "is :ok when a wildcard worker drains the broadcast queue" do
+      config.streams_broadcast_queue = "realtime"
+      config.workers = [{ queues: %w[*], threads: 5 }]
+      allow(doctor).to receive(:production?).and_return(true)
+
+      expect(broadcast_queue_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "warns when the broadcast queue is set but NO worker capsule drains it (the footgun)" do
+      # Broadcasts route to `realtime` but nothing reads it — they pile up
+      # unread and the browser never updates. This is worse than the nil case.
+      config.streams_broadcast_queue = "realtime"
+      config.workers = [{ queues: %w[default], threads: 5 }]
+      allow(doctor).to receive(:production?).and_return(true)
+
+      check = broadcast_queue_check(doctor.run)
+      expect(check[:status]).to eq(:warn)
+      expect(check[:detail]).to include("realtime")
+      expect(check[:detail]).to match(/no worker|not drained|capsule/i)
+    end
+
+    it "warns about an undrained broadcast queue even outside production (broadcasts silently pile up)" do
+      config.streams_broadcast_queue = "realtime"
+      config.workers = [{ queues: %w[default], threads: 5 }]
+      allow(doctor).to receive(:production?).and_return(false)
+
+      expect(broadcast_queue_check(doctor.run)[:status]).to eq(:warn)
     end
 
     it "is :ok outside production even without a dedicated broadcast queue" do
