@@ -64,10 +64,12 @@ module Pgbus
       private
 
       # A fresh, mutable 401 response triple each call. See UNAUTHORIZED_BODY.
+      # Header keys are lowercase per the Rack 3 SPEC (matches stream_app.rb and
+      # prometheus_exporter.rb); Rack::Headers looks them up case-insensitively.
       def unauthorized
         [
           401,
-          { "Content-Type" => "application/json", "WWW-Authenticate" => "Bearer" },
+          { "content-type" => "application/json", "www-authenticate" => "Bearer" },
           [UNAUTHORIZED_BODY]
         ]
       end
