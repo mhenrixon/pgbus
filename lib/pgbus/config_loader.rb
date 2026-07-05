@@ -4,6 +4,13 @@ require "yaml"
 require "erb"
 
 module Pgbus
+  # Loads a legacy +config/pgbus.yml+ into the running +Pgbus.configuration+.
+  #
+  # DEPRECATED (upgrade path only). Since #317, +pgbus:install+ generates a Ruby
+  # initializer (+config/initializers/pgbus.rb+) instead of YAML, and the Ruby
+  # DSL is the supported config surface. This loader stays for apps that predate
+  # that change and still ship a +config/pgbus.yml+; +pgbus:update+ converts such
+  # a file to an initializer. YAML config support is slated for removal in 2.0.
   module ConfigLoader
     module_function
 

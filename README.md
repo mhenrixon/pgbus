@@ -1233,7 +1233,7 @@ end
 
 The default `broadcasts_to` / `broadcasts_refreshes` model macros use turbo-rails' `broadcast_*_later_to` helpers, which enqueue the render+broadcast as a **background job** on the default queue. Delivery is isolated (the streamer runs in the web process with its own LISTEN connection), but the *enqueue-render hop* is not: under worker saturation, a broadcast job waits behind long-running jobs, so the browser sees the update only after a worker thread frees up.
 
-**New installs get this out of the box:** `rails generate pgbus:install` ships `config/pgbus.yml` with `streams_broadcast_queue: realtime` and a dedicated `realtime` worker capsule. The code default is `nil` (so a programmatic `Pgbus.configure` and existing installs are unchanged) — the generated config is where the recommended setup lives.
+**New installs get this out of the box:** `rails generate pgbus:install` ships `config/initializers/pgbus.rb` with `c.streams_broadcast_queue = "realtime"` and a dedicated `realtime` worker capsule. The code default is `nil` (so a programmatic `Pgbus.configure` and existing installs are unchanged) — the generated initializer is where the recommended setup lives.
 
 Two ways to keep broadcasts off the critical path:
 
