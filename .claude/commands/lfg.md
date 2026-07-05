@@ -86,6 +86,16 @@ Create a TaskCreate todo list with specific implementation steps.
 
 ## Phase 4: Implement (TDD)
 
+### The deviation log (keep it from the first edit)
+
+The plan is the map; the codebase is the territory. The moment reality forces a choice the plan or issue didn't settle, log it in `implementation-notes.md` at the repo root — one line, at the moment it happens, not reconstructed later:
+
+- **Deviations** — the plan said X, you did Y, because Z
+- **Discoveries** — facts about the codebase the plan didn't know
+- **Judgment calls** — choices the user might have made differently (defaults, naming, scope cuts)
+
+Pick the conservative option and keep going. The log is how the user audits your judgment afterwards. Never commit the file: its contents move into the PR body (Phase 7), then the file is deleted.
+
 For each logical unit:
 
 ### 4.1: Write Failing Test First
@@ -268,6 +278,20 @@ rm /tmp/pr-body.md
 
 The `--body-file` path avoids the double-layer of shell interpretation entirely and makes long PR bodies easier to read in the terminal buffer.
 
+The PR body MUST end with a `## Deviations & judgment calls` section copied from
+`implementation-notes.md` (then delete the file). If the plan held completely,
+write "None — the plan held." This section is read FIRST in review — it is the
+audit trail for every decision the plan didn't make.
+
+---
+
+## Phase 8: Comprehension Close-Out
+
+The tests prove the CODE is right; this phase keeps the USER's mental model right. After the PR is up, end your final message with:
+
+1. **The decisions, not the diff** — the 3–5 non-obvious choices in this change someone must understand to maintain it. Lead with anything from the deviation log; the user has never seen those.
+2. **Three merge-gate questions** the user should be able to answer before merging. If any answer isn't obvious to them, offer a walkthrough — an unanswerable question is comprehension debt, and merging anyway is how it compounds.
+
 ---
 
 ## Verification Checklist
@@ -279,6 +303,8 @@ The `--body-file` path avoids the double-layer of shell interpretation entirely 
 - [ ] Backwards compatibility maintained
 - [ ] PGMQ operations go through Client wrapper
 - [ ] PR created with description
+- [ ] PR body ends with `## Deviations & judgment calls` (from implementation-notes.md, since deleted)
+- [ ] Comprehension close-out delivered (decisions + three merge-gate questions)
 
 ---
 
