@@ -48,8 +48,13 @@ module Pgbus
         #   Required — the reconnect loop always rebuilds rather than resetting a
         #   possibly-dead socket, so every caller (production and tests) must pass
         #   one.
+        # dispatch_queue_limit (issue #315 item 3): 0 = unbounded (default). A
+        # positive value makes handle_notify DROP a durable wake when the
+        # dispatch queue is at/over the cap — safe because the next durable
+        # wake for that stream re-reads from the min cursor. Ephemeral wakes
+        # and Connect/Disconnect messages are never dropped.
         def initialize(pg_connection:, dispatch_queue:, health_check_ms:,
-                       connection_factory:, logger: Pgbus.logger)
+                       connection_factory:, dispatch_queue_limit: 0, logger: Pgbus.logger)
           raise ArgumentError, "connection_factory is required" unless connection_factory.respond_to?(:call)
 
           @conn = pg_connection
@@ -57,11 +62,18 @@ module Pgbus
           @health_check_ms = health_check_ms
           @logger = logger
           @connection_factory = connection_factory
+          @dispatch_queue_limit = dispatch_queue_limit
+          @dropped_wakes = 0
           @listening_to = Set.new
           @commands = Queue.new
           @running = false
           @thread = nil
         end
+
+        # Count of durable wakes dropped due to the dispatch-queue cap. Read by
+        # tests and available for operator introspection. Only mutated on the
+        # Listener thread (in handle_notify), so no synchronization needed.
+        attr_reader :dropped_wakes
 
         def start
           return if @running
@@ -201,6 +213,26 @@ module Pgbus
         def handle_notify(channel, payload = nil)
           queue_name = queue_name_from(channel)
           return unless queue_name
+
+          # Backpressure applies ONLY to durable wakes (payload nil): they
+          # self-heal because the next durable wake for the stream re-reads
+          # from the min cursor. Ephemeral wakes (payload present) carry the
+          # only copy of their HTML with no archive to replay, so they are
+          # never dropped (issue #315 item 3). @dispatch_queue.size on a stdlib
+          # Queue is internally synchronized; this runs only on the Listener
+          # thread and touches no dispatcher-owned state.
+          if payload.nil? && @dispatch_queue_limit.positive? &&
+             @dispatch_queue.size >= @dispatch_queue_limit
+            @dropped_wakes += 1
+            if (@dropped_wakes % 100) == 1
+              @logger.warn do
+                "[Pgbus::Streamer::Listener] dispatch queue at limit " \
+                  "(#{@dispatch_queue_limit}); dropped durable wake for " \
+                  "#{queue_name} (total dropped: #{@dropped_wakes})"
+              end
+            end
+            return
+          end
 
           @dispatch_queue << WakeMessage.new(queue_name: queue_name, payload: payload)
         end

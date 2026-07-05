@@ -90,6 +90,14 @@ module Pgbus
           # process-wide setting. Falls back to the global config
           # for production call sites that don't specify one.
           @config = config || Pgbus.configuration
+          # Two write deadlines (issue #315 item 3). Fanout writes run serially
+          # on this single thread, so a slow client stalls the connections
+          # queued behind it — the short fanout deadline bounds that stall.
+          # Connect-replay writes run once per subscribe (not in the hot loop),
+          # so a fresh client catching up from the archive keeps the full
+          # deadline and isn't spuriously evicted.
+          @fanout_write_deadline_ms  = @config.streams_fanout_write_deadline_ms
+          @connect_write_deadline_ms = @config.streams_write_deadline_ms
           @stream_counter = stream_counter || StreamCounter.new
           # stream_name → Array<[connection, Array<Envelope>]>
           @in_flight = Hash.new { |h, k| h[k] = [] }
@@ -321,13 +329,18 @@ module Pgbus
             limit: @read_limit
           )
           initial = raw_initial.map { |e| unwrap_stream_envelope(e) }
-          safe_enqueue(connection, visible_envelopes_for(initial, connection))
+          # Connect-replay (steps 3 & 4) uses the FULL write deadline, not the
+          # short fanout one: this runs once per subscribe, outside the serial
+          # hot loop, and a new client catching up a large archive backlog must
+          # not be killed by the 250ms fanout budget (issue #315 item 3).
+          safe_enqueue(connection, visible_envelopes_for(initial, connection),
+                       deadline_ms: @connect_write_deadline_ms)
 
           # Step 4: drain the in-flight buffer (anything published between
           # step 2 and now). Connection#enqueue dedupes by cursor, so
           # overlap with step 3 is safe. The buffer entries were already
           # filtered when enqueued by handle_wake, so no re-filter here.
-          safe_enqueue(connection, buffer)
+          safe_enqueue(connection, buffer, deadline_ms: @connect_write_deadline_ms)
 
           # Step 5: promote to the main registry. From this point the
           # regular WakeMessage path handles the connection. If the
@@ -440,11 +453,16 @@ module Pgbus
           @scanned_cursor[connection] = msg_id if msg_id > current
         end
 
-        def safe_enqueue(connection, envelopes_or_buffer)
+        # deadline_ms defaults to the SHORT fanout deadline: every hot-loop
+        # fanout call site (handle_durable_wake, handle_ephemeral_wake) uses
+        # it implicitly. handle_connect passes @connect_write_deadline_ms
+        # explicitly so a new client's initial replay keeps the full window
+        # (issue #315 item 3).
+        def safe_enqueue(connection, envelopes_or_buffer, deadline_ms: @fanout_write_deadline_ms)
           return if connection.dead?
           return if envelopes_or_buffer.empty?
 
-          connection.enqueue(envelopes_or_buffer)
+          connection.enqueue(envelopes_or_buffer, deadline_ms: deadline_ms)
         end
 
         def prune_dead(connections)

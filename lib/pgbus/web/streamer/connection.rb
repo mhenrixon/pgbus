@@ -40,7 +40,11 @@ module Pgbus
           @context = context
         end
 
-        def enqueue(envelopes)
+        # deadline_ms defaults to the connection's own write deadline so every
+        # existing caller is unchanged. The Dispatcher overrides it with the
+        # short streams_fanout_write_deadline_ms for hot-loop fanout writes,
+        # bounding head-of-line blocking on a slow client (issue #315 item 3).
+        def enqueue(envelopes, deadline_ms: @write_deadline_ms)
           written = []
           envelopes.each do |envelope|
             ephemeral = envelope.msg_id.negative?
@@ -52,7 +56,7 @@ module Pgbus
               data: envelope.payload
             )
 
-            result = @writer.write(self, bytes, deadline_ms: @write_deadline_ms)
+            result = @writer.write(self, bytes, deadline_ms: deadline_ms)
             if result == :ok
               @last_msg_id_sent = envelope.msg_id unless ephemeral
               @last_write_at = monotonic

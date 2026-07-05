@@ -31,7 +31,11 @@ module Pgbus
           @context = context
         end
 
-        def enqueue(envelopes)
+        # deadline_ms is accepted for duck-type parity with Connection#enqueue
+        # (so the Dispatcher's safe_enqueue can call either class) but ignored:
+        # write_to_body is non-blocking under Falcon's fiber reactor, so there
+        # is no head-of-line blocking to bound here (issue #315 item 3).
+        def enqueue(envelopes, deadline_ms: @write_deadline_ms) # rubocop:disable Lint/UnusedMethodArgument
           written = []
           envelopes.each do |envelope|
             next if envelope.msg_id <= @last_msg_id_sent

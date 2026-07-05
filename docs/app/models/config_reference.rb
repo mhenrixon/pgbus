@@ -142,6 +142,8 @@ module ConfigReference
     streams_port
     streams_listen_health_check_ms
     streams_write_deadline_ms
+    streams_fanout_write_deadline_ms
+    streams_dispatch_queue_limit
     streams_orphan_sweep_interval
     streams_orphan_threshold
     streams_durable_patterns

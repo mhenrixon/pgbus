@@ -43,6 +43,11 @@ module Pgbus
             pg_connection: @pg_connection,
             dispatch_queue: @dispatch_queue,
             health_check_ms: @config.streams_listen_health_check_ms,
+            # Opt-in dispatch-queue backpressure (issue #315 item 3). 0 =
+            # unbounded (default). The queue itself stays an unbounded
+            # Queue.new so the request-thread Connect push and the dispatcher's
+            # own prune_dead self-post never block.
+            dispatch_queue_limit: @config.streams_dispatch_queue_limit,
             logger: @logger,
             # On reconnect the Listener rebuilds its OWN connection via this
             # factory (fresh connect re-resolves DNS, converges on the promoted
