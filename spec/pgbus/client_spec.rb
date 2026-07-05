@@ -1033,6 +1033,51 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#send_stream_message (durable stream broadcasts)" do
+    before do
+      allow(client).to receive_messages(ensure_stream_queue: nil)
+    end
+
+    it "targets the bare queue when priority is disabled" do
+      client.send_stream_message("chat_42", { "html" => "<p>hi</p>" })
+
+      expect(mock_pgmq).to have_received(:produce).with(
+        "pgbus_test_chat_42",
+        '{"html":"<p>hi</p>"}',
+        headers: nil,
+        delay: 0
+      )
+    end
+
+    context "when priority_levels > 1 is configured (issue #310)" do
+      before { config.priority_levels = 3 }
+      after { config.priority_levels = nil }
+
+      it "still targets the BARE queue, not a _pN sub-queue" do
+        # The streamer LISTENs and replays on the bare queue only. Routing a
+        # durable broadcast to _p1 (as send_message would) means the browser
+        # never receives it. Streams are peek-based; priority is meaningless.
+        client.send_stream_message("chat_42", { "html" => "<p>hi</p>" })
+
+        expect(mock_pgmq).to have_received(:produce).with(
+          "pgbus_test_chat_42",
+          anything,
+          headers: nil,
+          delay: 0
+        )
+        expect(mock_pgmq).not_to have_received(:produce).with(
+          a_string_matching(/_p\d+$/), any_args
+        )
+      end
+    end
+
+    it "ensures the stream queue (bare) before producing" do
+      client.send_stream_message("chat_42", { "html" => "x" })
+
+      expect(client).to have_received(:ensure_stream_queue).with("chat_42")
+    end
+  end
+
   describe "#bind_topic" do
     it "ensures the queue and binds the pattern" do
       client.bind_topic("orders.#", "events")

@@ -157,10 +157,10 @@ module Pgbus
         }
         Instrumentation.instrument("pgbus.stream.broadcast", instrument_payload) do
           if transaction
-            transaction.after_commit { @client.send_message(@name, wrapped) }
+            transaction.after_commit { @client.send_stream_message(@name, wrapped) }
             nil
           else
-            @client.send_message(@name, wrapped)
+            @client.send_stream_message(@name, wrapped)
           end
         end
       end

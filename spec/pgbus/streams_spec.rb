@@ -10,7 +10,7 @@ RSpec.describe Pgbus::Streams do
       instance_double(
         Pgbus::Client,
         ensure_stream_queue: nil,
-        send_message: 1248,
+        send_stream_message: 1248,
         stream_current_msg_id: 1247,
         read_after: []
       )
@@ -29,7 +29,7 @@ RSpec.describe Pgbus::Streams do
         # The HTML is wrapped as {"html" => ...} because PGMQ stores messages
         # as JSONB and won't accept raw HTML. Dispatcher unwraps before
         # delivering to the SSE client.
-        expect(client).to have_received(:send_message).with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
+        expect(client).to have_received(:send_stream_message).with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
       end
 
       it "returns the assigned msg_id" do
@@ -45,49 +45,49 @@ RSpec.describe Pgbus::Streams do
 
       it "carries exclude: in the wrapped payload for actor-echo suppression" do
         stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "conn-abc123")
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream>X</turbo-stream>", "exclude" => "conn-abc123" })
       end
 
       it "omits exclude from the payload when nil (the common path)" do
         stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: nil)
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
       end
 
       it "omits exclude from the payload when blank" do
         stream.broadcast("<turbo-stream>X</turbo-stream>", exclude: "")
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream>X</turbo-stream>" })
       end
 
       it "composes exclude with visible_to" do
         stream.broadcast("X", visible_to: :admins, exclude: "conn-9")
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "X", "visible_to" => "admins", "exclude" => "conn-9" })
       end
 
       it "carries a typed event name in the wrapped payload" do
         stream.broadcast("<turbo-stream/>", event: "presence")
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream/>", "event" => "presence" })
       end
 
       it "omits event from the payload when nil (default turbo-stream path)" do
         stream.broadcast("<turbo-stream/>", event: nil)
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream/>" })
       end
 
       it "omits event when it is the default turbo-stream (no need to carry it)" do
         stream.broadcast("<turbo-stream/>", event: "turbo-stream")
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream/>" })
       end
 
       it "composes event with visible_to and exclude" do
         stream.broadcast("X", event: "reactive", visible_to: :admins, exclude: "c1")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => "X", "visible_to" => "admins", "exclude" => "c1", "event" => "reactive" }
         )
@@ -102,7 +102,7 @@ RSpec.describe Pgbus::Streams do
       it "submits to the coalescer instead of broadcasting immediately" do
         stream.broadcast("<turbo-stream/>", coalesce: 80, target: "cursor")
 
-        expect(client).not_to have_received(:send_message)
+        expect(client).not_to have_received(:send_stream_message)
         expect(coalescer).to have_received(:submit).with(
           stream_name: "chat",
           target: "cursor",
@@ -139,7 +139,7 @@ RSpec.describe Pgbus::Streams do
       it "does not coalesce when coalesce is nil/false (normal broadcast)" do
         stream.broadcast("x", coalesce: false, target: "t")
         expect(coalescer).not_to have_received(:submit)
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
       end
 
       it "rejects a non-numeric, non-true coalesce value at the API boundary" do
@@ -173,7 +173,7 @@ RSpec.describe Pgbus::Streams do
       subject(:stream) { described_class.new("chat", client: client, durable: true) }
 
       let(:client) do
-        double("Pgbus::Client", ensure_stream_queue: nil, send_message: 1248,
+        double("Pgbus::Client", ensure_stream_queue: nil, send_stream_message: 1248,
                                 stream_current_msg_id: 1247, read_after: [])
       end
       let(:coalescer) { instance_spy(Pgbus::Streams::Coalescer) }
@@ -225,7 +225,7 @@ RSpec.describe Pgbus::Streams do
 
       it "renders the component, wraps it in a turbo-stream action tag, and broadcasts" do
         stream.broadcast_render(renderable: phlex_like.new("hi"), action: :append, target: "messages")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="append" target="messages"><template><div class="msg">hi</div></template></turbo-stream>' }
         )
@@ -233,7 +233,7 @@ RSpec.describe Pgbus::Streams do
 
       it "defaults the action to replace" do
         stream.broadcast_render(renderable: phlex_like.new("x"), target: "item_1")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="replace" target="item_1"><template><div class="msg">x</div></template></turbo-stream>' }
         )
@@ -241,7 +241,7 @@ RSpec.describe Pgbus::Streams do
 
       it "accepts a pre-rendered HTML string as the renderable" do
         stream.broadcast_render(renderable: "<p>plain</p>", action: :prepend, target: "list")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="prepend" target="list"><template><p>plain</p></template></turbo-stream>' }
         )
@@ -249,7 +249,7 @@ RSpec.describe Pgbus::Streams do
 
       it "omits the <template> for content-less actions like remove" do
         stream.broadcast_render(action: :remove, target: "item_9")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="remove" target="item_9"></turbo-stream>' }
         )
@@ -257,7 +257,7 @@ RSpec.describe Pgbus::Streams do
 
       it "HTML-escapes the action and target attributes" do
         stream.broadcast_render(renderable: "x", action: :replace, target: 'a"b')
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="replace" target="a&quot;b"><template>x</template></turbo-stream>' }
         )
@@ -265,7 +265,7 @@ RSpec.describe Pgbus::Streams do
 
       it "passes exclude through to the broadcast (composes with #165)" do
         stream.broadcast_render(renderable: "x", target: "t", exclude: "conn-7")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           {
             "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
@@ -276,7 +276,7 @@ RSpec.describe Pgbus::Streams do
 
       it "passes visible_to through to the broadcast" do
         stream.broadcast_render(renderable: "x", target: "t", visible_to: :admins)
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           {
             "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
@@ -290,7 +290,7 @@ RSpec.describe Pgbus::Streams do
           def render_in(_view_context) = "<span>vc</span>"
         end.new
         stream.broadcast_render(renderable: renderable, target: "t")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           { "html" => '<turbo-stream action="replace" target="t"><template><span>vc</span></template></turbo-stream>' }
         )
@@ -307,7 +307,7 @@ RSpec.describe Pgbus::Streams do
 
       it "passes a typed event through to the broadcast" do
         stream.broadcast_render(renderable: "x", target: "t", event: "reactive")
-        expect(client).to have_received(:send_message).with(
+        expect(client).to have_received(:send_stream_message).with(
           "chat",
           {
             "html" => '<turbo-stream action="replace" target="t"><template>x</template></turbo-stream>',
@@ -322,7 +322,7 @@ RSpec.describe Pgbus::Streams do
 
         stream.broadcast_render(renderable: "<span>c</span>", target: "cursor", action: :update, coalesce: 30)
 
-        expect(client).not_to have_received(:send_message)
+        expect(client).not_to have_received(:send_stream_message)
         expect(coalescer).to have_received(:submit).with(
           stream_name: "chat",
           target: "cursor",
@@ -345,7 +345,7 @@ RSpec.describe Pgbus::Streams do
         double(
           "Pgbus::Client",
           ensure_stream_queue: nil,
-          send_message: 1248,
+          send_stream_message: 1248,
           stream_current_msg_id: 1247,
           read_after: []
         )
@@ -381,12 +381,12 @@ RSpec.describe Pgbus::Streams do
 
       before { stub_const("ActiveRecord::Base", ar_base) }
 
-      it "defers send_message until the transaction commits" do
+      it "defers send_stream_message until the transaction commits" do
         stream.broadcast("<turbo-stream>A</turbo-stream>")
 
-        expect(client).not_to have_received(:send_message)
+        expect(client).not_to have_received(:send_stream_message)
         transaction.commit!
-        expect(client).to have_received(:send_message)
+        expect(client).to have_received(:send_stream_message)
           .with("chat", { "html" => "<turbo-stream>A</turbo-stream>" })
       end
 
@@ -394,12 +394,12 @@ RSpec.describe Pgbus::Streams do
         stream.broadcast("<turbo-stream>A</turbo-stream>")
         transaction.rollback!
 
-        expect(client).not_to have_received(:send_message)
+        expect(client).not_to have_received(:send_stream_message)
       end
 
       it "accumulates multiple broadcasts and fires them all on commit in order" do
         sent = []
-        allow(client).to receive(:send_message) { |_name, payload| sent << payload["html"] }
+        allow(client).to receive(:send_stream_message) { |_name, payload| sent << payload["html"] }
 
         stream.broadcast("<turbo-stream>A</turbo-stream>")
         stream.broadcast("<turbo-stream>B</turbo-stream>")
@@ -426,18 +426,18 @@ RSpec.describe Pgbus::Streams do
       end
 
       context "when the transaction is already closed" do
-        it "falls back to synchronous send_message" do
+        it "falls back to synchronous send_stream_message" do
           transaction.open = false
           stream.broadcast("X")
-          expect(client).to have_received(:send_message).with("chat", { "html" => "X" })
+          expect(client).to have_received(:send_stream_message).with("chat", { "html" => "X" })
         end
       end
 
-      context "when a later broadcast's send_message raises after commit" do
+      context "when a later broadcast's send_stream_message raises after commit" do
         it "does not prevent earlier deferred broadcasts from firing" do
           first = nil
           calls = 0
-          allow(client).to receive(:send_message) do |*|
+          allow(client).to receive(:send_stream_message) do |*|
             calls += 1
             first = :ok if calls == 1
             raise "boom" if calls == 2
@@ -467,7 +467,7 @@ RSpec.describe Pgbus::Streams do
         double(
           "Pgbus::Client",
           ensure_stream_queue: nil,
-          send_message: 1248,
+          send_stream_message: 1248,
           stream_current_msg_id: 1247,
           read_after: []
         )
@@ -477,9 +477,9 @@ RSpec.describe Pgbus::Streams do
         hide_const("ActiveRecord::Base") if defined?(ActiveRecord::Base)
       end
 
-      it "falls back to synchronous send_message" do
+      it "falls back to synchronous send_stream_message" do
         stream.broadcast("X")
-        expect(client).to have_received(:send_message).with("chat", { "html" => "X" })
+        expect(client).to have_received(:send_stream_message).with("chat", { "html" => "X" })
       end
     end
 

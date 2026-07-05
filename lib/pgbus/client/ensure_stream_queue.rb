@@ -22,7 +22,14 @@ module Pgbus
         full_name = config.queue_name(stream_name)
 
         with_stale_connection_retry do
-          ensure_queue(stream_name)
+          # Create the BARE queue directly. ensure_queue would fan out through
+          # the priority strategy to _p0.._pN under priority_levels>1, leaving
+          # the bare queue — the one the streamer NOTIFYs on and read_after
+          # peeks — uncreated, and the enable_notify_if_needed below would then
+          # raise on the missing bare table. Streams never use priority
+          # sub-queues (issue #310).
+          ensure_pgmq_schema
+          ensure_single_queue(full_name)
 
           # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
           # high-frequency worker queue inserts. Streams are latency-
