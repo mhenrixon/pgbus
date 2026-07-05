@@ -18,7 +18,7 @@ module Pgbus
         sql = build_read_after_sql(sanitized)
 
         rows = synchronized do
-          with_raw_connection do |conn|
+          with_streams_connection do |conn|
             conn.exec_params(sql, [after_id.to_i, limit.to_i]).to_a
           end
         end
@@ -34,7 +34,7 @@ module Pgbus
         sanitized = sanitized_queue(stream_name)
         sql = "SELECT COALESCE(MAX(msg_id), 0) AS max FROM pgmq.q_#{sanitized}"
         synchronized do
-          with_raw_connection do |conn|
+          with_streams_connection do |conn|
             conn.exec(sql).first.fetch("max").to_i
           end
         end
@@ -53,7 +53,7 @@ module Pgbus
           ) AS least
         SQL
         synchronized do
-          with_raw_connection do |conn|
+          with_streams_connection do |conn|
             value = conn.exec(sql).first.fetch("least")
             value&.to_i
           end

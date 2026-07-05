@@ -24,6 +24,7 @@ to guess.
 | Connection pool checkout | every PGMQ operation under concurrency | `connection_pool_bench.rb` |
 | Execution pool dispatch | every job dispatched to thread/async pool | `execution_pool_bench.rb` |
 | SSE streaming | every Turbo Stream broadcast | `streams_bench.rb` |
+| Streamer replay read | every durable-stream wake + SSE connect (`Client#read_after`) | `streams_read_pool_bench.rb` |
 
 ## Measuring
 
@@ -36,6 +37,7 @@ rake bench:one[name]    # a single benchmark by name (e.g. client_bench)
 rake bench:memory       # detailed memory profiling with allocation breakdown
 rake bench:integration  # real PostgreSQL + PGMQ (requires PGBUS_DATABASE_URL)
 rake bench:streams      # real Puma + SSE fan-out (requires PGBUS_DATABASE_URL)
+rake bench:one[streams_read_pool_bench]  # streamer replay-read pool (requires PGBUS_DATABASE_URL)
 ```
 
 - **Unit benches** (`benchmarks/*_bench.rb`) isolate gem overhead with a mocked
@@ -46,6 +48,31 @@ rake bench:streams      # real Puma + SSE fan-out (requires PGBUS_DATABASE_URL)
   PostgreSQL + PGMQ instance for end-to-end latency.
 - **Streams benches** (`benchmarks/streams_bench.rb`) boot a real Puma server
   and measure SSE broadcast fan-out.
+- **Streamer replay-read bench** (`benchmarks/streams_read_pool_bench.rb`)
+  isolates the per-wake `Client#read_after` cost against a real DB, comparing
+  a fresh `PG.connect` per call (the pre-#315 `with_raw_connection` behavior) to
+  the dedicated streams pool.
+
+#### Streamer connection model (issue #315)
+
+The durable-stream publish and replay hot paths run on a **dedicated streams
+DB pool** (`config.streams_pool_size` / `streams_pool_timeout`), separate from
+the job pool (`pool_size`):
+
+- `Client#send_stream_message` (the broadcast INSERT) draws from the streams
+  pool, so a saturated job pool can't delay a broadcast on pool checkout.
+- The dispatcher's per-wake reads (`read_after`, `stream_current_msg_id`,
+  `stream_oldest_msg_id`) check out a persistent pooled connection via
+  `Client#with_streams_connection` instead of a fresh `PG.connect` per call —
+  measured ~23× faster per read against a real DB (191 μs vs 4.42 ms), removing
+  the TCP + auth + TLS setup cost from the single dispatcher thread. This is a
+  connection-setup win at the client layer, **not** end-to-end broadcast
+  latency (which the PGMQ round-trip + LISTEN/NOTIFY + socket write dominate).
+
+On the shared-ActiveRecord (Proc) connection path no separate pool is created
+(libpq isn't thread-safe): streams share the single serialized connection, so
+the isolation applies only to the dedicated `database_url` / `connection_params`
+config.
 
 ### Reading the output
 
