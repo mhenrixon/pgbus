@@ -26,9 +26,9 @@ RSpec.describe "Streams pool autoscaler", :integration do
   end
 
   let(:client) { Pgbus::Client.new(config, schema_ensured: true) }
-  let(:autoscaler) { Pgbus::Web::Streamer::PoolAutoscaler.new(client: client, config: config, logger: config.logger) }
+  let(:autoscaler) { Pgbus::Streams::PoolAutoscaler.new(client: client, config: config, logger: config.logger) }
   let(:maintenance) do
-    Pgbus::Web::Streamer::PoolAutoscaler::Maintenance.new(
+    Pgbus::Streams::PoolAutoscaler::Maintenance.new(
       autoscaler: autoscaler, interval: 0, application_name_prefix: config.streams_application_name
     )
   end

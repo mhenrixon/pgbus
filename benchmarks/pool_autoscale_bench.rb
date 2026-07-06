@@ -68,8 +68,8 @@ end
 
 client = build_client
 client.ensure_stream_queue(STREAM)
-autoscaler = Pgbus::Web::Streamer::PoolAutoscaler.new(client: client, config: client.config, logger: client.config.logger)
-maintenance = Pgbus::Web::Streamer::PoolAutoscaler::Maintenance.new(
+autoscaler = Pgbus::Streams::PoolAutoscaler.new(client: client, config: client.config, logger: client.config.logger)
+maintenance = Pgbus::Streams::PoolAutoscaler::Maintenance.new(
   autoscaler: autoscaler, interval: 0, application_name_prefix: client.config.streams_application_name
 )
 

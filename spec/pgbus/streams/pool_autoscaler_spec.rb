@@ -6,7 +6,7 @@ require "spec_helper"
 # #323). It owns no thread and no connection — #evaluate takes a headroom hash
 # ({maxc:, used:, peers:}) and the pool busy_ratio (from a fake client's
 # streams_pool_stats) and decides grow/shrink/emergency/hold. Fully DB-free.
-RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
+RSpec.describe Pgbus::Streams::PoolAutoscaler do
   subject(:autoscaler) { described_class.new(client: client, config: config, logger: logger) }
 
   let(:logger) { instance_double(Logger, info: nil, warn: nil, error: nil, debug: nil) }
@@ -182,7 +182,7 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       described_class.new(autoscaler: autoscaler_double, interval: 300, application_name_prefix: "pgbus_streams")
     end
 
-    let(:autoscaler_double) { instance_double(Pgbus::Web::Streamer::PoolAutoscaler, evaluate: :hold) }
+    let(:autoscaler_double) { instance_double(Pgbus::Streams::PoolAutoscaler, evaluate: :hold) }
 
     it "runs the headroom query on the given connection and hands the reading to the autoscaler" do
       row = { "maxc" => "100", "used" => "40", "peers" => "5" }
@@ -194,7 +194,7 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       maintenance.run(conn)
 
       expect(conn).to have_received(:exec_params).with(
-        Pgbus::Web::Streamer::PoolAutoscaler::HEADROOM_SQL, ["pgbus_streams_%"]
+        Pgbus::Streams::PoolAutoscaler::HEADROOM_SQL, ["pgbus_streams_%"]
       )
       expect(autoscaler_double).to have_received(:evaluate).with(maxc: 100, used: 40, peers: 5)
     end
