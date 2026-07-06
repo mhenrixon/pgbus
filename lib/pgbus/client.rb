@@ -7,6 +7,7 @@ require_relative "client/read_after"
 require_relative "client/ensure_stream_queue"
 require_relative "client/notify_stream"
 require_relative "client/connection_health"
+require_relative "client/resizable_pool"
 
 module Pgbus
   class Client
@@ -90,7 +91,23 @@ module Pgbus
         # thread counts.
         @streams_pgmq = PGMQ::Client.new(conn_opts, pool_size: config.streams_pool_size,
                                                     pool_timeout: config.streams_pool_timeout)
+        # Snapshot the bounds-applied connection options so a hot-swap rebuilds a
+        # byte-identical pool at a new size (issue #323). nil on the shared path,
+        # where resize is a no-op.
+        @streams_conn_opts = conn_opts
       end
+
+      # Wrap the streams pool so its live reference can be atomically hot-swapped
+      # to a new size under load without losing broadcasts or leaking connections
+      # (issue #323 spike; #resize_streams_pool). All streams-pool access goes
+      # through this — see #streams_pool. Default behavior with no swap is
+      # byte-identical (one AtomicReference read + a counter bump per op).
+      @streams_pool = ResizablePool.new(
+        @streams_pgmq,
+        shared: @shared_connection,
+        drain_timeout: config.streams_pool_timeout + 1.0,
+        logger: Pgbus.logger
+      )
 
       @queues_created = Concurrent::Map.new
       @stream_indexes_created = Concurrent::Map.new
@@ -272,7 +289,7 @@ module Pgbus
           # shared-AR path @streams_pgmq aliases @pgmq and synchronized still
           # serializes on the mutex.
           synchronized do
-            @streams_pgmq.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay)
+            streams_pool.produce(target, serialize(payload), headers: headers && serialize(headers), delay: delay)
           end
         end
       end
@@ -488,7 +505,7 @@ module Pgbus
     # On the shared-AR path @streams_pgmq aliases @pgmq, so this reports the job
     # pool's counters — accurate, since streams share that connection there.
     def streams_pool_stats
-      @streams_pgmq.stats.merge(pool_timeout: config.streams_pool_timeout)
+      streams_pool.stats.merge(pool_timeout: config.streams_pool_timeout)
     rescue StandardError => e
       Pgbus.logger.debug { "[Pgbus::Client] streams_pool_stats unavailable: #{e.class}: #{e.message}" }
       {}
@@ -692,11 +709,41 @@ module Pgbus
     def close
       synchronized do
         @pgmq.close
-        # Close the dedicated streams pool too (issue #315) so its connections
-        # don't leak. On the shared-AR path @streams_pgmq aliases @pgmq — guard
-        # with equal? so we don't double-close the same pool.
-        @streams_pgmq.close unless @streams_pgmq.equal?(@pgmq)
+        # Close the CURRENT streams pool too (issue #315) so its connections
+        # don't leak. close_current reads the live (possibly hot-swapped, #323)
+        # pool once under the swap mutex and skips it when it aliases @pgmq (the
+        # shared-AR path) so we don't double-close the same pool.
+        @streams_pool.close_current(job_pool: @pgmq)
       end
+    end
+
+    # Opt-in hot-swap of the dedicated streams pool to a new size (issue #323
+    # spike). Builds a fresh PGMQ::Client at new_size with the SAME bounds-applied
+    # connection options, atomically swaps the live reference, then drains +
+    # closes the old pool (bounded, never Thread#kill). NOT called automatically —
+    # there is no control loop here; a caller triggers it explicitly.
+    #
+    # No-op on the shared-AR (Proc) path (the streams pool aliases the job pool,
+    # which is non-thread-safe and forced to pool_size 1 — swapping it would
+    # corrupt the job pool), and no-op when the size is unchanged.
+    #
+    # @return [ResizablePool::SwapStats] on a swap, or {swapped: false, reason:}
+    def resize_streams_pool(new_size)
+      raise ArgumentError, "new_size must be a positive integer" unless new_size.is_a?(Integer) && new_size.positive?
+      return { swapped: false, reason: :shared_connection } if @shared_connection
+      return { swapped: false, reason: :unchanged } if streams_pool.stats[:size] == new_size
+
+      from_size = streams_pool.stats[:size]
+      new_pgmq = PGMQ::Client.new(
+        @streams_conn_opts, pool_size: new_size, pool_timeout: config.streams_pool_timeout
+      )
+      @streams_pool.swap(new_pgmq, from_size: from_size, to_size: new_size)
+    end
+
+    # Accumulated streams-pool swap telemetry (issue #323) — for the bench and a
+    # future control loop. Zero-valued before any swap.
+    def streams_swap_stats
+      @streams_pool.stats_snapshot
     end
 
     private
@@ -842,7 +889,7 @@ module Pgbus
       if @shared_connection
         with_raw_connection(&)
       else
-        @streams_pgmq.with_connection(&)
+        streams_pool.with_connection(&)
       end
     end
 
@@ -940,6 +987,11 @@ module Pgbus
         yield
       end
     end
+
+    # The ResizablePool wrapping the streams pool. All streams-pool reads
+    # (produce / with_connection / stats) go through it so the underlying
+    # PGMQ::Client can be atomically hot-swapped to a new size (issue #323).
+    attr_reader :streams_pool
 
     # Substrings that indicate the pooled PG::Connection was already dead
     # *before* pgmq-ruby tried to use it — typically killed by a connection
