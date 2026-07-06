@@ -1574,6 +1574,22 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_pool_timeout).to eq(5)
     end
 
+    it "disables streams-pool autoscaling by default" do
+      expect(config.streams_pool_autoscale).to be false
+    end
+
+    it "leaves the autoscale hard cap unset by default (dynamic headroom is the ceiling)" do
+      expect(config.streams_pool_max).to be_nil
+    end
+
+    it "runs the autoscale maintenance check every 5 minutes by default" do
+      expect(config.streams_pool_autoscale_interval).to eq(300.0)
+    end
+
+    it "tags streams connections 'pgbus_streams' by default (peer inference)" do
+      expect(config.streams_application_name).to eq("pgbus_streams")
+    end
+
     it "does not opt into the Falcon streaming body code path by default" do
       expect(config.streams_falcon_streaming_body).to be false
     end
@@ -1702,6 +1718,33 @@ RSpec.describe Pgbus::Configuration do
     it "rejects non-positive streams_pool_timeout" do
       config.streams_pool_timeout = 0
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_timeout/)
+    end
+
+    it "rejects a non-boolean streams_pool_autoscale" do
+      config.streams_pool_autoscale = "yes"
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_autoscale/)
+    end
+
+    it "accepts nil streams_pool_max (no hard cap)" do
+      config.streams_pool_max = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "accepts a streams_pool_max >= streams_pool_size" do
+      config.streams_pool_size = 5
+      config.streams_pool_max = 12
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a streams_pool_max below streams_pool_size (inverted ceiling)" do
+      config.streams_pool_size = 5
+      config.streams_pool_max = 3
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_max/)
+    end
+
+    it "rejects a non-positive streams_pool_autoscale_interval" do
+      config.streams_pool_autoscale_interval = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /streams_pool_autoscale_interval/)
     end
 
     it "accepts a valid streams config" do

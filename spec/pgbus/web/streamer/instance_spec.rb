@@ -60,6 +60,7 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       read_after: [],
       stream_current_msg_id: 0,
       ensure_stream_queue: nil,
+      shared_connection?: false,
       config: config
     )
   end
@@ -414,6 +415,74 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
       expect(instances.uniq.size).to eq(1)
       expect(build_count.value).to eq(1)
+    end
+  end
+
+  describe "streams-pool autoscaler wiring (issue #323)" do
+    let(:autoscale_client) do
+      instance_double(
+        Pgbus::Client,
+        read_after: [], stream_current_msg_id: 0, ensure_stream_queue: nil,
+        config: config, shared_connection?: shared
+      )
+    end
+    let(:shared) { false }
+
+    def build_instance
+      described_class.new(client: autoscale_client, config: config, pg_connection: fake_pg,
+                          logger: Logger.new(IO::NULL))
+    end
+
+    context "when autoscale is off (default)" do
+      it "does not build an autoscaler (no maintenance, no shared_connection? probe)" do
+        instance = build_instance
+        expect(instance.autoscaler).to be_nil
+      ensure
+        instance&.shutdown!
+      end
+    end
+
+    context "when autoscale is on but the connection is shared (AR path)" do
+      let(:shared) { true }
+
+      before { config.streams_pool_autoscale = true }
+
+      it "does not build an autoscaler (resize is a no-op on the shared path)" do
+        instance = build_instance
+        expect(instance.autoscaler).to be_nil
+      ensure
+        instance&.shutdown!
+      end
+    end
+
+    context "when autoscale is on and the connection is dedicated" do
+      before { config.streams_pool_autoscale = true }
+
+      it "builds a pure-decision autoscaler (no thread — it has no start/stop)" do
+        instance = build_instance
+        expect(instance.autoscaler).to be_a(Pgbus::Web::Streamer::PoolAutoscaler)
+        expect(instance.autoscaler).not_to respond_to(:start)
+      ensure
+        instance&.shutdown!
+      end
+
+      it "wires the autoscaler into the Listener as a throttled maintenance task" do
+        maintenance = instance_double(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance)
+        allow(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to receive(:new).and_return(maintenance)
+        captured = nil
+        allow(Pgbus::Web::Streamer::Listener).to receive(:new).and_wrap_original do |orig, **kwargs|
+          captured = kwargs[:maintenance]
+          orig.call(**kwargs)
+        end
+
+        instance = build_instance
+        expect(captured).to eq(maintenance)
+        expect(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to have_received(:new)
+          .with(autoscaler: instance.autoscaler, interval: config.streams_pool_autoscale_interval,
+                application_name_prefix: config.streams_application_name)
+      ensure
+        instance&.shutdown!
+      end
     end
   end
 end

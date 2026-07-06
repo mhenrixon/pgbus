@@ -89,12 +89,17 @@ module Pgbus
         # persistent connection instead of a fresh PG.connect per call. Its own
         # PGMQ::Client → its own connection_pool, sized independently of worker
         # thread counts.
-        @streams_pgmq = PGMQ::Client.new(conn_opts, pool_size: config.streams_pool_size,
-                                                    pool_timeout: config.streams_pool_timeout)
-        # Snapshot the bounds-applied connection options so a hot-swap rebuilds a
-        # byte-identical pool at a new size (issue #323). nil on the shared path,
-        # where resize is a no-op.
-        @streams_conn_opts = conn_opts
+        # Build the streams pool from streams_connection_options (which defaults
+        # to connection_options but honors streams_database_url/host/port for a
+        # separate/direct streams DB — issue #315), bounds-applied, and tagged
+        # with a per-process application_name so the autoscaler can count peer
+        # processes from pg_stat_activity (issue #323 P1/P2). Snapshot it so a
+        # hot-swap rebuilds a byte-identical pool at a new size.
+        @streams_conn_opts = tag_application_name(
+          apply_connection_bounds(config.streams_connection_options)
+        )
+        @streams_pgmq = PGMQ::Client.new(@streams_conn_opts, pool_size: config.streams_pool_size,
+                                                             pool_timeout: config.streams_pool_timeout)
       end
 
       # Wrap the streams pool so its live reference can be atomically hot-swapped
@@ -1222,6 +1227,32 @@ module Pgbus
     # read_timeout is already failing — and keeps a single server-side mechanism.
     #
     # Returns conn_opts unchanged when read_timeout is nil (bounding disabled).
+    # Stamp a per-process application_name on the streams-pool connection options
+    # so the autoscaler can count peer processes via
+    # `pg_stat_activity.application_name LIKE '<prefix>_%'` (issue #323 P1). The
+    # suffix is the pid so DISTINCT application_name is an exact process count.
+    # application_name is a cosmetic session GUC — appending it can't break the
+    # connection. The Proc (shared-AR) path never reaches here.
+    def tag_application_name(conn_opts)
+      name = "#{config.streams_application_name}_#{::Process.pid}"
+      case conn_opts
+      when Hash
+        conn_opts.merge(application_name: name)
+      when String
+        # Two libpq string forms (mirrors #append_connection_bounds): URI form
+        # carries params as `?key=value&…` query pairs; key=value conninfo form
+        # is space-separated. Appending wins over any earlier application_name.
+        if conn_opts.start_with?("postgres://", "postgresql://")
+          separator = conn_opts.include?("?") ? "&" : "?"
+          "#{conn_opts}#{separator}application_name=#{name}"
+        else
+          "#{conn_opts} application_name=#{name}"
+        end
+      else
+        conn_opts
+      end
+    end
+
     def apply_connection_bounds(conn_opts)
       timeout = config.read_timeout
       return conn_opts unless timeout&.positive?

@@ -24,7 +24,7 @@ namespace :bench do
   # Benches that need a real PostgreSQL/PGMQ (or boot Puma) — excluded from the
   # no-DB unit suite that bench:all runs in CI.
   db_benches = %w[connection_pool_bench integration_bench streams_bench streams_read_pool_bench
-                  execution_modes_bench pool_swap_bench].freeze
+                  execution_modes_bench pool_swap_bench pool_autoscale_bench].freeze
   # The unit suite is every *_bench.rb that doesn't need a database, derived
   # from the directory so a new unit bench is picked up automatically (kept in
   # sync with bench:one, which globs the same files).
@@ -72,6 +72,11 @@ namespace :bench do
   desc "Run streams-pool hot-swap benchmark (zero-loss/zero-leak/cost under load; requires PGBUS_DATABASE_URL)"
   task :pool_swap do
     ruby "benchmarks/pool_swap_bench.rb"
+  end
+
+  desc "Run streams-pool autoscaler benchmark (tick cost + grow-under-load; requires PGBUS_DATABASE_URL)"
+  task :pool_autoscale do
+    ruby "benchmarks/pool_autoscale_bench.rb"
   end
 
   desc "Run a single benchmark: rake bench:one[client_bench]"

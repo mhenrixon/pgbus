@@ -109,6 +109,8 @@ module ConfigReference
       { name: "streams_idle_timeout", type: "Numeric", default: "3600", desc: "Close idle SSE connections after N seconds." },
       { name: "streams_pool_size", type: "Integer", default: "5", desc: "Dedicated DB pool for durable-stream publish + replay, isolated from the job pool so a saturated worker pool can't delay broadcasts. Ignored on the shared-ActiveRecord connection path." },
       { name: "streams_pool_timeout", type: "Numeric", default: "5", desc: "Seconds to wait for a connection from the dedicated streams pool." },
+      { name: "streams_pool_autoscale", type: "Boolean", default: "false", desc: "Self-tuning: a periodic maintenance check (on the streamer's idle LISTEN connection — no extra connection) grows the streams pool into a fair share of live Postgres connection headroom under saturation, shrinks back to streams_pool_size when idle, and emergency-shrinks if the DB runs low on connections. Opt-in; no-op on the shared-ActiveRecord path." },
+      { name: "streams_pool_max", type: "Integer, nil", default: "nil", desc: "Optional hard ceiling for streams-pool autoscaling. nil lets the dynamic per-process fair share of DB headroom be the effective cap." },
       { name: "streams_path", type: "String, nil", default: "nil", desc: "Custom SSE endpoint path (auto-detected from mount)." },
       { name: "streams_falcon_streaming_body", type: "Boolean", default: "false", desc: "Use Falcon-native streaming body instead of hijack. Experimental — exempt from the 1.0 stability promise." },
       { name: "streams_stats_enabled", type: "Boolean", default: "false", desc: "Record stream broadcast/connect/disconnect stats." },
@@ -146,6 +148,8 @@ module ConfigReference
     streams_dispatch_queue_limit
     streams_writer_threads
     streams_writer_buffer_limit
+    streams_pool_autoscale_interval
+    streams_application_name
     streams_orphan_sweep_interval
     streams_orphan_threshold
     streams_durable_patterns

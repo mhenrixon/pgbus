@@ -85,6 +85,11 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
         @events << [:close]
       end
 
+      def exec_params(sql, _params)
+        @executed << sql
+        nil
+      end
+
       def push_notify(channel)
         @events << [:notify, channel]
       end
@@ -585,6 +590,57 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
       expect(acked).to be true
       expect(fake_pg.executed).to include(%(LISTEN "pgmq.q_chat.INSERT"))
+    end
+  end
+
+  describe "periodic maintenance on the idle connection (issue #323)" do
+    subject(:listener) do
+      described_class.new(
+        pg_connection: fake_pg, dispatch_queue: dispatch_queue, health_check_ms: 50,
+        maintenance: maintenance, logger: logger, clock: -> { fake_clock[0] },
+        connection_factory: -> { factory_conns.shift }
+      )
+    end
+
+    let(:fake_clock) { [0.0] }
+    let(:runs) { [] }
+    let(:maintenance) do
+      interval = 300
+      recorder = runs
+      Class.new do
+        define_method(:interval) { interval }
+        define_method(:run) { |conn| recorder << conn }
+      end.new
+    end
+
+    it "runs maintenance on the health-check window, throttled to the interval, on the LISTEN connection" do
+      listener.start
+
+      # First idle window → maintenance runs (never run before).
+      fake_pg.push_timeout
+      wait_until { runs.size >= 1 }
+      expect(runs.first).to eq(fake_pg)
+
+      # Second idle window still inside the interval → NOT run again.
+      fake_pg.push_timeout
+      fake_pg.push_timeout
+      sleep 0.05
+      expect(runs.size).to eq(1)
+
+      # Advance past the interval → runs again on the next window.
+      fake_clock[0] += 301
+      fake_pg.push_timeout
+      wait_until { runs.size >= 2 }
+      expect(runs.size).to eq(2)
+    end
+
+    it "does not disturb the listen loop when maintenance raises" do
+      allow(maintenance).to receive(:run).and_raise(StandardError, "boom")
+      listener.start
+      fake_pg.push_timeout
+      fake_pg.push_notify("pgmq.q_chat.INSERT") # loop must still be alive
+      wait_until { dispatch_queue.size >= 1 }
+      expect(dispatch_queue.size).to be >= 1
     end
   end
 end

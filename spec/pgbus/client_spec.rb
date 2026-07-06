@@ -1125,6 +1125,27 @@ RSpec.describe Pgbus::Client do
       expect(PGMQ::Client).to have_received(:new).with(anything, pool_size: 8, pool_timeout: 3)
     end
 
+    it "tags the streams pool connection with a per-process application_name (P1, issue #323)" do
+      # A String URL streams pool gets the application_name appended so the
+      # autoscaler can count peer processes from pg_stat_activity.
+      client # force construction
+
+      expect(PGMQ::Client).to have_received(:new)
+        .with(a_string_matching(/application_name=pgbus_streams_#{Process.pid}\b/),
+              pool_size: anything, pool_timeout: anything)
+    end
+
+    it "builds the streams pool from streams_connection_options, not the job DB (P2, issue #323)" do
+      # When a separate streams DB is configured, the streams pool must connect
+      # there — not to the job database_url.
+      config.streams_database_url = "postgres://streamshost/streamsdb"
+      client # force construction
+
+      expect(PGMQ::Client).to have_received(:new)
+        .with(a_string_starting_with("postgres://streamshost/streamsdb"),
+              pool_size: config.streams_pool_size, pool_timeout: config.streams_pool_timeout)
+    end
+
     describe "#read_after over the streams pool" do
       let(:conn) { double("PG::Connection") }
 
