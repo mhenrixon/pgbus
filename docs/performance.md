@@ -27,6 +27,7 @@ to guess.
 | Streamer replay read | every durable-stream wake + SSE connect (`Client#read_after`) | `streams_read_pool_bench.rb` |
 | Streams-pool hot-swap | elastic resize under load (issue #323) | `pool_swap_bench.rb` |
 | Streams-pool autoscaler | per-tick decision cost + grow-under-load (issue #323) | `pool_autoscale_bench.rb` |
+| Job-burst limiter gate | is the job pool or the DB pool the burst ceiling? (issue #323 phase 3) | `job_burst_bench.rb` |
 
 ## Measuring
 
