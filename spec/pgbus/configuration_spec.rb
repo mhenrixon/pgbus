@@ -1582,8 +1582,8 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_pool_max).to be_nil
     end
 
-    it "samples autoscale every 1 second by default" do
-      expect(config.streams_pool_autoscale_interval).to eq(1.0)
+    it "runs the autoscale maintenance check every 5 minutes by default" do
+      expect(config.streams_pool_autoscale_interval).to eq(300.0)
     end
 
     it "tags streams connections 'pgbus_streams' by default (peer inference)" do

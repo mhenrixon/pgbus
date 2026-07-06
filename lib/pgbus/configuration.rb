@@ -312,7 +312,11 @@ module Pgbus
       # (nil = the dynamic fair share is the effective cap).
       @streams_pool_autoscale = false
       @streams_pool_max = nil
-      @streams_pool_autoscale_interval = 1.0
+      # Slow maintenance cadence (seconds) — the autoscaler runs as a periodic
+      # check on the streamer's idle LISTEN connection (pghero-style), not a busy
+      # loop. 5 minutes: the interval itself debounces, so there is no per-sample
+      # hysteresis; a sustained burst converges over a few checks.
+      @streams_pool_autoscale_interval = 300.0
       # Distinctive application_name prefix stamped on streams-pool connections
       # so the autoscaler can count peer processes (DISTINCT application_name
       # LIKE '<prefix>_%') from pg_stat_activity. Per-process suffix is appended

@@ -53,8 +53,15 @@ module Pgbus
         # dispatch queue is at/over the cap — safe because the next durable
         # wake for that stream re-reads from the min cursor. Ephemeral wakes
         # and Connect/Disconnect messages are never dropped.
+        # `maintenance:` is an optional periodic callback (issue #323 pool
+        # autoscaler). On the listener's idle health-check window — the only place
+        # the non-thread-safe LISTEN connection is safely idle — it is invoked at
+        # most once per `maintenance.interval` seconds with THIS connection, so a
+        # maintenance query (e.g. pg_stat_activity headroom) reuses the existing
+        # idle connection instead of opening its own. nil disables it.
         def initialize(pg_connection:, dispatch_queue:, health_check_ms:,
-                       connection_factory:, dispatch_queue_limit: 0, logger: Pgbus.logger)
+                       connection_factory:, dispatch_queue_limit: 0, maintenance: nil,
+                       logger: Pgbus.logger, clock: nil)
           raise ArgumentError, "connection_factory is required" unless connection_factory.respond_to?(:call)
 
           @conn = pg_connection
@@ -63,6 +70,9 @@ module Pgbus
           @logger = logger
           @connection_factory = connection_factory
           @dispatch_queue_limit = dispatch_queue_limit
+          @maintenance = maintenance
+          @clock = clock || -> { ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) }
+          @maintenance_last = nil
           @dropped_wakes = 0
           @listening_to = Set.new
           @commands = Queue.new
@@ -239,6 +249,24 @@ module Pgbus
 
         def run_health_check
           @conn.exec("SELECT 1")
+          run_maintenance
+        end
+
+        # Periodic maintenance on the idle LISTEN connection, throttled to
+        # @maintenance.interval (issue #323). Runs on the listener thread, so it
+        # is the only place the non-thread-safe @conn may be queried outside
+        # wait_for_notify. Fail-soft: a raising maintenance callback is logged and
+        # never disturbs the listen loop.
+        def run_maintenance
+          return unless @maintenance
+
+          now = @clock.call
+          return if @maintenance_last && (now - @maintenance_last) < @maintenance.interval
+
+          @maintenance_last = now
+          @maintenance.run(@conn)
+        rescue StandardError => e
+          @logger.debug { "[Pgbus::Streamer::Listener] maintenance raised: #{e.class}: #{e.message}" }
         end
 
         # Retry reconnect until we succeed (fresh conn + every channel

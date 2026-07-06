@@ -2,17 +2,18 @@
 
 # Streams-pool autoscaler benchmark (issue #323).
 #
-# Measures the self-tuning control loop against a real Postgres:
-#   (1) tick overhead — the cost of one decision (headroom probe read + policy),
-#       so we can assert it is cheap enough to run every second;
-#   (2) grow-under-load — that a sustained DB-bound streams burst on a small
-#       fixed pool grows the pool into headroom, with the swaps bounded by the cap.
+# The autoscaler runs as a periodic maintenance check (default every 5 min) on
+# the streamer's idle LISTEN connection — a pghero capture_query_stats-style
+# task, not a busy loop. This bench measures against a real Postgres:
+#   (1) check cost — one headroom query + decision, so we can confirm it's cheap
+#       enough to run on the Listener's idle window;
+#   (2) grow-under-saturation — that a saturated streams pool grows into headroom
+#       over a few checks, bounded by streams_pool_max.
 #
-# HONEST FRAMING: this measures the autoscaler's own cost + that it reacts, NOT
-# a per-op speedup. Whether autoscaling beats a well-sized static streams pool
-# depends entirely on the workload's burstiness (#324: a fixed small pool
-# SERIALISES under a burst — it does not error). For steady load, a larger
-# static streams_pool_size is simpler and just as good.
+# HONEST FRAMING: this measures the check's cost + that it reacts, NOT a per-op
+# speedup. Whether autoscaling beats a well-sized static pool is a burstiness
+# question (#324: a fixed small pool SERIALISES under a burst — it does not
+# error). For steady load, a larger static streams_pool_size is simpler.
 #
 # Requires PGBUS_DATABASE_URL. Run-and-report, never a CI gate.
 #   PGBUS_DATABASE_URL=postgres://user@host/db bundle exec rake bench:pool_autoscale
@@ -51,8 +52,6 @@ def build_client
     c.streams_pool_size = 3
     c.streams_pool_max = 10
     c.streams_pool_timeout = 2
-    c.streams_pool_autoscale = true
-    c.streams_pool_autoscale_interval = 0.1
   end
   Pgbus::Client.new(config, schema_ensured: true)
 end
@@ -70,65 +69,72 @@ end
 client = build_client
 client.ensure_stream_queue(STREAM)
 autoscaler = Pgbus::Web::Streamer::PoolAutoscaler.new(client: client, config: client.config, logger: client.config.logger)
+maintenance = Pgbus::Web::Streamer::PoolAutoscaler::Maintenance.new(
+  autoscaler: autoscaler, interval: 0, application_name_prefix: client.config.streams_application_name
+)
 
-# --- (1) tick overhead: idle pool, measure the probe read + policy per tick ---
-warmup = 5
-warmup.times { autoscaler.tick }
+# One check = the Listener would run maintenance.run(listen_conn); here a
+# standalone connection stands in for the idle LISTEN connection.
+probe_conn = PG.connect(DATABASE_URL)
+def check(maintenance, conn) = maintenance.run(conn)
+
+# --- (1) check cost: idle pool, measure headroom query + decision ---
+5.times { check(maintenance, probe_conn) }
 iters = 200
 t0 = monotonic
-iters.times { autoscaler.tick }
-per_tick_ms = ((monotonic - t0) / iters) * 1000.0
+iters.times { check(maintenance, probe_conn) }
+per_check_ms = ((monotonic - t0) / iters) * 1000.0
 
-# --- (2) grow-under-load: churn the pool, tick, watch it grow ---
+# --- (2) grow-under-saturation: CHURN the pool (re-checkout each op so the load
+# follows the pool across a hot-swap), run checks, watch it grow step by step ---
 stop = Concurrent::AtomicBoolean.new(false)
-churn = Array.new(8) do
+churn = Array.new(12) do
   Thread.new do
     until stop.true?
       begin
-        client.send(:streams_pool).with_connection { |c| c.exec("SELECT pg_sleep(0.03)") }
+        client.send(:streams_pool).with_connection { |c| c.exec("SELECT pg_sleep(0.05)") }
       rescue StandardError
         # pool timeout under contention is expected
       end
     end
   end
 end
+sleep 0.3 # let the churn saturate
 
 sizes = []
-t_grow = monotonic
-120.times do
-  autoscaler.tick
+10.times do
+  check(maintenance, probe_conn)
   sizes << client.streams_pool_stats[:size]
   break if client.streams_pool_stats[:size] >= 10
 
-  sleep 0.11 # let a sustained window build (real time, real cooldown)
+  sleep 0.1 # let churn re-saturate the freshly-grown pool
 end
-grow_wall = monotonic - t_grow
 stop.make_true
 churn.each { |t| t.join(5) }
 
 final = client.streams_pool_stats[:size]
 swaps = client.streams_swap_stats.swap_count
-autoscaler.stop
+probe_conn.close
 client.close
 
 puts
-puts "Tick overhead (idle):"
-puts format("  %.3f ms/tick (headroom probe read + decision)", per_tick_ms)
-puts "  -> at a 1s interval this is #{format("%.4f", per_tick_ms / 1000.0 * 100)}%% of a core; negligible."
+puts "Check cost (idle):"
+puts format("  %.3f ms/check (headroom query + decision)", per_check_ms)
+puts "  -> at the 5-minute default this is utterly negligible; it runs on the"
+puts "     streamer's already-idle LISTEN connection (zero extra connections)."
 puts
-puts "Grow-under-load (3 -> cap 10, churn on 8 threads):"
-puts "  size trajectory : #{sizes.first(12).inspect}#{" ..." if sizes.size > 12}"
+puts "Grow-under-saturation (3 -> cap 10, all baseline connections held):"
+puts "  size trajectory : #{sizes.inspect}"
 puts "  final size      : #{final} (started 3)"
 puts "  swaps           : #{swaps}"
-puts format("  wall to settle  : %.1f s (bounded by the 15s cooldown between grows)", grow_wall)
 puts
 if final > 3
-  puts "RESULT: the autoscaler reacted — grew the streams pool into headroom under a"
-  puts "sustained DB-bound burst, capped at streams_pool_max. Per-op throughput is a"
-  puts "workload question (#324): a fixed small pool serialises the same burst; a"
+  puts "RESULT: the autoscaler reacted — grew the streams pool into headroom under"
+  puts "saturation, one step per check, capped at streams_pool_max. Per-op throughput"
+  puts "is a workload question (#324): a fixed small pool serialises the same load; a"
   puts "larger static pool avoids both. Enable autoscale for BURSTY streams load."
 else
-  puts "RESULT: no growth (load did not sustain saturation). For steady load, size"
+  puts "RESULT: no growth (pool not saturated or no headroom). For steady load, size"
   puts "streams_pool_size statically — autoscale earns its keep only under bursts."
 end
 puts "Done."

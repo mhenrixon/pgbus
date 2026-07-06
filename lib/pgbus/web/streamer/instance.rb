@@ -40,6 +40,16 @@ module Pgbus
 
           @stream_counter = StreamCounter.new
           @pg_connection = pg_connection || build_pg_connection
+          # Self-tuning streams-pool autoscaler (issue #323). Opt-in; nil unless
+          # enabled AND on the dedicated connection path (the shared-AR streams
+          # pool aliases the non-thread-safe job pool and resize is a no-op there).
+          # It's a pure decision object — no thread, no connection. It runs as a
+          # throttled maintenance task on the Listener's idle LISTEN connection
+          # (zero extra connections), querying live headroom there.
+          @autoscaler =
+            if @config.streams_pool_autoscale && !@client.shared_connection?
+              PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
+            end
           @listener = Listener.new(
             pg_connection: @pg_connection,
             dispatch_queue: @dispatch_queue,
@@ -49,6 +59,7 @@ module Pgbus
             # Queue.new so the request-thread Connect push and the dispatcher's
             # own prune_dead self-post never block.
             dispatch_queue_limit: @config.streams_dispatch_queue_limit,
+            maintenance: build_autoscale_maintenance,
             logger: @logger,
             # On reconnect the Listener rebuilds its OWN connection via this
             # factory (fresh connect re-resolves DNS, converges on the promoted
@@ -84,14 +95,6 @@ module Pgbus
             idle_timeout: @config.streams_idle_timeout,
             logger: @logger
           )
-          # Self-tuning streams-pool autoscaler (issue #323). Opt-in; nil (and so
-          # a strict no-op — no thread) unless enabled AND on the dedicated
-          # connection path (the shared-AR streams pool aliases the non-thread-safe
-          # job pool and resize is a no-op there).
-          @autoscaler =
-            if @config.streams_pool_autoscale && !@client.shared_connection?
-              PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
-            end
           @started = false
           @shutdown_mutex = Mutex.new
         end
@@ -106,7 +109,6 @@ module Pgbus
           @listener.start
           @dispatcher.start
           @heartbeat.start
-          @autoscaler&.start
           self
         end
 
@@ -157,9 +159,6 @@ module Pgbus
             return unless @started
 
             @started = false
-            # Quiesce the actuator FIRST so no resize races the dispatcher/pump
-            # teardown (issue #323).
-            safely { @autoscaler&.stop }
             safely { @heartbeat.stop }
             safely { @listener.stop }
             safely { @dispatcher.stop }
@@ -182,6 +181,20 @@ module Pgbus
         # dispatch queue — the SAME explicit protocol prune_dead and the
         # heartbeat use — so the dispatcher thread owns the lockless cursor +
         # registry cleanup and the pump never touches dispatcher state.
+        # Wrap the autoscaler as a throttled Listener maintenance task (issue
+        # #323), so headroom is read on the Listener's existing idle LISTEN
+        # connection every streams_pool_autoscale_interval seconds. nil (no
+        # autoscaler) means the Listener runs no maintenance.
+        def build_autoscale_maintenance
+          return nil unless @autoscaler
+
+          PoolAutoscaler::Maintenance.new(
+            autoscaler: @autoscaler,
+            interval: @config.streams_pool_autoscale_interval,
+            application_name_prefix: @config.streams_application_name
+          )
+        end
+
         def build_pump
           threads = @config.streams_writer_threads
           return nil unless threads.positive?

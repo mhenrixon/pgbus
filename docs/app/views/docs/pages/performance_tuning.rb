@@ -28,24 +28,36 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
         and a saturated pool **serialises** replay reads (it doesn't error — the
         checkout just waits), so broadcasts fan out more slowly. For steady load,
         the right fix is simply a larger `streams_pool_size`. For **bursty** load,
-        opt into autoscaling: a per-web-process control loop grows the pool into a
+        opt into autoscaling: a periodic maintenance check grows the pool into a
         fair share of live Postgres connection headroom while it's saturated and
         shrinks it back to `streams_pool_size` when the burst passes.
       MD
       DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
         Pgbus.configure do |config|
-          config.streams_pool_autoscale = true   # opt-in; default false
-          config.streams_pool_size      = 5       # baseline + shrink floor
-          config.streams_pool_max       = 12      # optional hard per-process cap
+          config.streams_pool_autoscale          = true   # opt-in; default false
+          config.streams_pool_size               = 5       # baseline + shrink floor
+          config.streams_pool_max                = 12      # optional hard per-process cap
+          config.streams_pool_autoscale_interval = 300     # check cadence, seconds (default 5 min)
         end
       RUBY
       md <<~'MD'
         There is **no connection-count target to tune**. Every threshold derives
-        from live `max_connections`: the loop reads `pg_stat_activity`, counts how
+        from live `max_connections`: each check reads `pg_stat_activity`, counts how
         many pgbus stream processes share the database, and grows only into its own
         fair share of the free connections. `streams_pool_max` is an optional hard
         ceiling — leave it `nil` and the dynamic fair share is the cap.
       MD
+      DocsUI::Callout(:note) do
+        plain "It adds "
+        strong { "no extra database connections" }
+        plain " and no extra thread: the check is a lightweight "
+        code { "pg_stat_activity" }
+        plain " query that runs on the streamer's existing idle LISTEN connection "
+        plain "every "
+        code { "streams_pool_autoscale_interval" }
+        plain " seconds — like pghero's periodic stats capture. One grow (or shrink) "
+        plain "step per check; a sustained burst converges over a few checks."
+      end
       DocsUI::Callout(:tip) do
         plain "It self-protects: if the database runs critically low on free "
         plain "connections, every process immediately shrinks its streams pool back "

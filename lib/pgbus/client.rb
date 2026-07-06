@@ -890,11 +890,6 @@ module Pgbus
     # points at the non-thread-safe AR raw_connection), so we fall back to
     # with_raw_connection, which reuses that same shared connection. Callers
     # already wrap this in `synchronized`, so the shared path stays serialized.
-    #
-    # Public (issue #323): the autoscaler's HeadroomProbe reads pg_stat_activity
-    # through this, so it must be callable from outside the Client.
-    public
-
     def with_streams_connection(&)
       if @shared_connection
         with_raw_connection(&)
@@ -902,25 +897,6 @@ module Pgbus
         streams_pool.with_connection(&)
       end
     end
-
-    # Public (issue #323): a fresh, standalone PG connection to the STREAMS
-    # database for the autoscaler's HeadroomProbe. Deliberately NOT from the
-    # streams pool — the probe must read pg_stat_activity even when the pool is
-    # fully saturated (0 slots free), which is exactly when the loop wants to
-    # grow. Uses the tagged streams opts (@streams_conn_opts) so this connection
-    # also carries the pgbus_streams_<pid> application_name. Raises on the
-    # shared-AR path, where autoscaling never runs.
-    def build_streams_probe_connection
-      raise "no dedicated streams pool on the shared-AR path" if @shared_connection
-
-      case @streams_conn_opts
-      when String then ::PG.connect(@streams_conn_opts)
-      when Hash   then ::PG.connect(**@streams_conn_opts)
-      else raise "cannot build streams probe connection from #{@streams_conn_opts.class}"
-      end
-    end
-
-    private
 
     def ensure_single_queue(full_name)
       return if @queues_created[full_name]

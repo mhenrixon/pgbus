@@ -434,7 +434,7 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
     end
 
     context "when autoscale is off (default)" do
-      it "does not build an autoscaler (no thread, no shared_connection? probe)" do
+      it "does not build an autoscaler (no maintenance, no shared_connection? probe)" do
         instance = build_instance
         expect(instance.autoscaler).to be_nil
       ensure
@@ -458,43 +458,30 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
     context "when autoscale is on and the connection is dedicated" do
       before { config.streams_pool_autoscale = true }
 
-      it "builds, starts, and stops the autoscaler" do
-        autoscaler = instance_double(Pgbus::Web::Streamer::PoolAutoscaler, start: nil, stop: nil)
-        allow(Pgbus::Web::Streamer::PoolAutoscaler).to receive(:new).and_return(autoscaler)
-
+      it "builds a pure-decision autoscaler (no thread — it has no start/stop)" do
         instance = build_instance
-        expect(instance.autoscaler).to eq(autoscaler)
-
-        instance.start
-        expect(autoscaler).to have_received(:start)
-
-        instance.shutdown!
-        expect(autoscaler).to have_received(:stop)
+        expect(instance.autoscaler).to be_a(Pgbus::Web::Streamer::PoolAutoscaler)
+        expect(instance.autoscaler).not_to respond_to(:start)
+      ensure
+        instance&.shutdown!
       end
 
-      it "stops the autoscaler before the heartbeat (actuator quiesced first)" do
-        order = []
-        autoscaler = instance_double(Pgbus::Web::Streamer::PoolAutoscaler,
-                                     start: nil, stop: nil)
-        allow(autoscaler).to receive(:stop) { order << :autoscaler }
-        allow(Pgbus::Web::Streamer::PoolAutoscaler).to receive(:new).and_return(autoscaler)
+      it "wires the autoscaler into the Listener as a throttled maintenance task" do
+        maintenance = instance_double(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance)
+        allow(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to receive(:new).and_return(maintenance)
+        captured = nil
+        allow(Pgbus::Web::Streamer::Listener).to receive(:new).and_wrap_original do |orig, **kwargs|
+          captured = kwargs[:maintenance]
+          orig.call(**kwargs)
+        end
 
         instance = build_instance
-        allow(instance.heartbeat).to receive(:stop) { order << :heartbeat }
-        instance.start
-        instance.shutdown!
-
-        expect(order).to eq(%i[autoscaler heartbeat])
-      end
-
-      it "swallows a raising autoscaler stop (safely)" do
-        autoscaler = instance_double(Pgbus::Web::Streamer::PoolAutoscaler, start: nil)
-        allow(autoscaler).to receive(:stop).and_raise(StandardError, "boom")
-        allow(Pgbus::Web::Streamer::PoolAutoscaler).to receive(:new).and_return(autoscaler)
-
-        instance = build_instance
-        instance.start
-        expect { instance.shutdown! }.not_to raise_error
+        expect(captured).to eq(maintenance)
+        expect(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to have_received(:new)
+          .with(autoscaler: instance.autoscaler, interval: config.streams_pool_autoscale_interval,
+                application_name_prefix: config.streams_application_name)
+      ensure
+        instance&.shutdown!
       end
     end
   end
