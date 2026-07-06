@@ -135,7 +135,9 @@ module Pgbus
                   :streams_host, :streams_port, :streams_database_url,
                   :streams_pool_size, :streams_pool_timeout,
                   :streams_fanout_write_deadline_ms, :streams_dispatch_queue_limit,
-                  :streams_writer_threads, :streams_writer_buffer_limit
+                  :streams_writer_threads, :streams_writer_buffer_limit,
+                  :streams_pool_autoscale, :streams_pool_max,
+                  :streams_pool_autoscale_interval, :streams_application_name
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
     # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
@@ -300,6 +302,26 @@ module Pgbus
       # thread-safe and streams keep using the single serialized connection.
       @streams_pool_size = 5
       @streams_pool_timeout = 5
+      # Self-tuning streams-pool autoscaling (issue #323). Opt-in, default off.
+      # When true, a per-web-process control loop grows the dedicated streams
+      # pool into a FAIR SHARE of live Postgres connection headroom under
+      # saturation and shrinks it back to streams_pool_size (the baseline/floor)
+      # when idle — and emergency-shrinks immediately if the DB runs critically
+      # low on connections. No connection-count config: every threshold derives
+      # from live max_connections. streams_pool_max is an OPTIONAL hard ceiling
+      # (nil = the dynamic fair share is the effective cap).
+      @streams_pool_autoscale = false
+      @streams_pool_max = nil
+      @streams_pool_autoscale_interval = 1.0
+      # Distinctive application_name prefix stamped on streams-pool connections
+      # so the autoscaler can count peer processes (DISTINCT application_name
+      # LIKE '<prefix>_%') from pg_stat_activity. Per-process suffix is appended
+      # at build time. Namespace it per deployment if several pgbus fleets share
+      # one database. NOTE: a transaction-mode PgBouncer strips application_name;
+      # peer inference then degrades to "assume alone" (the safety margin +
+      # emergency-shrink cushion this) — connect the streamer DIRECTLY for
+      # accurate autoscaling.
+      @streams_application_name = "pgbus_streams"
       @streams_signed_name_secret = nil
       @streams_default_retention = 5 * 60 # 5 minutes
       @streams_retention = {}
@@ -626,6 +648,8 @@ module Pgbus
         raise Pgbus::ConfigurationError, "streams_pool_timeout must be a positive number"
       end
 
+      validate_streams_autoscale!
+
       raise Pgbus::ConfigurationError, "streams_retention must be a Hash" unless streams_retention.is_a?(Hash)
 
       unless streams_broadcast_queue.nil? ||
@@ -656,6 +680,26 @@ module Pgbus
       return if streams_orphan_threshold.is_a?(Numeric) && streams_orphan_threshold.positive?
 
       raise Pgbus::ConfigurationError, "streams_orphan_threshold must be a positive number or nil to disable"
+    end
+
+    def validate_streams_autoscale!
+      raise Pgbus::ConfigurationError, "streams_pool_autoscale must be true or false" unless [true, false].include?(streams_pool_autoscale)
+
+      # nil = no hard cap (dynamic fair-share is the ceiling). A positive value
+      # below the baseline is an inverted ceiling — fail loud at boot.
+      unless streams_pool_max.nil? ||
+             (streams_pool_max.is_a?(Integer) && streams_pool_max >= streams_pool_size)
+        raise Pgbus::ConfigurationError,
+              "streams_pool_max must be an Integer >= streams_pool_size " \
+              "(#{streams_pool_size}) or nil to leave growth uncapped"
+      end
+
+      unless streams_pool_autoscale_interval.is_a?(Numeric) && streams_pool_autoscale_interval.positive?
+        raise Pgbus::ConfigurationError, "streams_pool_autoscale_interval must be a positive number"
+      end
+
+      raise Pgbus::ConfigurationError, "streams_application_name must be a non-empty String" \
+        unless streams_application_name.is_a?(String) && !streams_application_name.empty?
     end
 
     def validate_metrics_backend!
