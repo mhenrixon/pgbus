@@ -298,6 +298,11 @@ module Pgbus
           end
         end
       end
+      # Opportunistically autoscale the streams pool from the publish path so a
+      # pure-publisher process (no streamer) still grows under a broadcast storm
+      # (issue #323 follow-up). Throttled + fail-soft — never delays or breaks the
+      # broadcast; nil (a no-op) unless autoscale is on and the pool is dedicated.
+      streams_pool_trigger&.maybe_check
     end
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
@@ -997,6 +1002,25 @@ module Pgbus
     # (produce / with_connection / stats) go through it so the underlying
     # PGMQ::Client can be atomically hot-swapped to a new size (issue #323).
     attr_reader :streams_pool
+
+    # Lazily-built publisher-side autoscale trigger (issue #323). nil (a no-op)
+    # unless streams_pool_autoscale is on AND this is the dedicated-connection
+    # path (resize is a no-op on the shared-AR path). Memoized once — computed on
+    # the first publish, then reused. Runs its headroom query through the job
+    # pool (@pgmq), so it never competes with the streams pool it resizes.
+    def streams_pool_trigger
+      return @streams_pool_trigger if defined?(@streams_pool_trigger)
+
+      @streams_pool_trigger =
+        if config.streams_pool_autoscale && !@shared_connection
+          autoscaler = Streams::PoolAutoscaler.new(client: self, config: config)
+          Streams::PoolTrigger.new(
+            autoscaler: autoscaler, job_pool: @pgmq,
+            interval: config.streams_pool_autoscale_interval,
+            application_name_prefix: config.streams_application_name
+          )
+        end
+    end
 
     # Substrings that indicate the pooled PG::Connection was already dead
     # *before* pgmq-ruby tried to use it — typically killed by a connection
