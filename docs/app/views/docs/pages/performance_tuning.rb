@@ -14,6 +14,7 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
     archive
     job_burst_tuning
     streams_pool_autoscaling
+    fanout_throughput
     health_metrics
   end
 
@@ -55,6 +56,39 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
         plain "). Watch "
         code { "pgbus_worker_pool_utilization" }
         plain " — sustained near 1 means raise both."
+      end
+    end
+  end
+
+  def fanout_throughput
+    DocsUI::Section("Fan-out throughput: raise the writer threads",
+                    description: "When broadcasts fan out to many SSE clients, scale the writer pool statically.") do
+      md <<~'MD'
+        With `streams_writer_threads > 0`, durable broadcast socket writes move off
+        the dispatcher into a pool of writer threads (each connection pinned to one
+        worker so its frames stay ordered). If you fan out to a large fleet of
+        connections, more writer threads flush them in parallel — throughput scales
+        roughly linearly with the count.
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |config|
+          config.streams_writer_threads = 8   # more parallel socket writes
+        end
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "This is a "
+        strong { "static" }
+        plain " knob, and that's deliberate — pgbus does not autoscale the writer "
+        plain "pool. A slow or congested client can't stall the fleet: the fan-out "
+        plain "write deadline ("
+        code { "streams_fanout_write_deadline_ms" }
+        plain ", default 250 ms) evicts it, and it reconnects and replays from the "
+        plain "durable archive. So the writer pool scales fan-out throughput; it "
+        plain "doesn't need to grow to absorb slow clients. Size "
+        code { "streams_writer_threads" }
+        plain " for your peak fan-out fleet (measured with "
+        code { "bench:one[writer_burst_bench]" }
+        plain ")."
       end
     end
   end
