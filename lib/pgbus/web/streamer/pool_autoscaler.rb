@@ -111,8 +111,17 @@ module Pgbus
               "[Pgbus::Streamer::PoolAutoscaler] EMERGENCY streams-pool shrink to " \
                 "#{@baseline} (free=#{free}/#{maxc})"
             end
+            :emergency_shrink
+          else
+            # The DB is critically low on connections but the shrink was a no-op
+            # (unchanged / shared-AR). This is the one case where a failed resize
+            # matters most — leave a trace instead of silently reporting success.
+            @logger.warn do
+              "[Pgbus::Streamer::PoolAutoscaler] EMERGENCY streams-pool shrink to " \
+                "#{@baseline} did NOT apply (free=#{free}/#{maxc}) — resize was a no-op"
+            end
+            :hold
           end
-          :emergency_shrink
         end
 
         # fair_share = free / (peers · SAFETY); claim FAIR_FRACTION, never more than

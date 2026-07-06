@@ -132,6 +132,17 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       expect(autoscaler.evaluate(headroom(free: 2, peers: 5))).to eq(:hold)
       expect(resizes).to be_empty
     end
+
+    it "warns and returns :hold when a critical-headroom shrink resize is a no-op" do
+      # DB critically low AND above baseline, but the resize returns unswapped.
+      allow(client).to receive(:resize_streams_pool) do |target|
+        resizes << target
+        { swapped: false, reason: :unchanged }
+      end
+
+      expect(autoscaler.evaluate(headroom(free: 2, peers: 5))).to eq(:hold)
+      expect(logger).to have_received(:warn).at_least(:once)
+    end
   end
 
   describe "#evaluate — fail-soft" do

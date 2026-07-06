@@ -104,8 +104,9 @@ sleep 0.3 # let the churn saturate
 sizes = []
 10.times do
   check(maintenance, probe_conn)
-  sizes << client.streams_pool_stats[:size]
-  break if client.streams_pool_stats[:size] >= 10
+  size = client.streams_pool_stats[:size]
+  sizes << size
+  break if size >= 10
 
   sleep 0.1 # let churn re-saturate the freshly-grown pool
 end
