@@ -144,11 +144,35 @@ RSpec.describe ExecutionModeHarness do
     end
   end
 
-  describe ".async_yield" do
-    it "uses Kernel#sleep when no Async scheduler is present" do
+  describe ".run_job" do
+    # A plain Kernel#sleep is used for the yield portion — under Async's fiber
+    # scheduler it's intercepted and yields to the reactor; under threads it
+    # blocks the thread. No mode-specific branch needed.
+    it "sleeps for the yield portion outside any checkout" do
       allow(described_class).to receive(:sleep)
-      described_class.async_yield(0.001)
-      expect(described_class).to have_received(:sleep).with(0.001)
+      io = ExecutionModeHarness::IoProfile.new(label: "yield_only", db_seconds: 0.0, yield_seconds: 0.02)
+      client = instance_double(Pgbus::Client) # never touched: db_seconds is 0
+
+      described_class.run_job(client, io)
+
+      expect(described_class).to have_received(:sleep).with(0.02)
+    end
+
+    it "checks out a real pooled connection for the db portion" do
+      # PG / PGMQ::Client aren't loaded in unit specs (pgmq is stubbed away), so
+      # use plain doubles for the conn + pgmq; the harness only calls
+      # #with_connection and #exec_params on them.
+      allow(described_class).to receive(:sleep)
+      conn = double("PG::Connection", exec_params: nil)
+      pgmq = double("PGMQ::Client")
+      allow(pgmq).to receive(:with_connection).and_yield(conn)
+      client = instance_double(Pgbus::Client, pgmq: pgmq)
+      io = ExecutionModeHarness::IoProfile.new(label: "db_only", db_seconds: 0.01, yield_seconds: 0.0)
+
+      described_class.run_job(client, io)
+
+      expect(pgmq).to have_received(:with_connection)
+      expect(conn).to have_received(:exec_params).with("SELECT pg_sleep($1)", [0.01])
     end
   end
 

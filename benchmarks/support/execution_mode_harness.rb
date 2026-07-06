@@ -120,14 +120,17 @@ module ExecutionModeHarness
     sampler ||= PoolSampler.new(client)
     warmup_jobs ||= pool_size * 2
     pool = Pgbus::ExecutionPools.build(mode: mode, capacity: concurrency)
+    sampler_thread = nil
     begin
       warmup!(pool: pool, client: client, io_profile: io_profile, warmup_jobs: warmup_jobs)
       sampler_thread = start_sampling(sampler, client)
       outcome = drive(pool: pool, client: client, io_profile: io_profile, job_count: job_count, clock: clock)
-      stop_sampling(sampler_thread)
       summarize(mode: mode, pool_size: pool_size, concurrency: concurrency,
                 io_profile: io_profile, job_count: job_count, sampler: sampler, outcome: outcome)
     ensure
+      # Stop the sampler FIRST (else its thread polls pool_stats forever if
+      # drive/summarize raised), then tear down the pool.
+      stop_sampling(sampler_thread) if sampler_thread
       pool.shutdown
       pool.wait_for_termination(15)
     end
@@ -166,23 +169,17 @@ module ExecutionModeHarness
     nil
   end
 
-  # Fiber-aware yield. Under async a bare Kernel#sleep parks the WHOLE reactor
-  # (the exact execution_pool_bench.rb bug); use Async::Task#sleep when a
-  # scheduler is present.
-  def async_yield(seconds)
-    task = (Async::Task.current? if defined?(Async::Task))
-    if task
-      task.sleep(seconds)
-    else
-      sleep(seconds)
-    end
-  end
-
   # THE fair unit of work — identical bytes for threads & async, real pooled
-  # checkout. yield_seconds runs OUTSIDE any checkout (fiber can share its slot);
-  # db_seconds runs INSIDE a real pooled checkout via the public reader.
+  # checkout. yield_seconds is app I/O OUTSIDE any checkout (a fiber can share
+  # its slot here); db_seconds runs INSIDE a real pooled checkout via the public
+  # reader.
+  #
+  # A plain Kernel#sleep is correct in BOTH modes: under Async's fiber scheduler
+  # it's intercepted (the kernel_sleep hook) and yields to the reactor, so other
+  # fibers keep running; under threads it just blocks the thread. (Async::Task#sleep
+  # is deprecated in favor of Kernel#sleep in async 2.x precisely because of this.)
   def run_job(client, io_profile)
-    async_yield(io_profile.yield_seconds) if io_profile.yield_seconds.positive?
+    sleep(io_profile.yield_seconds) if io_profile.yield_seconds.positive?
     return unless io_profile.db_seconds.positive?
 
     client.pgmq.with_connection do |conn|

@@ -67,8 +67,9 @@ def free_backends
   conn = PG.connect(DATABASE_URL)
   total = conn.exec("SHOW max_connections").first["max_connections"].to_i
   used  = conn.exec("SELECT count(*) AS n FROM pg_stat_activity").first["n"].to_i
-  conn.close
   total - used
+ensure
+  conn&.close # close even if a query raises (preflight! rescues the error)
 end
 
 def preflight!
