@@ -161,11 +161,13 @@ end
 #      fanout deadline + mark-dead path, not absorbed by scaling writers.
 #
 # So the honest gate verdict is about elasticity, not about raw scaling:
-fast = all[:fast]
-fast_scale = fast.last[:throughput].to_f / fast.first[:throughput]
+# Report the 2→16 scaling PER profile so the "every profile" claim is backed by
+# each profile's own number, not extrapolated from one.
+scales = all.transform_values { |rows| rows.last[:throughput].to_f / rows.first[:throughput] }
 puts "─" * 60
-puts format("Writer count scales throughput ~%.1fx (2→16) on every write profile —", fast_scale)
-puts "as expected for parallel blocking writes. But that argues for the EXISTING"
+puts "Writer count scales throughput 2→16 by #{scales.map { |l, s| format("%.1fx (%s)", s, l) }.join(", ")}"
+puts "— similar across every write profile, as expected for parallel blocking writes."
+puts "But that argues for the EXISTING"
 puts "static `streams_writer_threads` knob, not for elastic writers:"
 puts "  • more writers help → raise streams_writer_threads (static, safe, today);"
 puts "  • this bench runs a fixed N per cell, so it can't show the SPIKINESS that"
