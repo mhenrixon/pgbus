@@ -286,7 +286,10 @@ module Pgbus
     # trigger + archive index, mirroring this bare-name write path.
     def send_stream_message(stream_name, payload, headers: nil, delay: 0)
       target = config.queue_name(stream_name)
-      Instrumentation.instrument("pgbus.client.send_message", queue: target) do
+      # Capture the produced msg_id — it is this method's return value (callers
+      # like Stream#broadcast rely on it), so the autoscale trigger below must NOT
+      # become the last expression.
+      msg_id = Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         with_stale_connection_retry do
           ensure_stream_queue(stream_name)
           # Publish through the dedicated streams pool (issue #315) so a
@@ -303,6 +306,7 @@ module Pgbus
       # (issue #323 follow-up). Throttled + fail-soft — never delays or breaks the
       # broadcast; nil (a no-op) unless autoscale is on and the pool is dedicated.
       streams_pool_trigger&.maybe_check
+      msg_id
     end
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)

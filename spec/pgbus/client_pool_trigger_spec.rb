@@ -65,6 +65,17 @@ RSpec.describe Pgbus::Client do
       expect(streams_pgmq).to have_received(:produce) # produce still happened
     end
 
+    it "returns the produced msg_id, not the trigger result (regression guard)" do
+      client = build_client(config)
+      trigger = client.send(:streams_pool_trigger)
+      allow(trigger).to receive(:maybe_check).and_return(nil) # trigger returns nil
+      allow(streams_pgmq).to receive(:produce).and_return(4242)
+
+      result = client.send_stream_message("chat", { "html" => "x" })
+
+      expect(result).to eq(4242) # the msg_id, NOT the trigger's nil
+    end
+
     it "memoizes the trigger across publishes" do
       client = build_client(config)
       first = client.send(:streams_pool_trigger)
