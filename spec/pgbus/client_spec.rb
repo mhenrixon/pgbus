@@ -516,6 +516,36 @@ RSpec.describe Pgbus::Client do
       end
     end
 
+    context "when require_primary is set and the connection is in recovery (a replica, issue #332)" do
+      before do
+        config.require_primary = true
+        allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn)
+        allow(raw_conn).to receive(:exec).with("SELECT 1").and_return(double("PG::Result"))
+        # PrimaryValidator asks pg_is_in_recovery(); a replica returns "t".
+        allow(raw_conn).to receive(:exec).with(Pgbus::Process::PrimaryValidator::RECOVERY_QUERY)
+                                         .and_return(double("PG::Result", getvalue: "t"))
+      end
+
+      it "raises rather than reporting a healthy connection" do
+        expect { client.verify_connection! }
+          .to raise_error(Pgbus::ConfigurationError, /replica|recovery/i)
+      end
+    end
+
+    context "when require_primary is set and the connection is on the primary (issue #332)" do
+      before do
+        config.require_primary = true
+        allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn)
+        allow(raw_conn).to receive(:exec).with("SELECT 1").and_return(double("PG::Result"))
+        allow(raw_conn).to receive(:exec).with(Pgbus::Process::PrimaryValidator::RECOVERY_QUERY)
+                                         .and_return(double("PG::Result", getvalue: "f"))
+      end
+
+      it "verifies successfully" do
+        expect(client.verify_connection!).to be_truthy
+      end
+    end
+
     context "when pgmq raises a ConnectionError" do
       before do
         allow(mock_pgmq).to receive(:with_connection)
@@ -1123,6 +1153,50 @@ RSpec.describe Pgbus::Client do
       client # force construction
 
       expect(PGMQ::Client).to have_received(:new).with(anything, pool_size: 8, pool_timeout: 3)
+    end
+
+    context "with connection_guc_mode :session and database.yml :variables (issue #332)" do
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.connection_params = { host: "localhost", dbname: "pgbus_test",
+                                  variables: { "client_min_messages" => "warning" } }
+          c.queue_prefix = "pgbus_test"
+          c.connection_guc_mode = :session
+        end
+      end
+
+      it "passes a callable connection factory to PGMQ::Client (post-connect SET, pooler-safe)" do
+        received = []
+        allow(PGMQ::Client).to receive(:new) do |opts, **_kw|
+          received << opts
+          mock_pgmq
+        end
+
+        c = described_class.new(config, schema_ensured: true)
+        allow(c).to receive(:tune_autovacuum)
+
+        expect(received).to include(an_instance_of(Proc))
+      end
+
+      it "the factory applies each :variables entry via SET on a fresh connection" do
+        raw_conn = double("PG::Connection", exec: nil)
+        pg_module = Module.new
+        allow(pg_module).to receive(:connect).and_return(raw_conn)
+        stub_const("PG", pg_module)
+
+        factory = nil
+        allow(PGMQ::Client).to receive(:new) do |opts, **_kw|
+          factory ||= opts if opts.respond_to?(:call)
+          mock_pgmq
+        end
+
+        # Build directly (not the memoized subject, whose block re-stubs .new).
+        c = described_class.new(config, schema_ensured: true)
+        allow(c).to receive(:tune_autovacuum)
+        factory.call
+
+        expect(raw_conn).to have_received(:exec).with(/SET\s+client_min_messages\s*=\s*['"]?warning['"]?/i)
+      end
     end
 
     it "tags the streams pool connection with a per-process application_name (P1, issue #323)" do

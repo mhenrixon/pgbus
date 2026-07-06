@@ -355,6 +355,34 @@ RSpec.describe Pgbus::Process::NotifyListener do
       # Probe ran for the initial connection only, not the reconnect.
       expect(Pgbus::Process::NotifyProbe).to have_received(:probe_notify_delivery!).once
     end
+
+    it "reports delivering? true once the probe succeeds (issue #332)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(true)
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(listener.delivering?).to be(true)
+    end
+
+    it "reports delivering? false when the probe fails (pooler-deaf, issue #332)" do
+      allow(Pgbus::Process::NotifyProbe).to receive(:probe_notify_delivery!).and_return(false)
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(listener.delivering?).to be(false)
+    end
+  end
+
+  describe "#delivering? (public)" do
+    it "is true before the probe runs (optimistic default — assume healthy)" do
+      # Until the start-time probe has run, treat the listener as delivering so
+      # a not-yet-started listener isn't mistaken for a pooler-deaf one.
+      expect(listener.delivering?).to be(true)
+    end
   end
 
   describe "#running? (public)" do

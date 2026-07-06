@@ -102,6 +102,27 @@ module Pgbus
     # Requires a matching entry in config/database.yml under the "pgbus" key.
     attr_accessor :connects_to
 
+    # Reject a job-pool connection that landed on a read-only replica
+    # (pg_is_in_recovery() => t). Default false — a correctly-configured
+    # single-primary deployment sees no change. Set true when a read/write
+    # splitting pooler (pgdog/pgcat) could route pgmq's VOLATILE read/archive
+    # to a replica, which otherwise makes workers silently read nothing.
+    # See issue #332.
+    attr_accessor :require_primary
+
+    # How pgbus forwards database.yml GUCs (`variables:` such as
+    # client_min_messages, and the read-timeout statement_timeout) onto its
+    # dedicated pgmq connections:
+    #   :options (default) — bake them into the libpq `options` STARTUP param
+    #                        (-c key=value). Works everywhere EXCEPT a
+    #                        transaction-mode PgBouncer, which rejects the
+    #                        `options` startup param with a FATAL.
+    #   :session           — apply them via post-connect `SET` statements on a
+    #                        fresh connection instead, so a transaction-mode
+    #                        pooler accepts them. Dedicated-connection path only.
+    # See issue #332.
+    attr_reader :connection_guc_mode
+
     # Zombie message detection — logs a warning when a message is redelivered
     # (read_ct > 1) without any prior failure recorded in pgbus_failed_events.
     attr_accessor :zombie_detection
@@ -248,6 +269,8 @@ module Pgbus
       @stats_flush_interval = StatBuffer::DEFAULT_FLUSH_INTERVAL
 
       @connects_to = nil
+      @require_primary = false
+      @connection_guc_mode = :options
 
       @web_auth = nil
       @web_refresh_interval = 5000
@@ -510,6 +533,18 @@ module Pgbus
       @group_mode = coerced
     end
 
+    VALID_CONNECTION_GUC_MODES = %i[options session].freeze
+
+    def connection_guc_mode=(mode)
+      mode = mode.to_sym
+      unless VALID_CONNECTION_GUC_MODES.include?(mode)
+        raise Pgbus::ConfigurationError,
+              "Invalid connection_guc_mode: #{mode}. Must be one of: #{VALID_CONNECTION_GUC_MODES.join(", ")}"
+      end
+
+      @connection_guc_mode = mode
+    end
+
     VALID_PGMQ_SCHEMA_MODES = %i[auto extension embedded].freeze
 
     def pgmq_schema_mode=(mode)
@@ -593,6 +628,8 @@ module Pgbus
       unless insights_default_minutes.is_a?(Integer) && insights_default_minutes.positive?
         raise Pgbus::ConfigurationError, "insights_default_minutes must be a positive integer"
       end
+
+      raise Pgbus::ConfigurationError, "require_primary must be true or false" unless [true, false].include?(require_primary)
 
       validate_streams!
       validate_metrics_backend!
@@ -1039,7 +1076,17 @@ module Pgbus
       if database_url
         database_url
       elsif connection_params
-        connection_params
+        # An explicit connection_params Hash may carry a database.yml-style
+        # `:variables` block; forward it the same way the AR-extracted path does
+        # so client_min_messages etc. actually reach pgmq's connections and a
+        # non-libpq :variables key never reaches PG.connect (issue #332). A
+        # non-Hash connection_params (e.g. a Proc returning a raw connection)
+        # passes through untouched.
+        if connection_params.is_a?(Hash)
+          forward_connection_variables(connection_params.except(:variables), connection_params[:variables])
+        else
+          connection_params
+        end
       elsif defined?(ActiveRecord::Base)
         # Extract connection config from ActiveRecord so pgmq-ruby creates its
         # own dedicated PG connections. Sharing AR's raw_connection via a Proc
@@ -1326,13 +1373,15 @@ module Pgbus
       # Rails 7.1+ db_config.configuration_hash returns the full config
       config_hash = db_config.configuration_hash
 
-      {
+      base = {
         host: config_hash[:host] || "localhost",
         port: (config_hash[:port] || 5432).to_i,
         dbname: config_hash[:database],
         user: config_hash[:username],
         password: config_hash[:password]
       }.compact
+
+      forward_connection_variables(base, config_hash[:variables])
     rescue StandardError => e
       # Fallback to Proc path if AR config extraction fails (e.g., adapter
       # doesn't expose standard config keys). Log a warning since this path
@@ -1346,6 +1395,29 @@ module Pgbus
         -> { Pgbus::BusRecord.connection.raw_connection }
       else
         -> { ActiveRecord::Base.connection.raw_connection }
+      end
+    end
+
+    # database.yml's `variables:` block (e.g. client_min_messages) is a Rails
+    # convention, not a libpq keyword — pgmq-ruby passes the hash straight to
+    # PG.connect, which would ignore/reject a `:variables` key. So carry the GUCs
+    # forward by the mechanism the operator's pooler tolerates:
+    #   :options — bake them into the libpq `options` STARTUP param
+    #              (-c key=value), appended to any existing options. A
+    #              transaction-mode PgBouncer rejects this param.
+    #   :session — leave the raw `:variables` hash on the returned options so the
+    #              Client applies them via post-connect `SET` (pooler-safe).
+    # Empty/absent variables is a no-op on both paths. See issue #332.
+    def forward_connection_variables(base, variables)
+      return base if variables.nil? || variables.empty?
+
+      case connection_guc_mode
+      when :session
+        base.merge(variables: variables)
+      else
+        gucs = variables.map { |k, v| "-c #{k}=#{v}" }.join(" ")
+        options = [base[:options], gucs].compact.reject(&:empty?).join(" ")
+        base.merge(options: options)
       end
     end
   end

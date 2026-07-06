@@ -16,7 +16,9 @@ module ConfigReference
       { name: "connection_params", type: "Hash, nil", default: "nil", desc: "Extra connection parameters merged into the pool." },
       { name: "pool_size", type: "Integer, nil", default: "nil (auto)", desc: "Connection pool size; auto-tuned from thread counts when nil." },
       { name: "pool_timeout", type: "Numeric", default: "5", desc: "Seconds to wait for a pooled connection." },
-      { name: "connects_to", type: "Hash, nil", default: "nil", desc: "Rails multi-database config for a dedicated pgbus database." }
+      { name: "connects_to", type: "Hash, nil", default: "nil", desc: "Rails multi-database config for a dedicated pgbus database." },
+      { name: "require_primary", type: "Boolean", default: "false", desc: "Reject a job connection that lands on a read-only replica (pg_is_in_recovery) at boot — pooler safety against a read/write splitter routing pgmq reads to a standby." },
+      { name: "connection_guc_mode", type: "Symbol", default: ":options", desc: "How database.yml GUCs (variables:) reach pgmq connections — :options (libpq startup param) or :session (post-connect SET, for a transaction-mode PgBouncer that rejects the options param)." }
     ],
     "Queues" => [
       { name: "queue_prefix", type: "String", default: '"pgbus"', desc: "Prefix for every PGMQ queue name." },

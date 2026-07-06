@@ -49,10 +49,23 @@ module Pgbus
         @running = false
         @thread = nil
         @conn = nil
+        # Optimistic until the start-time self-probe runs: assume NOTIFY delivery
+        # works so a not-yet-probed listener isn't mistaken for a pooler-deaf one.
+        @delivering = true
       end
 
       def listening_to
         @state_mutex.synchronize { @listening_to.dup }
+      end
+
+      # Whether the start-time self-probe confirmed this connection can actually
+      # receive a NOTIFY. False when a transaction-mode pooler or replica
+      # silently drops LISTEN: the thread is still alive (running? == true) but
+      # will never wake the loop. The Worker/Consumer consult this so a
+      # live-but-deaf listener is treated as absent for wake-timeout purposes —
+      # fast polling, not the 15s NOTIFY ceiling (issue #332).
+      def delivering?
+        @state_mutex.synchronize { @delivering }
       end
 
       def start
@@ -116,8 +129,11 @@ module Pgbus
         # One-shot delivery self-probe on the initial connection only. A pooler
         # or replica that silently breaks LISTEN/NOTIFY is surfaced here with an
         # actionable error; the listener still runs and degrades to polling.
-        # Reconnects skip the probe to stay cheap.
-        NotifyProbe.probe_notify_delivery!(conn, logger: @logger)
+        # Reconnects skip the probe to stay cheap. Record the result so the
+        # owning worker can drop back to fast polling instead of the 15s NOTIFY
+        # ceiling when this connection can't actually deliver (issue #332).
+        delivering = NotifyProbe.probe_notify_delivery!(conn, logger: @logger)
+        @state_mutex.synchronize { @delivering = delivering }
         @state_mutex.synchronize { @conn = conn }
         drain_commands
 

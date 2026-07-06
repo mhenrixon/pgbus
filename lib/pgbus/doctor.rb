@@ -5,7 +5,7 @@ require "pgbus/mcp/health_analyzer"
 
 module Pgbus
   # Preflight diagnostics for a pgbus deployment — the single command that
-  # answers "is this environment healthy enough to run?". Runs eight checks and
+  # answers "is this environment healthy enough to run?". Runs nine checks and
   # returns a machine-readable result plus a human report, so `pgbus doctor`
   # and `rake pgbus:doctor` can gate a deploy or CI run (exit 0 on success,
   # 1 on any failure).
@@ -42,7 +42,8 @@ module Pgbus
         check_notify,
         check_processes,
         check_allowed_global_id_models,
-        check_broadcast_queue
+        check_broadcast_queue,
+        check_primary
       ].map(&:to_h)
     end
 
@@ -246,6 +247,29 @@ module Pgbus
                 detail: broadcast_queue ? "dedicated: #{broadcast_queue}" : "n/a")
     rescue StandardError => e
       Check.new(name: "Broadcast queue", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # 9. Primary affinity — pooler safety (issue #332). A read/write-splitting
+    # pooler (pgdog/pgcat) can route pgmq's VOLATILE read/archive to a read
+    # replica, where workers read nothing and jobs stop with a healthy
+    # heartbeat. If the job connection currently lands on a replica
+    # (pg_is_in_recovery() => t), warn with the direct-port remediation. A
+    # warning, never a failure: a deliberate replica-read setup is rare but
+    # possible, and require_primary is the enforcement knob for those who want a
+    # hard stop.
+    def check_primary
+      if @client.in_recovery?
+        return Check.new(name: "Primary affinity", status: :warn,
+                         detail: "job connection is on a read-only replica (pg_is_in_recovery() => t) — " \
+                                 "a read/write-splitting pooler may be routing pgmq reads to a standby, " \
+                                 "silently stalling jobs. Point the connection at the DIRECT primary port " \
+                                 "(worker_notify_* / streams_* overrides) and set require_primary to reject " \
+                                 "a replica at boot")
+      end
+
+      Check.new(name: "Primary affinity", status: :ok, detail: "on primary")
+    rescue StandardError => e
+      Check.new(name: "Primary affinity", status: :warn, detail: "could not determine (#{e.class}: #{e.message})")
     end
 
     # True when some configured worker capsule drains the given queue — either

@@ -79,7 +79,7 @@ module Pgbus
         # Both raise clean PG errors — no Ruby Timeout, no Thread#raise. Only
         # safe on this dedicated-connection branch — never on the shared-AR Proc
         # path, where statement_timeout would leak into application queries.
-        conn_opts = apply_connection_bounds(conn_opts)
+        conn_opts = wrap_session_gucs(apply_connection_bounds(conn_opts))
         @pgmq = PGMQ::Client.new(conn_opts, pool_size: config.resolved_pool_size, pool_timeout: config.pool_timeout)
         @pgmq_mutex = nil
         # Dedicated streams pool (issue #315): isolates the durable-stream
@@ -95,8 +95,10 @@ module Pgbus
         # with a per-process application_name so the autoscaler can count peer
         # processes from pg_stat_activity (issue #323 P1/P2). Snapshot it so a
         # hot-swap rebuilds a byte-identical pool at a new size.
-        @streams_conn_opts = tag_application_name(
-          apply_connection_bounds(config.streams_connection_options)
+        @streams_conn_opts = wrap_session_gucs(
+          tag_application_name(
+            apply_connection_bounds(config.streams_connection_options)
+          )
         )
         @streams_pgmq = PGMQ::Client.new(@streams_conn_opts, pool_size: config.streams_pool_size,
                                                              pool_timeout: config.streams_pool_timeout)
@@ -163,9 +165,22 @@ module Pgbus
     # carries the underlying error plus which config source was in use.
     def verify_connection!
       synchronized do
-        @pgmq.with_connection { |conn| conn.exec("SELECT 1") }
+        @pgmq.with_connection do |conn|
+          conn.exec("SELECT 1")
+          # When require_primary is set, reject a connection that landed on a
+          # read-only replica at boot rather than letting a read/write-splitting
+          # pooler silently route pgmq's VOLATILE read/archive to a standby,
+          # where workers read nothing and jobs stop with a healthy heartbeat
+          # (issue #332). Off by default, so a single-primary deployment is
+          # unaffected.
+          Process::PrimaryValidator.validate_primary!(conn) if config.require_primary
+        end
       end
       true
+    rescue Process::ReplicaConnectionError => e
+      raise ConfigurationError,
+            "Database connection via #{connection_source} landed on a read-only replica " \
+            "(require_primary is set): #{e.message}"
     rescue PGMQ::Errors::ConnectionError, PG::Error => e
       raise ConfigurationError, "Database connection failed via #{connection_source}: #{e.message}"
     end
@@ -180,6 +195,17 @@ module Pgbus
     def ping # rubocop:disable Naming/PredicateMethod
       with_raw_connection { |conn| conn.exec("SELECT 1") }
       true
+    end
+
+    # Whether the job connection currently lands on a read-only replica
+    # (pg_is_in_recovery() => t). Used by the doctor to warn about a
+    # read/write-splitting pooler that could route pgmq's VOLATILE read/archive
+    # to a standby, silently stalling job processing (issue #332). Raw PG error
+    # propagates so the caller can render the reason.
+    def in_recovery?
+      with_raw_connection do |conn|
+        conn.exec(Process::PrimaryValidator::RECOVERY_QUERY).getvalue(0, 0) == "t"
+      end
     end
 
     # The logical queue names pgbus expects to exist based on the configuration
@@ -890,7 +916,14 @@ module Pgbus
                PG.connect(opts)
              when Hash
                owned = true
-               PG.connect(**opts)
+               # :variables is a database.yml convention, not a libpq keyword —
+               # strip it before PG.connect and apply the GUCs via SET so this
+               # raw bootstrap/DDL connection matches the pooled connections
+               # (issue #332). Empty/absent variables is a plain connect.
+               variables = opts[:variables]
+               conn = PG.connect(**opts.except(:variables))
+               variables&.each { |name, value| conn.exec("SET #{name} = '#{value}'") }
+               conn
              else
                raise ConfigurationError, "Cannot resolve raw PG connection from #{opts.class}"
              end
@@ -1296,6 +1329,31 @@ module Pgbus
         end
       else
         conn_opts
+      end
+    end
+
+    # In :session GUC mode, a Hash conn_opts carrying database.yml `:variables`
+    # must apply those GUCs via post-connect `SET` rather than the libpq
+    # `options` STARTUP param (which a transaction-mode PgBouncer rejects). We
+    # can't pass `:variables` to PG.connect (not a libpq keyword), so wrap the
+    # opts in a fresh-connect factory Proc: pgmq-ruby natively accepts a callable
+    # per pool slot (pgmq connection.rb), and it must return a UNIQUE
+    # PG::Connection each call (pgmq guards against a shared object). Applies to
+    # a Hash with `:variables` only — a String URL or no variables passes through
+    # unchanged, as does :options mode (where forward_connection_variables
+    # already baked the GUCs into `options`). See issue #332.
+    def wrap_session_gucs(conn_opts)
+      return conn_opts unless config.connection_guc_mode == :session
+      return conn_opts unless conn_opts.is_a?(Hash)
+
+      variables = conn_opts[:variables]
+      return conn_opts if variables.nil? || variables.empty?
+
+      pg_opts = conn_opts.except(:variables)
+      lambda do
+        conn = PG.connect(pg_opts)
+        variables.each { |name, value| conn.exec("SET #{name} = '#{value}'") }
+        conn
       end
     end
 
