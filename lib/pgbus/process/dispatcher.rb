@@ -37,6 +37,16 @@ module Pgbus
       MAINTENANCE_BACKOFF_BASE = 30    # seconds; first backoff window
       MAINTENANCE_BACKOFF_MAX = 600    # seconds; window ceiling (10 minutes)
 
+      # A pooled backend the server terminated while the dispatcher sat idle
+      # between cycles surfaces with this exact PostgreSQL text on the next
+      # query. It is expected and self-healing — release_maintenance_connections
+      # returns the dead socket to the pool and the next cycle reconnects — so a
+      # task that hits it logs a calm INFO rather than an alarming WARN. Matched
+      # case-insensitively as a substring of the exception message. Common in
+      # local development (Postgres restart, `rails db:migrate` terminating idle
+      # backends, foreman/overmind restarting the DB), rare in production.
+      TERMINATED_CONNECTION_SIGNAL = "terminating connection due to administrator command"
+
       # The per-task monotonic timestamps run_maintenance consults via run_if_due.
       # Enumerated so set_maintenance_timestamp can validate its argument.
       MAINTENANCE_TIMESTAMPS = %i[
@@ -166,6 +176,51 @@ module Pgbus
 
         results = run_maintenance_tasks(now)
         update_maintenance_backoff(now, results)
+      ensure
+        release_maintenance_connections
+      end
+
+      # Return every AR connection this cycle leased back to the pool. The
+      # dispatcher is a long-lived loop that queries the pool on coarse
+      # intervals (concurrency cleanup every 300s, most tasks hourly). If it
+      # kept its pooled connection leased across the idle sleep, a backend the
+      # server terminates while it sits idle — routine in local development
+      # (a Postgres restart, `rails db:migrate` calling pg_terminate_backend,
+      # foreman/overmind restarting the DB) — would be reused dead on the next
+      # cycle, and every task would raise PG::ConnectionBad
+      # ("terminating connection due to administrator command"). Releasing here
+      # means the next cycle checks out afresh, and AR's verify!-on-checkout
+      # transparently discards a dead socket and reconnects. Best-effort: a
+      # failure to release must never crash the loop (mirrors the Streamer's
+      # release_ar_connections).
+      def release_maintenance_connections
+        return unless defined?(::ActiveRecord::Base)
+
+        Pgbus::BusRecord.connection_handler.clear_active_connections!
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Maintenance connection release failed: #{e.class}: #{e.message}" }
+      end
+
+      # True when the error is a pooled backend the server terminated while the
+      # dispatcher was idle between cycles. Self-healing (see
+      # TERMINATED_CONNECTION_SIGNAL / release_maintenance_connections), so
+      # callers downgrade the log from WARN to INFO.
+      def terminated_connection_error?(error)
+        error.message.to_s.downcase.include?(TERMINATED_CONNECTION_SIGNAL)
+      end
+
+      # Log a maintenance task failure at the right volume: a self-healing
+      # terminated-idle-connection is a calm INFO ("will reconnect next cycle"),
+      # anything else stays a WARN operators should look at.
+      def log_maintenance_failure(label, error)
+        if terminated_connection_error?(error)
+          Pgbus.logger.info do
+            "[Pgbus] #{label} skipped: database connection was terminated while idle; " \
+              "reconnecting on the next cycle (#{error.message.lines.first&.strip})"
+          end
+        else
+          Pgbus.logger.warn { "[Pgbus] #{label} failed: #{error.message}" }
+        end
       end
 
       # Runs every due maintenance task and returns their results. Each entry
@@ -284,7 +339,7 @@ module Pgbus
         deleted = ProcessedEvent.expired(Time.current - ttl).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} expired processed events" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Idempotency cleanup failed: #{e.message}" }
+        log_maintenance_failure("Idempotency cleanup", e)
         e
       end
 
@@ -293,7 +348,7 @@ module Pgbus
         deleted = ProcessEntry.stale(Time.current - threshold).delete_all
         Pgbus.logger.info { "[Pgbus] Reaped #{deleted} stale processes" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Stale process reaping failed: #{e.message}" }
+        log_maintenance_failure("Stale process reaping", e)
         e
       end
 
@@ -306,7 +361,7 @@ module Pgbus
         orphaned = Concurrency::BlockedExecution.expire_stale
         Pgbus.logger.debug { "[Pgbus] Expired #{orphaned} orphaned blocked executions" } if orphaned.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Concurrency cleanup failed: #{e.message}" }
+        log_maintenance_failure("Concurrency cleanup", e)
         e
       end
 
@@ -314,14 +369,14 @@ module Pgbus
         promoted = Concurrency::BlockedExecution.promote_next(key, client: Pgbus.client)
         Pgbus.logger.debug { "[Pgbus] Released blocked execution for key: #{key}" } if promoted
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Failed to release blocked execution for #{key}: #{e.message}" }
+        log_maintenance_failure("Releasing blocked execution for #{key}", e)
       end
 
       def cleanup_batches
         deleted = Batch.cleanup(older_than: Time.current - (7 * 24 * 3600)) # 7 days
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} finished batches" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Batch cleanup failed: #{e.message}" }
+        log_maintenance_failure("Batch cleanup", e)
         e
       end
 
@@ -353,7 +408,7 @@ module Pgbus
         )
         Pgbus.logger.info { "[Pgbus] Table maintenance completed: #{maintained} table(s) vacuumed" } if maintained.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Table maintenance failed: #{e.message}" }
+        log_maintenance_failure("Table maintenance", e)
         e
       end
 
@@ -378,7 +433,7 @@ module Pgbus
         reaped = reap_orphaned_uniqueness_keys
         Pgbus.logger.info { "[Pgbus] Reaped #{reaped} orphaned uniqueness keys" } if reaped.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Job lock cleanup failed: #{e.message}" }
+        log_maintenance_failure("Job lock cleanup", e)
         e
       end
 
@@ -434,7 +489,7 @@ module Pgbus
         deleted = OutboxEntry.published_before(Time.current - retention).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} published outbox entries" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Outbox cleanup failed: #{e.message}" }
+        log_maintenance_failure("Outbox cleanup", e)
         e
       end
 
@@ -469,7 +524,7 @@ module Pgbus
         end
         outcome.result
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Archive compaction failed: #{e.message}" }
+        log_maintenance_failure("Archive compaction", e)
         e
       end
 
@@ -510,7 +565,7 @@ module Pgbus
         end
         outcome.result
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Stream archive compaction failed: #{e.message}" }
+        log_maintenance_failure("Stream archive compaction", e)
         e
       end
 
@@ -576,7 +631,7 @@ module Pgbus
         Pgbus.logger.debug { "[Pgbus] Orphan stream sweep complete: dropped #{dropped} queue(s)" } if dropped.positive?
         outcome.result
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Orphan stream sweep failed: #{e.message}" }
+        log_maintenance_failure("Orphan stream sweep", e)
         e
       end
 
@@ -597,7 +652,7 @@ module Pgbus
         deleted = RecurringExecution.older_than(Time.current - retention).delete_all
         Pgbus.logger.debug { "[Pgbus] Cleaned up #{deleted} old recurring executions" } if deleted.positive?
       rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Recurring execution cleanup failed: #{e.message}" }
+        log_maintenance_failure("Recurring execution cleanup", e)
         e
       end
 

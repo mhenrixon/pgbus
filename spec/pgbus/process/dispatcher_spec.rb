@@ -190,6 +190,45 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
       expect { dispatcher.send(:run_maintenance) }.not_to raise_error
     end
+
+    it "releases pooled AR connections after the cycle so an idle backend is never reused" do
+      allow(dispatcher).to receive(:release_maintenance_connections)
+
+      dispatcher.set_maintenance_timestamp(:@last_reap_at, past_monotonic(described_class::REAP_INTERVAL + 1))
+      allow(dispatcher).to receive(:reap_stale_processes)
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:release_maintenance_connections)
+    end
+
+    it "still releases connections even when a maintenance task raised" do
+      allow(dispatcher).to receive(:release_maintenance_connections)
+      dispatcher.set_maintenance_timestamp(:@last_cleanup_at, past_monotonic(described_class::CLEANUP_INTERVAL + 1))
+      allow(dispatcher).to receive(:cleanup_processed_events).and_raise(StandardError, "boom")
+
+      dispatcher.send(:run_maintenance)
+
+      expect(dispatcher).to have_received(:release_maintenance_connections)
+    end
+  end
+
+  describe "#release_maintenance_connections (private)" do
+    it "clears active connections back to the pool" do
+      handler = instance_double(ActiveRecord::ConnectionAdapters::ConnectionHandler, clear_active_connections!: nil)
+      allow(Pgbus::BusRecord).to receive(:connection_handler).and_return(handler)
+
+      dispatcher.send(:release_maintenance_connections)
+
+      expect(handler).to have_received(:clear_active_connections!)
+    end
+
+    it "never raises when the pool release itself fails" do
+      handler = instance_double(ActiveRecord::ConnectionAdapters::ConnectionHandler)
+      allow(handler).to receive(:clear_active_connections!).and_raise(StandardError, "pool gone")
+      allow(Pgbus::BusRecord).to receive(:connection_handler).and_return(handler)
+
+      expect { dispatcher.send(:release_maintenance_connections) }.not_to raise_error
+    end
   end
 
   describe "#cleanup_concurrency (private)" do
@@ -216,6 +255,20 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "rescues errors gracefully" do
       allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_raise(StandardError, "db error")
       expect { dispatcher.send(:cleanup_concurrency) }.not_to raise_error
+    end
+
+    it "logs a terminated-connection error calmly (info, not warn) since it self-heals next cycle" do
+      terminated = StandardError.new(
+        "PQconsumeInput() FATAL:  terminating connection due to administrator command"
+      )
+      allow(Pgbus::Concurrency::Semaphore).to receive(:expire_stale).and_raise(terminated)
+      logger = instance_double(Logger, warn: nil, error: nil, debug: nil, info: nil)
+      allow(Pgbus).to receive(:logger).and_return(logger)
+
+      dispatcher.send(:cleanup_concurrency)
+
+      expect(logger).to have_received(:info)
+      expect(logger).not_to have_received(:warn)
     end
   end
 
