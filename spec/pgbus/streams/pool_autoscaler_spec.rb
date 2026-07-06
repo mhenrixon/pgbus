@@ -115,6 +115,25 @@ RSpec.describe Pgbus::Streams::PoolAutoscaler do
       expect(autoscaler.evaluate(headroom)).to eq(:hold)
       expect(resizes).to be_empty
     end
+
+    it "does NOT normal-shrink when allow_shrink is false (publisher grow-only)" do
+      busy!(0.1) # idle — would normally shrink
+      expect(autoscaler.evaluate(headroom, allow_shrink: false)).to eq(:hold)
+      expect(resizes).to be_empty
+    end
+
+    it "still GROWS when allow_shrink is false" do
+      pool_size[0] = 3
+      busy!(1.0)
+      expect(autoscaler.evaluate(headroom(free: 60, peers: 5), allow_shrink: false)).to eq(:grow)
+      expect(resizes.last).to be > 3
+    end
+
+    it "still EMERGENCY-shrinks when allow_shrink is false (DB exhaustion always relieved)" do
+      busy!(1.0)
+      expect(autoscaler.evaluate(headroom(free: 3, peers: 5), allow_shrink: false)).to eq(:emergency_shrink)
+      expect(resizes.last).to eq(config.streams_pool_size)
+    end
   end
 
   describe "#evaluate — EMERGENCY SHRINK" do
@@ -166,13 +185,13 @@ RSpec.describe Pgbus::Streams::PoolAutoscaler do
     it "grows once then stops as peers/used rise — never exceeds max_connections" do
       busy!(1.0)
       # Check 1: cold boot, free=100 peers=1 → +STEP_MAX
-      autoscaler.evaluate(maxc: 100, used: 0, peers: 1)
+      autoscaler.evaluate({ maxc: 100, used: 0, peers: 1 })
       expect(resizes.last).to eq(7)
 
       # Check 2 (5 min later): fleet connected, headroom gone → no grow
       resizes.clear
       busy!(1.0)
-      expect(autoscaler.evaluate(maxc: 100, used: 88, peers: 10)).to eq(:hold) # free=12 < reserve
+      expect(autoscaler.evaluate({ maxc: 100, used: 88, peers: 10 })).to eq(:hold) # free=12 < reserve
       expect(resizes).to be_empty
     end
   end
@@ -196,7 +215,8 @@ RSpec.describe Pgbus::Streams::PoolAutoscaler do
       expect(conn).to have_received(:exec_params).with(
         Pgbus::Streams::PoolAutoscaler::HEADROOM_SQL, ["pgbus_streams_%"]
       )
-      expect(autoscaler_double).to have_received(:evaluate).with(maxc: 100, used: 40, peers: 5)
+      expect(autoscaler_double).to have_received(:evaluate)
+        .with({ maxc: 100, used: 40, peers: 5 }, allow_shrink: true)
     end
 
     it "exposes the throttle interval" do

@@ -58,7 +58,14 @@ module Pgbus
       # One maintenance decision. `headroom` is {maxc:, used:, peers:} from a
       # caller's query, or nil if it failed (→ HOLD). Returns the action taken
       # (:emergency_shrink / :grow / :shrink / :hold) — handy for tests + logging.
-      def evaluate(headroom)
+      #
+      # `allow_shrink:` gates the NORMAL idle shrink (priority 3). The streamer
+      # passes true (it sees the sustained idle picture across replay reads). A
+      # publisher passes false: it only ever reacts to its OWN publish pressure
+      # (grow), and leaves idle-shrink to the streamer/consumer. Emergency shrink
+      # is NEVER gated — a DB running out of connections must always be relieved,
+      # whoever notices first.
+      def evaluate(headroom, allow_shrink: true)
         return :hold if headroom.nil?
 
         free = headroom[:maxc] - headroom[:used]
@@ -71,7 +78,7 @@ module Pgbus
 
         if busy_ratio >= GROW_THRESHOLD
           maybe_grow(size, free, headroom)
-        elsif busy_ratio < SHRINK_THRESHOLD
+        elsif allow_shrink && busy_ratio < SHRINK_THRESHOLD
           maybe_shrink(size)
         else
           :hold
@@ -181,8 +188,12 @@ module Pgbus
 
         def run(conn)
           row = conn.exec_params(HEADROOM_SQL, [@like]).first
+          # Explicit positional hash (braces) — evaluate now takes an optional
+          # allow_shrink: keyword, so a bare hash would be parsed as keywords.
+          # The streamer allows shrink (it sees the sustained idle picture).
           @autoscaler.evaluate(
-            maxc: row["maxc"].to_i, used: row["used"].to_i, peers: row["peers"].to_i
+            { maxc: row["maxc"].to_i, used: row["used"].to_i, peers: row["peers"].to_i },
+            allow_shrink: true
           )
         end
       end

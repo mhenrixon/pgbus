@@ -717,6 +717,10 @@ module Pgbus
     end
 
     def close
+      # Stop the publisher autoscale executor (if one was ever built) so its
+      # background thread doesn't leak (issue #323). Outside `synchronized` — it
+      # takes no pool lock and shutdown waits on a possibly-running check.
+      @streams_pool_trigger.shutdown if defined?(@streams_pool_trigger) && @streams_pool_trigger
       synchronized do
         @pgmq.close
         # Close the CURRENT streams pool too (issue #315) so its connections
