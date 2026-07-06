@@ -58,7 +58,12 @@ RSpec.describe "Streams pool publisher autoscale", :integration do
     peak = 3
     20.times do
       sleep 0.1
+      # streams_pool_stats returns {} on a transient read hiccup (it rescues
+      # internally), and this loop runs concurrently with the swap storm — so
+      # size can be nil. Skip those samples rather than raise NoMethodError.
       size = client.streams_pool_stats[:size]
+      next unless size
+
       peak = size if size > peak
       break if peak >= 8
     end

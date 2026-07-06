@@ -76,6 +76,22 @@ RSpec.describe Pgbus::Client do
       expect(result).to eq(4242) # the msg_id, NOT the trigger's nil
     end
 
+    it "builds exactly one trigger under concurrent first-publishers (no memo race)" do
+      client = build_client(config)
+      triggers = Concurrent::Array.new
+      barrier = Concurrent::CyclicBarrier.new(8)
+
+      threads = Array.new(8) do
+        Thread.new do
+          barrier.wait # release all threads at once to maximize the race
+          triggers << client.send(:streams_pool_trigger)
+        end
+      end
+      threads.each(&:join)
+
+      expect(triggers.uniq.size).to eq(1) # every thread got the SAME trigger
+    end
+
     it "memoizes the trigger across publishes" do
       client = build_client(config)
       first = client.send(:streams_pool_trigger)

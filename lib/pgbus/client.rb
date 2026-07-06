@@ -116,6 +116,10 @@ module Pgbus
 
       @queues_created = Concurrent::Map.new
       @stream_indexes_created = Concurrent::Map.new
+      # Guards the one-time build of the publisher autoscale trigger (issue #323).
+      # NOT @pgmq_mutex — that is nil on the dedicated path (the only path the
+      # trigger exists on), so it wouldn't serialize concurrent first-publishers.
+      @streams_trigger_mutex = Mutex.new
       @queue_strategy = QueueFactory.for(config)
       @schema_ensured = schema_ensured
       @connection_health = ConnectionHealth.new(
@@ -1013,21 +1017,31 @@ module Pgbus
 
     # Lazily-built publisher-side autoscale trigger (issue #323). nil (a no-op)
     # unless streams_pool_autoscale is on AND this is the dedicated-connection
-    # path (resize is a no-op on the shared-AR path). Memoized once — computed on
-    # the first publish, then reused. Runs its headroom query through the job
-    # pool (@pgmq), so it never competes with the streams pool it resizes.
+    # path (resize is a no-op on the shared-AR path). Built once — on the first
+    # publish, then reused. Runs its headroom query through the job pool (@pgmq),
+    # so it never competes with the streams pool it resizes.
+    #
+    # Double-checked under @streams_trigger_mutex so concurrent first-publishers
+    # (the integration spec fires 8) can't each build their own trigger — that
+    # would give each thread a trigger with its own throttle, defeating the
+    # once-per-interval throttle on the first window. Steady-state publishes hit
+    # the fast `defined?` path with no lock.
     def streams_pool_trigger
       return @streams_pool_trigger if defined?(@streams_pool_trigger)
 
-      @streams_pool_trigger =
-        if config.streams_pool_autoscale && !@shared_connection
-          autoscaler = Streams::PoolAutoscaler.new(client: self, config: config)
-          Streams::PoolTrigger.new(
-            autoscaler: autoscaler, job_pool: @pgmq,
-            interval: config.streams_pool_autoscale_interval,
-            application_name_prefix: config.streams_application_name
-          )
-        end
+      @streams_trigger_mutex.synchronize do
+        return @streams_pool_trigger if defined?(@streams_pool_trigger)
+
+        @streams_pool_trigger =
+          if config.streams_pool_autoscale && !@shared_connection
+            autoscaler = Streams::PoolAutoscaler.new(client: self, config: config)
+            Streams::PoolTrigger.new(
+              autoscaler: autoscaler, job_pool: @pgmq,
+              interval: config.streams_pool_autoscale_interval,
+              application_name_prefix: config.streams_application_name
+            )
+          end
+      end
     end
 
     # Substrings that indicate the pooled PG::Connection was already dead
