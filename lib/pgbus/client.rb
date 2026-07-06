@@ -890,6 +890,11 @@ module Pgbus
     # points at the non-thread-safe AR raw_connection), so we fall back to
     # with_raw_connection, which reuses that same shared connection. Callers
     # already wrap this in `synchronized`, so the shared path stays serialized.
+    #
+    # Public (issue #323): the autoscaler's HeadroomProbe reads pg_stat_activity
+    # through this, so it must be callable from outside the Client.
+    public
+
     def with_streams_connection(&)
       if @shared_connection
         with_raw_connection(&)
@@ -897,6 +902,8 @@ module Pgbus
         streams_pool.with_connection(&)
       end
     end
+
+    private
 
     def ensure_single_queue(full_name)
       return if @queues_created[full_name]

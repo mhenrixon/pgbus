@@ -20,7 +20,8 @@ module Pgbus
       # production the module-level Streamer.current(...) builds all of the
       # defaults from the configuration.
       class Instance
-        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue, :stream_counter, :pump
+        attr_reader :registry, :listener, :dispatcher, :heartbeat, :dispatch_queue, :stream_counter, :pump,
+                    :autoscaler
 
         def initialize(
           client: Pgbus.client,
@@ -83,6 +84,14 @@ module Pgbus
             idle_timeout: @config.streams_idle_timeout,
             logger: @logger
           )
+          # Self-tuning streams-pool autoscaler (issue #323). Opt-in; nil (and so
+          # a strict no-op — no thread) unless enabled AND on the dedicated
+          # connection path (the shared-AR streams pool aliases the non-thread-safe
+          # job pool and resize is a no-op there).
+          @autoscaler =
+            if @config.streams_pool_autoscale && !@client.shared_connection?
+              PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
+            end
           @started = false
           @shutdown_mutex = Mutex.new
         end
@@ -97,6 +106,7 @@ module Pgbus
           @listener.start
           @dispatcher.start
           @heartbeat.start
+          @autoscaler&.start
           self
         end
 
@@ -147,6 +157,9 @@ module Pgbus
             return unless @started
 
             @started = false
+            # Quiesce the actuator FIRST so no resize races the dispatcher/pump
+            # teardown (issue #323).
+            safely { @autoscaler&.stop }
             safely { @heartbeat.stop }
             safely { @listener.stop }
             safely { @dispatcher.stop }
