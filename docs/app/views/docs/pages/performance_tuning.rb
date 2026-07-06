@@ -12,10 +12,61 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
   def content
     autovacuum
     archive
+    streams_pool_autoscaling
     health_metrics
   end
 
   private
+
+  def streams_pool_autoscaling
+    DocsUI::Section("Streams pool autoscaling",
+                    description: "Let the SSE streams pool grow into spare connections under a burst, and shrink back when it's over.") do
+      md <<~'MD'
+        The dedicated streams pool (used for durable-broadcast publish and the
+        dispatcher's replay reads) is normally a fixed size — `streams_pool_size`
+        (default 5). Under a genuine burst of SSE clients that pool can saturate,
+        and a saturated pool **serialises** replay reads (it doesn't error — the
+        checkout just waits), so broadcasts fan out more slowly. For steady load,
+        the right fix is simply a larger `streams_pool_size`. For **bursty** load,
+        opt into autoscaling: a per-web-process control loop grows the pool into a
+        fair share of live Postgres connection headroom while it's saturated and
+        shrinks it back to `streams_pool_size` when the burst passes.
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |config|
+          config.streams_pool_autoscale = true   # opt-in; default false
+          config.streams_pool_size      = 5       # baseline + shrink floor
+          config.streams_pool_max       = 12      # optional hard per-process cap
+        end
+      RUBY
+      md <<~'MD'
+        There is **no connection-count target to tune**. Every threshold derives
+        from live `max_connections`: the loop reads `pg_stat_activity`, counts how
+        many pgbus stream processes share the database, and grows only into its own
+        fair share of the free connections. `streams_pool_max` is an optional hard
+        ceiling — leave it `nil` and the dynamic fair share is the cap.
+      MD
+      DocsUI::Callout(:tip) do
+        plain "It self-protects: if the database runs critically low on free "
+        plain "connections, every process immediately shrinks its streams pool back "
+        plain "to the baseline — protecting the database wins over keeping a busy "
+        plain "pool full."
+      end
+      DocsUI::Callout(:warning) do
+        plain "Autoscaling needs to see each process's own connections, so it must "
+        plain "connect to Postgres "
+        strong { "directly" }
+        plain " — a transaction-pooling PgBouncer strips the "
+        code { "application_name" }
+        plain " it uses to count peers, so it falls back to assuming it's the only "
+        plain "process (still connection-safe, just less precise). It's also a no-op "
+        plain "on the shared-ActiveRecord connection path. When in doubt, a larger "
+        plain "static "
+        code { "streams_pool_size" }
+        plain " is always the simpler choice."
+      end
+    end
+  end
 
   def autovacuum
     DocsUI::Section("Autovacuum tuning", description: "Queue tables churn far faster than the Postgres defaults expect.") do

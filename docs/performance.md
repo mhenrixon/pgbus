@@ -25,6 +25,8 @@ to guess.
 | Execution pool dispatch | every job dispatched to thread/async pool | `execution_pool_bench.rb` |
 | SSE streaming | every Turbo Stream broadcast | `streams_bench.rb` |
 | Streamer replay read | every durable-stream wake + SSE connect (`Client#read_after`) | `streams_read_pool_bench.rb` |
+| Streams-pool hot-swap | elastic resize under load (issue #323) | `pool_swap_bench.rb` |
+| Streams-pool autoscaler | per-tick decision cost + grow-under-load (issue #323) | `pool_autoscale_bench.rb` |
 
 ## Measuring
 
