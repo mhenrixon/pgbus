@@ -12,11 +12,52 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
   def content
     autovacuum
     archive
+    job_burst_tuning
     streams_pool_autoscaling
     health_metrics
   end
 
   private
+
+  def job_burst_tuning
+    DocsUI::Section("Job bursts: raise threads and the pool together",
+                    description: "Under a job spike, the DB connection pool is the ceiling — not the thread count.") do
+      md <<~'MD'
+        When a queue floods, the instinct is to add worker threads. But a job
+        holds a database connection only for the brief `read_batch` + `archive`
+        round-trip — not for the job body — so a worker's throughput is capped by
+        its **connection pool**, not its thread count. Adding threads past the
+        pool size just makes them queue on connection checkout: latency climbs,
+        throughput doesn't.
+      MD
+      md <<~'MD'
+        So size the two **together**. Raising `threads` alone plateaus at the pool
+        size; raising both scales throughput roughly linearly (measured 8× from
+        2→16 when the pool matches). The connection pool auto-tunes from the thread
+        count by default, so in practice you raise `threads` and let `pool_size`
+        follow — but if you pin `pool_size`, keep it ≥ `threads`.
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |config|
+          config.worker "default", threads: 16   # more concurrency…
+          config.pool_size = 20                  # …needs the connections to back it
+        end
+      RUBY
+      DocsUI::Callout(:note) do
+        plain "This is the "
+        strong { "static headroom" }
+        plain " answer, and it's usually the right one: idle pool slots are lazy — "
+        plain "they cost nothing until a burst uses them. pgbus deliberately does "
+        plain "not autoscale the job pool, because elastic threads on a fixed "
+        plain "connection pool can't push past the connection ceiling (measured "
+        plain "with "
+        code { "rake bench:job_burst" }
+        plain "). Watch "
+        code { "pgbus_worker_pool_utilization" }
+        plain " — sustained near 1 means raise both."
+      end
+    end
+  end
 
   def streams_pool_autoscaling
     DocsUI::Section("Streams pool autoscaling",
