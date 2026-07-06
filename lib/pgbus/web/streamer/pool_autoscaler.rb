@@ -7,8 +7,8 @@ module Pgbus
       #
       # One per web-server process (a sibling of Heartbeat in the Streamer
       # Instance). Every `streams_pool_autoscale_interval` seconds it:
-      #   1. reads live Postgres headroom (max_connections − used) through the
-      #      streams pool's own connection — a HeadroomProbe;
+      #   1. reads live Postgres headroom (max_connections − used) via a
+      #      HeadroomProbe on its own dedicated connection to the streams DB;
       #   2. EMERGENCY-SHRINKS to the baseline immediately if free connections are
       #      critically low (protect the DB, overriding busy_ratio AND cooldown);
       #   3. otherwise, when the pool is sustained-saturated AND a fair share of
@@ -72,6 +72,7 @@ module Pgbus
           @wake_mutex.synchronize { @wake.broadcast }
           @thread&.join(5)
           @thread = nil
+          @probe.close if @probe.respond_to?(:close)
           self
         end
 
@@ -220,12 +221,18 @@ module Pgbus
           end
         end
 
-        # Reads live Postgres connection headroom + peer process count through the
-        # streams pool's OWN connection (the correct streams DB, after P2). Any
-        # failure — including a pool-checkout timeout when the pool is saturated —
-        # returns nil, and tick HOLDs (never blocks the loop, never raises). The
-        # emergency path simply can't fire without a headroom reading; degrading
-        # to HOLD is safe (shrink protects the DB; not-growing does no harm).
+        # Reads live Postgres connection headroom + peer process count from
+        # pg_stat_activity on the streams DB.
+        #
+        # It uses its OWN dedicated single connection — NOT the streams pool.
+        # This is essential: the autoscaler must be able to read headroom exactly
+        # when the streams pool is saturated (busy_ratio ≈ 1.0), which is the
+        # moment it wants to grow. A through-the-pool probe would time out on
+        # checkout at 100% saturation (0 slots free) and the loop could never
+        # grow — the one-connection dedicated probe sidesteps that entirely for
+        # the cost of a single extra backend per web process. The connection is
+        # lazy (opened on first read) and reconnected on failure. Any error →
+        # nil → tick HOLDs (never blocks the loop, never raises).
         class HeadroomProbe
           SQL = <<~SQL
             SELECT current_setting('max_connections')::int AS maxc,
@@ -238,17 +245,38 @@ module Pgbus
           def initialize(client)
             @client = client
             @like = "#{client.config.streams_application_name}_%"
+            @connection = nil
+            @mutex = Mutex.new
           end
 
           # Returns {maxc:, used:, peers:} or nil on any failure (fail-soft).
           def read
-            @client.with_streams_connection do |conn|
-              row = conn.exec_params(SQL, [@like]).first
+            @mutex.synchronize do
+              row = connection.exec_params(SQL, [@like]).first
               { maxc: row["maxc"].to_i, used: row["used"].to_i, peers: row["peers"].to_i }
             end
           rescue StandardError => e
             Pgbus.logger.debug { "[Pgbus::Streamer::PoolAutoscaler] headroom probe failed: #{e.class}: #{e.message}" }
+            reset_connection
             nil
+          end
+
+          def close
+            @mutex.synchronize { reset_connection }
+          end
+
+          private
+
+          def connection
+            @connection ||= @client.build_streams_probe_connection
+          end
+
+          def reset_connection
+            @connection&.close
+          rescue StandardError
+            nil
+          ensure
+            @connection = nil
           end
         end
       end

@@ -56,7 +56,7 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
   let(:probe_script) { [] }
   let(:probe) do
     script = probe_script
-    instance_double(described_class::HeadroomProbe).tap do |p|
+    instance_double(described_class::HeadroomProbe, close: nil).tap do |p|
       allow(p).to receive(:read) { script.length > 1 ? script.shift : script.first }
     end
   end

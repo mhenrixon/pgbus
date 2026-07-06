@@ -903,6 +903,23 @@ module Pgbus
       end
     end
 
+    # Public (issue #323): a fresh, standalone PG connection to the STREAMS
+    # database for the autoscaler's HeadroomProbe. Deliberately NOT from the
+    # streams pool — the probe must read pg_stat_activity even when the pool is
+    # fully saturated (0 slots free), which is exactly when the loop wants to
+    # grow. Uses the tagged streams opts (@streams_conn_opts) so this connection
+    # also carries the pgbus_streams_<pid> application_name. Raises on the
+    # shared-AR path, where autoscaling never runs.
+    def build_streams_probe_connection
+      raise "no dedicated streams pool on the shared-AR path" if @shared_connection
+
+      case @streams_conn_opts
+      when String then ::PG.connect(@streams_conn_opts)
+      when Hash   then ::PG.connect(**@streams_conn_opts)
+      else raise "cannot build streams probe connection from #{@streams_conn_opts.class}"
+      end
+    end
+
     private
 
     def ensure_single_queue(full_name)
@@ -1246,9 +1263,15 @@ module Pgbus
       when Hash
         conn_opts.merge(application_name: name)
       when String
-        # libpq takes later key=value pairs as overrides, so appending wins over
-        # any application_name already in the URL/conninfo.
-        "#{conn_opts} application_name=#{name}"
+        # Two libpq string forms (mirrors #append_connection_bounds): URI form
+        # carries params as `?key=value&…` query pairs; key=value conninfo form
+        # is space-separated. Appending wins over any earlier application_name.
+        if conn_opts.start_with?("postgres://", "postgresql://")
+          separator = conn_opts.include?("?") ? "&" : "?"
+          "#{conn_opts}#{separator}application_name=#{name}"
+        else
+          "#{conn_opts} application_name=#{name}"
+        end
       else
         conn_opts
       end
