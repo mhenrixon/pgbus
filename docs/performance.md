@@ -38,6 +38,7 @@ rake bench:memory       # detailed memory profiling with allocation breakdown
 rake bench:integration  # real PostgreSQL + PGMQ (requires PGBUS_DATABASE_URL)
 rake bench:streams      # real Puma + SSE fan-out (requires PGBUS_DATABASE_URL)
 rake bench:one[streams_read_pool_bench]  # streamer replay-read pool (requires PGBUS_DATABASE_URL)
+rake bench:execution_modes  # threads vs async DB-connection consumption (requires PGBUS_DATABASE_URL)
 ```
 
 - **Unit benches** (`benchmarks/*_bench.rb`) isolate gem overhead with a mocked
@@ -148,6 +149,61 @@ unbounded) caps a connection's outbound buffer, dropping its **oldest** durable
 frame on overflow — safe because durable frames are re-read from the archive on
 reconnect; it's an OOM guard for a pathologically slow-but-alive client, not a
 delivery guarantee.
+
+### Execution mode and DB pool sizing (threads vs async)
+
+**Offered concurrency is not connections held.** A worker's `threads:` setting is
+how many jobs run at once; `resolved_pool_size` is how many *DB connections* the
+pgmq pool holds. They are not the same number, because a job holds a pgmq
+connection only for the `read_batch` + `archive` SQL round-trip — `perform_now`
+runs with **zero** pgmq connections checked out (`executor.rb`). If your job does
+its own database work, that uses ActiveRecord's *separate* pool, not this one.
+
+This means the folklore "async saves connections" is only half true, and the
+`benchmarks/execution_modes_bench.rb` harness (`rake bench:execution_modes`,
+requires `PGBUS_DATABASE_URL`) measures exactly when it holds. It runs the same
+offered load (240 jobs at concurrency 12) through both pools and samples
+`peak_busy = pool size − available` — the live checkout count — going through the
+real pool, so pool *sharing* is what's measured. Representative local numbers:
+
+| mode | pool | io profile | peak_busy | throughput | note |
+|------|------|-----------|-----------|-----------|------|
+| threads | 12 | io_light | 12 | ~216 job/s | baseline: ~1 conn per busy thread's checkout window |
+| async | 3 | io_light | **3** | ~222 job/s | **12 fibers sustained on 3 connections, full throughput** |
+| threads | 3 | io_light | 3 | ~208 job/s | short 10 ms checkouts cycle fast enough that 3 conns serve 12 threads too |
+| threads | 12 | db_bound | 12 | ~320 job/s | connection-bound — one conn per concurrent DB call |
+| async | 12 | db_bound | 12 | ~324 job/s | async matches threads when the pool is sized right |
+| async | **3** | db_bound | 3 | **~95 job/s** | **under-provisioned: throughput collapses ~3.4×** (p50 37 ms → 125 ms) |
+
+**What the numbers actually say:**
+
+- **Async's connection-density win is real for I/O-light work** — where a job
+  spends most of its time *outside* the checkout (HTTP calls, app compute, waits).
+  There, a handful of connections serves many fibers with no throughput loss. This
+  is why async workers are auto-sized to a flat `ASYNC_POOL_CONNECTIONS` (3) per
+  capsule rather than one-per-fiber.
+- **For DB-bound work, async is connection-bound just like threads.** A fiber
+  holds a connection for the whole SQL call (a blocking libpq call does not yield
+  the reactor), so a too-small async pool doesn't share — it **serialises**, and
+  throughput collapses.
+- **Under-provisioning degrades throughput; it does not necessarily error.**
+  Because `pool_timeout` (5 s) dwarfs a typical checkout (10–30 ms), a
+  too-small pool rarely times out — it just serialises work behind the available
+  connections. Watch `throughput` and p95/p99 latency, not just error counts.
+
+**Sizing guidance:**
+
+| mode | recommended `pool_size` | under-provision symptom | over-provision cost |
+|------|------------------------|-------------------------|---------------------|
+| threads | ≈ `Σ worker threads` (+ dispatcher/scheduler/consumers) — the auto-tuned default | throughput collapse; eventually `pool_timeout` (`enrich_pool_timeout_error`), `available → 0` | wastes Postgres `max_connections`; `warn_if_oversized` fires above 50 |
+| async | `ASYNC_POOL_CONNECTIONS` (3) for **I/O-light** work; **≈ your peak concurrent DB calls** for **DB-bound** work — measure with `rake bench:execution_modes` | reactor fibers serialise on checkout → throughput collapse (harder to spot; no error) | forfeits the density win async exists for |
+
+This is a connection-**density** tool, not a throughput tuner: a smaller pool means
+fewer Postgres backends for the same offered load, not faster jobs (PGMQ round-trip
+and job I/O dominate wall time). The numbers are single-box, single-process, no
+PgBouncer — a per-process, per-io-profile sizing guide, not a production capacity
+guarantee. Budget `resolved_pool_size + streams_pool_size` per forked process (see
+Capacity planning above).
 
 ### Reading the output
 
