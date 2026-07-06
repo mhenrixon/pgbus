@@ -48,7 +48,7 @@ module Pgbus
           # (zero extra connections), querying live headroom there.
           @autoscaler =
             if @config.streams_pool_autoscale && !@client.shared_connection?
-              PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
+              Pgbus::Streams::PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
             end
           @listener = Listener.new(
             pg_connection: @pg_connection,
@@ -188,7 +188,7 @@ module Pgbus
         def build_autoscale_maintenance
           return nil unless @autoscaler
 
-          PoolAutoscaler::Maintenance.new(
+          Pgbus::Streams::PoolAutoscaler::Maintenance.new(
             autoscaler: @autoscaler,
             interval: @config.streams_pool_autoscale_interval,
             application_name_prefix: @config.streams_application_name

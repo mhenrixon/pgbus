@@ -116,6 +116,10 @@ module Pgbus
 
       @queues_created = Concurrent::Map.new
       @stream_indexes_created = Concurrent::Map.new
+      # Guards the one-time build of the publisher autoscale trigger (issue #323).
+      # NOT @pgmq_mutex — that is nil on the dedicated path (the only path the
+      # trigger exists on), so it wouldn't serialize concurrent first-publishers.
+      @streams_trigger_mutex = Mutex.new
       @queue_strategy = QueueFactory.for(config)
       @schema_ensured = schema_ensured
       @connection_health = ConnectionHealth.new(
@@ -286,7 +290,10 @@ module Pgbus
     # trigger + archive index, mirroring this bare-name write path.
     def send_stream_message(stream_name, payload, headers: nil, delay: 0)
       target = config.queue_name(stream_name)
-      Instrumentation.instrument("pgbus.client.send_message", queue: target) do
+      # Capture the produced msg_id — it is this method's return value (callers
+      # like Stream#broadcast rely on it), so the autoscale trigger below must NOT
+      # become the last expression.
+      msg_id = Instrumentation.instrument("pgbus.client.send_message", queue: target) do
         with_stale_connection_retry do
           ensure_stream_queue(stream_name)
           # Publish through the dedicated streams pool (issue #315) so a
@@ -298,6 +305,12 @@ module Pgbus
           end
         end
       end
+      # Opportunistically autoscale the streams pool from the publish path so a
+      # pure-publisher process (no streamer) still grows under a broadcast storm
+      # (issue #323 follow-up). Throttled + fail-soft — never delays or breaks the
+      # broadcast; nil (a no-op) unless autoscale is on and the pool is dedicated.
+      streams_pool_trigger&.maybe_check
+      msg_id
     end
 
     def send_batch(queue_name, payloads, headers: nil, delay: 0)
@@ -712,6 +725,10 @@ module Pgbus
     end
 
     def close
+      # Stop the publisher autoscale executor (if one was ever built) so its
+      # background thread doesn't leak (issue #323). Outside `synchronized` — it
+      # takes no pool lock and shutdown waits on a possibly-running check.
+      @streams_pool_trigger.shutdown if defined?(@streams_pool_trigger) && @streams_pool_trigger
       synchronized do
         @pgmq.close
         # Close the CURRENT streams pool too (issue #315) so its connections
@@ -997,6 +1014,35 @@ module Pgbus
     # (produce / with_connection / stats) go through it so the underlying
     # PGMQ::Client can be atomically hot-swapped to a new size (issue #323).
     attr_reader :streams_pool
+
+    # Lazily-built publisher-side autoscale trigger (issue #323). nil (a no-op)
+    # unless streams_pool_autoscale is on AND this is the dedicated-connection
+    # path (resize is a no-op on the shared-AR path). Built once — on the first
+    # publish, then reused. Runs its headroom query through the job pool (@pgmq),
+    # so it never competes with the streams pool it resizes.
+    #
+    # Double-checked under @streams_trigger_mutex so concurrent first-publishers
+    # (the integration spec fires 8) can't each build their own trigger — that
+    # would give each thread a trigger with its own throttle, defeating the
+    # once-per-interval throttle on the first window. Steady-state publishes hit
+    # the fast `defined?` path with no lock.
+    def streams_pool_trigger
+      return @streams_pool_trigger if defined?(@streams_pool_trigger)
+
+      @streams_trigger_mutex.synchronize do
+        return @streams_pool_trigger if defined?(@streams_pool_trigger)
+
+        @streams_pool_trigger =
+          if config.streams_pool_autoscale && !@shared_connection
+            autoscaler = Streams::PoolAutoscaler.new(client: self, config: config)
+            Streams::PoolTrigger.new(
+              autoscaler: autoscaler, job_pool: @pgmq,
+              interval: config.streams_pool_autoscale_interval,
+              application_name_prefix: config.streams_application_name
+            )
+          end
+      end
+    end
 
     # Substrings that indicate the pooled PG::Connection was already dead
     # *before* pgmq-ruby tried to use it — typically killed by a connection

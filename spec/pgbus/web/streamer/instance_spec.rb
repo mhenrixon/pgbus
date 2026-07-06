@@ -460,15 +460,15 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
       it "builds a pure-decision autoscaler (no thread — it has no start/stop)" do
         instance = build_instance
-        expect(instance.autoscaler).to be_a(Pgbus::Web::Streamer::PoolAutoscaler)
+        expect(instance.autoscaler).to be_a(Pgbus::Streams::PoolAutoscaler)
         expect(instance.autoscaler).not_to respond_to(:start)
       ensure
         instance&.shutdown!
       end
 
       it "wires the autoscaler into the Listener as a throttled maintenance task" do
-        maintenance = instance_double(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance)
-        allow(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to receive(:new).and_return(maintenance)
+        maintenance = instance_double(Pgbus::Streams::PoolAutoscaler::Maintenance)
+        allow(Pgbus::Streams::PoolAutoscaler::Maintenance).to receive(:new).and_return(maintenance)
         captured = nil
         allow(Pgbus::Web::Streamer::Listener).to receive(:new).and_wrap_original do |orig, **kwargs|
           captured = kwargs[:maintenance]
@@ -477,7 +477,7 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
         instance = build_instance
         expect(captured).to eq(maintenance)
-        expect(Pgbus::Web::Streamer::PoolAutoscaler::Maintenance).to have_received(:new)
+        expect(Pgbus::Streams::PoolAutoscaler::Maintenance).to have_received(:new)
           .with(autoscaler: instance.autoscaler, interval: config.streams_pool_autoscale_interval,
                 application_name_prefix: config.streams_application_name)
       ensure

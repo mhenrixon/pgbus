@@ -52,11 +52,16 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
         strong { "no extra database connections" }
         plain " and no extra thread: the check is a lightweight "
         code { "pg_stat_activity" }
-        plain " query that runs on the streamer's existing idle LISTEN connection "
-        plain "every "
+        plain " query that runs on an existing idle connection every "
         code { "streams_pool_autoscale_interval" }
-        plain " seconds — like pghero's periodic stats capture. One grow (or shrink) "
-        plain "step per check; a sustained burst converges over a few checks."
+        plain " seconds — like pghero's periodic stats capture. In a web process "
+        plain "serving SSE it rides the streamer's idle LISTEN connection; a "
+        plain "background worker that only "
+        em { "publishes" }
+        plain " broadcasts triggers the same throttled check from the publish path "
+        plain "(on the job pool), so pure-publisher processes autoscale too. One "
+        plain "grow (or shrink) step per check; a sustained burst converges over a "
+        plain "few checks."
       end
       DocsUI::Callout(:tip) do
         plain "It self-protects: if the database runs critically low on free "

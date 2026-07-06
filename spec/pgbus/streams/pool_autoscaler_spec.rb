@@ -6,7 +6,7 @@ require "spec_helper"
 # #323). It owns no thread and no connection — #evaluate takes a headroom hash
 # ({maxc:, used:, peers:}) and the pool busy_ratio (from a fake client's
 # streams_pool_stats) and decides grow/shrink/emergency/hold. Fully DB-free.
-RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
+RSpec.describe Pgbus::Streams::PoolAutoscaler do
   subject(:autoscaler) { described_class.new(client: client, config: config, logger: logger) }
 
   let(:logger) { instance_double(Logger, info: nil, warn: nil, error: nil, debug: nil) }
@@ -115,6 +115,25 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       expect(autoscaler.evaluate(headroom)).to eq(:hold)
       expect(resizes).to be_empty
     end
+
+    it "does NOT normal-shrink when allow_shrink is false (publisher grow-only)" do
+      busy!(0.1) # idle — would normally shrink
+      expect(autoscaler.evaluate(headroom, allow_shrink: false)).to eq(:hold)
+      expect(resizes).to be_empty
+    end
+
+    it "still GROWS when allow_shrink is false" do
+      pool_size[0] = 3
+      busy!(1.0)
+      expect(autoscaler.evaluate(headroom(free: 60, peers: 5), allow_shrink: false)).to eq(:grow)
+      expect(resizes.last).to be > 3
+    end
+
+    it "still EMERGENCY-shrinks when allow_shrink is false (DB exhaustion always relieved)" do
+      busy!(1.0)
+      expect(autoscaler.evaluate(headroom(free: 3, peers: 5), allow_shrink: false)).to eq(:emergency_shrink)
+      expect(resizes.last).to eq(config.streams_pool_size)
+    end
   end
 
   describe "#evaluate — EMERGENCY SHRINK" do
@@ -166,13 +185,13 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
     it "grows once then stops as peers/used rise — never exceeds max_connections" do
       busy!(1.0)
       # Check 1: cold boot, free=100 peers=1 → +STEP_MAX
-      autoscaler.evaluate(maxc: 100, used: 0, peers: 1)
+      autoscaler.evaluate({ maxc: 100, used: 0, peers: 1 })
       expect(resizes.last).to eq(7)
 
       # Check 2 (5 min later): fleet connected, headroom gone → no grow
       resizes.clear
       busy!(1.0)
-      expect(autoscaler.evaluate(maxc: 100, used: 88, peers: 10)).to eq(:hold) # free=12 < reserve
+      expect(autoscaler.evaluate({ maxc: 100, used: 88, peers: 10 })).to eq(:hold) # free=12 < reserve
       expect(resizes).to be_empty
     end
   end
@@ -182,7 +201,7 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       described_class.new(autoscaler: autoscaler_double, interval: 300, application_name_prefix: "pgbus_streams")
     end
 
-    let(:autoscaler_double) { instance_double(Pgbus::Web::Streamer::PoolAutoscaler, evaluate: :hold) }
+    let(:autoscaler_double) { instance_double(Pgbus::Streams::PoolAutoscaler, evaluate: :hold) }
 
     it "runs the headroom query on the given connection and hands the reading to the autoscaler" do
       row = { "maxc" => "100", "used" => "40", "peers" => "5" }
@@ -194,9 +213,10 @@ RSpec.describe Pgbus::Web::Streamer::PoolAutoscaler do
       maintenance.run(conn)
 
       expect(conn).to have_received(:exec_params).with(
-        Pgbus::Web::Streamer::PoolAutoscaler::HEADROOM_SQL, ["pgbus_streams_%"]
+        Pgbus::Streams::PoolAutoscaler::HEADROOM_SQL, ["pgbus_streams_%"]
       )
-      expect(autoscaler_double).to have_received(:evaluate).with(maxc: 100, used: 40, peers: 5)
+      expect(autoscaler_double).to have_received(:evaluate)
+        .with({ maxc: 100, used: 40, peers: 5 }, allow_shrink: true)
     end
 
     it "exposes the throttle interval" do

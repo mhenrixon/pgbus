@@ -26,9 +26,9 @@ RSpec.describe "Streams pool autoscaler", :integration do
   end
 
   let(:client) { Pgbus::Client.new(config, schema_ensured: true) }
-  let(:autoscaler) { Pgbus::Web::Streamer::PoolAutoscaler.new(client: client, config: config, logger: config.logger) }
+  let(:autoscaler) { Pgbus::Streams::PoolAutoscaler.new(client: client, config: config, logger: config.logger) }
   let(:maintenance) do
-    Pgbus::Web::Streamer::PoolAutoscaler::Maintenance.new(
+    Pgbus::Streams::PoolAutoscaler::Maintenance.new(
       autoscaler: autoscaler, interval: 0, application_name_prefix: config.streams_application_name
     )
   end
@@ -101,7 +101,7 @@ RSpec.describe "Streams pool autoscaler", :integration do
 
     # Simulate near-exhaustion by feeding a headroom reading with tiny free.
     grown = client.streams_pool_stats[:size]
-    action = autoscaler.evaluate(maxc: 100, used: 99, peers: 1) # free=1 < emergency margin
+    action = autoscaler.evaluate({ maxc: 100, used: 99, peers: 1 }) # free=1 < emergency margin
     expect(action).to eq(:emergency_shrink)
     expect(client.streams_pool_stats[:size]).to eq(3)
     expect(grown).to be > 3
