@@ -1037,7 +1037,7 @@ RSpec.describe Pgbus::Process::Worker do
       instance_double(
         Pgbus::Process::NotifyListener,
         start: nil, stop: nil, add_queue: nil, remove_queue: nil,
-        listening_to: [], running?: true
+        listening_to: [], running?: true, delivering?: true
       ).tap { |l| allow(l).to receive(:start).and_return(l) }
     end
 
@@ -1126,6 +1126,17 @@ RSpec.describe Pgbus::Process::Worker do
         # up. Fall back to the polling interval until it's restarted.
         allow(worker).to receive(:notify_wakeup?).and_return(true)
         allow(fake_listener).to receive(:running?).and_return(false)
+        worker.notify_listener = fake_listener
+        expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
+      end
+
+      it "returns effective_polling_interval when a live listener is not delivering (pooler-deaf, issue #332)" do
+        # A transaction-pooler LISTEN connection is alive (running? true) but its
+        # self-NOTIFY probe failed, so it will never actually wake the loop.
+        # Keeping the 15s NOTIFY ceiling would degrade latency to WORSE than a
+        # plain no-NOTIFY deployment; fall back to fast polling instead.
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        allow(fake_listener).to receive_messages(running?: true, delivering?: false)
         worker.notify_listener = fake_listener
         expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
       end

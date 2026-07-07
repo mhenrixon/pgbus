@@ -605,11 +605,18 @@ module Pgbus
       def wake_timeout
         # A dead listener (running? false) will never wake the loop, so treat
         # it as absent and keep polling at the short interval until
-        # ensure_notify_listener restarts it. Only a live listener earns the
-        # long NOTIFY-mode ceiling.
-        return effective_polling_interval unless notify_wakeup? && @notify_listener&.running?
+        # ensure_notify_listener restarts it. A live-but-deaf listener
+        # (delivering? false — a transaction-mode pooler or replica that drops
+        # LISTEN) is the same story: it will never wake us, so don't raise the
+        # poll floor to the 15s ceiling behind it (issue #332). Only a live,
+        # delivering listener earns the long NOTIFY-mode ceiling.
+        return effective_polling_interval unless notify_wakeup? && listener_delivering?
 
         [effective_polling_interval, config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def listener_delivering?
+        @notify_listener&.running? && @notify_listener.delivering?
       end
 
       def effective_polling_interval

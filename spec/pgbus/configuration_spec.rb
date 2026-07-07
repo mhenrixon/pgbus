@@ -1129,6 +1129,28 @@ RSpec.describe Pgbus::Configuration do
       expect(config.group_mode).to eq(:fifo)
     end
 
+    it "accepts :options and :session for connection_guc_mode" do
+      config.connection_guc_mode = :session
+      expect { config.validate! }.not_to raise_error
+      config.connection_guc_mode = :options
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects an invalid connection_guc_mode at assignment" do
+      expect { config.connection_guc_mode = :bogus }.to raise_error(Pgbus::ConfigurationError, /connection_guc_mode/)
+    end
+
+    it "rejects a non-boolean require_primary" do
+      config.require_primary = "yes"
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /require_primary/)
+    end
+
+    it "accepts a boolean require_primary (default false)" do
+      expect(config.require_primary).to be(false)
+      config.require_primary = true
+      expect { config.validate! }.not_to raise_error
+    end
+
     it "raises Pgbus::ConfigurationError (not NoMethodError) for non-string/symbol types" do
       expect { config.group_mode = 1 }.to raise_error(Pgbus::ConfigurationError, /type/)
       expect { config.group_mode = true }.to raise_error(Pgbus::ConfigurationError, /type/)
@@ -1375,6 +1397,34 @@ RSpec.describe Pgbus::Configuration do
         result = config.connection_options
         expect(result).to be_a(Proc)
         expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
+
+    context "when database.yml carries a :variables block (GUC forwarding, issue #332)" do
+      let(:db_config) do
+        double("db_config", configuration_hash: {
+                 host: "localhost", port: 5432, database: "myapp",
+                 username: "u", variables: { "client_min_messages" => "warning" }
+               })
+      end
+
+      before do
+        allow(ActiveRecord::Base).to receive(:connection_db_config).and_return(db_config)
+      end
+
+      it "forwards :variables into the libpq options param by default (:options mode)" do
+        # Previously :variables was dropped entirely, so client_min_messages
+        # never reached pgmq's raw connections (NOTICE flooding).
+        result = config.connection_options
+        expect(result).to be_a(Hash)
+        expect(result[:options]).to include("-c client_min_messages=warning")
+      end
+
+      it "keeps the raw :variables hash available for :session mode" do
+        config.connection_guc_mode = :session
+        result = config.connection_options
+        expect(result).to be_a(Hash)
+        expect(result[:variables]).to eq("client_min_messages" => "warning")
       end
     end
   end

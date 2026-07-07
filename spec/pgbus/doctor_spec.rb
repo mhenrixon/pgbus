@@ -23,7 +23,8 @@ RSpec.describe Pgbus::Doctor do
         pgmq_schema_version: Pgbus::PgmqSchema.latest_version,
         configured_queues: %w[default],
         list_queues: [{ queue_name: "pgbus_default" }],
-        notify_enabled?: true
+        notify_enabled?: true,
+        in_recovery?: false
       )
       # Mirror the real Client: resolve a logical name to its physical PGMQ
       # table name(s). Default (non-priority) maps 1:1 with the prefix.
@@ -41,8 +42,8 @@ RSpec.describe Pgbus::Doctor do
   end
 
   describe "#run" do
-    it "runs eight checks" do
-      expect(doctor.run.size).to eq(8)
+    it "runs nine checks" do
+      expect(doctor.run.size).to eq(9)
     end
 
     it "returns hashes with :name, :status, :detail keys" do
@@ -341,6 +342,30 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  describe "the primary-affinity check (pooler safety, #332)" do
+    it "is :ok when the job connection is on the primary" do
+      allow(client).to receive(:in_recovery?).and_return(false)
+      check = primary_check(doctor.run)
+      expect(check[:status]).to eq(:ok)
+    end
+
+    it "warns (never fails) when the job connection is on a read-only replica" do
+      allow(client).to receive(:in_recovery?).and_return(true)
+      check = primary_check(doctor.run)
+      expect(check[:status]).to eq(:warn)
+      expect(check[:detail]).to match(/replica|recovery/i)
+      # Names the actionable remediation (direct-port overrides).
+      expect(check[:detail]).to match(/direct|worker_notify|require_primary/i)
+      # A warning must never fail the run.
+      expect(doctor.success?).to be(true)
+    end
+
+    it "does not crash when the recovery probe raises" do
+      allow(client).to receive(:in_recovery?).and_raise(StandardError, "boom")
+      expect { doctor.run }.not_to raise_error
+    end
+  end
+
   describe "#report" do
     it "renders one line per check" do
       report = doctor.report
@@ -424,4 +449,5 @@ RSpec.describe Pgbus::Doctor do
   def process_check(checks) = checks.find { |c| c[:name].match?(/process|liveness|health/i) }
   def gid_check(checks)     = checks.find { |c| c[:name].match?(/globalid|allowlist/i) }
   def broadcast_queue_check(checks) = checks.find { |c| c[:name].match?(/broadcast queue/i) }
+  def primary_check(checks)         = checks.find { |c| c[:name].match?(/primary/i) }
 end
