@@ -76,6 +76,14 @@ module Pgbus
         # notify_trigger_current? makes those calls cheap no-ops.
         bootstrap_queues
 
+        # Optional in-process doctor preflight (issue #347): run the diagnostic
+        # checks here — after config is loaded, the DB is verified reachable, and
+        # queues are bootstrapped, but BEFORE any worker is forked — so an
+        # entrypoint gets a single Rails boot instead of `pgbus doctor` + `pgbus
+        # start`. :strict aborts the boot (raising, so nothing forks) on a
+        # genuinely-fatal finding; :report only logs. Off by default.
+        run_doctor_preflight unless config.doctor_on_boot.nil?
+
         boot_processes
         monitor_loop
       ensure
@@ -681,6 +689,33 @@ module Pgbus
         raise
       rescue StandardError => e
         ErrorReporter.report(e, { action: "bootstrap_queues" })
+      end
+
+      # In-process doctor preflight (issue #347). Runs the boot-safe subset of
+      # doctor checks (everything except the worker-dependent process-liveness
+      # check, which has no workers to observe yet) against the supervisor's own
+      # config and the already-verified shared client, and logs the report.
+      #
+      # In :strict mode, a genuinely-fatal check (Doctor::STRICT_FATAL —
+      # Configuration or an absent PGMQ schema) aborts the boot by raising
+      # Pgbus::ConfigurationError. Because this runs before boot_processes, no
+      # child is forked, and `run`'s `ensure shutdown` tears down the heartbeat
+      # and health server — the same fail-fast path verify_connection! uses.
+      # A transient-shaped failure (Queues, Database) is reported but never
+      # aborts: the lenient bootstrap above is built to let children ride out a
+      # boot-time DB blip, and a strict abort there would take down a whole
+      # fleet's cold boot in lockstep.
+      def run_doctor_preflight
+        doctor = Pgbus::Doctor.new(config: config, client: Pgbus.client)
+        report = doctor.boot_report
+        Pgbus.logger.info { "[Pgbus] doctor preflight (#{config.doctor_on_boot}):\n#{report}" }
+
+        return unless config.doctor_on_boot == :strict
+        return if doctor.boot_ok?
+
+        raise Pgbus::ConfigurationError,
+              "doctor preflight failed a fatal check (doctor_on_boot: :strict) — refusing to boot. " \
+              "See the report above."
       end
 
       def load_rails_app

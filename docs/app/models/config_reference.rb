@@ -123,7 +123,8 @@ module ConfigReference
     "Validation" => [
       { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },
       { name: "allowed_global_id_models", type: "Array, nil", default: "nil", desc: "Allowlist of models permitted as GlobalID event arguments." },
-      { name: "pgmq_schema_mode", type: "Symbol", default: ":auto", desc: "PGMQ schema install mode (:auto, :extension, :embedded)." }
+      { name: "pgmq_schema_mode", type: "Symbol", default: ":auto", desc: "PGMQ schema install mode (:auto, :extension, :embedded)." },
+      { name: "doctor_on_boot", type: "Symbol, nil", default: "nil", desc: "Run doctor preflight checks inside the booting supervisor (one Rails boot instead of `pgbus doctor` + `pgbus start`). nil/false = off. :report logs the report and always boots; :strict refuses to boot on a fatal check (bad config or an absent PGMQ schema) — transient-shaped failures (Queues/Database) never abort. Set via the --doctor / --doctor-strict start flags too." }
     ]
   }.freeze
 

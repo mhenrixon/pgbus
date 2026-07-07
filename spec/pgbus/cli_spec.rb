@@ -212,6 +212,45 @@ RSpec.describe Pgbus::CLI do
       end
     end
 
+    context "with --doctor flag (issue #347)" do
+      it "sets config.doctor_on_boot to :report" do
+        original = Pgbus.configuration.doctor_on_boot
+        described_class.start(["start", "--doctor"])
+        expect(Pgbus.configuration.doctor_on_boot).to eq(:report)
+      ensure
+        Pgbus.configuration.doctor_on_boot = original
+      end
+    end
+
+    context "with --doctor-strict flag (issue #347)" do
+      it "sets config.doctor_on_boot to :strict" do
+        original = Pgbus.configuration.doctor_on_boot
+        described_class.start(["start", "--doctor-strict"])
+        expect(Pgbus.configuration.doctor_on_boot).to eq(:strict)
+      ensure
+        Pgbus.configuration.doctor_on_boot = original
+      end
+
+      it "wins over --doctor when both are passed (strict is the stronger gate)" do
+        original = Pgbus.configuration.doctor_on_boot
+        described_class.start(["start", "--doctor", "--doctor-strict"])
+        expect(Pgbus.configuration.doctor_on_boot).to eq(:strict)
+      ensure
+        Pgbus.configuration.doctor_on_boot = original
+      end
+    end
+
+    context "without a doctor flag" do
+      it "leaves config.doctor_on_boot at its configured value (default nil)" do
+        original = Pgbus.configuration.doctor_on_boot
+        Pgbus.configuration.doctor_on_boot = nil
+        described_class.start(["start"])
+        expect(Pgbus.configuration.doctor_on_boot).to be_nil
+      ensure
+        Pgbus.configuration.doctor_on_boot = original
+      end
+    end
+
     context "with multiple --*-only flags (mutually exclusive)" do
       it "raises ArgumentError when --workers-only and --scheduler-only are both passed" do
         expect do

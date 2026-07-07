@@ -51,6 +51,16 @@ module Pgbus
       Pgbus.configuration.execution_mode = options[:execution_mode].to_sym if options[:execution_mode]
       apply_capsule_filter(options[:capsule]) if options[:capsule]
       apply_role_filter(options)
+      apply_doctor_flag(options)
+    end
+
+    # --doctor runs the boot preflight in report mode; --doctor-strict aborts
+    # the boot on a fatal finding. Both set config.doctor_on_boot, which the
+    # supervisor reads at boot (issue #347). Strict wins if both are passed — it
+    # is the stronger gate, so a user asking for both clearly wants strict.
+    def apply_doctor_flag(options)
+      Pgbus.configuration.doctor_on_boot = :report if options[:doctor]
+      Pgbus.configuration.doctor_on_boot = :strict if options[:doctor_strict]
     end
 
     def parse_start_options(args)
@@ -80,6 +90,14 @@ module Pgbus
 
         opts.on("--execution-mode MODE", "Execution mode: threads (default) or async") do |v|
           options[:execution_mode] = v
+        end
+
+        opts.on("--doctor", "Run doctor preflight checks at boot and log the report (issue #347)") do
+          options[:doctor] = true
+        end
+
+        opts.on("--doctor-strict", "Run doctor preflight and refuse to boot on a fatal finding") do
+          options[:doctor_strict] = true
         end
       end.parse!(args.dup)
       options
@@ -199,6 +217,12 @@ module Pgbus
                              pattern)
           --execution-mode   Execution mode: threads (default) or async
                              (fiber-based, lower connection usage)
+          --doctor           Run doctor preflight checks in the booting
+                             supervisor and log the report (one Rails boot
+                             instead of `pgbus doctor` + `pgbus start`)
+          --doctor-strict    Like --doctor, but refuse to boot (exit non-zero,
+                             fork nothing) if a fatal check fails (bad config
+                             or an absent PGMQ schema)
 
         Environment for `mcp`:
           PGBUS_MCP_TOKEN          If set, PGBUS_MCP_AUTH_TOKEN must match for

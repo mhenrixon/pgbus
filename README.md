@@ -1872,6 +1872,25 @@ rake pgbus:doctor  # identical checks, for a Rake-based deploy pipeline
 
 The report ends with a resolved-config summary (queue prefix, pool size, roles, capsules) with any password redacted from `database_url` / `connection_params`. Warnings do not fail the exit code — only a `:fail` result does.
 
+##### Doctor preflight at boot (single Rails boot)
+
+Running `pgbus doctor || true` in a container entrypoint before `pgbus start` boots the full Rails app **twice** on every deploy, and the pre-supervisor `Process liveness` check false-fails (no workers exist yet) — which is why the `|| true` is needed, swallowing any genuinely-fatal finding too. Instead, run the preflight *inside* the booting supervisor:
+
+```bash
+pgbus start --doctor          # run the preflight, log the report, always boot
+pgbus start --doctor-strict   # refuse to boot on a fatal check (exit non-zero, fork nothing)
+```
+
+or set it in the initializer:
+
+```ruby
+Pgbus.configure do |c|
+  c.doctor_on_boot = :report   # or :strict; nil/false (default) is off
+end
+```
+
+The boot preflight runs after the DB is verified reachable and queues are bootstrapped, but **before any worker is forked** — one Rails boot, and the `Process liveness` check is skipped (nothing to observe yet, so it can't false-fail). `:strict` aborts the boot only on a genuinely-fatal, non-transient check — a `Configuration` failure or an **absent** PGMQ schema. A transient DB blip that the lenient queue bootstrap is designed to ride out (surfacing as a `Queues` or `Database` failure) is reported but never aborts, so a fleet-wide cold boot against a momentarily-saturated primary doesn't fail every pod in lockstep.
+
 #### pgbus dlq
 
 Dead-letter inspect/drain operations from a headless deployment or incident runbook, routed through `Web::DataSource` so retry/discard semantics are identical to the dashboard (origin-queue re-enqueue, transactional produce+delete, lock release on discard) with zero raw SQL and no direct PGMQ calls:

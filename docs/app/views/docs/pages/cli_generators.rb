@@ -119,9 +119,24 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
           [ [ :code, "--scheduler-only" ], "Run only the recurring-task scheduler." ],
           [ [ :code, "--dispatcher-only" ], "Run only the maintenance dispatcher." ],
           [ [ :code, "--capsule NAME" ], "Boot a single named capsule." ],
-          [ [ :code, "--execution-mode async" ], "Run jobs as fibers instead of threads." ]
+          [ [ :code, "--execution-mode async" ], "Run jobs as fibers instead of threads." ],
+          [ [ :code, "--doctor" ], "Run the doctor preflight in the booting supervisor and log the report — one Rails boot instead of `pgbus doctor` + `pgbus start`." ],
+          [ [ :code, "--doctor-strict" ], "Like --doctor, but refuse to boot (exit non-zero, fork nothing) on a fatal check — bad config or an absent PGMQ schema." ]
         ]
       )
+      DocsUI::Callout(:tip) do
+        plain "Prefer "
+        code { "--doctor" }
+        plain " over an entrypoint that runs "
+        code { "pgbus doctor || true" }
+        plain " before "
+        code { "pgbus start" }
+        plain ": it boots Rails once, and the process-liveness check is skipped (no "
+        plain "workers are forked yet, so it can't false-fail). "
+        code { "--doctor-strict" }
+        plain " gates the boot on genuinely-fatal findings only; transient DB blips "
+        plain "that the queue bootstrap is built to ride out never abort the boot."
+      end
       DocsUI::Callout(:note) do
         plain "The role flags are mutually exclusive, and the auto-tuned "
         code { "pool_size" }

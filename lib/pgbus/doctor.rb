@@ -25,26 +25,47 @@ module Pgbus
 
     STATUS_ICON = { ok: "✓", warn: "!", fail: "✗" }.freeze
 
+    # The ordered check suite, name → method. The name strings are the public,
+    # stable identity of each check (used in the report and to select subsets).
+    CHECKS = {
+      "Configuration" => :check_configuration,
+      "Database" => :check_database,
+      "PGMQ schema" => :check_pgmq_schema,
+      "Queues" => :check_queues,
+      "LISTEN/NOTIFY" => :check_notify,
+      "Process liveness" => :check_processes,
+      "GlobalID allowlist" => :check_allowed_global_id_models,
+      "Broadcast queue" => :check_broadcast_queue,
+      "Primary affinity" => :check_primary
+    }.freeze
+
+    # Process liveness reads the pgbus_processes table (via HealthAnalyzer), so
+    # it is only meaningful once workers have registered. The supervisor boot
+    # preflight (issue #347) runs BEFORE forking any worker, so it excludes this
+    # check — otherwise stale prior-generation worker rows plus a visible backlog
+    # would produce a false STALLED verdict on a redeploy.
+    BOOT_SKIP = ["Process liveness"].freeze
+
+    # The subset of checks whose :fail is genuinely deploy-fatal AND not a
+    # transient the supervisor is designed to ride out. Only these abort a
+    # `:strict` boot. Configuration#validate! failing is a real config bug;
+    # an absent PGMQ schema means the migrations never ran. Deliberately NOT
+    # Queues/Database: the lenient queue bootstrap swallows a boot-time DB blip
+    # so children crash-and-backoff and recover, and verify_connection! already
+    # gated a hard-down DB before the preflight — making either strict-fatal
+    # would turn a tolerated transient into a fleet-wide lockstep boot abort.
+    STRICT_FATAL = ["Configuration", "PGMQ schema"].freeze
+
     def initialize(config: Pgbus.configuration, client: Pgbus.client, data_source: nil)
       @config = config
       @client = client
-      @data_source = data_source || Pgbus::Web::DataSource.new(client: client)
+      @data_source = data_source
     end
 
     # Run all checks and return an array of result hashes:
     #   { name:, status: :ok|:warn|:fail, detail: }
     def run
-      @run ||= [
-        check_configuration,
-        check_database,
-        check_pgmq_schema,
-        check_queues,
-        check_notify,
-        check_processes,
-        check_allowed_global_id_models,
-        check_broadcast_queue,
-        check_primary
-      ].map(&:to_h)
+      @run ||= run_checks(CHECKS.keys)
     end
 
     # True when no check failed. Warnings do not fail the run — they surface a
@@ -53,11 +74,34 @@ module Pgbus
       run.none? { |c| c[:status] == :fail }
     end
 
+    # --- Supervisor boot preflight (issue #347) ---
+
+    # The checks safe to run inside the booting supervisor before any worker is
+    # forked: everything except the worker-dependent process-liveness check.
+    # Runs a genuine SUBSET — check_processes is never invoked — so there is no
+    # pre-fork HealthAnalyzer/DataSource round-trip.
+    def boot_checks
+      @boot_checks ||= run_checks(CHECKS.keys - BOOT_SKIP)
+    end
+
+    # True unless a strict-fatal check (see STRICT_FATAL) failed. Warnings and
+    # transient-shaped failures (Queues, Database) never block a `:strict` boot.
+    def boot_ok?
+      boot_checks.none? { |c| c[:status] == :fail && STRICT_FATAL.include?(c[:name]) }
+    end
+
+    # Human-readable report for the boot preflight — the boot_checks subset.
+    def boot_report
+      report(boot_checks)
+    end
+
     # Human-readable report: one line per check, then a resolved-config summary
     # with passwords redacted. Suitable for stdout in the CLI and rake task.
-    def report
+    # Defaults to the full run; pass a filtered result array (e.g. boot_checks)
+    # to render a subset.
+    def report(checks = run)
       lines = ["Pgbus Doctor", "=" * 40]
-      run.each do |check|
+      checks.each do |check|
         icon = STATUS_ICON.fetch(check[:status], "?")
         lines << format("%<icon>s %<name>-22s %<detail>s", icon: icon, name: check[:name], detail: check[:detail])
       end
@@ -85,6 +129,21 @@ module Pgbus
     end
 
     private
+
+    # Run the named checks in CHECKS order and return an array of result hashes.
+    # Only the requested checks are INVOKED — a check omitted from `names` does
+    # no work (e.g. boot_checks never calls check_processes, so no HealthAnalyzer
+    # round-trip pre-fork).
+    def run_checks(names)
+      CHECKS.filter_map { |name, method| send(method).to_h if names.include?(name) }
+    end
+
+    # The dashboard data source backing the process-liveness check. Built lazily
+    # so the boot preflight (which excludes that check) never constructs a
+    # DataSource or touches the dashboard layer at the fork boundary.
+    def data_source
+      @data_source ||= Pgbus::Web::DataSource.new(client: @client)
+    end
 
     # True in a Rails production environment. Guarded so the doctor still runs
     # outside Rails (plain Ruby, tests) without assuming Rails is loaded.
@@ -181,7 +240,7 @@ module Pgbus
     # from the shared HealthAnalyzer. STALLED (the silent-worker-wedge) is a
     # failure; DEGRADED is a warning; OK passes.
     def check_processes
-      verdict = Pgbus::MCP::HealthAnalyzer.new(@data_source).verdict
+      verdict = Pgbus::MCP::HealthAnalyzer.new(data_source).verdict
       status = verdict[:status]
       detail = Array(verdict[:reasons]).first || status
 

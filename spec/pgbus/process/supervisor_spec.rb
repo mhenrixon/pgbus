@@ -571,6 +571,107 @@ RSpec.describe Pgbus::Process::Supervisor do
     end
   end
 
+  # Issue #347: doctor preflight runs inside the booting supervisor (one Rails
+  # boot instead of two), between bootstrap_queues and boot_processes.
+  describe "doctor-on-boot preflight" do
+    let(:config) { Pgbus::Configuration.new }
+    let(:supervisor) { described_class.new(config: config) }
+    let(:mock_client) { build_mock_client }
+    let(:doctor) { instance_double(Pgbus::Doctor) }
+
+    before do
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive_messages(
+        ensure_all_queues: nil, verify_connection!: true, pgmq_schema_version: "1.5.0"
+      )
+      # Isolate the full boot path from real forking/signals/loops.
+      allow(supervisor).to receive(:setup_signals)
+      allow(supervisor).to receive(:start_heartbeat)
+      allow(supervisor).to receive(:start_health_server)
+      allow(supervisor).to receive(:boot_processes)
+      allow(supervisor).to receive(:monitor_loop)
+      allow(supervisor).to receive(:shutdown)
+      allow(Pgbus.logger).to receive(:info)
+      allow(Pgbus.logger).to receive(:error)
+    end
+
+    context "when doctor_on_boot is off (default nil)" do
+      it "never constructs a Doctor and boots normally" do
+        allow(Pgbus::Doctor).to receive(:new)
+        supervisor.run
+        expect(Pgbus::Doctor).not_to have_received(:new)
+        expect(supervisor).to have_received(:boot_processes)
+      end
+    end
+
+    context "when doctor_on_boot is :report" do
+      before do
+        config.doctor_on_boot = :report
+        allow(Pgbus::Doctor).to receive(:new).and_return(doctor)
+        allow(doctor).to receive_messages(boot_report: "REPORT", boot_ok?: false)
+      end
+
+      it "runs the boot preflight and logs the report, then boots regardless of findings" do
+        supervisor.run
+        expect(doctor).to have_received(:boot_report)
+        expect(supervisor).to have_received(:boot_processes)
+      end
+
+      it "builds the Doctor with the supervisor's own config and the shared client" do
+        supervisor.run
+        expect(Pgbus::Doctor).to have_received(:new).with(config: config, client: mock_client)
+      end
+
+      it "runs the preflight after bootstrap_queues and before boot_processes" do
+        call_order = []
+        allow(supervisor).to receive(:bootstrap_queues) { call_order << :bootstrap }
+        allow(supervisor).to receive(:run_doctor_preflight) { call_order << :preflight }
+        allow(supervisor).to receive(:boot_processes) { call_order << :boot }
+
+        supervisor.run
+
+        expect(call_order).to eq(%i[bootstrap preflight boot])
+      end
+    end
+
+    context "when doctor_on_boot is :strict" do
+      before do
+        config.doctor_on_boot = :strict
+        allow(Pgbus::Doctor).to receive(:new).and_return(doctor)
+        allow(doctor).to receive(:boot_report).and_return("REPORT")
+      end
+
+      it "boots when the strict preflight passes" do
+        allow(doctor).to receive(:boot_ok?).and_return(true)
+        supervisor.run
+        expect(supervisor).to have_received(:boot_processes)
+      end
+
+      it "raises ConfigurationError and forks NOTHING when a strict-fatal check fails" do
+        allow(doctor).to receive(:boot_ok?).and_return(false)
+
+        expect { supervisor.run }.to raise_error(Pgbus::ConfigurationError, /doctor/i)
+        expect(supervisor).not_to have_received(:boot_processes)
+      end
+
+      it "logs the report before raising so the operator sees which check failed" do
+        allow(doctor).to receive(:boot_ok?).and_return(false)
+
+        supervisor.run
+      rescue Pgbus::ConfigurationError
+        expect(doctor).to have_received(:boot_report)
+      end
+
+      it "tears down the heartbeat and health server on a strict abort (ensure shutdown)" do
+        allow(doctor).to receive(:boot_ok?).and_return(false)
+
+        expect { supervisor.run }.to raise_error(Pgbus::ConfigurationError)
+        expect(supervisor).to have_received(:shutdown)
+        expect(supervisor.forks).to be_empty
+      end
+    end
+  end
+
   describe "boot diagnostics banner (private)" do
     let(:supervisor) { described_class.new(config: config) }
     let(:config) { Pgbus::Configuration.new }
