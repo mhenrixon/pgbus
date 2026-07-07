@@ -1180,7 +1180,13 @@ RSpec.describe Pgbus::Client do
 
       it "the factory applies each :variables entry via SET on a fresh connection" do
         raw_conn = double("PG::Connection", exec: nil)
-        pg_module = Module.new
+        # Client#initialize probes PG.library_version (libpq_read_bounds_effective?)
+        # during construction, so the PG stub must carry it too — not just
+        # .connect, which the factory calls later. A bare Module.new lacks it and
+        # blows up at construction (seed-dependent, only in CI).
+        pg_module = Module.new do
+          def self.library_version = 160_000
+        end
         allow(pg_module).to receive(:connect).and_return(raw_conn)
         stub_const("PG", pg_module)
 
