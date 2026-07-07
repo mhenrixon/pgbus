@@ -89,6 +89,19 @@ module Pgbus
     # PGMQ schema installation mode (:auto, :extension, :embedded)
     attr_reader :pgmq_schema_mode
 
+    # Run doctor preflight checks inside the supervisor at boot (issue #347),
+    # so an entrypoint need not boot Rails twice (once for `pgbus doctor`, once
+    # for `pgbus start`). nil/false (default) — off, byte-identical to today.
+    #   :report — run the preflight and log the report, always continue booting.
+    #   :strict — additionally REFUSE to boot (raise before forking any worker)
+    #             when a genuinely-fatal, non-transient check fails. The strict
+    #             set is deliberately narrow (Configuration, PGMQ schema) so a
+    #             transient boot-time DB blip — which the lenient queue bootstrap
+    #             is designed to ride out via child crash-and-backoff — never
+    #             aborts a whole fleet's cold boot in lockstep. Set via the
+    #             `--doctor` / `--doctor-strict` start flags too.
+    attr_reader :doctor_on_boot
+
     # Event consumers
     attr_reader :event_consumers
 
@@ -248,6 +261,7 @@ module Pgbus
       @worker_notify_database_url = nil
 
       @pgmq_schema_mode = :auto
+      @doctor_on_boot = nil
 
       @event_consumers = nil
 
@@ -564,6 +578,28 @@ module Pgbus
       end
 
       @pgmq_schema_mode = mode
+    end
+
+    VALID_DOCTOR_ON_BOOT_MODES = [nil, :report, :strict].freeze
+
+    # nil/false are both "off"; a String is coerced to a Symbol so the CLI flags
+    # and YAML-ish configs work. Validated at assignment time (like the other
+    # enum options), not in validate!.
+    def doctor_on_boot=(mode)
+      coerced = case mode
+                when nil, false then nil
+                when Symbol then mode
+                when String then mode.to_sym
+                else
+                  raise Pgbus::ConfigurationError,
+                        "Invalid doctor_on_boot type: #{mode.class}. Must be nil, false, String, or Symbol"
+                end
+      unless VALID_DOCTOR_ON_BOOT_MODES.include?(coerced)
+        raise Pgbus::ConfigurationError,
+              "Invalid doctor_on_boot: #{coerced.inspect}. Must be nil/false (off), :report, or :strict"
+      end
+
+      @doctor_on_boot = coerced
     end
 
     def validate!

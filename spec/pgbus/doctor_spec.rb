@@ -439,6 +439,78 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  # Supervisor-integrated preflight (issue #347): a subset of checks safe to run
+  # inside the booting supervisor BEFORE workers are forked.
+  describe "#boot_checks" do
+    it "excludes the process-liveness check (workers aren't forked yet)" do
+      names = doctor.boot_checks.map { |c| c[:name] }
+      expect(names).not_to include(a_string_matching(/process|liveness/i))
+    end
+
+    it "runs the other eight checks" do
+      expect(doctor.boot_checks.size).to eq(8)
+    end
+
+    it "never invokes the HealthAnalyzer — the excluded check does zero work" do
+      # The whole point of excluding it: no pre-fork DataSource/HealthAnalyzer
+      # round-trip against pgbus_processes (which has no rows for this generation
+      # yet, and could carry stale prior-generation rows).
+      allow(Pgbus::MCP::HealthAnalyzer).to receive(:new).and_call_original
+      doctor.boot_checks
+      expect(Pgbus::MCP::HealthAnalyzer).not_to have_received(:new)
+    end
+
+    it "returns the same hash shape as #run" do
+      doctor.boot_checks.each do |check|
+        expect(check).to include(:name, :status, :detail)
+        expect(check[:status]).to be_in(%i[ok warn fail])
+      end
+    end
+  end
+
+  describe "#boot_ok?" do
+    it "is true in a healthy environment" do
+      expect(doctor.boot_ok?).to be(true)
+    end
+
+    it "is false when the Configuration check fails (a real, non-transient config bug)" do
+      allow(config).to receive(:validate!).and_raise(Pgbus::ConfigurationError, "bad workers")
+      expect(doctor.boot_ok?).to be(false)
+    end
+
+    it "is false when the PGMQ schema is absent (deploy-fatal)" do
+      allow(client).to receive_messages(pgmq_schema_version: nil, pgmq_installed?: false)
+      expect(doctor.boot_ok?).to be(false)
+    end
+
+    it "stays true when only the Queues check fails — a transient the lenient bootstrap tolerates" do
+      # bootstrap_queues deliberately swallows a boot-time DB blip so children
+      # crash-and-backoff; a Queues :fail must NOT hard-abort a fleet cold boot.
+      allow(client).to receive(:list_queues).and_return([])
+      queues = doctor.boot_checks.find { |c| c[:name] == "Queues" }
+      expect(queues[:status]).to eq(:fail)          # it does fail…
+      expect(doctor.boot_ok?).to be(true)           # …but boot is not blocked
+    end
+
+    it "stays true on a warning (e.g. an outdated but present PGMQ schema)" do
+      allow(client).to receive(:pgmq_schema_version).and_return("0.0.1")
+      expect(doctor.boot_ok?).to be(true)
+    end
+  end
+
+  describe "#boot_report" do
+    it "renders the preflight subset and omits the process-liveness line" do
+      report = doctor.boot_report
+      expect(report).to include("Configuration")
+      expect(report).to include("PGMQ schema")
+      expect(report).not_to match(/Process liveness/i)
+    end
+
+    it "still redacts the password in the config summary" do
+      expect(doctor.boot_report).not_to include("s3cret")
+    end
+  end
+
   # --- helpers to pluck a check out of the results by keyword ---
 
   def config_check(checks)  = checks.find { |c| c[:name].match?(/config/i) }
