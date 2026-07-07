@@ -1439,9 +1439,15 @@ module Pgbus
       # Rails 7.1+ db_config.configuration_hash returns the full config
       config_hash = db_config.configuration_hash
 
+      # Do NOT default host/port here. An absent `host:` in database.yml is a
+      # Unix-socket connection; AR connects via libpq's socket default, so pgmq's
+      # raw connections must too. Forcing TCP localhost:5432 diverges from AR on
+      # socket-based configs (issue #343). `.compact` drops the absent keys and
+      # libpq applies its own defaults (PGHOST / default socket dir). A
+      # present-but-nil port is preserved as nil (also dropped by compact).
       base = {
-        host: config_hash[:host] || "localhost",
-        port: (config_hash[:port] || 5432).to_i,
+        host: config_hash[:host],
+        port: config_hash[:port]&.to_i,
         dbname: config_hash[:database],
         user: config_hash[:username],
         password: config_hash[:password]
