@@ -29,7 +29,6 @@ RSpec.describe Pgbus::Client::ReadAfter do
     Pgbus::Configuration.new.tap do |c|
       c.database_url = "postgres://localhost/pgbus_test"
       c.queue_prefix = "pgbus_test"
-      c.streams_queue_prefix = "pgbus_stream"
     end
   end
   let(:mock_pgmq) { build_mock_pgmq }

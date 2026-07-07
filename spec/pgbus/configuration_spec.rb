@@ -1151,6 +1151,137 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.not_to raise_error
     end
 
+    # Pre-1.0 surface-freeze: close the validation gaps on core job-path keys so
+    # a malformed value fails loud at boot instead of deep in a worker thread,
+    # per-enqueue, or by silently corrupting queue names (issue #335).
+    context "with the #335 config-gap validations" do
+      # Worker recycling trio: nil = disabled, positive Numeric when set.
+      %i[max_jobs_per_worker max_memory_mb max_worker_lifetime].each do |key|
+        it "rejects a non-numeric #{key} (recycling limit)" do
+          config.public_send("#{key}=", "10")
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        # Body is AST-identical to the interval loop's zero-rejection but tests a
+        # different key/rule; RuboCop can't tell them apart, hence the disable.
+        it "rejects a zero #{key} (recycling limit)" do # rubocop:disable RSpec/RepeatedExample
+          config.public_send("#{key}=", 0)
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        it "accepts nil #{key} (recycling disabled)" do
+          config.public_send("#{key}=", nil)
+          expect { config.validate! }.not_to raise_error
+        end
+
+        it "accepts a positive #{key} (recycling limit)" do
+          config.public_send("#{key}=", 500)
+          expect { config.validate! }.not_to raise_error
+        end
+      end
+
+      # Interval knobs: positive Numeric, never nil.
+      %i[dispatch_interval outbox_poll_interval recurring_schedule_interval].each do |key|
+        # AST-identical to the recycling loop's zero-rejection (different key/rule).
+        it "rejects a zero #{key} (interval)" do # rubocop:disable RSpec/RepeatedExample
+          config.public_send("#{key}=", 0)
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        it "rejects a negative #{key} (interval)" do
+          config.public_send("#{key}=", -1)
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        it "accepts a positive #{key} (interval)" do
+          config.public_send("#{key}=", 2.5)
+          expect { config.validate! }.not_to raise_error
+        end
+      end
+
+      it "rejects a zero outbox_batch_size" do
+        config.outbox_batch_size = 0
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /outbox_batch_size/)
+      end
+
+      it "rejects a non-integer outbox_batch_size" do
+        config.outbox_batch_size = 1.5
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /outbox_batch_size/)
+      end
+
+      it "rejects a negative default_priority" do
+        config.default_priority = -1
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /default_priority/)
+      end
+
+      it "accepts a zero default_priority (0 is a valid priority level)" do
+        config.default_priority = 0
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "rejects a non-integer default_priority" do
+        config.default_priority = "high"
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /default_priority/)
+      end
+
+      %i[queue_prefix default_queue].each do |key|
+        it "rejects an empty #{key}" do
+          config.public_send("#{key}=", "")
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        it "rejects a nil #{key}" do
+          config.public_send("#{key}=", nil)
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+
+        it "rejects a non-String #{key}" do
+          config.public_send("#{key}=", :sym)
+          expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /#{key}/)
+        end
+      end
+
+      it "rejects a non-callable web_auth" do
+        config.web_auth = "yes"
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /web_auth/)
+      end
+
+      it "accepts a nil web_auth (dashboard open)" do
+        config.web_auth = nil
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "accepts a callable web_auth" do
+        config.web_auth = ->(_req) { true }
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "rejects a non-Array error_reporters" do
+        config.error_reporters = ->(_e, _ctx) {}
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /error_reporters/)
+      end
+
+      it "accepts an Array error_reporters" do
+        config.error_reporters = [->(_e, _ctx) {}]
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "rejects a non-Hash connects_to" do
+        config.connects_to = :pgbus
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /connects_to/)
+      end
+
+      it "accepts a nil connects_to (primary database)" do
+        config.connects_to = nil
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "accepts a Hash connects_to" do
+        config.connects_to = { database: { writing: :pgbus } }
+        expect { config.validate! }.not_to raise_error
+      end
+    end
+
     it "raises Pgbus::ConfigurationError (not NoMethodError) for non-string/symbol types" do
       expect { config.group_mode = 1 }.to raise_error(Pgbus::ConfigurationError, /type/)
       expect { config.group_mode = true }.to raise_error(Pgbus::ConfigurationError, /type/)
@@ -1564,8 +1695,11 @@ RSpec.describe Pgbus::Configuration do
       expect(config.streams_enabled).to be true
     end
 
-    it "has a default queue prefix for streams" do
-      expect(config.streams_queue_prefix).to eq("pgbus_stream")
+    it "removed streams_queue_prefix in 1.0 (inert since #308, issue #335)" do
+      # The accessor was an inert no-op since #308 and is fully removed in 1.0.
+      # Stream queues are named like job queues via #queue_name.
+      expect(config).not_to respond_to(:streams_queue_prefix)
+      expect { config.streams_queue_prefix = "x" }.to raise_error(NoMethodError)
     end
 
     it "has no signed name secret by default (falls back to Turbo's key)" do
