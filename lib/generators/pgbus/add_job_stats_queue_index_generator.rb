@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus job stats queue index added!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. The Insights 'latency by queue' aggregation will now use the index"
         say "     instead of sequentially scanning pgbus_job_stats. Install this on"
         say "     heavy-traffic deployments with a large job stats retention window."

@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus stream stats table installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Opt in by setting `config.streams_stats_enabled = true` in your"
         say "     pgbus initializer (disabled by default — stream event volume can"
         say "     be high, so stats recording is off unless you ask for it)."

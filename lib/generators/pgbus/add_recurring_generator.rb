@@ -33,7 +33,7 @@ module Pgbus
         say "Pgbus recurring jobs installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Edit config/recurring.yml to define your recurring tasks"
         say "  3. Restart pgbus: bin/pgbus start"
         say ""

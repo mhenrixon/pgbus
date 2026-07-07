@@ -31,7 +31,7 @@ module Pgbus
         say ""
         say "Next steps:"
         say "  1. Review the migration in db/#{separate_database? ? "pgbus_migrate" : "migrate"}/"
-        say "  2. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  2. Run: rails db:migrate#{migrate_command_suffix}"
         say ""
       end
 

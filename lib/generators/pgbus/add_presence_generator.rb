@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus presence installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Use in your code:"
         say "       Pgbus.stream(@room).presence.join(member_id: current_user.id.to_s)"
         say "       Pgbus.stream(@room).presence.members"

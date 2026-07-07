@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus job stats table installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Stats collection is enabled by default"
         say "  3. View insights at /pgbus/insights"
         say ""

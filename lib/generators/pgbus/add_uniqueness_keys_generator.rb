@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus uniqueness keys table installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Add `ensures_uniqueness` to your job classes (DSL is auto-included)"
         say "  3. Restart pgbus: bin/pgbus start"
         say ""
