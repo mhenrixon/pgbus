@@ -215,33 +215,40 @@ task :release, %i[version force] do |_t, args|
   # leg with exit 16, and docs-CI on any docs change). Regenerating here keeps the
   # version-pin drift out of the release commit instead of surfacing on the next PR.
   header "Frozen lockfiles"
-  # Map each frozen lockfile to the gemfile bundle should resolve. Set
-  # BUNDLE_GEMFILE EXPLICITLY (absolute) for every entry — an inherited
-  # BUNDLE_GEMFILE (present when this runs under `bundle exec rake`) takes
-  # precedence over directory-based Gemfile discovery, so `chdir` alone would
-  # let the docs bundle resolve the ROOT Gemfile instead of docs/Gemfile. An
-  # absolute BUNDLE_GEMFILE removes that ambiguity and needs no chdir.
-  frozen_gemfiles = {
-    "gemfiles/rails_7_1.gemfile.lock" => "gemfiles/rails_7_1.gemfile",
-    "docs/Gemfile.lock" => "docs/Gemfile"
-  }
+  # The ONLY thing a version bump changes in these frozen lockfiles is the pgbus
+  # path-gem pin — so bump exactly that line, in place, with a string edit.
+  #
+  # We deliberately do NOT run `bundle lock` here: a full re-resolve trips over
+  # constraints that have nothing to do with pgbus. Concretely, docs/Gemfile.lock
+  # carries a broad PLATFORMS list (…-gnu / …-musl / arm-linux) for which a
+  # platform gem like `thruster` ships no variant, so `bundle lock` fails with
+  # "Could not find gems matching 'thruster' valid for all resolution platforms"
+  # on any machine whose cache doesn't already hold those exact gems — aborting
+  # the release. `bundle lock --local` was even worse (wrong-file write + no
+  # fetch). A targeted pin edit sidesteps all of it, is deterministic on any
+  # machine, and produces the minimal 2-line diff (the PATH spec + the
+  # DEPENDENCIES pin). See #338/#341 and the surgical-bump fix.
+  frozen_lockfiles = %w[gemfiles/rails_7_1.gemfile.lock docs/Gemfile.lock]
   regenerated_lockfiles = []
-  frozen_gemfiles.each do |lockfile, gemfile|
+  frozen_lockfiles.each do |lockfile|
     unless File.exist?(lockfile)
       skip "#{lockfile} not present"
       next
     end
 
-    # `bundle lock` (NOT `--local`): `--local` forbids remote fetch, so it can't
-    # resolve gems that aren't in the local cache (e.g. the docs bundle's
-    # platform gems) and — worse — it ignores the BUNDLE_GEMFILE-derived lockfile
-    # path and writes the ROOT Gemfile.lock instead. A plain `bundle lock` writes
-    # the correct `<gemfile>.lock` and still produces a minimal diff (only the
-    # pgbus path-gem pin moves; the rest of the lock stays put). See #338 fix.
-    env = { "BUNDLE_FROZEN" => "false", "BUNDLE_GEMFILE" => File.expand_path(gemfile) }
-    sh(env, "bundle lock")
+    content = File.read(lockfile)
+    # Matches both the PATH-source spec ("    pgbus (X.Y.Z)") and the
+    # DEPENDENCIES pin ("  pgbus (X.Y.Z)"), leaving everything else untouched.
+    bumped = content.gsub(/^(\s+pgbus) \([^)]*\)$/, "\\1 (#{new_version})")
+
+    if bumped == content
+      skip "#{lockfile} — no pgbus pin to bump"
+      next
+    end
+
+    File.write(lockfile, bumped)
     regenerated_lockfiles << lockfile
-    success "Regenerated #{lockfile}"
+    success "Bumped pgbus pin in #{lockfile}"
   end
 
   # Step 2: Verify gem builds cleanly
