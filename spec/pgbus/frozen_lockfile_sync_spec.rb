@@ -25,8 +25,10 @@ RSpec.describe "Frozen lockfile version sync" do
 
         expect(pinned).to eq(Pgbus::VERSION),
                           "#{relative} pins pgbus #{pinned.inspect} but the gemspec is " \
-                          "#{Pgbus::VERSION.inspect} — regenerate it (rake release does this in the " \
-                          "bump commit): BUNDLE_GEMFILE=#{relative.sub(/\.lock$/, "")} bundle lock"
+                          "#{Pgbus::VERSION.inspect}. `rake release` bumps this pin in place; to fix " \
+                          "by hand, replace the `pgbus (...)` pin(s) in #{relative} with " \
+                          "`pgbus (#{Pgbus::VERSION})` (do NOT run `bundle lock` — the docs lock's " \
+                          "PLATFORMS list makes a full re-resolve fail on platform-only gems)."
       end
     end
   end
