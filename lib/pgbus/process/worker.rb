@@ -415,11 +415,20 @@ module Pgbus
         Pgbus::StreamQueue.reset_cache!
         stream_names = Pgbus::StreamQueue.all_names
 
+        # Event-bus subscriber queues also share the job namespace (pgbus_<handler>)
+        # but carry event payloads, not ActiveJob jobs. A wildcard worker that
+        # adopts one hands the event to the executor, which fails to deserialize
+        # it and DLQ-moves it out of the consumer's reach — so an app running the
+        # event bus had to hand-maintain an explicit queue list. Exclude them,
+        # like stream queues (issue #333).
+        event_names = Pgbus::EventBus::Registry.instance.event_queue_names
+
         conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
         all_queues = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
         resolved = all_queues
                    .reject { |q| q.end_with?(dlq_suffix) }
                    .reject { |q| stream_names.include?(q) }
+                   .reject { |q| event_names.include?(q) }
                    .map { |q| q.delete_prefix(prefix) }
 
         if resolved.empty?

@@ -257,6 +257,28 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         ]
       )
       md <<~'MD'
+        **Uniqueness: `key:` is now effectively required for argument-taking
+        `:until_executed` jobs.** Before, `ensures_uniqueness strategy:
+        :until_executed` with no `key:` fell back to the **job class name** as the
+        key. For a job that takes per-record arguments — `ImportOrderJob.perform_later(order_id)`
+        — that collapsed *every* order into one per-class singleton (order 1 and
+        order 2 shared a lock, so the second was silently discarded) with no
+        warning. Now such a job **raises `ArgumentError` at enqueue** naming the
+        collapse. Fix it by giving the key the arguments:
+
+        ```ruby
+        # Before (silently collapsed all orders into one):
+        ensures_uniqueness strategy: :until_executed
+
+        # After:
+        ensures_uniqueness strategy: :until_executed, key: ->(order_id) { "import-order-#{order_id}" }
+        ```
+
+        A **no-argument** `:until_executed` job (e.g. a recurring `CleanupJob`
+        that must not overlap itself) still uses the class-name default and does
+        **not** raise — that case has one logical instance, so there is nothing to
+        collapse. `:while_executing` is unaffected.
+
         **New in 1.0.0:**
 
         - `Pgbus.publish` / `Pgbus.publish_later` — top-level shortcuts for

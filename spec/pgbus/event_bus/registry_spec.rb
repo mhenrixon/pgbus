@@ -50,6 +50,19 @@ RSpec.describe Pgbus::EventBus::Registry do
     end
   end
 
+  describe "#event_queue_names" do
+    it "returns the prefixed physical queue name for each subscriber (issue #333)" do
+      registry.subscribe("orders.#", handler_class, queue_name: "orders_handler")
+      prefix = Pgbus.configuration.queue_prefix
+
+      expect(registry.event_queue_names).to contain_exactly("#{prefix}_orders_handler")
+    end
+
+    it "returns an empty set when no subscribers are registered" do
+      expect(registry.event_queue_names).to be_empty
+    end
+  end
+
   describe "#clear!" do
     it "removes all subscribers" do
       registry.subscribe("orders.#", handler_class)

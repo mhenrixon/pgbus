@@ -892,6 +892,9 @@ RSpec.describe Pgbus::Process::Worker do
       allow(ActiveRecord::Base).to receive(:connection).and_return(conn)
       # Default: no registered streams, so wildcard resolution is unchanged.
       allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, all_names: Set.new)
+      # Default: no registered event subscribers.
+      registry = instance_double(Pgbus::EventBus::Registry, event_queue_names: Set.new)
+      allow(Pgbus::EventBus::Registry).to receive(:instance).and_return(registry)
     end
 
     it "excludes registered stream queues (issue #309)" do
@@ -901,6 +904,21 @@ RSpec.describe Pgbus::Process::Worker do
       allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(["#{prefix}_chat_42"]))
       allow(conn).to receive(:select_values)
         .and_return(["#{prefix}_default", "#{prefix}_chat_42", "#{prefix}_events"])
+
+      worker.send(:resolve_wildcard_queues)
+
+      expect(worker.queues).to eq(%w[default events])
+    end
+
+    it "excludes registered event-subscriber queues (issue #333)" do
+      # Event-bus subscriber queues share the job namespace (pgbus_<handler>) but
+      # carry event payloads, not ActiveJob jobs. A wildcard worker that adopts
+      # one hands the event to the executor, which fails to deserialize it and
+      # DLQ-moves it out of the consumer's reach. Exclude them, like streams.
+      registry = instance_double(Pgbus::EventBus::Registry, event_queue_names: Set.new(["#{prefix}_orders_handler"]))
+      allow(Pgbus::EventBus::Registry).to receive(:instance).and_return(registry)
+      allow(conn).to receive(:select_values)
+        .and_return(["#{prefix}_default", "#{prefix}_orders_handler", "#{prefix}_events"])
 
       worker.send(:resolve_wildcard_queues)
 
