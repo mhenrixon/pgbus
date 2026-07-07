@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus failed events unique index added!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Failed jobs will now be tracked in the dashboard"
         say ""
       end

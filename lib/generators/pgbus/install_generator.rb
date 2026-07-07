@@ -99,7 +99,7 @@ module Pgbus
 
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{database_name}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Edit config/initializers/pgbus.rb to configure workers"
         say "  3. Start processing: bin/pgbus start"
         say ""
@@ -115,8 +115,11 @@ module Pgbus
         options[:pgmq_schema_mode]
       end
 
+      # An explicit --database wins; otherwise fall back to a database already
+      # configured via connects_to so a bare re-install targets the right DB
+      # and its setup hints/output name it (issue #344).
       def database_name
-        options[:database]
+        effective_database_name
       end
     end
   end

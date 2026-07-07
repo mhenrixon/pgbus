@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus queue states table installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Restart pgbus: bin/pgbus start"
         say ""
       end

@@ -29,7 +29,7 @@ module Pgbus
         say "Pgbus job stats latency columns installed!", :green
         say ""
         say "Next steps:"
-        say "  1. Run: rails db:migrate#{":#{options[:database]}" if separate_database?}"
+        say "  1. Run: rails db:migrate#{migrate_command_suffix}"
         say "  2. Queue latency and retry metrics are now tracked automatically"
         say "  3. View latency insights at /pgbus/insights"
         say ""
