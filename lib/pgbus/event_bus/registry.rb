@@ -42,9 +42,17 @@ module Pgbus
       def setup_all!(safe: false)
         return if safe && schema_task_context?
 
-        @subscribers.each do |subscriber|
+        # Snapshot under the mutex — subscribe/clear! mutate @subscribers under
+        # @mutex, and setup! does DB I/O we must NOT hold the lock across, so
+        # iterate a copy taken atomically.
+        subscribers = @mutex.synchronize { @subscribers.dup }
+
+        subscribers.each do |subscriber|
           subscriber.setup!
-        rescue PGMQ::Errors::ConnectionError, PG::Error => e
+        rescue PGMQ::Errors::ConnectionError, PG::ConnectionBad => e
+          # Only a genuine CONNECTION failure ("database isn't up yet") is
+          # tolerable under safe:; a PG::Error subclass like a syntax/permission/
+          # missing-table error is a real setup bug and must still surface.
           raise unless safe
 
           Pgbus.logger.warn do
@@ -88,7 +96,8 @@ module Pgbus
 
         tasks = ::Rake.application.top_level_tasks
         tasks.any? { |t| SCHEMA_TASK_PREFIXES.any? { |prefix| t.to_s.start_with?(prefix) } }
-      rescue StandardError
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] schema_task_context? detection failed, assuming non-schema: #{e.class}: #{e.message}" }
         false
       end
 

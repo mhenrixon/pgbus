@@ -91,6 +91,17 @@ RSpec.describe Pgbus::EventBus::Registry do
         expect(Pgbus.logger).to have_received(:warn)
       end
 
+      it "does NOT swallow a non-connection PG::Error (a real setup bug still surfaces)" do
+        # safe: only tolerates "database isn't up yet" — a syntax/permission/
+        # missing-table error is a real bug and must propagate (review of #334).
+        real_pgmq_connection_error # loads PGMQ::Errors (referenced in the rescue)
+        require "pg"
+        syntax_error = Class.new(PG::Error)
+        allow(subscriber).to receive(:setup!).and_raise(syntax_error, "syntax error")
+
+        expect { registry.setup_all!(safe: true) }.to raise_error(syntax_error)
+      end
+
       it "skips entirely during a schema/db: rake context (no connection opened)" do
         allow(registry).to receive(:schema_task_context?).and_return(true)
         allow(subscriber).to receive(:setup!)
