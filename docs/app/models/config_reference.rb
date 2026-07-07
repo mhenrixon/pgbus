@@ -103,7 +103,6 @@ module ConfigReference
     ],
     "Streams (SSE)" => [
       { name: "streams_enabled", type: "Boolean", default: "true", desc: "Enable the SSE streams transport." },
-      { name: "streams_queue_prefix", type: "String", default: '"pgbus_stream"', desc: "Prefix for stream queues." },
       { name: "streams_default_retention", type: "Numeric", default: "300", desc: "Default stream retention in seconds." },
       { name: "streams_retention", type: "Hash", default: "{}", desc: "Per-stream retention overrides." },
       { name: "streams_heartbeat_interval", type: "Numeric", default: "15", desc: "SSE heartbeat interval (seconds)." },

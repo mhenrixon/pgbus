@@ -145,7 +145,7 @@ module Pgbus
     attr_accessor :health_port, :health_bind
 
     # Streams (turbo-rails replacement, SSE-based)
-    attr_accessor :streams_enabled, :streams_path, :streams_queue_prefix, :streams_signed_name_secret,
+    attr_accessor :streams_enabled, :streams_path, :streams_signed_name_secret,
                   :streams_default_retention, :streams_retention, :streams_heartbeat_interval,
                   :streams_max_connections, :streams_idle_timeout, :streams_listen_health_check_ms,
                   :streams_write_deadline_ms, :streams_falcon_streaming_body,
@@ -291,12 +291,11 @@ module Pgbus
 
       @streams_enabled = true
       @streams_path = nil
-      # Retained for backward compatibility only — NO LONGER USED for queue
-      # naming or stream detection. Stream queues are named like job queues
-      # (`#{queue_prefix}_<name>`, see #queue_name) and are identified via the
-      # `pgbus_stream_queues` registry (Pgbus::StreamQueue), not by this prefix.
-      # Setting it has no effect. See issue #308.
-      @streams_queue_prefix = "pgbus_stream"
+      # streams_queue_prefix was removed in 1.0 (issue #335): it had been an
+      # inert no-op since #308 (stream queues are named like job queues,
+      # `#{queue_prefix}_<name>`, and identified via the pgbus_stream_queues
+      # registry). Setting it now raises NoMethodError — remove it from your
+      # initializer.
       # Streamer-only connection overrides. The Streamer's Listener owns a
       # dedicated long-lived `wait_for_notify` PG connection that can't go
       # through a PgBouncer in transaction mode (LISTEN/NOTIFY don't survive
@@ -631,10 +630,61 @@ module Pgbus
 
       raise Pgbus::ConfigurationError, "require_primary must be true or false" unless [true, false].include?(require_primary)
 
+      validate_job_path_gaps!
       validate_streams!
       validate_metrics_backend!
 
       self
+    end
+
+    # Pre-1.0 surface-freeze: reject malformed values for core job-path keys at
+    # boot rather than failing deep in a worker/dispatcher/poller/scheduler
+    # thread, per-enqueue, or by silently corrupting queue names / leaving the
+    # dashboard open. Mirrors the idioms already used above (issue #335).
+    def validate_job_path_gaps!
+      # Worker recycling trio: nil disables the limit; a set value must be a
+      # positive Numeric (mirror stall_threshold).
+      { max_jobs_per_worker: max_jobs_per_worker, max_memory_mb: max_memory_mb,
+        max_worker_lifetime: max_worker_lifetime }.each do |name, value|
+        next if value.nil? || (value.is_a?(Numeric) && value.positive?)
+
+        raise Pgbus::ConfigurationError, "#{name} must be a positive number or nil to disable"
+      end
+
+      # Interval knobs: positive Numeric, never nil (mirror polling_interval).
+      { dispatch_interval: dispatch_interval, outbox_poll_interval: outbox_poll_interval,
+        recurring_schedule_interval: recurring_schedule_interval }.each do |name, value|
+        raise Pgbus::ConfigurationError, "#{name} must be > 0" unless value.is_a?(Numeric) && value.positive?
+      end
+
+      unless outbox_batch_size.is_a?(Integer) && outbox_batch_size.positive?
+        raise Pgbus::ConfigurationError, "outbox_batch_size must be a positive integer"
+      end
+
+      # 0 is a valid priority level (queue_factory clamps to 0..priority_levels-1).
+      unless default_priority.is_a?(Integer) && default_priority >= 0
+        raise Pgbus::ConfigurationError, "default_priority must be a non-negative integer"
+      end
+
+      # Queue-name components: a nil/empty/non-String prefix silently corrupts
+      # every derived queue name (mirror health_bind).
+      { queue_prefix: queue_prefix, default_queue: default_queue }.each do |name, value|
+        raise Pgbus::ConfigurationError, "#{name} must be a non-empty String" unless value.is_a?(String) && !value.empty?
+      end
+
+      # web_auth gates the dashboard; a non-callable value silently leaves it
+      # open (mirror streams_presence_member).
+      unless web_auth.nil? || web_auth.respond_to?(:call)
+        raise Pgbus::ConfigurationError, "web_auth must respond to #call (a Proc/lambda) or be nil"
+      end
+
+      raise Pgbus::ConfigurationError, "error_reporters must be an Array" unless error_reporters.is_a?(Array)
+
+      # connects_to is splatted into ActiveRecord's connects_to at engine boot;
+      # a non-Hash raises a raw TypeError there — surface a clean message here.
+      return if connects_to.nil? || connects_to.is_a?(Hash)
+
+      raise Pgbus::ConfigurationError, "connects_to must be a Hash or nil"
     end
 
     def validate_streams!
@@ -1114,28 +1164,7 @@ module Pgbus
     #
     # Precedence: streams_database_url > streams_host/port override > base.
     def streams_connection_options
-      return streams_database_url if streams_database_url
-
-      base = connection_options
-      return base unless streams_host || streams_port
-
-      case base
-      when Hash
-        result = base.dup
-        result[:host] = streams_host if streams_host
-        result[:port] = streams_port if streams_port
-        result
-      when String
-        # libpq's conninfo parser takes later key=value pairs as overrides
-        # for earlier ones, so we just append. Handles both URI form
-        # (postgres://...) and key=value form.
-        parts = [base]
-        parts << "host=#{streams_host}" if streams_host
-        parts << "port=#{streams_port}" if streams_port
-        parts.join(" ")
-      else
-        base
-      end
+      override_connection_options(url: streams_database_url, host: streams_host, port: streams_port)
     end
 
     # Connection options for the Worker's dedicated NotifyListener connection.
@@ -1143,25 +1172,7 @@ module Pgbus
     # overridable via worker_notify_database_url / worker_notify_host /
     # worker_notify_port so the LISTEN connection can bypass PgBouncer.
     def worker_notify_connection_options
-      return worker_notify_database_url if worker_notify_database_url
-
-      base = connection_options
-      return base unless worker_notify_host || worker_notify_port
-
-      case base
-      when Hash
-        result = base.dup
-        result[:host] = worker_notify_host if worker_notify_host
-        result[:port] = worker_notify_port if worker_notify_port
-        result
-      when String
-        parts = [base]
-        parts << "host=#{worker_notify_host}" if worker_notify_host
-        parts << "port=#{worker_notify_port}" if worker_notify_port
-        parts.join(" ")
-      else
-        base
-      end
+      override_connection_options(url: worker_notify_database_url, host: worker_notify_host, port: worker_notify_port)
     end
 
     # Resolved notify wakeup flag: defaults to listen_notify when nil.
@@ -1174,6 +1185,36 @@ module Pgbus
     end
 
     private
+
+    # Shared resolver for a dedicated connection (streamer LISTEN / worker
+    # NotifyListener) that can override the base `connection_options` to bypass a
+    # pooler. Precedence: a full `url` wins outright; otherwise `host`/`port`
+    # surgically override the base (a Hash gets dup+merge, a String URL/conninfo
+    # gets appended key=value pairs libpq treats as later-wins overrides); with
+    # no override, or a base that is neither Hash nor String, the base passes
+    # through unchanged. Extracted from the byte-identical
+    # streams_connection_options / worker_notify_connection_options (issue #335).
+    def override_connection_options(url:, host:, port:)
+      return url if url
+
+      base = connection_options
+      return base unless host || port
+
+      case base
+      when Hash
+        result = base.dup
+        result[:host] = host if host
+        result[:port] = port if port
+        result
+      when String
+        parts = [base]
+        parts << "host=#{host}" if host
+        parts << "port=#{port}" if port
+        parts.join(" ")
+      else
+        base
+      end
+    end
 
     # True when log_format= may install its own formatter: no formatter set yet
     # (nil), a pgbus formatter we installed, or a framework DEFAULT formatter
