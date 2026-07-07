@@ -136,6 +136,45 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
   end
 
+  describe "#enqueue with :until_executed uniqueness and retry_on (issue #333)" do
+    let(:uniqueness_config) do
+      { strategy: :until_executed, key: ->(*) { "UniqJob-42" }, explicit_key: true, on_conflict: :reject }
+    end
+    let(:job_class_double) do
+      double("JobClass", pgbus_uniqueness: uniqueness_config, name: "UniqJob").tap do |klass|
+        allow(klass).to receive(:respond_to?).and_return(false)
+        allow(klass).to receive(:respond_to?).with(:pgbus_uniqueness).and_return(true)
+      end
+    end
+    let(:uniqueness_payload) { serialized_hash.merge("pgbus_uniqueness_key" => "UniqJob-42") }
+
+    before do
+      allow(Pgbus::Uniqueness).to receive_messages(inject_metadata: uniqueness_payload, extract_key: "UniqJob-42")
+      allow(Pgbus::Uniqueness).to receive(:uniqueness_config).and_return(uniqueness_config)
+      allow(job).to receive(:class).and_return(job_class_double)
+      allow(mock_client).to receive(:send_message).and_return(42)
+    end
+
+    it "rejects a FRESH duplicate (executions == 0) whose key is already held" do
+      allow(job).to receive(:executions).and_return(0)
+      allow(Pgbus::Uniqueness).to receive(:acquire_enqueue_lock).and_return(:locked)
+
+      expect { adapter.enqueue(job) }.to raise_error(Pgbus::JobNotUnique, /UniqJob/)
+      expect(mock_client).not_to have_received(:send_message)
+    end
+
+    it "lets a RETRY re-enqueue (executions > 0) through against its own held key" do
+      allow(job).to receive(:executions).and_return(1)
+      # acquire_enqueue_lock must NOT even be consulted — the retry owns the key.
+      allow(Pgbus::Uniqueness).to receive(:acquire_enqueue_lock)
+
+      adapter.enqueue(job)
+
+      expect(mock_client).to have_received(:send_message)
+      expect(Pgbus::Uniqueness).not_to have_received(:acquire_enqueue_lock)
+    end
+  end
+
   describe "#enqueue_all" do
     let(:second_job_id) { SecureRandom.uuid }
     let(:job2) { build_job_double(job_class: "OtherJob", queue_name: "default", job_id: second_job_id) }

@@ -36,6 +36,16 @@ module Pgbus
         @subscribers.select { |s| matches?(s.pattern, routing_key) }
       end
 
+      # Physical PGMQ queue names for every registered event subscriber, so a
+      # wildcard (`queues: ['*']`) worker can exclude them — an event queue
+      # carries event payloads, not ActiveJob jobs, and a job worker that adopts
+      # one fails to deserialize and DLQ-moves the event (issue #333). Returns a
+      # Set of prefixed names (`#{queue_prefix}_<subscriber>`), matching the
+      # pgmq.meta rows the wildcard resolver diffs against.
+      def event_queue_names
+        @subscribers.to_set { |s| Pgbus.configuration.queue_name(s.queue_name) }
+      end
+
       def clear!
         @mutex.synchronize { @subscribers.clear }
       end

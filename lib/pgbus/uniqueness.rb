@@ -62,9 +62,18 @@ module Pgbus
         raise ArgumentError, "on_conflict must be one of: #{VALID_CONFLICTS.join(", ")}" unless VALID_CONFLICTS.include?(on_conflict)
         raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
 
+        # Record whether an explicit key was given. With NO explicit key the key
+        # defaults to the class name; that is safe for a no-argument job (one
+        # logical instance — e.g. a recurring CleanupJob that must not overlap
+        # itself) but a silent-correctness footgun for a job that takes per-record
+        # arguments: `ImportOrderJob.perform_later(order_id)` would collapse every
+        # order into ONE per-class singleton. resolve_key raises at resolve time
+        # when the class-name default meets non-empty arguments (see #333); the
+        # no-arg case keeps working. explicit_key marks which is which.
         @pgbus_uniqueness = {
           strategy: strategy,
           key: key || ->(*) { name },
+          explicit_key: !key.nil?,
           on_conflict: on_conflict
         }.freeze
       end
@@ -80,6 +89,7 @@ module Pgbus
         return nil unless config
 
         args = active_job.arguments
+        guard_class_name_default!(active_job, config, args)
         last = args.last
         key = if last.is_a?(Hash) && last.each_key.all?(Symbol)
                 config[:key].call(*args[...-1], **last)
@@ -91,6 +101,27 @@ module Pgbus
         # so users can pass model instances directly without manual .to_global_id.to_s
         key = key.to_global_id.to_s if key.respond_to?(:to_global_id)
         key
+      end
+
+      # Guards the class-name default key against the per-record collapse
+      # footgun (#333). When an :until_executed job was declared with NO explicit
+      # key (so the key is the class name) AND is enqueued WITH arguments, every
+      # distinct argument set would resolve to the same class-name key and
+      # collapse into one per-class singleton — almost never what the caller
+      # wants. Raise with an actionable message. A no-argument job keeps the
+      # class-name default (one logical instance, e.g. a recurring task that must
+      # not overlap itself), and :while_executing is unaffected (it acquires
+      # per-invocation at execution start, not by class-name identity at enqueue).
+      def guard_class_name_default!(active_job, config, args)
+        return if config[:explicit_key]
+        return unless config[:strategy] == :until_executed
+        return if args.nil? || args.empty?
+
+        raise ArgumentError,
+              "#{active_job.class.name} uses ensures_uniqueness strategy: :until_executed with no key: " \
+              "but is enqueued with arguments — the default key is the class name, which would collapse " \
+              "every distinct argument set into one per-class singleton. Pass an explicit " \
+              "key: ->(*args) { ... } that includes the arguments. See https://pgbus.dev/docs/upgrading-pgbus"
       end
 
       def inject_metadata(active_job, payload_hash)

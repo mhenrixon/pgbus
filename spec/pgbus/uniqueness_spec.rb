@@ -28,10 +28,42 @@ RSpec.describe Pgbus::Uniqueness do
       job_class = Class.new do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness
+        ensures_uniqueness key: ->(id) { "job-#{id}" }
       end
 
       expect(job_class.pgbus_uniqueness[:strategy]).to eq(:until_executed)
+    end
+
+    it "permits omitting key: for :until_executed at definition time (the guard is at resolve time)" do
+      # A no-key :until_executed job is legal to DECLARE — a no-argument job
+      # (e.g. a recurring task) legitimately uses the class-name default. The
+      # per-record collapse footgun is caught at resolve time only when such a
+      # job is enqueued WITH arguments (see #333).
+      expect do
+        Class.new do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :until_executed
+        end
+      end.not_to raise_error
+    end
+
+    it "records explicit_key: false when key is omitted" do
+      job_class = Class.new do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed
+      end
+      expect(job_class.pgbus_uniqueness[:explicit_key]).to be(false)
+    end
+
+    it "records explicit_key: true when a key is given" do
+      job_class = Class.new do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, key: ->(id) { "job-#{id}" }
+      end
+      expect(job_class.pgbus_uniqueness[:explicit_key]).to be(true)
     end
 
     it "raises ArgumentError when the removed lock_ttl: keyword is passed" do
@@ -83,16 +115,66 @@ RSpec.describe Pgbus::Uniqueness do
       expect(described_class.resolve_key(job)).to be_nil
     end
 
-    it "uses class name as default key" do
+    it "uses class name as default key for :while_executing (per-invocation acquire)" do
+      # :while_executing acquires the lock at execution start, per invocation, so
+      # the class-name default is acceptable there (it means "one at a time by
+      # class"). See #333.
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness
+        ensures_uniqueness strategy: :while_executing
       end
       stub_const("MyUniqueJob", job_class)
       job = MyUniqueJob.new
 
       expect(described_class.resolve_key(job)).to eq("MyUniqueJob")
+    end
+
+    context "with the class-name default collapse guard for :until_executed (issue #333)" do
+      it "uses the class-name default for a NO-argument :until_executed job (legit — e.g. a recurring task)" do
+        job_class = Class.new(ActiveJob::Base) do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :until_executed
+        end
+        stub_const("CleanupJob", job_class)
+
+        expect(described_class.resolve_key(CleanupJob.new)).to eq("CleanupJob")
+      end
+
+      it "RAISES when a no-key :until_executed job is enqueued WITH arguments (the collapse footgun)" do
+        job_class = Class.new(ActiveJob::Base) do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :until_executed
+        end
+        stub_const("ImportOrderJob", job_class)
+
+        expect { described_class.resolve_key(ImportOrderJob.new(42)) }
+          .to raise_error(ArgumentError, /class name.*collapse|collapse.*singleton/im)
+      end
+
+      it "does NOT raise when an explicit key is given even with arguments" do
+        job_class = Class.new(ActiveJob::Base) do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :until_executed, key: ->(id) { "order-#{id}" }
+        end
+        stub_const("ImportOrderJob2", job_class)
+
+        expect(described_class.resolve_key(ImportOrderJob2.new(42))).to eq("order-42")
+      end
+
+      it "does NOT raise for :while_executing with arguments and no key" do
+        job_class = Class.new(ActiveJob::Base) do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :while_executing
+        end
+        stub_const("WhileExecJob", job_class)
+
+        expect { described_class.resolve_key(WhileExecJob.new(42)) }.not_to raise_error
+      end
     end
 
     it "automatically serializes GlobalID-compatible objects returned by the key lambda" do
@@ -150,7 +232,7 @@ RSpec.describe Pgbus::Uniqueness do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness strategy: :until_executed
+        ensures_uniqueness strategy: :until_executed, key: ->(*) { "k" }
       end
       stub_const("LockJob", job_class)
       job = LockJob.new
@@ -181,7 +263,7 @@ RSpec.describe Pgbus::Uniqueness do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Uniqueness
 
-        ensures_uniqueness strategy: :until_executed
+        ensures_uniqueness strategy: :until_executed, key: ->(*) { "k" }
       end
       job = job_class.new
 

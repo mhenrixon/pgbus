@@ -112,6 +112,17 @@ module Pgbus
         uniqueness_key = Uniqueness.extract_key(payload_hash)
         return false unless uniqueness_key
 
+        # A retry re-enqueue is the SAME logical job re-acquiring its OWN key.
+        # ActiveJob increments `executions` at the start of perform_now (before
+        # the body), then retry_on re-enqueues from inside perform_now — while
+        # the executor still holds the key (it releases only on success/DLQ). So
+        # a re-enqueue with executions > 0 would otherwise hit its own held key,
+        # be rejected as a duplicate (JobNotUnique), and dead-letter the original
+        # while losing the retry. Let the retry through; the existing key row
+        # correctly stays held until the job finally succeeds or dead-letters.
+        # See issue #333.
+        return false if active_job.executions.to_i.positive?
+
         result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job)
 
         # :no_lock means no enqueue-time lock needed (e.g. :while_executing strategy)
