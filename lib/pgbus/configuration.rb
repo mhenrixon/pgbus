@@ -494,12 +494,23 @@ module Pgbus
       # pgbus-installed formatter. A user who set a custom logger with a custom
       # formatter keeps it — log_format only records the intended format for
       # pgbus's own defaults, it must not silently clobber their formatting.
-      return unless pgbus_installable_formatter?(@logger&.formatter)
+      old_formatter = @logger&.formatter
+      return unless pgbus_installable_formatter?(old_formatter)
 
-      @logger.formatter = case format
-                          when :json then LogFormatter::JSON.new
-                          when :text then LogFormatter::Text.new
-                          end
+      new_formatter = case format
+                      when :json then LogFormatter::JSON.new
+                      when :text then LogFormatter::Text.new
+                      end
+
+      # ActiveSupport::TaggedLogging works by extending the logger's formatter
+      # instance with a module that prepends the current tags (and adds a
+      # #tagged method the logger delegates to). Installing a fresh pgbus
+      # formatter would strip that, so `logger.tagged { ... }` would drop tags —
+      # and, worse, raise NoMethodError: undefined method `tagged` on our
+      # formatter. Re-extend the new formatter with the same module when the old
+      # one carried it, so tagging keeps working (issue #334).
+      preserve_tagged_logging(old_formatter, new_formatter)
+      @logger.formatter = new_formatter
     end
 
     VALID_BROADCAST_MODES = %i[ephemeral durable].freeze
@@ -1214,6 +1225,20 @@ module Pgbus
       else
         base
       end
+    end
+
+    # When the logger's previous formatter was extended with
+    # ActiveSupport::TaggedLogging::Formatter (the case for a Rails
+    # Rails.logger), extend the replacement pgbus formatter with the same module
+    # so `logger.tagged`/`push_tags` keep prepending tags instead of dropping
+    # them (and calling #tagged on our formatter stops raising NoMethodError).
+    # No-op when TaggedLogging isn't loaded or the old formatter wasn't tagged.
+    def preserve_tagged_logging(old_formatter, new_formatter)
+      return unless new_formatter
+      return unless defined?(::ActiveSupport::TaggedLogging::Formatter)
+      return unless old_formatter.is_a?(::ActiveSupport::TaggedLogging::Formatter)
+
+      new_formatter.extend(::ActiveSupport::TaggedLogging::Formatter)
     end
 
     # True when log_format= may install its own formatter: no formatter set yet

@@ -50,4 +50,27 @@ RSpec.describe Pgbus do
       expect(described_class.configuration).not_to be(old_config)
     end
   end
+
+  describe ".stream_name_budget (issue #334)" do
+    it "returns the max stream-name length: pgmq budget minus the queue prefix" do
+      # A stream name becomes the physical queue `#{queue_prefix}_<name>`, so the
+      # usable budget is MAX_QUEUE_NAME_LENGTH - queue_prefix.length - 1 (the _).
+      described_class.configuration.queue_prefix = "pgbus"
+      expected = Pgbus::QueueNameValidator::MAX_QUEUE_NAME_LENGTH - "pgbus".length - 1
+
+      expect(described_class.stream_name_budget).to eq(expected)
+    end
+
+    it "shrinks as the queue prefix grows" do
+      described_class.configuration.queue_prefix = "a_longer_prefix"
+      short = described_class.stream_name_budget
+
+      described_class.configuration.queue_prefix = "x"
+      long = described_class.stream_name_budget
+
+      expect(long).to be > short
+    ensure
+      described_class.configuration.queue_prefix = "pgbus"
+    end
+  end
 end

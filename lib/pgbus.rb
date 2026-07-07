@@ -103,6 +103,11 @@ module Pgbus
         # the gem and loads the subsystem explicitly.
         loader.ignore("#{__dir__}/pgbus/mcp")
         loader.ignore("#{__dir__}/pgbus/mcp.rb")
+        # The Phlex stream helper references Phlex::Rails::HelperMacros from the
+        # optional `phlex-rails` gem. Keep it out of Zeitwerk so eager_load never
+        # touches those constants; a Phlex app requires it explicitly via
+        # `require "pgbus/streams/phlex_helpers"`.
+        loader.ignore("#{__dir__}/pgbus/streams/phlex_helpers.rb")
         # Vendor integrations are loaded conditionally (when the vendor gem
         # is present) by lib/pgbus/engine.rb. Keeping them out of Zeitwerk
         # means we don't reference vendor constants at autoload time.
@@ -207,6 +212,19 @@ module Pgbus
     #   Pgbus.stream(Pgbus.stream_key!(key)).broadcast(html)
     def stream_key!(key)
       Streams::Key.stream_key!(key)
+    end
+
+    # The maximum length (in characters) a stream name may be before it
+    # overflows the pgbus queue-name budget. A stream name becomes the physical
+    # queue `#{queue_prefix}_<name>`, and PGMQ caps queue names, so the usable
+    # budget is `QueueNameValidator::MAX_QUEUE_NAME_LENGTH - queue_prefix.length
+    # - 1`. Depends on `config.queue_prefix`. Use it to size or truncate stream
+    # identifiers up front instead of hand-computing the budget at every call
+    # site.
+    #
+    #   name = candidate.length > Pgbus.stream_name_budget ? Pgbus.stream_key(record) : candidate
+    def stream_name_budget
+      Streams::Key.queue_name_budget
     end
 
     # Publish an event to the bus — the top-level shortcut for

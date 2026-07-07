@@ -250,6 +250,13 @@ GEM
       connection_pool (~> 2.4)
       pg (~> 1.5)
       zeitwerk (~> 2.6)
+    phlex (2.4.1)
+      refract (~> 1.0)
+      zeitwerk (~> 2.7)
+    phlex-rails (2.4.0)
+      phlex (~> 2.4.0)
+      railties (>= 7.1, < 9)
+      zeitwerk (~> 2.7)
     playwright-ruby-client (1.61.0)
       base64
       concurrent-ruby (>= 1.1.6)
@@ -314,6 +321,9 @@ GEM
       prism (>= 1.6.0)
       rbs (>= 4.0.0)
       tsort
+    refract (1.1.0)
+      prism
+      zeitwerk
     regexp_parser (2.12.0)
     reline (0.6.3)
       io-console (~> 0.5)
@@ -432,6 +442,7 @@ DEPENDENCIES
   memory_profiler (~> 1.1)
   pg (~> 1.5)
   pgbus!
+  phlex-rails (~> 2.0)
   puma
   rails-i18n (~> 7.0)
   railties (~> 7.1.0)
@@ -539,6 +550,8 @@ CHECKSUMS
   pg (1.6.3-x86_64-linux-musl) sha256=9c9c90d98c72f78eb04c0f55e9618fe55d1512128e411035fe229ff427864009
   pgbus (0.10.0)
   pgmq-ruby (0.7.0) sha256=018a33e304b0c4513d3dc8cd06322ac767ebc0b475422738a71c198f066f2a76
+  phlex (2.4.1) sha256=e596717fbfe38b5271840266758779ebe75092e02629f0c170287e6290a70b12
+  phlex-rails (2.4.0) sha256=2bcddbd488681acb25753bab1887d3ac150e644244ff8ba307f2171a4d0195f5
   playwright-ruby-client (1.61.0) sha256=1f5c5f0307a2f6bd70b4fa797020a30eef5680caf8d5bd9ccc8d3937f6666e08
   pp (0.6.4) sha256=dfcb0fce700c41456265922884f9fe195d7fbb0674a3578e6c0f69588e82b570
   prettyprint (0.2.0) sha256=2bc9e15581a94742064a3cc8b0fb9d45aae3d03a1baa6ef80922627a0766f193
@@ -565,6 +578,7 @@ CHECKSUMS
   rake (13.4.2) sha256=cb825b2bd5f1f8e91ca37bddb4b9aaf345551b4731da62949be002fa89283701
   rbs (4.0.3) sha256=5a7bf70e2628549d9a1f44eae447b2cfe55968a9c60cfff52693a4bdcc020e14
   rdoc (8.0.0) sha256=03bf8c08a9639658855a0cfd77c0abca8325c227693f7f33f82957811348c469
+  refract (1.1.0) sha256=ee3b9627e39f7692831101e2fedd73e0d09a592ff5d5c05f171d14211fc7a9c7
   regexp_parser (2.12.0) sha256=35a916a1d63190ab5c9009457136ae5f3c0c7512d60291d0d1378ba18ce08ebb
   reline (0.6.3) sha256=1198b04973565b36ec0f11542ab3f5cfeeec34823f4e54cebde90968092b1835
   rspec (3.13.2) sha256=206284a08ad798e61f86d7ca3e376718d52c0bc944626b2349266f239f820587

@@ -50,6 +50,10 @@ group :development, :test do
   gem "globalid", ">= 1.0"
   gem "mcp", "~> 0.22"
   gem "pg", "~> 1.5"
+  # Optional integration — pgbus ships a Phlex-includable pgbus_stream_from
+  # helper (Pgbus::Streams::PhlexHelpers) but does NOT depend on phlex-rails.
+  # Present here only so the helper module can be exercised in the test suite.
+  gem "phlex-rails", "~> 2.0", require: false
 
   # Coverage measurement — a dev tool, not a gemspec runtime dep.
   # Loaded at the top of spec/spec_helper.rb before "pgbus" so lib files
