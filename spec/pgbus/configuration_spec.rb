@@ -2244,5 +2244,33 @@ RSpec.describe Pgbus::Configuration do
     it "still validates the format regardless of the formatter guard" do
       expect { config.log_format = :xml }.to raise_error(Pgbus::ConfigurationError, /log_format/)
     end
+
+    context "when the logger is an ActiveSupport::TaggedLogging logger (issue #334)" do
+      it "preserves tags with the JSON formatter" do
+        require "active_support/tagged_logging"
+        io = StringIO.new
+        logger = ActiveSupport::TaggedLogging.new(Logger.new(io))
+        config.logger = logger
+
+        config.log_format = :json
+        logger.tagged("request-42") { logger.info("hello") }
+
+        expect(io.string).to include("request-42")
+        expect(io.string).to include("hello")
+      end
+
+      it "preserves tags with the Text formatter" do
+        require "active_support/tagged_logging"
+        io = StringIO.new
+        logger = ActiveSupport::TaggedLogging.new(Logger.new(io))
+        config.logger = logger
+
+        config.log_format = :text
+        logger.tagged("job-7") { logger.info("world") }
+
+        expect(io.string).to include("job-7")
+        expect(io.string).to include("world")
+      end
+    end
   end
 end

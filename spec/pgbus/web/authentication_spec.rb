@@ -53,6 +53,50 @@ RSpec.describe Pgbus::Web::Authentication do
       end
     end
 
+    context "when web_auth is nil but a gating base_controller_class is set (issue #334)" do
+      before do
+        Pgbus.configuration.web_auth = nil
+        described_class.auth_warned = false
+        # A non-default base_controller_class signals the app deliberately chose
+        # a controller that already gates access (e.g. an AdminController with
+        # its own before_action), so the dashboard is NOT actually open.
+        Pgbus.configuration.base_controller_class = "AdminController"
+      end
+
+      after { Pgbus.configuration.base_controller_class = "::ActionController::Base" }
+
+      it "does not warn about an unauthenticated dashboard" do
+        allow(Pgbus.logger).to receive(:warn).and_yield
+        controller.send(:authenticate_pgbus!)
+        expect(Pgbus.logger).not_to have_received(:warn)
+      end
+
+      it "still allows access (the gating is the host controller's job)" do
+        controller.send(:authenticate_pgbus!)
+        expect(controller.head_status).to be_nil
+      end
+    end
+
+    context "when base_controller_class is the default in a different form (issue #334 review)" do
+      before do
+        Pgbus.configuration.web_auth = nil
+        described_class.auth_warned = false
+      end
+
+      after { Pgbus.configuration.base_controller_class = "::ActionController::Base" }
+
+      # "ActionController::Base" (no leading ::) and the ::-prefixed form are the
+      # SAME default — the dashboard is still open, so the warning must fire.
+      it "warns for the unprefixed default string" do
+        Pgbus.configuration.base_controller_class = "ActionController::Base"
+        allow(Pgbus.logger).to receive(:warn).and_yield
+
+        controller.send(:authenticate_pgbus!)
+
+        expect(Pgbus.logger).to have_received(:warn)
+      end
+    end
+
     context "when web_auth returns true" do
       before { Pgbus.configuration.web_auth = ->(_req) { true } }
       after { Pgbus.configuration.web_auth = nil }

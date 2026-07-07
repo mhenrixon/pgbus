@@ -13,6 +13,12 @@ module Pgbus
         attr_accessor :auth_warned
       end
 
+      # Default base controller — anything else means the app deliberately
+      # chose a controller (e.g. an AdminController) that already gates access,
+      # so the dashboard isn't actually open and the warning is a false positive.
+      DEFAULT_BASE_CONTROLLER = "::ActionController::Base"
+      private_constant :DEFAULT_BASE_CONTROLLER
+
       private
 
       def authenticate_pgbus!
@@ -30,6 +36,10 @@ module Pgbus
 
       def warn_unauthenticated_dashboard
         return if Pgbus::Web::Authentication.auth_warned
+        # A non-default base_controller_class signals host-level auth is in
+        # place; don't nag apps that gate the dashboard via a custom controller
+        # (they had to set a redundant web_auth lambda just to silence us — #334).
+        return unless default_base_controller?
 
         Pgbus.logger.warn do
           "[Pgbus] Dashboard is accessible without authentication. " \
@@ -37,6 +47,19 @@ module Pgbus
             "See: https://github.com/mhenrixon/pgbus#dashboard-authentication"
         end
         Pgbus::Web::Authentication.auth_warned = true
+      end
+
+      # True when base_controller_class is (still) the default ActionController::Base.
+      # Normalizes both sides so a Class value, the "::"-prefixed string, and the
+      # bare "ActionController::Base" string all compare equal — otherwise the
+      # warning would wrongly fire for an app that set the default in another form.
+      def default_base_controller?
+        normalize_controller_name(Pgbus.configuration.base_controller_class) ==
+          normalize_controller_name(DEFAULT_BASE_CONTROLLER)
+      end
+
+      def normalize_controller_name(value)
+        value.to_s.delete_prefix("::")
       end
     end
   end

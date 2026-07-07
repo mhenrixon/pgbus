@@ -70,4 +70,55 @@ RSpec.describe Pgbus::EventBus::Registry do
       expect(registry.subscribers).to be_empty
     end
   end
+
+  describe "#setup_all! (issue #334)" do
+    let(:subscriber) do
+      registry.subscribe("orders.#", handler_class, queue_name: "orders_handler")
+    end
+
+    it "sets up every subscriber by default" do
+      allow(subscriber).to receive(:setup!)
+      registry.setup_all!
+      expect(subscriber).to have_received(:setup!)
+    end
+
+    context "with safe: true" do
+      it "swallows a connection error instead of crashing boot" do
+        allow(subscriber).to receive(:setup!).and_raise(real_pgmq_connection_error, "db down")
+        allow(Pgbus.logger).to receive(:warn)
+
+        expect { registry.setup_all!(safe: true) }.not_to raise_error
+        expect(Pgbus.logger).to have_received(:warn)
+      end
+
+      it "does NOT swallow a non-connection PG::Error (a real setup bug still surfaces)" do
+        # safe: only tolerates "database isn't up yet" — a syntax/permission/
+        # missing-table error is a real bug and must propagate (review of #334).
+        real_pgmq_connection_error # loads PGMQ::Errors (referenced in the rescue)
+        require "pg"
+        syntax_error = Class.new(PG::Error)
+        allow(subscriber).to receive(:setup!).and_raise(syntax_error, "syntax error")
+
+        expect { registry.setup_all!(safe: true) }.to raise_error(syntax_error)
+      end
+
+      it "skips entirely during a schema/db: rake context (no connection opened)" do
+        allow(registry).to receive(:schema_task_context?).and_return(true)
+        allow(subscriber).to receive(:setup!)
+
+        registry.setup_all!(safe: true)
+
+        expect(subscriber).not_to have_received(:setup!)
+      end
+
+      it "still sets up normally outside a schema context" do
+        allow(registry).to receive(:schema_task_context?).and_return(false)
+        allow(subscriber).to receive(:setup!)
+
+        registry.setup_all!(safe: true)
+
+        expect(subscriber).to have_received(:setup!)
+      end
+    end
+  end
 end
