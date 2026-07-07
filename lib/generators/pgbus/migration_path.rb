@@ -77,7 +77,16 @@ module Pgbus
           name: database_name
         )
         Array(config&.migrations_paths).first
-      rescue StandardError
+      rescue StandardError => e
+        # A missing config for `database_name` isn't an error — configs_for
+        # returns nil and we fall back to the db/pgbus_migrate convention. But a
+        # genuine failure here (malformed database.yml, an AR API change) would
+        # otherwise be invisible, so surface it via the generator's own output
+        # the way update_generator#resolve_connection does — not Pgbus.logger
+        # (unavailable/inappropriate at generate time; pgbus_failed_events is the
+        # runtime job-failure table, not a generator diagnostics sink).
+        say "  !  could not resolve migrations_paths for #{database_name.inspect}: " \
+            "#{e.class}: #{e.message} (falling back to db/pgbus_migrate)", :yellow
         nil
       end
     end

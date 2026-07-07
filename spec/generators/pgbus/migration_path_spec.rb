@@ -20,15 +20,24 @@ RSpec.describe Pgbus::Generators::MigrationPath do
       attr_reader :options
       attr_accessor :destination_root
 
+      # Records what the mixin would print via the generator's own output.
+      attr_reader :said
+
       def initialize(options)
         @options = options
         @destination_root = "/nonexistent"
+        @said = []
       end
 
       # Stands in for ActiveRecord::Generators::Migration#db_migrate_path,
       # which reads migrations_paths from database.yml at runtime.
       def db_migrate_path
         "db/pgbus_migrate"
+      end
+
+      # Stands in for Thor::Shell#say, which real generators provide.
+      def say(message, *_args)
+        @said << message
       end
     end
   end
@@ -167,6 +176,48 @@ RSpec.describe Pgbus::Generators::MigrationPath do
       it "names the db:migrate task from the detected database" do
         expect(host.send(:migrate_command_suffix)).to eq(":pgbus")
       end
+    end
+  end
+
+  # A missing migrations_paths for the detected DB is normal (fall back to the
+  # convention silently); a genuine failure must surface via the generator's own
+  # output rather than vanish — not Pgbus.logger, which is inappropriate at
+  # generate time. Grounds the rescue in migrations_path_for.
+  describe "#migrations_path_for" do
+    let(:options) { {} }
+
+    before do
+      # The unit spec loads Rails as a bare module without an env; the mixin
+      # guards on Rails.respond_to?(:env), so give it one for these cases.
+      allow(Rails).to receive(:respond_to?).and_call_original
+      allow(Rails).to receive(:respond_to?).with(:env).and_return(true)
+      allow(Rails).to receive(:env).and_return("test")
+    end
+
+    it "returns the configured migrations_path when the DB is in configurations" do
+      config = double("db_config", migrations_paths: ["db/pgbus_migrate"])
+      allow(ActiveRecord::Base.configurations)
+        .to receive(:configs_for).with(env_name: "test", name: "pgbus").and_return(config)
+
+      expect(host.send(:migrations_path_for, "pgbus")).to eq("db/pgbus_migrate")
+      expect(host.said).to be_empty
+    end
+
+    it "returns nil quietly when the DB is not in configurations (normal fallback case)" do
+      allow(ActiveRecord::Base.configurations)
+        .to receive(:configs_for).with(env_name: "test", name: "pgbus").and_return(nil)
+
+      expect(host.send(:migrations_path_for, "pgbus")).to be_nil
+      expect(host.said).to be_empty
+    end
+
+    it "surfaces an unexpected lookup failure via the generator output and returns nil" do
+      allow(ActiveRecord::Base.configurations)
+        .to receive(:configs_for).and_raise(StandardError, "malformed database.yml")
+
+      expect(host.send(:migrations_path_for, "pgbus")).to be_nil
+      expect(host.said.join).to include("could not resolve migrations_paths for \"pgbus\"")
+      expect(host.said.join).to include("malformed database.yml")
     end
   end
 end
