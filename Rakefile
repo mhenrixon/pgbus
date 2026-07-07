@@ -232,8 +232,14 @@ task :release, %i[version force] do |_t, args|
       next
     end
 
+    # `bundle lock` (NOT `--local`): `--local` forbids remote fetch, so it can't
+    # resolve gems that aren't in the local cache (e.g. the docs bundle's
+    # platform gems) and — worse — it ignores the BUNDLE_GEMFILE-derived lockfile
+    # path and writes the ROOT Gemfile.lock instead. A plain `bundle lock` writes
+    # the correct `<gemfile>.lock` and still produces a minimal diff (only the
+    # pgbus path-gem pin moves; the rest of the lock stays put). See #338 fix.
     env = { "BUNDLE_FROZEN" => "false", "BUNDLE_GEMFILE" => File.expand_path(gemfile) }
-    sh(env, "bundle lock --local")
+    sh(env, "bundle lock")
     regenerated_lockfiles << lockfile
     success "Regenerated #{lockfile}"
   end
