@@ -1517,6 +1517,32 @@ RSpec.describe Pgbus::Configuration do
       end
     end
 
+    context "with a socket-based (host-less) database.yml (issue #343)" do
+      # A local-dev database.yml with no `host:`/`port:` is a Unix-socket
+      # connection. ActiveRecord itself connects via libpq's default socket
+      # (PGHOST / default socket dir). pgmq's raw connections must match — they
+      # must NOT be silently rewritten to TCP localhost:5432, which points at a
+      # different server on machines where the socket dir isn't localhost.
+      let(:db_config) do
+        double("db_config", configuration_hash: {
+                 database: "myapp_dev", username: "dev_user"
+               })
+      end
+
+      before do
+        allow(ActiveRecord::Base).to receive(:connection_db_config).and_return(db_config)
+      end
+
+      it "omits :host so libpq uses its socket default, matching AR" do
+        result = config.connection_options
+        expect(result).to be_a(Hash)
+        expect(result).not_to have_key(:host)
+        expect(result).not_to have_key(:port)
+        expect(result[:dbname]).to eq("myapp_dev")
+        expect(result[:user]).to eq("dev_user")
+      end
+    end
+
     context "when AR config extraction fails" do
       before do
         allow(ActiveRecord::Base).to receive(:connection_db_config)
