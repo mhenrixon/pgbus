@@ -209,17 +209,49 @@ task :release, %i[version force] do |_t, args|
     success "Updated #{version_file}"
   end
 
+  # Step 1b: Regenerate the frozen lockfiles that pin the pgbus path gem, so the
+  # bump ships with them in sync. These are installed with `--frozen`/deployment
+  # in CI, so if they still name the OLD version they instant-fail (the Rails 7.1
+  # leg with exit 16, and docs-CI on any docs change). Regenerating here keeps the
+  # version-pin drift out of the release commit instead of surfacing on the next PR.
+  header "Frozen lockfiles"
+  # Map each frozen lockfile to the gemfile bundle should resolve. Set
+  # BUNDLE_GEMFILE EXPLICITLY (absolute) for every entry — an inherited
+  # BUNDLE_GEMFILE (present when this runs under `bundle exec rake`) takes
+  # precedence over directory-based Gemfile discovery, so `chdir` alone would
+  # let the docs bundle resolve the ROOT Gemfile instead of docs/Gemfile. An
+  # absolute BUNDLE_GEMFILE removes that ambiguity and needs no chdir.
+  frozen_gemfiles = {
+    "gemfiles/rails_7_1.gemfile.lock" => "gemfiles/rails_7_1.gemfile",
+    "docs/Gemfile.lock" => "docs/Gemfile"
+  }
+  regenerated_lockfiles = []
+  frozen_gemfiles.each do |lockfile, gemfile|
+    unless File.exist?(lockfile)
+      skip "#{lockfile} not present"
+      next
+    end
+
+    env = { "BUNDLE_FROZEN" => "false", "BUNDLE_GEMFILE" => File.expand_path(gemfile) }
+    sh(env, "bundle lock --local")
+    regenerated_lockfiles << lockfile
+    success "Regenerated #{lockfile}"
+  end
+
   # Step 2: Verify gem builds cleanly
   header "Build verification"
   sh("gem build pgbus.gemspec --strict")
   sh("rm -f pgbus-*.gem")
   success "Gem builds cleanly"
 
-  # Step 3: Commit version bump
+  # Step 3: Commit version bump (+ any re-synced lockfiles)
   header "Git commit"
-  version_changed = !`git diff #{version_file}`.strip.empty? || !`git diff --cached #{version_file}`.strip.empty?
-  if version_changed
-    sh("git add #{version_file}")
+  paths_to_stage = [version_file, *regenerated_lockfiles]
+  staged_changes = paths_to_stage.any? do |path|
+    !`git diff #{path}`.strip.empty? || !`git diff --cached #{path}`.strip.empty?
+  end
+  if staged_changes
+    paths_to_stage.each { |path| sh("git add #{path}") }
     sh("git commit -m 'chore: bump version to #{new_version}'")
     success "Committed version bump"
   else
