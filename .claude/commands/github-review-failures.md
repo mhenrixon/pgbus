@@ -29,8 +29,10 @@ If exactly one open PR exists for the current branch, use it. If none or multipl
 Once you have the PR number, confirm it:
 
 ```bash
-gh pr view <PR_NUMBER> --json title,state,url
+gh pr view <PR_NUMBER> --json title,state,url,mergeable
 ```
+
+**Pre-flight: merge conflicts (detection only).** If `mergeable` is `CONFLICTING`, STOP — do not diagnose CI on a conflicted branch (the merge itself may fix or cause the failures). Report the conflict and hand off to `/github-review-pr`, whose Phase A0 owns the resolution runbook — this command's toolset deliberately does not include the merge machinery. If `mergeable` is `UNKNOWN`, note it and proceed: the orchestrator resolves the ambiguity; a standalone run shouldn't block on GitHub's recompute.
 
 ---
 
@@ -44,9 +46,13 @@ Categorise each failing check:
 
 | Check Type | Examples | How to Get Logs |
 |------------|----------|----------------|
-| Lint (rubocop) | `lint` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
-| Specs (RSpec) | `test` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
-| Gem build | `build` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Dependency audit | `Security` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Lint (rubocop + herb) + gem build | `Lint`, `Lint (Ruby 3.3 floor)` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Unit specs (matrix) | `Ruby 3.3 (Rails 8.x)` … `Ruby 4.0 (Rails 7.1)` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Integration specs (real PG + PGMQ) | `Integration (PG 17)` / `(PG 18)` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Browser system specs (Playwright) | `System Tests` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Docs site (runs only on `docs/**` changes) | `Build & test` | `gh run view <RUN_ID> --job=<JOB_ID> --log-failed` |
+| Benchmarks | `Benchmarks (report only)` | report-only artifact — never a merge blocker |
 
 Extract the run ID and job IDs from the check URLs. The URL format is:
 `https://github.com/mhenrixon/pgbus/actions/runs/<RUN_ID>/job/<JOB_ID>`
