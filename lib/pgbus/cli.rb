@@ -18,6 +18,8 @@ module Pgbus
         list_queues
       when "dlq"
         DLQ.start(args[1..] || [])
+      when "dashboard"
+        Dashboard.start(args[1..] || [])
       when "mcp"
         start_mcp_server
       when "doctor"
@@ -196,6 +198,8 @@ module Pgbus
           queues   List queues with metrics
           dlq      Inspect and drain dead-letter queues
                    (list/show/retry/retry-all/purge)
+          dashboard  Print an AppSignal dashboard as import-ready JSON
+                     (main/health/streams/throughput; --list to enumerate)
           mcp      Start the read-only MCP diagnostic server over stdio
           doctor   Run environment diagnostics (config, DB, PGMQ, queues,
                    LISTEN/NOTIFY, process liveness); exits 1 on any failure

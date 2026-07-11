@@ -11,7 +11,7 @@
         "display": "LINE",
         "title": "Job status per queue",
         "description": "Processed, failed, and dead-lettered jobs per queue.",
-        "line_label": "%queue% - %status%",
+        "line_label": "%job_class% - %queue% - %status%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -23,6 +23,10 @@
               }
             ],
             "tags": [
+              {
+                "key": "job_class",
+                "value": "*"
+              },
               {
                 "key": "queue",
                 "value": "*"
@@ -232,7 +236,7 @@
         "display": "LINE",
         "title": "Event handler status",
         "description": "Processed and failed event handler invocations.",
-        "line_label": "%handler% - %status%",
+        "line_label": "%handler% - %status% - %routing_key%",
         "format": "number",
         "draw_null_as_zero": true,
         "metrics": [
@@ -250,6 +254,10 @@
               },
               {
                 "key": "status",
+                "value": "*"
+              },
+              {
+                "key": "routing_key",
                 "value": "*"
               }
             ]

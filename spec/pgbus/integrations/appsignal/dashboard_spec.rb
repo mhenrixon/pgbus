@@ -71,6 +71,34 @@ RSpec.describe "Pgbus::Integrations::Appsignal dashboard" do
     )
   end
 
+  # The upstream review on appsignal/public_config#80 added job_class and
+  # routing_key to the tag filters and line labels — without the wildcard tag
+  # entry the %placeholder% in the line label never resolves.
+  it "labels job status lines with job_class, queue, and status" do
+    panel = dashboard_json["dashboard"]["visuals"].find { |v| v["title"] == "Job status per queue" }
+
+    expect(panel["line_label"]).to eq("%job_class% - %queue% - %status%")
+    # Assert the full tag hashes, not just the keys: the label only resolves
+    # when each tag carries the wildcard value "*". A literal or empty value
+    # would keep the keys but leave %job_class% unresolved.
+    expect(panel["metrics"].first["tags"]).to contain_exactly(
+      { "key" => "job_class", "value" => "*" },
+      { "key" => "queue", "value" => "*" },
+      { "key" => "status", "value" => "*" }
+    )
+  end
+
+  it "labels event handler lines with handler, status, and routing_key" do
+    panel = dashboard_json["dashboard"]["visuals"].find { |v| v["title"] == "Event handler status" }
+
+    expect(panel["line_label"]).to eq("%handler% - %status% - %routing_key%")
+    expect(panel["metrics"].first["tags"]).to contain_exactly(
+      { "key" => "handler", "value" => "*" },
+      { "key" => "status", "value" => "*" },
+      { "key" => "routing_key", "value" => "*" }
+    )
+  end
+
   it "uses metric_keys that match actual probe or subscriber metric names" do
     keys = dashboard_json["metric_keys"]
     all_metric_names = dashboard_json["dashboard"]["visuals"]
