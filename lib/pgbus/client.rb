@@ -1099,6 +1099,14 @@ module Pgbus
     ].freeze
     private_constant :STALE_CONNECTION_PATTERNS
 
+    # Compiled once: matches an error message containing any stale-connection
+    # pattern as a substring, case-insensitively (replacing the previous
+    # `message.downcase` + substring scan). Regexp.union escapes the literal
+    # parens in "pqsocket() ...", so they match literally.
+    STALE_CONNECTION_PATTERN =
+      Regexp.new(Regexp.union(STALE_CONNECTION_PATTERNS).source, Regexp::IGNORECASE).freeze
+    private_constant :STALE_CONNECTION_PATTERN
+
     # How many times a matched stale-connection error is retried before it
     # propagates. Two attempts (not one) so a transient window — a PgBouncer
     # restart or a brief failover — that outlasts the first immediate retry
@@ -1482,8 +1490,11 @@ module Pgbus
     end
 
     def stale_connection_error?(error)
-      message = error.message.to_s.downcase
-      STALE_CONNECTION_PATTERNS.any? { |pattern| message.include?(pattern) }
+      # Substring match against any stale-connection pattern. Deliberately a
+      # single Regexp rather than `STALE_CONNECTION_PATTERNS.any? { |p| msg.include?(p) }`:
+      # Style/ArrayIntersect misfires on that shape and "corrects" it to
+      # `patterns.intersect?(msg)`, which raises TypeError (String isn't an Array).
+      STALE_CONNECTION_PATTERN.match?(error.message.to_s)
     end
 
     # Substring pgmq-ruby uses when a pool checkout times out — a
