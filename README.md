@@ -820,15 +820,23 @@ end
 
 #### Dashboards
 
-Three importable AppSignal dashboards ship with the gem:
+Four importable AppSignal dashboards ship with the gem:
 
-| File | Purpose |
-|------|---------|
-| `lib/pgbus/integrations/appsignal/dashboards/pgbus_throughput.json` | Jobs/sec, perform-duration percentiles, send/read counts |
-| `lib/pgbus/integrations/appsignal/dashboards/pgbus_health.json` | Queue depth, oldest message age, DLQ, dead tuples, MVCC horizon, worker recycles |
-| `lib/pgbus/integrations/appsignal/dashboards/pgbus_streams.json` | Broadcasts, fanout, active SSE connections, outbox, recurring tasks |
+| Name | File | Purpose |
+|------|------|---------|
+| `main` | `lib/pgbus/integrations/appsignal/dashboard.json` | All-in-one overview (the automated dashboard submitted to appsignal/public_config) |
+| `throughput` | `lib/pgbus/integrations/appsignal/dashboards/pgbus_throughput.json` | Jobs/sec, perform-duration percentiles, send/read counts |
+| `health` | `lib/pgbus/integrations/appsignal/dashboards/pgbus_health.json` | Queue depth, oldest message age, DLQ, dead tuples, MVCC horizon, worker recycles |
+| `streams` | `lib/pgbus/integrations/appsignal/dashboards/pgbus_streams.json` | Broadcasts, fanout, active SSE connections, outbox, recurring tasks |
 
-Import via the AppSignal dashboard UI ("New dashboard" → "Import JSON") or the AppSignal API.
+The files are stored in AppSignal's automated-dashboard format (a `metric_keys` trigger wrapping
+the dashboard object); `pgbus dashboard <name>` unwraps one into the JSON that AppSignal's
+"New dashboard" → "Import dashboard" dialog accepts:
+
+```bash
+pgbus dashboard --list            # available names and titles
+pgbus dashboard health | pbcopy   # paste into the import dialog
+```
 
 ### Metrics adapter (Prometheus / StatsD)
 

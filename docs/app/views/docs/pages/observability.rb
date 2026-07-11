@@ -144,9 +144,10 @@ class Views::Docs::Pages::Observability < DocsUI::Page
         Load the `appsignal` gem and pgbus auto-installs a subscriber and a minutely
         probe — background-job transactions for every job and handler, `pgbus_`
         counters and distributions, and gauges for queue depth, oldest-message age,
-        DLQ depth, dead tuples, and MVCC horizon. Three importable dashboards ship in
-        `lib/pgbus/integrations/appsignal/dashboards/`. Opt out with
-        `config.appsignal_enabled = false`.
+        DLQ depth, dead tuples, and MVCC horizon. Four importable dashboards ship
+        with the gem — `pgbus dashboard --list` enumerates them and
+        `pgbus dashboard <name>` prints import-ready JSON for AppSignal's
+        "Import dashboard" dialog. Opt out with `config.appsignal_enabled = false`.
       MD
     end
   end
