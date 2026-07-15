@@ -230,7 +230,11 @@ RSpec.describe Pgbus::Recurring::Schedule do
     end
 
     it "fails closed (skips the tick) when the default key cannot be built" do
-      allow(JSON).to receive(:generate).and_raise(StandardError, "boom")
+      # Scope the stub to the task's args array: the JSON log formatter also
+      # calls ::JSON.generate (with a Hash), and a blanket raise would blow up
+      # the fail-closed rescue's own log line instead of testing the rescue.
+      allow(JSON).to receive(:generate).and_call_original
+      allow(JSON).to receive(:generate).with(["site_a"]).and_raise(StandardError, "boom")
 
       schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
 
