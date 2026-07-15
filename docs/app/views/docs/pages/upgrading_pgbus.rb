@@ -6,12 +6,13 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
   title "Upgrading pgbus"
   eyebrow "Migrate"
 
-  def lead = "The standard upgrade procedure, plus what changes on each hop from 0.9.7 to 1.0.0."
+  def lead = "The standard upgrade procedure, plus what changes on each hop."
 
   def content
     overview
     standard_procedure
     v098
+    v011x
     v100_stub
   end
 
@@ -167,6 +168,34 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
           [ [ :code, "pgbus doctor" ], "The single preflight command this guide uses to verify every upgrade." ]
         ]
       )
+    end
+  end
+
+  def v011x
+    DocsUI::Section("0.11.x → next release", description: "One PGMQ schema bump — no pgbus behavior changes.") do
+      DocsUI::Callout(:warning, title: "Next release not yet cut") do
+        plain "The vendored PGMQ 1.12.0 schema is merged but has not shipped in "
+        plain "a gem release yet. This section gets its concrete version number "
+        plain "when the release is cut."
+      end
+      md <<~'MD'
+        ### PGMQ vendored schema: 1.11.1 → 1.12.0
+
+        This hop moves the vendored PGMQ schema forward one minor version —
+        another instance of step 5 in the [standard procedure](#the-standard-upgrade-procedure)
+        above. The upstream delta is additive: one new function,
+        `pgmq.read_grouped_head_with_poll` (a polling wrapper over
+        `read_grouped_head` that waits up to `max_poll_seconds` for grouped
+        messages to arrive); everything else is comments and whitespace, so no
+        function pgbus calls changes shape. Run `rake pgbus:pgmq:status` after
+        updating the gem; it will report `installed 1.11.1, vendored 1.12.0`
+        and tell you to run:
+      MD
+      DocsUI::Code(<<~SHELL, lexer: :shell)
+        rails generate pgbus:upgrade_pgmq
+        rails db:migrate            # single database
+        rails db:migrate:pgbus      # separate-database install
+      SHELL
     end
   end
 
