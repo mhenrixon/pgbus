@@ -74,7 +74,11 @@ module Pgbus
           unsupported_server
         end
       rescue StandardError => e
-        logger.error { "[Pgbus::StreamApp] #{e.class}: #{e.message}" }
+        # Report, don't just log: a broken streamer config (e.g. bad
+        # streams_connection_options) 500s EVERY stream request on this
+        # worker — logger-only made that invisible to APM (issue #352).
+        ErrorReporter.report(e, { action: "stream_connect" }, config: config)
+        logger.debug { e.backtrace&.join("\n") }
         server_error
       end
 

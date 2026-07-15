@@ -5,16 +5,19 @@ require "pgbus/mcp/health_analyzer"
 
 module Pgbus
   # Preflight diagnostics for a pgbus deployment — the single command that
-  # answers "is this environment healthy enough to run?". Runs nine checks and
+  # answers "is this environment healthy enough to run?". Runs ten checks and
   # returns a machine-readable result plus a human report, so `pgbus doctor`
   # and `rake pgbus:doctor` can gate a deploy or CI run (exit 0 on success,
   # 1 on any failure).
   #
-  # Doctor never touches PGMQ or PostgreSQL directly: every probe goes through
-  # Pgbus::Client (DB, PGMQ schema, queues, NOTIFY) or Pgbus::Web::DataSource
-  # (process liveness, via Pgbus::MCP::HealthAnalyzer). It also never raises —
-  # a broken environment turns into :fail results, never a crash — so it is
-  # safe to run against a database that is down or a half-installed schema.
+  # Doctor probes through Pgbus::Client (DB, PGMQ schema, queues, NOTIFY),
+  # Pgbus::Web::DataSource (process liveness, via Pgbus::MCP::HealthAnalyzer),
+  # or Pgbus::DedicatedConnection (the streamer/notify-listener check — a
+  # deliberate exception to "everything via Client": those runtime paths
+  # bypass the Client's pools, so probing via the Client cannot catch a
+  # broken dedicated path; see issue #352). It never raises — a broken
+  # environment turns into :fail results, never a crash — so it is safe to
+  # run against a database that is down or a half-installed schema.
   class Doctor
     # A single check result. status is one of :ok, :warn, :fail.
     Check = Struct.new(:name, :status, :detail) do
@@ -36,7 +39,8 @@ module Pgbus
       "Process liveness" => :check_processes,
       "GlobalID allowlist" => :check_allowed_global_id_models,
       "Broadcast queue" => :check_broadcast_queue,
-      "Primary affinity" => :check_primary
+      "Primary affinity" => :check_primary,
+      "Dedicated connections" => :check_dedicated_connections
     }.freeze
 
     # Process liveness reads the pgbus_processes table (via HealthAnalyzer), so
@@ -329,6 +333,51 @@ module Pgbus
       Check.new(name: "Primary affinity", status: :ok, detail: "on primary")
     rescue StandardError => e
       Check.new(name: "Primary affinity", status: :warn, detail: "could not determine (#{e.class}: #{e.message})")
+    end
+
+    # 10. Dedicated connections — the streamer's LISTEN connection and the
+    # worker NotifyListener bypass the Client's pgmq pools and connect via
+    # DedicatedConnection, so a broken dedicated path is invisible to every
+    # other check (issue #352: :session-mode `:variables` broke ONLY these
+    # connections while every Client path worked). Open each configured
+    # dedicated connection exactly the way the runtime does, probe it, close
+    # it. NOT strict-fatal, same reasoning as the Database check: a transient
+    # DB blip at boot must not lockstep-abort a fleet.
+    def check_dedicated_connections
+      targets = []
+      targets << ["streams", @config.streams_connection_options] if @config.streams_enabled
+      targets << ["worker notify", @config.worker_notify_connection_options] if @config.worker_notify_wakeup?
+
+      if targets.empty?
+        return Check.new(name: "Dedicated connections", status: :ok,
+                         detail: "disabled in config (streams + notify wakeup off)")
+      end
+
+      failures = targets.filter_map { |label, opts| probe_dedicated_connection(label, opts) }
+      if failures.empty?
+        Check.new(name: "Dedicated connections", status: :ok,
+                  detail: "#{targets.map(&:first).join(" + ")} connect OK")
+      else
+        Check.new(name: "Dedicated connections", status: :fail, detail: failures.join("; "))
+      end
+    rescue StandardError => e
+      Check.new(name: "Dedicated connections", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # Open one dedicated connection the way the runtime does, verify it
+    # answers, close it. Returns nil on success, "label: error" on failure.
+    def probe_dedicated_connection(label, opts)
+      conn = Pgbus::DedicatedConnection.connect(opts)
+      conn.exec("SELECT 1")
+      nil
+    rescue StandardError => e
+      "#{label}: #{e.class}: #{e.message}"
+    ensure
+      begin
+        conn&.close if conn.respond_to?(:close)
+      rescue StandardError
+        nil
+      end
     end
 
     # True when some configured worker capsule drains the given queue — either

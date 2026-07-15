@@ -230,16 +230,16 @@ module Pgbus
           probe(validate_primary(build_raw_pg_connection))
         end
 
-        # Raw PG.connect with no validation or probe. This is what the Listener's
+        # Raw connect with no validation or probe. This is what the Listener's
         # connection_factory calls on every reconnect attempt: the reconnect loop
         # runs its own PrimaryValidator (retrying on a replica) and skips the
         # probe to stay cheap, mirroring Pgbus::Process::NotifyListener.
+        # String/Hash go through DedicatedConnection so a :session-mode
+        # `:variables` key never reaches PG.connect (issue #352).
         def build_raw_pg_connection
-          require "pg" unless defined?(::PG::Connection)
           opts = @config.streams_connection_options
           case opts
-          when String then ::PG.connect(opts)
-          when Hash   then ::PG.connect(**opts)
+          when String, Hash then Pgbus::DedicatedConnection.connect(opts)
           when Proc
             # The Proc branch in connection_options typically returns
             # ActiveRecord::Base.connection.raw_connection — a pooled

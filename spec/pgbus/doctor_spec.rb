@@ -39,11 +39,17 @@ RSpec.describe Pgbus::Doctor do
     allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {})
     health = instance_double(Pgbus::MCP::HealthAnalyzer, verdict: ok_verdict)
     allow(Pgbus::MCP::HealthAnalyzer).to receive(:new).and_return(health)
+    # The dedicated-connections check opens real PG connections through
+    # DedicatedConnection (deliberately NOT through the mocked client —
+    # that's the whole point of the check). Stub it healthy by default;
+    # the check-specific describe re-stubs it per scenario.
+    allow(Pgbus::DedicatedConnection).to receive(:connect)
+      .and_return(double("dedicated PG connection", exec: nil, close: nil))
   end
 
   describe "#run" do
-    it "runs nine checks" do
-      expect(doctor.run.size).to eq(9)
+    it "runs ten checks" do
+      expect(doctor.run.size).to eq(10)
     end
 
     it "returns hashes with :name, :status, :detail keys" do
@@ -366,6 +372,87 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  describe "the dedicated-connections check (issue #352)" do
+    def dedicated_check(results)
+      results.find { |c| c[:name] == "Dedicated connections" }
+    end
+
+    it "is :ok when the streamer and notify-listener connections open and answer" do
+      expect(dedicated_check(doctor.run)[:status]).to eq(:ok)
+    end
+
+    it "opens each configured dedicated connection the way the runtime does, probes it, and closes it" do
+      conn = double("dedicated PG connection", exec: nil, close: nil)
+      allow(Pgbus::DedicatedConnection).to receive(:connect).and_return(conn)
+
+      doctor.run
+
+      # streams + worker notify — both default to the base connection options.
+      expect(Pgbus::DedicatedConnection).to have_received(:connect)
+        .with(config.streams_connection_options).at_least(:once)
+      expect(Pgbus::DedicatedConnection).to have_received(:connect)
+        .with(config.worker_notify_connection_options).at_least(:once)
+      expect(conn).to have_received(:exec).with("SELECT 1").twice
+      expect(conn).to have_received(:close).twice
+    end
+
+    it "fails with the connect error and the affected path label" do
+      # The exact failure this check exists for: :session GUC mode leaves a
+      # :variables key that libpq rejects — only the dedicated paths break,
+      # every Client-pooled path works, so probing via the client misses it.
+      allow(Pgbus::DedicatedConnection).to receive(:connect)
+        .and_raise(StandardError.new('invalid connection option "variables"'))
+
+      check = dedicated_check(doctor.run)
+
+      expect(check[:status]).to eq(:fail)
+      expect(check[:detail]).to include("streams", "worker notify", 'invalid connection option "variables"')
+    end
+
+    it "closes the connection even when the probe query raises" do
+      conn = double("dedicated PG connection", close: nil)
+      allow(conn).to receive(:exec).and_raise(StandardError.new("boom"))
+      allow(Pgbus::DedicatedConnection).to receive(:connect).and_return(conn)
+
+      check = dedicated_check(doctor.run)
+
+      expect(check[:status]).to eq(:fail)
+      expect(conn).to have_received(:close).twice
+    end
+
+    it "is :ok/disabled when streams and notify wakeup are both off" do
+      config.streams_enabled = false
+      config.listen_notify = false # worker_notify_wakeup? defaults to listen_notify
+      allow(Pgbus::DedicatedConnection).to receive(:connect).and_raise("must not connect")
+
+      check = dedicated_check(doctor.run)
+
+      expect(check[:status]).to eq(:ok)
+      expect(check[:detail]).to match(/disabled/i)
+    end
+
+    it "probes only the notify path when streams are disabled" do
+      config.streams_enabled = false
+      conn = double("dedicated PG connection", exec: nil, close: nil)
+      allow(Pgbus::DedicatedConnection).to receive(:connect).and_return(conn)
+
+      doctor.run
+
+      expect(Pgbus::DedicatedConnection).to have_received(:connect).once
+    end
+
+    it "is not strict-fatal — a failing dedicated connection never aborts a :strict boot" do
+      # Same reasoning as the Database check: a transient DB blip at boot
+      # must not lockstep-abort a fleet; the failure still shows loud in the
+      # boot report.
+      allow(Pgbus::DedicatedConnection).to receive(:connect)
+        .and_raise(StandardError.new('invalid connection option "variables"'))
+
+      expect(dedicated_check(doctor.boot_checks)[:status]).to eq(:fail)
+      expect(doctor.boot_ok?).to be(true)
+    end
+  end
+
   describe "#report" do
     it "renders one line per check" do
       report = doctor.report
@@ -447,8 +534,8 @@ RSpec.describe Pgbus::Doctor do
       expect(names).not_to include(a_string_matching(/process|liveness/i))
     end
 
-    it "runs the other eight checks" do
-      expect(doctor.boot_checks.size).to eq(8)
+    it "runs the other nine checks" do
+      expect(doctor.boot_checks.size).to eq(9)
     end
 
     it "never invokes the HealthAnalyzer — the excluded check does zero work" do

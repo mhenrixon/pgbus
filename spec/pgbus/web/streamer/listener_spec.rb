@@ -441,6 +441,28 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       expect(listener.listening_to).to contain_exactly("pgmq.q_chat.INSERT")
     end
 
+    it "reports reconnect failures through ErrorReporter so APM handlers see them (issue #352)" do
+      reported = []
+      Pgbus.configuration.error_reporters << ->(ex, ctx) { reported << [ex, ctx] }
+      first = always_failing_conn.new
+      second = fake_pg.class.new
+      factory_conns.push(first, second)
+
+      listener.start
+      listener.ensure_listening("chat")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 1 }
+
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      second.push_timeout
+      wait_until { reported.any? }
+
+      expect(reported.first[0].message).to eq("always fails")
+      expect(reported.first[1]).to include(action: "streamer_reconnect")
+    ensure
+      Pgbus.configuration.error_reporters = []
+    end
+
     it "survives a ConfigurationError from the factory and recovers on a later attempt" do
       # build_raw_pg_connection can raise Pgbus::ConfigurationError (e.g. a
       # pooled AR connection in streams_connection_options). The reconnect loop

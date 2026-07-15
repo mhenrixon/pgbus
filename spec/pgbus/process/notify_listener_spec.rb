@@ -242,6 +242,91 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
   end
 
+  describe "ErrorReporter integration (issue #352)" do
+    after { Pgbus.configuration.error_reporters = [] }
+
+    it "reports a fatal run_loop error so APM handlers see it" do
+      reported = []
+      Pgbus.configuration.error_reporters << ->(ex, ctx) { reported << [ex, ctx] }
+      allow(listener).to receive(:build_connection).and_raise(PG::Error.new("boot failed"))
+
+      listener.start
+      wait_until { reported.any? }
+
+      expect(reported.first[0]).to be_a(PG::Error)
+      expect(reported.first[1]).to include(action: "notify_listener_fatal")
+    end
+
+    it "reports reconnect failures so APM handlers see them" do
+      reported = []
+      Pgbus.configuration.error_reporters << ->(ex, ctx) { reported << [ex, ctx] }
+      second_pg = fake_pg.class.new
+      call_count = 0
+      allow(listener).to receive(:build_connection) do
+        call_count += 1
+        raise PG::Error, "reconnect refused" if call_count == 2
+
+        call_count == 1 ? fake_pg : second_pg
+      end
+      stub_const("Pgbus::Process::NotifyListener::RECONNECT_BACKOFF_SECONDS", 0.01)
+
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      second_pg.push_timeout
+      wait_until { reported.any? }
+
+      expect(reported.first[0].message).to eq("reconnect refused")
+      expect(reported.first[1]).to include(action: "notify_listener_reconnect")
+    end
+  end
+
+  describe "#build_connection under :session GUC mode (issue #352)" do
+    # The listener's connection_options come from
+    # config.worker_notify_connection_options, which in :session GUC mode
+    # carries the database.yml `variables:` hash. :variables is not a libpq
+    # keyword — passing it through raises `PG::Error: invalid connection
+    # option "variables"`, killing NOTIFY wakeups (workers silently fall
+    # back to polling).
+    subject(:session_listener) do
+      described_class.new(
+        physical_queues: %w[pgbus_default],
+        on_wake: -> {},
+        connection_options: { host: "pooler.example", dbname: "app",
+                              variables: { statement_timeout: "10s", timezone: "UTC" } },
+        logger: logger
+      )
+    end
+
+    before do
+      # DedicatedConnection requires "pg" only when PG::Connection is absent;
+      # satisfy the check so the stubbed PG module is never clobbered by a
+      # real require.
+      stub_const("PG::Connection", Class.new) unless defined?(PG::Connection)
+    end
+
+    it "strips the non-libpq :variables key before PG.connect" do
+      captured = nil
+      allow(PG).to receive(:connect) do |**kwargs|
+        captured = kwargs
+        fake_pg
+      end
+
+      session_listener.send(:build_connection)
+
+      expect(captured).to eq(host: "pooler.example", dbname: "app")
+    end
+
+    it "keeps the GUCs by applying them via post-connect SET" do
+      allow(PG).to receive(:connect).and_return(fake_pg)
+
+      session_listener.send(:build_connection)
+
+      expect(fake_pg.executed).to eq(["SET statement_timeout = '10s'", "SET timezone = 'UTC'"])
+    end
+  end
+
   describe "replica rejection (failover self-healing)" do
     context "when a reconnect lands on a replica then converges on the primary" do
       let(:replica_pg) { fake_pg.class.new }

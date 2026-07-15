@@ -143,6 +143,24 @@ RSpec.describe Pgbus::Web::StreamApp do
       status, = app.call(env)
       expect(status).to eq(500)
     end
+
+    it "reports the internal error through ErrorReporter so APM handlers see it (issue #352)" do
+      # A 500 that is only logger.error'd is invisible to error trackers —
+      # a broken streamer config 500s every SSE request without a single
+      # APM event.
+      reported = []
+      Pgbus.configuration.error_reporters << ->(ex, ctx) { reported << [ex, ctx] }
+      allow(Pgbus::Streams::SignedName).to receive(:verify!).and_raise("boom")
+      env = get_env("/pgbus/streams/#{signed("chat")}")
+
+      app.call(env)
+
+      expect(reported.size).to eq(1)
+      expect(reported.first[0].message).to eq("boom")
+      expect(reported.first[1]).to include(action: "stream_connect")
+    ensure
+      Pgbus.configuration.error_reporters = []
+    end
   end
 
   describe "happy path with a real hijack" do
