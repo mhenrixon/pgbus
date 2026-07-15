@@ -2065,6 +2065,95 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#streams_pool_connection_options" do
+    context "when no streams_pool override is set" do
+      it "follows streams_connection_options — a direct-port LISTEN pin carries the pool with it (0.12.0 default)" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_port = 5432
+
+        expect(config.streams_pool_connection_options).to eq(
+          host: "pooler.example", port: 5432, dbname: "app"
+        )
+      end
+
+      it "follows the base options when no streams override is set either" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+
+        expect(config.streams_pool_connection_options).to eq(config.connection_options)
+      end
+
+      it "follows a separate streams database (streams_database_url)" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_database_url = "postgres://stream@direct.example:5432/streamsdb"
+
+        expect(config.streams_pool_connection_options).to eq(
+          "postgres://stream@direct.example:5432/streamsdb"
+        )
+      end
+    end
+
+    context "when streams_pool_port is set (issue #358: pooler-bypass installs)" do
+      it "routes the pool independently of the LISTEN connection" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_port = 5432       # LISTEN bypasses the pooler
+        config.streams_pool_port = 6432  # the pool stays on the pooler
+
+        expect(config.streams_pool_connection_options).to eq(
+          host: "pooler.example", port: 6432, dbname: "app"
+        )
+        expect(config.streams_connection_options).to eq(
+          host: "pooler.example", port: 5432, dbname: "app"
+        )
+      end
+
+      it "applies the override to the BASE options, not on top of the streams overrides" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_host = "direct.example"
+        config.streams_port = 5432
+        config.streams_pool_port = 6432
+
+        expect(config.streams_pool_connection_options).to eq(
+          host: "pooler.example", port: 6432, dbname: "app"
+        )
+      end
+
+      it "appends a port=... key=value override on a String base" do
+        config.database_url = "postgres://app@pooler.example:6432/app"
+        config.streams_port = 5432
+        config.streams_pool_port = 6432
+
+        expect(config.streams_pool_connection_options).to eq(
+          "postgres://app@pooler.example:6432/app port=6432"
+        )
+      end
+    end
+
+    context "when streams_pool_host is set" do
+      it "overrides only the host" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_pool_host = "pool.example"
+
+        expect(config.streams_pool_connection_options).to eq(
+          host: "pool.example", port: 6432, dbname: "app"
+        )
+      end
+    end
+
+    context "when streams_pool_database_url is set" do
+      it "wins over streams_pool_host/streams_pool_port and the streams overrides" do
+        config.connection_params = { host: "pooler.example", port: 6432, dbname: "app" }
+        config.streams_database_url = "postgres://stream@direct.example:5432/app"
+        config.streams_pool_host = "ignored"
+        config.streams_pool_port = 9999
+        config.streams_pool_database_url = "postgres://pool@pooler.example:6432/app"
+
+        expect(config.streams_pool_connection_options).to eq(
+          "postgres://pool@pooler.example:6432/app"
+        )
+      end
+    end
+  end
+
   describe "Pgbus.configure eager validation" do
     after { Pgbus.reset! }
 

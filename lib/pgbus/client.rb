@@ -89,15 +89,17 @@ module Pgbus
         # persistent connection instead of a fresh PG.connect per call. Its own
         # PGMQ::Client → its own connection_pool, sized independently of worker
         # thread counts.
-        # Build the streams pool from streams_connection_options (which defaults
-        # to connection_options but honors streams_database_url/host/port for a
-        # separate/direct streams DB — issue #315), bounds-applied, and tagged
-        # with a per-process application_name so the autoscaler can count peer
-        # processes from pg_stat_activity (issue #323 P1/P2). Snapshot it so a
-        # hot-swap rebuilds a byte-identical pool at a new size.
+        # Build the streams pool from streams_pool_connection_options (defaults
+        # to streams_connection_options so a separate streams DB carries the
+        # pool with it — issue #315 — but overridable via streams_pool_* so a
+        # pooler-bypass install keeps the pool off the direct port — issue
+        # #358), bounds-applied, and tagged with a per-process application_name
+        # so the autoscaler can count peer processes from pg_stat_activity
+        # (issue #323 P1/P2). Snapshot it so a hot-swap rebuilds a
+        # byte-identical pool at a new size.
         @streams_conn_opts = wrap_session_gucs(
           tag_application_name(
-            apply_connection_bounds(config.streams_connection_options)
+            apply_connection_bounds(config.streams_pool_connection_options)
           )
         )
         @streams_pgmq = PGMQ::Client.new(@streams_conn_opts, pool_size: config.streams_pool_size,
