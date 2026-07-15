@@ -193,7 +193,8 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
       MD
       DocsUI::Code(<<~SHELL, lexer: :shell)
         rails generate pgbus:upgrade_pgmq
-        rails db:migrate
+        rails db:migrate            # single database
+        rails db:migrate:pgbus      # separate-database install
       SHELL
     end
   end
