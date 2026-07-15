@@ -144,6 +144,9 @@ module ConfigReference
     streams_database_url
     streams_host
     streams_port
+    streams_pool_database_url
+    streams_pool_host
+    streams_pool_port
     streams_listen_health_check_ms
     streams_write_deadline_ms
     streams_fanout_write_deadline_ms

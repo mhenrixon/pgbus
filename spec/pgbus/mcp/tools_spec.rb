@@ -62,7 +62,7 @@ RSpec.describe "Pgbus MCP tools" do # rubocop:disable RSpec/DescribeClass
 
   describe Pgbus::MCP::Tools::HealthTool do
     it "returns a verdict computed by HealthAnalyzer" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {})
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {}, stream_queue_names: Set.new)
 
       result = body(described_class.call(server_context: context))
       expect(result["status"]).to eq("OK")

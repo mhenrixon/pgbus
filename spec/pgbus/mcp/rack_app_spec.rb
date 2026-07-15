@@ -16,7 +16,7 @@ RSpec.describe Pgbus::MCP::RackApp do
   end
 
   before do
-    allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {})
+    allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {}, stream_queue_names: Set.new)
   end
 
   def mock_for(**kwargs)

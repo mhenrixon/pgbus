@@ -60,7 +60,7 @@ module Pgbus
         raise ArgumentError, "unknown keyword: #{opts.keys.first.inspect}" if opts.any?
         raise ArgumentError, "strategy must be one of: #{VALID_STRATEGIES.join(", ")}" unless VALID_STRATEGIES.include?(strategy)
         raise ArgumentError, "on_conflict must be one of: #{VALID_CONFLICTS.join(", ")}" unless VALID_CONFLICTS.include?(on_conflict)
-        raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
+        raise ArgumentError, "key must be callable (Proc or lambda)" if !key.nil? && !key.respond_to?(:call)
 
         # Record whether an explicit key was given. With NO explicit key the key
         # defaults to the class name; that is safe for a no-argument job (one
@@ -70,16 +70,26 @@ module Pgbus
         # order into ONE per-class singleton. resolve_key raises at resolve time
         # when the class-name default meets non-empty arguments (see #333); the
         # no-arg case keeps working. explicit_key marks which is which.
+        #
+        # No proc is stored for the default — resolve_key derives it from the
+        # ENQUEUED job's class. A stored `->(*) { name }` would capture the
+        # DECLARING class, so a base-class declaration would collapse every
+        # subclass into one shared key once configs became inheritable (#357).
         @pgbus_uniqueness = {
           strategy: strategy,
-          key: key || ->(*) { name },
+          key: key,
           explicit_key: !key.nil?,
           on_conflict: on_conflict
         }.freeze
       end
 
+      # The nearest declaration in the ancestor chain wins: a class's own
+      # `ensures_uniqueness` beats an inherited one, and a base-class
+      # declaration reaches every subclass (issue #357 — class-level ivars
+      # don't inherit, so without the superclass walk a base declaration was
+      # silently inert for subclasses).
       def pgbus_uniqueness
-        @pgbus_uniqueness
+        @pgbus_uniqueness || (superclass.pgbus_uniqueness if superclass.respond_to?(:pgbus_uniqueness))
       end
     end
 
@@ -90,11 +100,12 @@ module Pgbus
 
         args = active_job.arguments
         guard_class_name_default!(active_job, config, args)
-        last = args.last
-        key = if last.is_a?(Hash) && last.each_key.all?(Symbol)
-                config[:key].call(*args[...-1], **last)
+        key = if config[:explicit_key]
+                Support.call_key_proc(config[:key], args)
               else
-                config[:key].call(*args)
+                # Class-name default, resolved from the ENQUEUED job's class so
+                # an inherited declaration keys each subclass separately (#357).
+                active_job.class.name
               end
 
         # Automatically serialize GlobalID-compatible objects (e.g. ActiveRecord models)

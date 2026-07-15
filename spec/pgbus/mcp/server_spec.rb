@@ -55,7 +55,7 @@ RSpec.describe Pgbus::MCP::Server do
     end
 
     it "calls pgbus_health end-to-end through the server" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {})
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], queue_health_stats: {}, stream_queue_names: Set.new)
 
       request = {
         jsonrpc: "2.0", id: 2, method: "tools/call",

@@ -75,7 +75,17 @@ RSpec.describe Pgbus::Concurrency do
       end.to raise_error(ArgumentError, /callable/)
     end
 
-    it "defaults key to class name" do
+    it "rejects key: false at definition time (would otherwise silently act as the default key)" do
+      expect do
+        Class.new(ActiveJob::Base) do
+          include Pgbus::Concurrency
+
+          limits_concurrency to: 1, key: false
+        end
+      end.to raise_error(ArgumentError, /callable/)
+    end
+
+    it "defaults key to the enqueued job's class name (no default proc stored)" do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Concurrency
 
@@ -83,9 +93,45 @@ RSpec.describe Pgbus::Concurrency do
 
         def perform; end
       end
+      stub_const("DefaultKeyJob", job_class)
 
-      config = job_class.pgbus_concurrency
-      expect(config[:key].call).to eq(job_class.name)
+      # No proc is stored for the default — the key is resolved from the job
+      # instance's class at resolve time, so base-class declarations can't
+      # collapse subclasses into the declaring class's key (issue #357).
+      expect(job_class.pgbus_concurrency[:key]).to be_nil
+      expect(described_class.resolve_key(DefaultKeyJob.new)).to eq("DefaultKeyJob")
+    end
+  end
+
+  describe "inheritance of base-class declarations (issue #357)" do
+    before do
+      stub_const("ThrottledBaseJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Concurrency
+
+        limits_concurrency to: 2, on_conflict: :discard
+      end)
+      stub_const("ThrottledChildJob", Class.new(ThrottledBaseJob))
+    end
+
+    it "makes the base-class config visible to subclasses" do
+      config = ThrottledChildJob.pgbus_concurrency
+      expect(config).to be_present
+      expect(config[:limit]).to eq(2)
+      expect(config[:on_conflict]).to eq(:discard)
+    end
+
+    it "resolves the SUBCLASS name for the class-name default, not the declaring class" do
+      expect(described_class.resolve_key(ThrottledChildJob.new)).to eq("ThrottledChildJob")
+    end
+
+    it "lets a subclass's own declaration override the inherited one" do
+      stub_const("OverridingChildJob", Class.new(ThrottledBaseJob) do
+        limits_concurrency to: 5, key: ->(*) { "custom" }
+      end)
+
+      expect(OverridingChildJob.pgbus_concurrency[:limit]).to eq(5)
+      expect(described_class.resolve_key(OverridingChildJob.new)).to eq("custom")
+      expect(ThrottledChildJob.pgbus_concurrency[:limit]).to eq(2)
     end
   end
 

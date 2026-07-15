@@ -157,6 +157,25 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
         code { "streams_pool_size" }
         plain " is always the simpler choice."
       end
+      DocsUI::Callout(:warning) do
+        plain "If you pin the streamer's LISTEN connection to the direct Postgres "
+        plain "port to bypass a transaction-mode pooler ("
+        code { "streams_port = 5432" }
+        plain "), the streams pool follows it by default — putting "
+        code { "streams_pool_size" }
+        plain " connections "
+        em { "per process" }
+        plain " on the direct port's low "
+        code { "max_connections" }
+        plain " ceiling. Only LISTEN needs the direct port; the pool's traffic is "
+        plain "pooler-safe. Route the pool back through the pooler with "
+        code { "streams_pool_port = 6432" }
+        plain " (or "
+        code { "streams_pool_host" }
+        plain " / "
+        code { "streams_pool_database_url" }
+        plain ")."
+      end
     end
   end
 

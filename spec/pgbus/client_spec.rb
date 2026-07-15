@@ -1226,6 +1226,21 @@ RSpec.describe Pgbus::Client do
               pool_size: config.streams_pool_size, pool_timeout: config.streams_pool_timeout)
     end
 
+    it "routes the streams pool through streams_pool_* independently of the LISTEN overrides (issue #358)" do
+      # Pooler-bypass installs pin only the LISTEN connection to the direct
+      # port (streams_port); the pool's INSERT/SELECT traffic is pooler-safe
+      # and must not eat direct-port max_connections slots.
+      config.streams_port = 5432
+      config.streams_pool_port = 6432
+      client # force construction
+
+      expect(PGMQ::Client).to have_received(:new)
+        .with(a_string_matching(/\bport=6432\b/),
+              pool_size: config.streams_pool_size, pool_timeout: config.streams_pool_timeout)
+      expect(PGMQ::Client).not_to have_received(:new)
+        .with(a_string_matching(/\bport=5432\b/), any_args)
+    end
+
     describe "#read_after over the streams pool" do
       let(:conn) { double("PG::Connection") }
 

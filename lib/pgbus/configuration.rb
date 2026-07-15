@@ -167,6 +167,7 @@ module Pgbus
                   :streams_durable_patterns, :streams_broadcast_queue,
                   :streams_presence_patterns, :streams_presence_member,
                   :streams_host, :streams_port, :streams_database_url,
+                  :streams_pool_host, :streams_pool_port, :streams_pool_database_url,
                   :streams_pool_size, :streams_pool_timeout,
                   :streams_fanout_write_deadline_ms, :streams_dispatch_queue_limit,
                   :streams_writer_threads, :streams_writer_buffer_limit,
@@ -338,6 +339,22 @@ module Pgbus
       # thread-safe and streams keep using the single serialized connection.
       @streams_pool_size = 5
       @streams_pool_timeout = 5
+      # Streams-POOL-only connection overrides (issue #358). The pool above
+      # defaults to wherever the streamer connects (streams_host/port/
+      # database_url), which is right for a separate streams database — but
+      # wrong for the pooler-bypass pattern, where streams_port pins the
+      # LISTEN connection to the direct Postgres port purely because LISTEN
+      # dies in transaction pooling. The pool's traffic (broadcast INSERTs,
+      # replay reads) is plain pooler-safe SQL, and on a direct port with a
+      # low max_connections ceiling every process's streams_pool_size
+      # connections eat scarce direct slots. Set any of these to route the
+      # POOL independently of the LISTEN connection:
+      #
+      #   c.streams_port = 5432        # LISTEN bypasses the pooler
+      #   c.streams_pool_port = 6432   # the pool stays on the pooler
+      @streams_pool_host = nil
+      @streams_pool_port = nil
+      @streams_pool_database_url = nil
       # Self-tuning streams-pool autoscaling (issue #323). Opt-in, default off.
       # When true, a per-web-process control loop grows the dedicated streams
       # pool into a FAIR SHARE of live Postgres connection headroom under
@@ -1212,6 +1229,33 @@ module Pgbus
     # Precedence: streams_database_url > streams_host/port override > base.
     def streams_connection_options
       override_connection_options(url: streams_database_url, host: streams_host, port: streams_port)
+    end
+
+    # Connection options for the dedicated streams PGMQ pool — durable-broadcast
+    # publish INSERTs and the dispatcher's replay reads (issue #315). Defaults
+    # to `streams_connection_options`, so a genuinely separate streams database
+    # carries the pool with it. When any of `streams_pool_database_url` /
+    # `streams_pool_host` / `streams_pool_port` is set, the pool is routed
+    # independently — applied to the BASE options, exactly like the other two
+    # override groups.
+    #
+    # Why this exists (issue #358): only the streamer's LISTEN connection needs
+    # to bypass a transaction-mode pooler (LISTEN dies at COMMIT boundaries);
+    # the pool's INSERT/SELECT traffic is pooler-safe. Without this split, a
+    # `streams_port` direct-port pin drags streams_pool_size connections per
+    # process onto the direct port's low max_connections ceiling:
+    #
+    #   c.streams_port = 5432        # LISTEN bypasses the pooler
+    #   c.streams_pool_port = 6432   # the pool stays on the pooler
+    #
+    # Precedence: streams_pool_database_url > streams_pool_host/port over the
+    # base > streams_connection_options.
+    def streams_pool_connection_options
+      return streams_connection_options unless streams_pool_database_url || streams_pool_host || streams_pool_port
+
+      override_connection_options(
+        url: streams_pool_database_url, host: streams_pool_host, port: streams_pool_port
+      )
     end
 
     # Connection options for the Worker's dedicated NotifyListener connection.

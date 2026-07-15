@@ -65,6 +65,19 @@ module Pgbus
       end
       private :fetch_queues_with_metrics
 
+      # Physical queue names registered as stream queues (the
+      # pgbus_stream_queues registry). Stream delivery is a non-consuming
+      # peek, so stream messages sit visible with read_ct=0 forever — health
+      # verdicts must not read that as a wedge (issue #359). Loaded fresh per
+      # call (reset + one query): verdicts run on coarse intervals and a
+      # long-lived process must see streams registered since the last check.
+      # Degrades to an empty Set when the registry table is absent
+      # (pre-migration installs) or unreadable — StreamQueue swallows both.
+      def stream_queue_names
+        StreamQueue.reset_cache!
+        StreamQueue.all_names
+      end
+
       # name is the full PGMQ queue name (e.g. "pgbus_default") as returned
       # by queues_with_metrics. No prefix is added.
       def queue_detail(name)
