@@ -101,12 +101,7 @@ module Pgbus
         args = active_job.arguments
         guard_class_name_default!(active_job, config, args)
         key = if config[:explicit_key]
-                last = args.last
-                if last.is_a?(Hash) && last.each_key.all?(Symbol)
-                  config[:key].call(*args[...-1], **last)
-                else
-                  config[:key].call(*args)
-                end
+                Support.call_key_proc(config[:key], args)
               else
                 # Class-name default, resolved from the ENQUEUED job's class so
                 # an inherited declaration keys each subclass separately (#357).

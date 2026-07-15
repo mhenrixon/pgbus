@@ -56,13 +56,7 @@ module Pgbus
         # inherited declaration keys each subclass separately (#357).
         return active_job.class.name unless config[:key]
 
-        args = active_job.arguments
-        last = args.last
-        if last.is_a?(Hash) && last.each_key.all?(Symbol)
-          config[:key].call(*args[...-1], **last)
-        else
-          config[:key].call(*args)
-        end
+        Support.call_key_proc(config[:key], active_job.arguments)
       end
 
       # Inject the resolved concurrency key into the job's serialized payload.
