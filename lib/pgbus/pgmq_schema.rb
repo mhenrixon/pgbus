@@ -135,6 +135,46 @@ module Pgbus
         SQL
       end
 
+      # SQL to re-install the per-queue NOTIFY insert triggers that
+      # drop_pgmq_functions_sql cascades away (issue #360). Dropping
+      # pgmq.notify_queue_listeners() with CASCADE also drops the
+      # trigger_notify_queue_insert_listeners trigger from every queue table;
+      # install_sql re-creates the function but nothing re-creates the
+      # triggers, so NOTIFY-gated wakeups silently die fleet-wide until each
+      # queue happens to be re-ensured by a process restart.
+      #
+      # The dropped state is fully recoverable: pgmq.notify_insert_throttle is
+      # a TABLE (preserved by the upgrade — its rows record exactly which
+      # queues had notify enabled and at what throttle, FK-bound to pgmq.meta
+      # so it can't reference a dropped queue), and pgmq.enable_notify_insert
+      # is idempotent. Replaying it per recorded row restores every trigger at
+      # its original interval. No-ops when the throttle table or the enable
+      # function is absent (a vendored version without the notify feature).
+      def reinstall_notify_triggers_sql
+        <<~SQL
+          DO $$
+          DECLARE
+            r RECORD;
+          BEGIN
+            IF to_regclass('pgmq.notify_insert_throttle') IS NULL THEN
+              RETURN;
+            END IF;
+            IF to_regprocedure('pgmq.enable_notify_insert(text, integer)') IS NULL THEN
+              RETURN;
+            END IF;
+
+            -- The FOR loop iterates a snapshot, so enable_notify_insert's
+            -- internal DELETE + re-INSERT of the same throttle row is safe.
+            FOR r IN
+              SELECT queue_name, throttle_interval_ms
+              FROM pgmq.notify_insert_throttle
+            LOOP
+              PERFORM pgmq.enable_notify_insert(r.queue_name, r.throttle_interval_ms);
+            END LOOP;
+          END $$;
+        SQL
+      end
+
       private
 
       # Strips extension-specific blocks (pg_extension_config_dump, pg_depend checks)

@@ -132,6 +132,27 @@ RSpec.describe Pgbus::PgmqSchema do
     end
   end
 
+  describe ".reinstall_notify_triggers_sql" do
+    subject(:sql) { described_class.reinstall_notify_triggers_sql }
+
+    it "replays pgmq.enable_notify_insert for every recorded throttle row (issue #360)" do
+      # drop_pgmq_functions_sql CASCADE-drops the per-queue NOTIFY triggers
+      # (they depend on the dropped trigger function); the throttle TABLE
+      # survives and records which queues had notify enabled and at what
+      # interval, so replaying enable_notify_insert restores every trigger.
+      expect(sql).to include("pgmq.notify_insert_throttle")
+      expect(sql).to include("pgmq.enable_notify_insert(r.queue_name, r.throttle_interval_ms)")
+    end
+
+    it "no-ops when the throttle table is absent (a vendored version without the notify feature)" do
+      expect(sql).to include("to_regclass('pgmq.notify_insert_throttle')")
+    end
+
+    it "no-ops when the enable function is absent" do
+      expect(sql).to include("to_regprocedure('pgmq.enable_notify_insert(text, integer)')")
+    end
+  end
+
   describe ".version_tracking_sql" do
     it "returns SQL to create the version tracking table" do
       sql = described_class.version_tracking_sql

@@ -20,10 +20,12 @@ RSpec.describe "PGMQ schema upgrade path (integration)", :integration do
   let(:queue_name)   { "pgbus_int_upgrade_probe" }
 
   # Mirrors lib/generators/pgbus/templates/upgrade_pgmq.rb.erb: drop functions,
-  # re-create at the target version, record the upgrade in the tracking table.
+  # re-create at the target version, re-install the NOTIFY triggers the drop
+  # cascaded away, record the upgrade in the tracking table.
   def run_upgrade_migration_sql(version)
     conn.execute(Pgbus::PgmqSchema.drop_pgmq_functions_sql)
     conn.execute(Pgbus::PgmqSchema.install_sql(version))
+    conn.execute(Pgbus::PgmqSchema.reinstall_notify_triggers_sql)
     conn.execute(<<~SQL)
       CREATE TABLE IF NOT EXISTS pgbus_pgmq_schema_versions (
         id SERIAL PRIMARY KEY,
@@ -42,6 +44,17 @@ RSpec.describe "PGMQ schema upgrade path (integration)", :integration do
       SELECT count(*) FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'pgmq' AND p.proname = '#{name}'
+    SQL
+  end
+
+  def notify_trigger_exists?(queue)
+    conn.select_value(<<~SQL).to_i.positive?
+      SELECT count(*) FROM pg_trigger t
+      JOIN pg_class c ON t.tgrelid = c.oid
+      JOIN pg_namespace n ON c.relnamespace = n.oid
+      WHERE n.nspname = 'pgmq'
+        AND c.relname = 'q_#{queue}'
+        AND t.tgname = 'trigger_notify_queue_insert_listeners'
     SQL
   end
 
@@ -66,6 +79,7 @@ RSpec.describe "PGMQ schema upgrade path (integration)", :integration do
 
     conn.execute("SELECT pgmq.drop_queue('#{queue_name}')") rescue nil # rubocop:disable Style/RescueModifier
     conn.execute("SELECT pgmq.create('#{queue_name}')")
+    conn.execute("SELECT pgmq.enable_notify_insert('#{queue_name}', throttle_interval_ms => 350)")
     conn.execute("SELECT pgmq.send('#{queue_name}', '{\"probe\": 1}'::jsonb)")
     conn.execute("SELECT pgmq.send('#{queue_name}', '{\"probe\": 2}'::jsonb)")
   end
@@ -133,5 +147,38 @@ RSpec.describe "PGMQ schema upgrade path (integration)", :integration do
       "SELECT count(*) FROM pgmq.read('#{queue_name}', 0, 10)"
     ).to_i
     expect(read).to eq(2)
+  end
+
+  describe "NOTIFY insert triggers across the upgrade (issue #360)" do
+    it "documents the bug: the function drop CASCADE removes the per-queue trigger" do
+      expect(notify_trigger_exists?(queue_name)).to be(true)
+
+      conn.execute(Pgbus::PgmqSchema.drop_pgmq_functions_sql)
+      conn.execute(Pgbus::PgmqSchema.install_sql(to_version))
+
+      # Without the repair step, the trigger is gone — NOTIFY wakeups die and
+      # workers silently fall back to polling.
+      expect(notify_trigger_exists?(queue_name)).to be(false)
+    end
+
+    it "re-installs the trigger at its recorded throttle interval" do
+      run_upgrade_migration_sql(to_version)
+
+      expect(notify_trigger_exists?(queue_name)).to be(true)
+      throttle = conn.select_value(
+        "SELECT throttle_interval_ms FROM pgmq.notify_insert_throttle WHERE queue_name = '#{queue_name}'"
+      ).to_i
+      expect(throttle).to eq(350)
+    end
+
+    it "keeps the restored trigger functional (an insert NOTIFYs listeners)" do
+      run_upgrade_migration_sql(to_version)
+
+      # A send through the restored trigger must not raise (the trigger calls
+      # pgmq.notify_queue_listeners, re-created by install_sql).
+      expect do
+        conn.execute("SELECT pgmq.send('#{queue_name}', '{\"probe\": 3}'::jsonb)")
+      end.not_to raise_error
+    end
   end
 end
