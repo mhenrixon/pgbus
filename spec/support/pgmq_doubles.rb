@@ -33,7 +33,8 @@ module PgmqDoubles
         convert_archive_partitioned: nil,
         tune_autovacuum: nil,
         stats: { size: 5, available: 5 },
-        close: nil
+        close: nil,
+        reload: nil
       )
       # Batch operations echo back the ids to mirror pgmq-ruby behavior
       allow(pgmq).to receive(:delete_batch) { |_queue, ids| ids.map(&:to_s) }

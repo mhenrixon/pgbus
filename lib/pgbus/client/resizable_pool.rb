@@ -101,6 +101,15 @@ module Pgbus
         end
       end
 
+      # Drop every pooled connection on the CURRENT streams client and let it
+      # rebuild lazily on next checkout (pgmq-ruby >= 0.7.1) — see
+      # Client#reload (issue #354). Takes the swap mutex so a reload cannot
+      # race a concurrent swap/close into reloading a pool that is being
+      # retired; reads stay lock-free.
+      def reload
+        @swap_mutex.synchronize { @ref.get.pgmq.reload }
+      end
+
       def stats_snapshot
         @last || SwapStats.new(swap_count: 0, last_drain_seconds: 0.0, last_conns_closed: 0,
                                last_from_size: nil, last_to_size: nil, last_drained: nil)
