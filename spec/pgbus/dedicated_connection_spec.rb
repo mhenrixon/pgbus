@@ -9,7 +9,6 @@ require "spec_helper"
 require "pg"
 
 RSpec.describe Pgbus::DedicatedConnection do
-
   let(:fake_conn) do
     Class.new do
       attr_reader :executed
