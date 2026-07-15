@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 
 RSpec.describe Pgbus::Recurring::Schedule do
   let(:config) { Pgbus::Configuration.new }
@@ -137,14 +138,143 @@ RSpec.describe Pgbus::Recurring::Schedule do
       expect(Pgbus::RecurringExecution).to have_received(:record)
         .with("daily_cleanup", run_at)
     end
+  end
+
+  describe "#enqueue_task uniqueness with a base-class declaration (issue #357)" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
+
+      stub_const("MaintenanceBaseJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, on_conflict: :discard
+      end)
+      stub_const("NightlySweepJob", Class.new(MaintenanceBaseJob))
+
+      config.recurring_tasks = {
+        "nightly_sweep" => {
+          "class" => "NightlySweepJob",
+          "schedule" => "0 2 * * *"
+        }
+      }
+    end
+
+    it "acquires the lock with the SUBCLASS name as the default key" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with("NightlySweepJob", queue_name: "default", msg_id: 0)
+    end
+
+    it "injects the subclass-name key into the payload metadata" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).to have_received(:send_message).with(
+        anything,
+        hash_including(Pgbus::Uniqueness::METADATA_KEY => "NightlySweepJob"),
+        headers: anything
+      )
+    end
 
     it "does not enqueue when execution already recorded" do
       allow(Pgbus::RecurringExecution).to receive(:record)
         .and_raise(Pgbus::Recurring::AlreadyRecorded)
 
-      schedule.enqueue_task(task, run_at: run_at)
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
 
       expect(mock_client).not_to have_received(:send_message)
+    end
+  end
+
+  describe "#enqueue_task no-key default with task arguments" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
+
+      stub_const("SiteSyncJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, on_conflict: :discard
+      end)
+
+      config.recurring_tasks = {
+        "sync_a" => { "class" => "SiteSyncJob", "schedule" => "0 2 * * *", "args" => ["site_a"] },
+        "sync_b" => { "class" => "SiteSyncJob", "schedule" => "0 2 * * *", "args" => ["site_b"] }
+      }
+    end
+
+    it "qualifies the default key with the task's arguments so distinct-arg tasks don't share a lock" do
+      schedule.tasks.each { |task| schedule.enqueue_task(task, run_at: run_at) }
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with('SiteSyncJob:["site_a"]', queue_name: "default", msg_id: 0)
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with('SiteSyncJob:["site_b"]', queue_name: "default", msg_id: 0)
+    end
+
+    it "injects the same args-qualified key into the payload metadata" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).to have_received(:send_message).with(
+        anything,
+        hash_including(Pgbus::Uniqueness::METADATA_KEY => 'SiteSyncJob:["site_a"]'),
+        headers: anything
+      )
+    end
+
+    it "fails closed (skips the tick) when the default key cannot be built" do
+      # Scope the stub to the task's args array: the JSON log formatter also
+      # calls ::JSON.generate (with a Hash), and a blanket raise would blow up
+      # the fail-closed rescue's own log line instead of testing the rescue.
+      allow(JSON).to receive(:generate).and_call_original
+      allow(JSON).to receive(:generate).with(["site_a"]).and_raise(StandardError, "boom")
+
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).not_to have_received(:send_message)
+    end
+  end
+
+  describe "#enqueue_task with a failing user-supplied key proc" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
+      allow(Pgbus::ErrorReporter).to receive(:report)
+
+      stub_const("BrokenKeyJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed,
+                           key: ->(*) { raise "kaput" },
+                           on_conflict: :discard
+      end)
+
+      config.recurring_tasks = {
+        "broken" => { "class" => "BrokenKeyJob", "schedule" => "0 2 * * *" }
+      }
+    end
+
+    it "fails closed (skips the tick) instead of enqueuing without a lock" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).not_to have_received(:send_message)
+    end
+
+    it "reports the failure through error_reporters" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(Pgbus::ErrorReporter).to have_received(:report)
+        .with(kind_of(StandardError), hash_including(action: "recurring_uniqueness_lock", task: "broken"))
     end
   end
 

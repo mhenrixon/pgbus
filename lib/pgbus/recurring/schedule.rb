@@ -139,7 +139,7 @@ module Pgbus
         return nil unless config
         return nil unless config[:strategy] == :until_executed
 
-        key = resolve_uniqueness_key(config, task)
+        key = resolve_uniqueness_key(job_class, config, task)
         return nil unless key
 
         acquired = UniquenessKey.acquire!(key, queue_name: resolve_queue(task), msg_id: 0)
@@ -155,6 +155,7 @@ module Pgbus
           "[Pgbus] Uniqueness lock check failed for #{task.key}: #{e.class}: #{e.message} — " \
             "skipping enqueue to prevent duplicates"
         end
+        ErrorReporter.report(e, { action: "recurring_uniqueness_lock", task: task.key })
         :already_locked # Fail closed — skip enqueue when lock check errors
       end
 
@@ -168,19 +169,39 @@ module Pgbus
       end
 
       # Resolve the uniqueness key for a recurring task.
-      # For no-argument recurring jobs, the key defaults to the class name.
-      def resolve_uniqueness_key(config, task)
+      # With no explicit key: the key is the SCHEDULED job class's name —
+      # resolved here, not via a stored proc, so a declaration inherited from
+      # a base class keys each subclass separately (issue #357) — qualified
+      # with the task's arguments so two recurring tasks pointing at the same
+      # job class with different args: don't share one lock (the scheduler
+      # can't use #333's raise-at-enqueue guard, so it disambiguates instead).
+      #
+      # Every failure here — default path or user-supplied key proc — must
+      # propagate to acquire_uniqueness_lock's fail-closed rescue (skip this
+      # tick, log, report). Returning nil instead would mean "no key
+      # configured", and the task would be enqueued WITHOUT a lock: a broken
+      # key proc silently disabling the very protection it configures. The
+      # warn adds the failing-proc context before re-raising.
+      def resolve_uniqueness_key(job_class, config, task)
         key_proc = config[:key]
         args = task.arguments || []
+        return default_uniqueness_key(job_class, args) unless key_proc
 
-        if args.empty?
-          key_proc.call
-        else
-          key_proc.call(*args)
+        begin
+          args.empty? ? key_proc.call : key_proc.call(*args)
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Could not resolve uniqueness key for #{task.key}: #{e.message}" }
+          raise
         end
-      rescue StandardError => e
-        Pgbus.logger.warn { "[Pgbus] Could not resolve uniqueness key for #{task.key}: #{e.message}" }
-        nil
+      end
+
+      # Class-name default for the scheduler path, args-qualified so distinct
+      # argument sets get distinct locks. JSON keeps the key deterministic
+      # and readable in the dashboard/locks table.
+      def default_uniqueness_key(job_class, args)
+        return job_class.name if args.empty?
+
+        "#{job_class.name}:#{JSON.generate(args)}"
       end
 
       # Inject uniqueness metadata into the payload so the executor releases
@@ -197,7 +218,7 @@ module Pgbus
         return payload unless config
         return payload unless config[:strategy] == :until_executed
 
-        key = resolve_uniqueness_key(config, task)
+        key = resolve_uniqueness_key(job_class, config, task)
         return payload unless key
 
         payload.merge(
