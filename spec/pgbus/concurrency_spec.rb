@@ -75,6 +75,16 @@ RSpec.describe Pgbus::Concurrency do
       end.to raise_error(ArgumentError, /callable/)
     end
 
+    it "rejects key: false at definition time (would otherwise silently act as the default key)" do
+      expect do
+        Class.new(ActiveJob::Base) do
+          include Pgbus::Concurrency
+
+          limits_concurrency to: 1, key: false
+        end
+      end.to raise_error(ArgumentError, /callable/)
+    end
+
     it "defaults key to the enqueued job's class name (no default proc stored)" do
       job_class = Class.new(ActiveJob::Base) do
         include Pgbus::Concurrency

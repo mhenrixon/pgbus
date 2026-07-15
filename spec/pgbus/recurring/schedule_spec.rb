@@ -242,6 +242,42 @@ RSpec.describe Pgbus::Recurring::Schedule do
     end
   end
 
+  describe "#enqueue_task with a failing user-supplied key proc" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
+      allow(Pgbus::ErrorReporter).to receive(:report)
+
+      stub_const("BrokenKeyJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed,
+                           key: ->(*) { raise "kaput" },
+                           on_conflict: :discard
+      end)
+
+      config.recurring_tasks = {
+        "broken" => { "class" => "BrokenKeyJob", "schedule" => "0 2 * * *" }
+      }
+    end
+
+    it "fails closed (skips the tick) instead of enqueuing without a lock" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).not_to have_received(:send_message)
+    end
+
+    it "reports the failure through error_reporters" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(Pgbus::ErrorReporter).to have_received(:report)
+        .with(kind_of(StandardError), hash_including(action: "recurring_uniqueness_lock", task: "broken"))
+    end
+  end
+
   describe "uniqueness integration" do
     let(:schedule) { described_class.new(config: config) }
     let(:task) { schedule.tasks.first }

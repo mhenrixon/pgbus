@@ -155,6 +155,7 @@ module Pgbus
           "[Pgbus] Uniqueness lock check failed for #{task.key}: #{e.class}: #{e.message} — " \
             "skipping enqueue to prevent duplicates"
         end
+        ErrorReporter.report(e, { action: "recurring_uniqueness_lock", task: task.key })
         :already_locked # Fail closed — skip enqueue when lock check errors
       end
 
@@ -175,11 +176,12 @@ module Pgbus
       # job class with different args: don't share one lock (the scheduler
       # can't use #333's raise-at-enqueue guard, so it disambiguates instead).
       #
-      # The default path deliberately sits OUTSIDE the rescue: if it fails,
-      # the error propagates to acquire_uniqueness_lock's fail-closed rescue
-      # (skip this tick) instead of degrading to nil — nil means "no key",
-      # which would enqueue WITHOUT a lock. The rescue stays for user-supplied
-      # key procs only, whose arity/behavior pgbus does not control.
+      # Every failure here — default path or user-supplied key proc — must
+      # propagate to acquire_uniqueness_lock's fail-closed rescue (skip this
+      # tick, log, report). Returning nil instead would mean "no key
+      # configured", and the task would be enqueued WITHOUT a lock: a broken
+      # key proc silently disabling the very protection it configures. The
+      # warn adds the failing-proc context before re-raising.
       def resolve_uniqueness_key(job_class, config, task)
         key_proc = config[:key]
         args = task.arguments || []
@@ -189,7 +191,7 @@ module Pgbus
           args.empty? ? key_proc.call : key_proc.call(*args)
         rescue StandardError => e
           Pgbus.logger.warn { "[Pgbus] Could not resolve uniqueness key for #{task.key}: #{e.message}" }
-          nil
+          raise
         end
       end
 

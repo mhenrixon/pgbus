@@ -60,7 +60,7 @@ module Pgbus
         raise ArgumentError, "unknown keyword: #{opts.keys.first.inspect}" if opts.any?
         raise ArgumentError, "strategy must be one of: #{VALID_STRATEGIES.join(", ")}" unless VALID_STRATEGIES.include?(strategy)
         raise ArgumentError, "on_conflict must be one of: #{VALID_CONFLICTS.join(", ")}" unless VALID_CONFLICTS.include?(on_conflict)
-        raise ArgumentError, "key must be callable (Proc or lambda)" if key && !key.respond_to?(:call)
+        raise ArgumentError, "key must be callable (Proc or lambda)" if !key.nil? && !key.respond_to?(:call)
 
         # Record whether an explicit key was given. With NO explicit key the key
         # defaults to the class name; that is safe for a no-argument job (one

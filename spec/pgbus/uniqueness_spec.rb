@@ -48,6 +48,19 @@ RSpec.describe Pgbus::Uniqueness do
       end.not_to raise_error
     end
 
+    it "rejects a non-nil, non-callable key (including false) at definition time" do
+      # `key: false` used to slip through the truthiness guard, record
+      # explicit_key: true, and crash at enqueue with NoMethodError instead
+      # of the documented ArgumentError here.
+      expect do
+        Class.new do
+          include Pgbus::Uniqueness
+
+          ensures_uniqueness strategy: :until_executed, key: false
+        end
+      end.to raise_error(ArgumentError, /callable/)
+    end
+
     it "records explicit_key: false when key is omitted" do
       job_class = Class.new do
         include Pgbus::Uniqueness
