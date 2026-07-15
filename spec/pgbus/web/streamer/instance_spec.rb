@@ -197,6 +197,63 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       expect(instance.listener.instance_variable_get(:@connection_factory)).to be(injected)
     end
 
+    context "when connection_guc_mode is :session with database.yml variables (issue #352)" do
+      # In :session mode Configuration#forward_connection_variables leaves the
+      # `variables:` hash on the options; :variables is not a libpq keyword, so
+      # a raw PG.connect(**opts) fails with `invalid connection option
+      # "variables"` — breaking every SSE stream on the worker.
+      let(:session_config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.connection_guc_mode = :session
+          c.connection_params = { host: "pooler.example", port: 6432, dbname: "app", user: "app",
+                                  variables: { statement_timeout: "10s", timezone: "UTC" } }
+          c.streams_port = 5432
+        end
+      end
+
+      let(:exec_recording_conn) do
+        Class.new do
+          attr_reader :executed
+
+          def initialize
+            @executed = []
+          end
+
+          def exec(sql)
+            @executed << sql
+            nil
+          end
+
+          def close; end
+          def reset = nil
+        end.new
+      end
+
+      it "strips the non-libpq :variables key before PG.connect" do
+        require "pg"
+        captured = nil
+        allow(PG).to receive(:connect) do |**kwargs|
+          captured = kwargs
+          exec_recording_conn
+        end
+
+        described_class.new(client: client, config: session_config, logger: Logger.new(IO::NULL))
+
+        expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app")
+      end
+
+      it "keeps the GUCs by applying them via post-connect SET" do
+        require "pg"
+        allow(PG).to receive(:connect).and_return(exec_recording_conn)
+
+        described_class.new(client: client, config: session_config, logger: Logger.new(IO::NULL))
+
+        expect(exec_recording_conn.executed).to eq(
+          ["SET statement_timeout = '10s'", "SET timezone = 'UTC'"]
+        )
+      end
+    end
+
     context "when the freshly built connection lands on a read-only replica" do
       before do
         require "pg"

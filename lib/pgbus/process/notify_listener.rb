@@ -146,7 +146,9 @@ module Pgbus
           wait_once
         end
       rescue StandardError => e
-        @logger.error { "[Pgbus::NotifyListener] fatal: #{e.class}: #{e.message}" } if running?
+        # Report, don't just log: a listener that dies at boot silently
+        # degrades every worker to polling (issue #352).
+        ErrorReporter.report(e, { action: "notify_listener_fatal" }) if running?
       ensure
         # Clear @running so #start can spawn a fresh thread after a fatal exit
         # (e.g. build_connection raising at boot). Without this, the dead
@@ -242,7 +244,7 @@ module Pgbus
             # partially-built conn is orphaned and the next retry just allocates
             # another one — leaking PG connections on repeated failures.
             close_quietly(new_conn)
-            @logger.error { "[Pgbus::NotifyListener] reconnect failed: #{e.class}: #{e.message}" }
+            ErrorReporter.report(e, { action: "notify_listener_reconnect" })
             sleep RECONNECT_BACKOFF_SECONDS
             next
           end
@@ -255,11 +257,11 @@ module Pgbus
         end
       end
 
+      # String/Hash go through DedicatedConnection so a :session-mode
+      # `:variables` key never reaches PG.connect (issue #352).
       def build_connection
-        require "pg" unless defined?(::PG::Connection)
         case @connection_options
-        when String then ::PG.connect(@connection_options)
-        when Hash   then ::PG.connect(**@connection_options)
+        when String, Hash then Pgbus::DedicatedConnection.connect(@connection_options)
         else
           raise Pgbus::ConfigurationError,
                 "NotifyListener cannot build a PG connection from #{@connection_options.class}. " \

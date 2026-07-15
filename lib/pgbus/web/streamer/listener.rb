@@ -303,7 +303,7 @@ module Pgbus
               # don't leak PG connections, then back off and retry rather than
               # letting the exception kill the listener thread silently.
               close_quietly(new_conn)
-              @logger.error { "[Pgbus::Streamer::Listener] reconnect failed: #{e.class}: #{e.message}" }
+              Pgbus::ErrorReporter.report(e, { action: "streamer_reconnect" })
               sleep RECONNECT_BACKOFF_SECONDS
               next
             end
