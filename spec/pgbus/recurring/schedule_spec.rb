@@ -137,12 +137,53 @@ RSpec.describe Pgbus::Recurring::Schedule do
       expect(Pgbus::RecurringExecution).to have_received(:record)
         .with("daily_cleanup", run_at)
     end
+  end
+
+  describe "#enqueue_task uniqueness with a base-class declaration (issue #357)" do
+    let(:schedule) { described_class.new(config: config) }
+    let(:run_at) { Time.utc(2026, 3, 31, 2, 0, 0) }
+
+    before do
+      allow(Pgbus::RecurringExecution).to receive(:record).and_yield
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(true)
+
+      stub_const("MaintenanceBaseJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, on_conflict: :discard
+      end)
+      stub_const("NightlySweepJob", Class.new(MaintenanceBaseJob))
+
+      config.recurring_tasks = {
+        "nightly_sweep" => {
+          "class" => "NightlySweepJob",
+          "schedule" => "0 2 * * *"
+        }
+      }
+    end
+
+    it "acquires the lock with the SUBCLASS name as the default key" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with("NightlySweepJob", queue_name: "default", msg_id: 0)
+    end
+
+    it "injects the subclass-name key into the payload metadata" do
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
+
+      expect(mock_client).to have_received(:send_message).with(
+        anything,
+        hash_including(Pgbus::Uniqueness::METADATA_KEY => "NightlySweepJob"),
+        headers: anything
+      )
+    end
 
     it "does not enqueue when execution already recorded" do
       allow(Pgbus::RecurringExecution).to receive(:record)
         .and_raise(Pgbus::Recurring::AlreadyRecorded)
 
-      schedule.enqueue_task(task, run_at: run_at)
+      schedule.enqueue_task(schedule.tasks.first, run_at: run_at)
 
       expect(mock_client).not_to have_received(:send_message)
     end

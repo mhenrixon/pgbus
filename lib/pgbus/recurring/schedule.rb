@@ -139,7 +139,7 @@ module Pgbus
         return nil unless config
         return nil unless config[:strategy] == :until_executed
 
-        key = resolve_uniqueness_key(config, task)
+        key = resolve_uniqueness_key(job_class, config, task)
         return nil unless key
 
         acquired = UniquenessKey.acquire!(key, queue_name: resolve_queue(task), msg_id: 0)
@@ -168,9 +168,13 @@ module Pgbus
       end
 
       # Resolve the uniqueness key for a recurring task.
-      # For no-argument recurring jobs, the key defaults to the class name.
-      def resolve_uniqueness_key(config, task)
+      # With no explicit key: the key is the SCHEDULED job class's name —
+      # resolved here, not via a stored proc, so a declaration inherited from
+      # a base class keys each subclass separately (issue #357).
+      def resolve_uniqueness_key(job_class, config, task)
         key_proc = config[:key]
+        return job_class.name unless key_proc
+
         args = task.arguments || []
 
         if args.empty?
@@ -197,7 +201,7 @@ module Pgbus
         return payload unless config
         return payload unless config[:strategy] == :until_executed
 
-        key = resolve_uniqueness_key(config, task)
+        key = resolve_uniqueness_key(job_class, config, task)
         return payload unless key
 
         payload.merge(

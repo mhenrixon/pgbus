@@ -283,4 +283,66 @@ RSpec.describe Pgbus::Uniqueness do
       expect(Pgbus::UniquenessKey).not_to have_received(:release!)
     end
   end
+
+  describe "inheritance of base-class declarations (issue #357)" do
+    let(:base_class) do
+      Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, on_conflict: :discard
+      end
+    end
+
+    before do
+      stub_const("RecurringBaseJob", base_class)
+      stub_const("NightlyCleanupJob", Class.new(RecurringBaseJob))
+    end
+
+    it "makes the base-class config visible to subclasses" do
+      config = NightlyCleanupJob.pgbus_uniqueness
+      expect(config).to be_present
+      expect(config[:strategy]).to eq(:until_executed)
+      expect(config[:explicit_key]).to be(false)
+    end
+
+    it "resolves the SUBCLASS name for the class-name default, not the declaring class" do
+      # The old default proc (`->(*) { name }`) captured the declaring class,
+      # so a naive inheritance fix would collapse every subclass into ONE
+      # "RecurringBaseJob" singleton lock — worse than the inert lookup it
+      # replaced. The default key must come from the enqueued job's class.
+      expect(described_class.resolve_key(NightlyCleanupJob.new)).to eq("NightlyCleanupJob")
+    end
+
+    it "fires the #333 no-key guard for a subclass enqueued WITH arguments" do
+      expect { described_class.resolve_key(NightlyCleanupJob.new(42)) }
+        .to raise_error(ArgumentError, /collapse/i)
+    end
+
+    it "lets a subclass's own declaration override the inherited one" do
+      stub_const("KeyedChildJob", Class.new(RecurringBaseJob) do
+        ensures_uniqueness strategy: :until_executed, key: ->(id) { "child-#{id}" }
+      end)
+
+      expect(described_class.resolve_key(KeyedChildJob.new(7))).to eq("child-7")
+      expect(described_class.resolve_key(NightlyCleanupJob.new)).to eq("NightlyCleanupJob")
+    end
+
+    it "uses an inherited explicit key: proc with the subclass's arguments" do
+      stub_const("ExplicitBaseJob", Class.new(ActiveJob::Base) do
+        include Pgbus::Uniqueness
+
+        ensures_uniqueness strategy: :until_executed, key: ->(id) { "record-#{id}" }
+      end)
+      stub_const("ExplicitChildJob", Class.new(ExplicitBaseJob))
+
+      expect(described_class.resolve_key(ExplicitChildJob.new(9))).to eq("record-9")
+    end
+
+    it "still returns nil for a class with no declaration anywhere in its ancestry" do
+      stub_const("PlainJob", Class.new(ActiveJob::Base) { include Pgbus::Uniqueness })
+
+      expect(PlainJob.pgbus_uniqueness).to be_nil
+      expect(described_class.resolve_key(PlainJob.new)).to be_nil
+    end
+  end
 end

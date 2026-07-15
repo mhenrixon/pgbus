@@ -16,7 +16,10 @@ module Pgbus
       #
       # Options:
       #   to:          Maximum concurrent jobs for the same key (required)
-      #   key:         Proc receiving job arguments, returns a string key. Default: job class name.
+      #   key:         Proc receiving job arguments, returns a string key.
+      #                Default: the ENQUEUED job's class name (resolved at
+      #                resolve time, so an inherited declaration keys each
+      #                subclass separately — issue #357).
       #   duration:    Safety expiry for semaphore (default: 15 minutes)
       #   on_conflict: What to do when limit is reached — :block, :discard, or :raise (default: :block)
       def limits_concurrency(to:, key: nil, duration: 15 * 60, on_conflict: :block) # rubocop:disable Naming/MethodParameterName
@@ -27,14 +30,16 @@ module Pgbus
 
         @pgbus_concurrency = {
           limit: to,
-          key: key || ->(*) { name },
+          key: key,
           duration: duration,
           on_conflict: on_conflict
         }.freeze
       end
 
+      # The nearest declaration in the ancestor chain wins — same inheritance
+      # contract as Uniqueness#pgbus_uniqueness (issue #357).
       def pgbus_concurrency
-        @pgbus_concurrency
+        @pgbus_concurrency || (superclass.pgbus_concurrency if superclass.respond_to?(:pgbus_concurrency))
       end
     end
 
@@ -46,6 +51,10 @@ module Pgbus
 
         config = active_job.class.pgbus_concurrency
         return nil unless config
+
+        # Class-name default, resolved from the ENQUEUED job's class so an
+        # inherited declaration keys each subclass separately (#357).
+        return active_job.class.name unless config[:key]
 
         args = active_job.arguments
         last = args.last
