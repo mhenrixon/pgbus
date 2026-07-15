@@ -5,7 +5,7 @@ require "spec_helper"
 RSpec.describe Pgbus::PgmqSchema do
   describe ".latest_version" do
     it "returns the latest vendored PGMQ version" do
-      expect(described_class.latest_version).to eq("1.11.1")
+      expect(described_class.latest_version).to eq("1.12.0")
     end
   end
 
@@ -22,6 +22,12 @@ RSpec.describe Pgbus::PgmqSchema do
       expect(File.exist?(path)).to be true
     end
 
+    it "returns the path to the vendored SQL file for v1.12.0" do
+      path = described_class.sql_path("1.12.0")
+      expect(path).to end_with("pgmq_schema/pgmq_v1.12.0.sql")
+      expect(File.exist?(path)).to be true
+    end
+
     it "raises for unknown versions" do
       expect { described_class.sql_path("0.0.0") }
         .to raise_error(Pgbus::PgmqSchema::VersionNotFoundError, /0\.0\.0/)
@@ -35,8 +41,8 @@ RSpec.describe Pgbus::PgmqSchema do
       expect(versions).to eq(versions.sort_by { |v| Gem::Version.new(v) })
     end
 
-    it "lists both 1.11.0 and 1.11.1" do
-      expect(described_class.available_versions).to include("1.11.0", "1.11.1")
+    it "lists 1.11.0, 1.11.1 and 1.12.0" do
+      expect(described_class.available_versions).to include("1.11.0", "1.11.1", "1.12.0")
     end
   end
 
@@ -49,6 +55,12 @@ RSpec.describe Pgbus::PgmqSchema do
 
     it "returns the SQL content for v1.11.1" do
       sql = described_class.sql_for_version("1.11.1")
+      expect(sql).to include("CREATE SCHEMA IF NOT EXISTS pgmq")
+      expect(sql).to include("CREATE FUNCTION pgmq.create(")
+    end
+
+    it "returns the SQL content for v1.12.0" do
+      sql = described_class.sql_for_version("1.12.0")
       expect(sql).to include("CREATE SCHEMA IF NOT EXISTS pgmq")
       expect(sql).to include("CREATE FUNCTION pgmq.create(")
     end
@@ -75,6 +87,27 @@ RSpec.describe Pgbus::PgmqSchema do
 
       it "defines the new read_grouped_head function" do
         expect(sql).to include("CREATE FUNCTION pgmq.read_grouped_head(")
+      end
+
+      it "strips the extension-only _belongs_to_pgmq helper" do
+        expect(sql).not_to include("_belongs_to_pgmq")
+      end
+    end
+
+    context "when targeting v1.12.0" do
+      subject(:sql) { described_class.install_sql("1.12.0") }
+
+      it "is non-empty" do
+        expect(sql).not_to be_empty
+      end
+
+      it "creates the pgmq schema without an extension dependency" do
+        expect(sql).to include("CREATE SCHEMA IF NOT EXISTS pgmq")
+        expect(sql).not_to include("CREATE EXTENSION")
+      end
+
+      it "defines the new read_grouped_head_with_poll function" do
+        expect(sql).to include("CREATE FUNCTION pgmq.read_grouped_head_with_poll(")
       end
 
       it "strips the extension-only _belongs_to_pgmq helper" do
@@ -112,7 +145,7 @@ RSpec.describe Pgbus::PgmqSchema do
     end
 
     it "defaults to the latest version" do
-      expect(described_class.version_tracking_sql).to include("1.11.1")
+      expect(described_class.version_tracking_sql).to include("1.12.0")
     end
   end
 end
