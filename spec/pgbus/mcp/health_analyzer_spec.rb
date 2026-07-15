@@ -7,8 +7,11 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
   let(:data_source) { instance_double(Pgbus::Web::DataSource) }
 
-  def stub_data_source(queues: [], processes: [], health: {})
-    allow(data_source).to receive_messages(queues_with_metrics: queues, processes: processes, queue_health_stats: health)
+  def stub_data_source(queues: [], processes: [], health: {}, stream_queues: [])
+    allow(data_source).to receive_messages(
+      queues_with_metrics: queues, processes: processes,
+      queue_health_stats: health, stream_queue_names: Set.new(stream_queues)
+    )
   end
 
   def queue(name:, length: 0, visible: 0, paused: false, max_read_ct: nil)
@@ -172,7 +175,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     before { allow(Pgbus.logger).to receive(:warn) }
 
     it "still produces a verdict when queue_health_stats raises" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [])
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], stream_queue_names: Set.new)
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
       verdict = analyzer.verdict
@@ -181,12 +184,55 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     end
 
     it "logs the queue_health_stats failure rather than swallowing it" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [])
+      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], stream_queue_names: Set.new)
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
       analyzer.verdict
 
       expect(Pgbus.logger).to have_received(:warn)
+    end
+  end
+
+  describe "registered stream queues are excluded from the verdict (issue #359)" do
+    it "does not read a stream queue's permanent read_ct=0 backlog as the wedge" do
+      # Durable stream delivery is a non-consuming peek: visible messages with
+      # read_ct=0 forever is the NORMAL state of a stream queue, not a wedge.
+      stub_data_source(
+        queues: [queue(name: "pgbus_chat_1_messages", length: 10, visible: 10, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        stream_queues: ["pgbus_chat_1_messages"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("OK")
+      expect(verdict[:reasons]).to be_empty
+    end
+
+    it "still detects a genuine job-queue wedge alongside noisy stream queues" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_chat_1_messages", length: 10, visible: 10, max_read_ct: 0),
+                 queue(name: "pgbus_default", length: 5, visible: 5, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        stream_queues: ["pgbus_chat_1_messages"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("pgbus_default")
+      expect(verdict[:reasons].first).not_to include("pgbus_chat_1_messages")
+    end
+
+    it "excludes stream backlog from the summary totals" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_chat_1_messages", length: 10, visible: 10, max_read_ct: 0),
+                 queue(name: "pgbus_default", length: 2, visible: 1, max_read_ct: 3)],
+        processes: [worker(status: :healthy)],
+        stream_queues: ["pgbus_chat_1_messages"]
+      )
+
+      summary = analyzer.verdict[:summary]
+      expect(summary[:total_visible]).to eq(1)
+      expect(summary[:total_depth]).to eq(2)
     end
   end
 

@@ -32,13 +32,19 @@ module Pgbus
       def verdict
         queues          = @data_source.queues_with_metrics
         processes       = @data_source.processes
+        stream_names    = @data_source.stream_queue_names
         health, health_error = safe_queue_health
 
-        # Partition queues once: non-DLQ (the operational set) and the subset
-        # of those with visible, claimable backlog. Paused queues are removed
-        # from the STALLED backlog (an intentional pause is not the wedge —
-        # it's reported under DEGRADED), but kept in `non_dlq` for the summary.
-        non_dlq = queues.reject { |q| dlq?(q) }
+        # Partition queues once: the operational set excludes DLQs and
+        # registered stream queues, and the backlog is the subset with
+        # visible, claimable messages. Stream queues are excluded like DLQs
+        # (issue #359): stream delivery is a non-consuming peek, so their
+        # messages are permanently visible with read_ct=0 — exactly the wedge
+        # signature — and counting them makes the verdict scream STALLED on
+        # every streams-heavy install. Paused queues are removed from the
+        # STALLED backlog (an intentional pause is not the wedge — it's
+        # reported under DEGRADED), but kept in `non_dlq` for the summary.
+        non_dlq = queues.reject { |q| dlq?(q) || stream_names.include?(q[:name].to_s) }
         backlog = non_dlq.select { |q| q[:queue_visible_length].to_i.positive? }
         active_backlog = backlog.reject { |q| q[:paused] }
 
