@@ -794,6 +794,32 @@ module Pgbus
       @streams_pool.stats_snapshot
     end
 
+    # Operator escape hatch (issue #354): drop every pooled PGMQ connection —
+    # job pool AND the live streams pool — and let the pools rebuild lazily on
+    # next checkout (pgmq-ruby >= 0.7.1). Use to recover connections libpq
+    # still reports as CONNECTION_OK but that are in fact wedged (e.g. after a
+    # wall-clock interrupt cut a query mid-flight), which pgmq-ruby's checkout
+    # health check cannot detect. Unlike #close, the pools stay usable.
+    # Connections checked out by other threads mid-reload are unaffected.
+    #
+    # No-op (returns false) on the shared-AR Proc path: those pool slots wrap
+    # ActiveRecord's own raw connection — reloading would close AR's socket
+    # out from under the application. Returns true after a reload.
+    def reload # rubocop:disable Naming/PredicateMethod -- command that reports whether it acted, like #ping
+      if @shared_connection
+        Pgbus.logger.warn do
+          "[Pgbus::Client] reload skipped: pgbus is sharing ActiveRecord's connection " \
+            "(Proc connection_options) and won't close a socket it doesn't own. " \
+            "Manage that connection through ActiveRecord instead."
+        end
+        return false
+      end
+
+      @pgmq.reload
+      @streams_pool.reload
+      true
+    end
+
     private
 
     # Human-readable label for which config knob supplied the connection
@@ -1146,6 +1172,18 @@ module Pgbus
     READ_TIMEOUT_SLACK = 5
     private_constant :READ_TIMEOUT_SLACK
 
+    # Raised (instead of plain ReadTimeoutError) when the Ruby Timeout last
+    # resort fires — i.e. Thread#raise interrupted a read mid-flight on a
+    # socket libpq couldn't bound (issue #354). IS-A Pgbus::ReadTimeoutError,
+    # so the public contract is unchanged; the distinct class lets
+    # with_read_timeout tell "wedged socket — reload the pool" (this) apart
+    # from "clean server-side statement_timeout cancel — connection healthy"
+    # (plain ReadTimeoutError), where reloading would churn a healthy pool on
+    # every slow query. Internal signal carried on the unwind path itself (no
+    # thread-local/ivar state around a Thread#raise interrupt); application
+    # code should rescue Pgbus::ReadTimeoutError.
+    class WedgedReadTimeout < Pgbus::ReadTimeoutError; end
+
     # Bound a read and surface a timeout as Pgbus::ReadTimeoutError. Prefer
     # libpq-native bounds baked into the connection; the Ruby Timeout is a
     # narrow, last-resort fallback used only where libpq cannot bound a hung
@@ -1179,12 +1217,19 @@ module Pgbus
     #      which AR passes straight through to the connection. #initialize logs a
     #      one-time hint when read_timeout is set on a Proc connection.
     #
-    #      KNOWN LIMITATION: when (3) fires on a genuinely hung socket, libpq may
-    #      leave the pooled PG::Connection reporting CONNECTION_OK while it will
-    #      in fact re-hang on reuse, and pgmq-ruby's health check won't discard
-    #      it (it isn't CONNECTION_BAD). The proper fix is a public pool-reload on
-    #      pgmq-ruby (follow-up, cf. mensfeld/pgmq-ruby#94); until then it's
-    #      documented and confined to the non-Linux dedicated path.
+    #      WEDGED-SOCKET RECOVERY (issue #354): when (3) fires on a genuinely
+    #      hung socket, libpq may leave the pooled PG::Connection reporting
+    #      CONNECTION_OK while it will in fact re-hang on reuse, and pgmq-ruby's
+    #      checkout health check won't discard it (it isn't CONNECTION_BAD). So
+    #      the Timeout raises WedgedReadTimeout (a ReadTimeoutError subclass)
+    #      and the rescue below drops every pooled connection via @pgmq.reload
+    #      (pgmq-ruby >= 0.7.1) — the pool rebuilds lazily on next checkout.
+    #      By the time the rescue runs, Thread#raise has unwound the read and
+    #      connection_pool's ensure has checked the poisoned connection back in
+    #      as idle, so reload does discard it. A small window remains where
+    #      another thread checks it out first; that thread's own read bound /
+    #      stale-retry covers it — reload narrows the window, it doesn't need
+    #      to close it atomically.
     #
     # MUST wrap only the bare `@pgmq.read*` call, inside both `synchronized` and
     # `with_stale_connection_retry`, so the Timeout clock starts only after the
@@ -1203,10 +1248,26 @@ module Pgbus
       return mapping_statement_timeout(&block) unless timeout&.positive?
 
       # rubocop:disable Pgbus/NoRubyTimeout -- deliberate last-resort bound; see above
-      Timeout.timeout(timeout + READ_TIMEOUT_SLACK, Pgbus::ReadTimeoutError) do
+      Timeout.timeout(timeout + READ_TIMEOUT_SLACK, WedgedReadTimeout) do
         mapping_statement_timeout(&block)
       end
       # rubocop:enable Pgbus/NoRubyTimeout
+    rescue WedgedReadTimeout
+      reload_pool_after_wedged_timeout
+      raise
+    end
+
+    # Best-effort job-pool reload after the Ruby Timeout fallback interrupted a
+    # read (see with_read_timeout). A reload failure is logged, never raised —
+    # the caller is already unwinding with ReadTimeoutError, which is the
+    # actionable error; masking it with a secondary pool failure would hide
+    # which read timed out.
+    def reload_pool_after_wedged_timeout
+      @pgmq.reload
+    rescue StandardError => e
+      Pgbus.logger.warn do
+        "[Pgbus::Client] pool reload after wedged read timeout failed: #{e.class}: #{e.message}"
+      end
     end
 
     # True when libpq's connection-baked read bounds (statement_timeout +

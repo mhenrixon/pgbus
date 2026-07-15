@@ -72,6 +72,44 @@ RSpec.describe Pgbus::Client do
         end
       end
 
+      # Issue #354: when the Ruby Timeout fallback interrupts a hung read, the
+      # poisoned connection is checked back into pgmq-ruby's pool still
+      # reporting CONNECTION_OK — the checkout health check can't discard it
+      # and the next checkout re-hangs. pgmq-ruby 0.7.1's Client#reload drops
+      # every pooled connection so the pool rebuilds lazily; the fallback path
+      # triggers it before re-raising.
+      context "when the Ruby Timeout fallback fires on a hung socket (issue #354)" do
+        before do
+          config.read_timeout = 1
+          client.instance_variable_set(:@libpq_read_bounds_effective, false)
+        end
+
+        it "reloads the pgmq pool so the wedged connection is never reused" do
+          allow(mock_pgmq).to receive(:read_batch) { sleep 10 }
+
+          expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
+          expect(mock_pgmq).to have_received(:reload).once
+        end
+
+        it "does NOT reload on a clean statement_timeout cancellation (healthy connection)" do
+          allow(mock_pgmq).to receive(:read_batch)
+            .and_raise(PGMQ::Errors::ConnectionError, "canceling statement due to statement timeout")
+
+          expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
+          expect(mock_pgmq).not_to have_received(:reload)
+        end
+
+        it "propagates ReadTimeoutError even when the reload itself fails, logging a warning" do
+          allow(mock_pgmq).to receive(:read_batch).and_raise(Pgbus::Client::WedgedReadTimeout, "execution expired")
+          allow(mock_pgmq).to receive(:reload).and_raise(StandardError, "pool exploded")
+          warnings = []
+          allow(Pgbus.logger).to receive(:warn) { |&blk| warnings << blk.call }
+
+          expect { client.read_batch("default", qty: 5) }.to raise_error(Pgbus::ReadTimeoutError)
+          expect(warnings.join).to include("pool exploded")
+        end
+      end
+
       # On a dedicated connection where libpq's bounds are effective (Linux,
       # read_timeout set, libpq >= 12), Ruby Timeout is never wired in — reads
       # rely purely on statement_timeout + tcp_user_timeout.

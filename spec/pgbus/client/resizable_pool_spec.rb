@@ -19,14 +19,17 @@ RSpec.describe Pgbus::Client::ResizablePool do
   def build_pgmq(size: 5, available: 5, on_produce: nil)
     stats = { size: size, available: available }
     Class.new do
-      attr_reader :produced, :closed
+      attr_reader :produced, :closed, :reloads
 
       define_method(:initialize) do
         @produced = 0
         @closed = false
+        @reloads = 0
         @stats = stats
         @on_produce = on_produce
       end
+
+      define_method(:reload) { @reloads += 1 }
 
       define_method(:produce) do |*_args, **_kwargs|
         @on_produce&.call
@@ -176,6 +179,26 @@ RSpec.describe Pgbus::Client::ResizablePool do
       expect(logger).to have_received(:warn)
       expect(old.closed?).to be(true) # closed anyway (leak-free: in-flight self-closes on checkin)
       expect(pool.stats_snapshot.last_drained).to be(false)
+    end
+  end
+
+  # Issue #354: Client#reload reaches the LIVE streams client through this
+  # wrapper — the @streams_pgmq ivar can be stale after a hot-swap.
+  describe "#reload" do
+    it "delegates to the current pool's pgmq client" do
+      resizable.reload
+
+      expect(seed_pgmq.reloads).to eq(1)
+    end
+
+    it "targets the new client after a swap, not the retired one" do
+      new_pgmq = build_pgmq(size: 12, available: 12)
+      resizable.swap(new_pgmq, from_size: 5, to_size: 12)
+
+      resizable.reload
+
+      expect(new_pgmq.reloads).to eq(1)
+      expect(seed_pgmq.reloads).to eq(0)
     end
   end
 
