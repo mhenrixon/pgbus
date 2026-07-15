@@ -8,6 +8,13 @@ class UpgradePgmqToV<%= target_version_slug.camelize %> < ActiveRecord::Migratio
     # This uses the vendored SQL which doesn't require the pgmq extension.
     execute Pgbus::PgmqSchema.install_sql("<%= target_version %>")
 
+    # Re-install the per-queue NOTIFY insert triggers the function drop
+    # cascaded away (pgmq.notify_insert_throttle records which queues had
+    # them and at what throttle; enable_notify_insert is idempotent).
+    # Without this, NOTIFY-gated wakeups silently die and workers fall back
+    # to polling until each queue is re-ensured by a process restart.
+    execute Pgbus::PgmqSchema.reinstall_notify_triggers_sql
+
     # Record the upgrade
     execute <<~SQL
       CREATE TABLE IF NOT EXISTS pgbus_pgmq_schema_versions (

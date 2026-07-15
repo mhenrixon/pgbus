@@ -22,6 +22,13 @@ RSpec.describe "Pgbus upgrade PGMQ generator migration template" do # rubocop:di
       expect(content).to include("Pgbus::PgmqSchema")
     end
 
+    it "re-installs the NOTIFY insert triggers the function drop cascaded away (issue #360)" do
+      content = File.read(template_path)
+      expect(content).to include("reinstall_notify_triggers_sql")
+      # The repair must run AFTER install_sql re-creates the trigger function.
+      expect(content.index("install_sql")).to be < content.index("reinstall_notify_triggers_sql")
+    end
+
     it "tracks the version in pgbus_pgmq_schema_versions" do
       content = File.read(template_path)
       expect(content).to include("pgbus_pgmq_schema_versions")
