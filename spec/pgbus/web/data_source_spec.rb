@@ -58,6 +58,19 @@ RSpec.describe Pgbus::Web::DataSource do
     end
   end
 
+  describe "#stream_queue_names" do
+    it "returns the freshly-loaded registry set (issue #359)" do
+      # Fresh per call: the health verdict runs on coarse intervals, and a
+      # long-lived process must see streams registered since the last check.
+      allow(Pgbus::StreamQueue).to receive(:reset_cache!)
+      allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(["pgbus_chat_1_messages"]))
+
+      expect(data_source.stream_queue_names).to eq(Set.new(["pgbus_chat_1_messages"]))
+      expect(Pgbus::StreamQueue).to have_received(:reset_cache!).ordered
+      expect(Pgbus::StreamQueue).to have_received(:all_names).ordered
+    end
+  end
+
   describe "#processes" do
     let(:worker_metadata) do
       {
