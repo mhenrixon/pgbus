@@ -1,9 +1,14 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+# Load pg at spec-LOAD time, not inside an example: other spec files
+# conditionally stub_const("PG", Module.new) when pg isn't loaded, and a
+# require that fires inside such a stub window loads the real gem into the
+# throwaway stub module — leaving PG undefined (but marked loaded) for the
+# rest of the process. Loading here runs before any example, on every seed.
+require "pg"
 
 RSpec.describe Pgbus::DedicatedConnection do
-  before { require "pg" }
 
   let(:fake_conn) do
     Class.new do
@@ -92,6 +97,50 @@ RSpec.describe Pgbus::DedicatedConnection do
         described_class.connect(dbname: "app", variables: {})
 
         expect(fake_conn.executed).to be_empty
+      end
+
+      context "when a SET raises after the connect succeeded" do
+        # The reconnect loops (NotifyListener#reconnect!, streamer Listener)
+        # retry build_connection on a 500ms backoff. Without closing here, a
+        # deterministically failing SET (e.g. a bogus GUC name in variables:)
+        # would orphan one server connection per retry until PostgreSQL
+        # exhausts max_connections.
+        let(:failing_conn) do
+          Class.new do
+            attr_reader :close_count
+
+            def initialize
+              @close_count = 0
+            end
+
+            def exec(_sql)
+              raise StandardError, 'unrecognized configuration parameter "bogus"'
+            end
+
+            def close
+              @close_count += 1
+            end
+          end.new
+        end
+
+        it "closes the freshly opened connection before re-raising" do
+          allow(PG).to receive(:connect).and_return(failing_conn)
+
+          expect do
+            described_class.connect(dbname: "app", variables: { bogus: "x" })
+          end.to raise_error(StandardError, /unrecognized configuration parameter/)
+
+          expect(failing_conn.close_count).to eq(1)
+        end
+
+        it "re-raises the SET error even when close itself fails" do
+          allow(failing_conn).to receive(:close).and_raise(StandardError.new("close failed"))
+          allow(PG).to receive(:connect).and_return(failing_conn)
+
+          expect do
+            described_class.connect(dbname: "app", variables: { bogus: "x" })
+          end.to raise_error(StandardError, /unrecognized configuration parameter/)
+        end
       end
 
       it "execs nothing for nil variables" do

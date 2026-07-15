@@ -31,8 +31,23 @@ module Pgbus
     def connect_from_hash(opts)
       variables = opts[:variables]
       conn = ::PG.connect(**opts.except(:variables))
-      variables&.each { |name, value| conn.exec("SET #{name} = '#{value}'") }
+      begin
+        variables&.each { |name, value| conn.exec("SET #{name} = '#{value}'") }
+      rescue StandardError
+        # A failing SET (e.g. a bogus GUC name in database.yml variables:)
+        # must not orphan the freshly opened socket — the reconnect loops
+        # retry on a tight backoff and would leak one server connection per
+        # attempt until PostgreSQL exhausts max_connections.
+        close_quietly(conn)
+        raise
+      end
       conn
+    end
+
+    def close_quietly(conn)
+      conn.close
+    rescue StandardError
+      nil
     end
   end
 end
