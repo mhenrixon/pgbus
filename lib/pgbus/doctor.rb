@@ -258,15 +258,17 @@ module Pgbus
     end
 
     # 7. GlobalID allowlist — security. allowed_global_id_models = nil means
-    # "allow ANY model as a GlobalID event/job argument", which lets a crafted
-    # payload deserialize arbitrary AR models. It's the default for upgrade
-    # continuity, so this is a warning (never a failure), and only in production
-    # where the blast radius is real.
+    # "allow ANY model as a GlobalID EventBus payload or ActiveJob argument",
+    # which lets a crafted queue message deserialize arbitrary AR models
+    # (issue #368 closed the job-path hole; both paths share the gate). It's
+    # the default for upgrade continuity, so this is a warning (never a
+    # failure), and only in production where the blast radius is real.
     def check_allowed_global_id_models
       if @config.allowed_global_id_models.nil? && production?
         return Check.new(name: "GlobalID allowlist", status: :warn,
                          detail: "allowed_global_id_models is nil (allow-all) in production — " \
-                                 "set an explicit allowlist of models permitted as GlobalID arguments")
+                                 "set an explicit allowlist of models permitted as GlobalID " \
+                                 "job arguments and EventBus payloads")
       end
 
       Check.new(name: "GlobalID allowlist", status: :ok,

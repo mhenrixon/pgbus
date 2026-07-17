@@ -65,17 +65,31 @@ module Pgbus
       end
       private :fetch_queues_with_metrics
 
-      # Physical queue names registered as stream queues (the
-      # pgbus_stream_queues registry). Stream delivery is a non-consuming
-      # peek, so stream messages sit visible with read_ct=0 forever — health
-      # verdicts must not read that as a wedge (issue #359). Loaded fresh per
-      # call (reset + one query): verdicts run on coarse intervals and a
-      # long-lived process must see streams registered since the last check.
-      # Degrades to an empty Set when the registry table is absent
-      # (pre-migration installs) or unreadable — StreamQueue swallows both.
+      # Physical queue names known to back streams: the pgbus_stream_queues
+      # registry plus any dormant pre-registry queues discovered by the
+      # archive msg_id index fingerprint (issue #366). Stream delivery is a
+      # non-consuming peek, so stream messages sit visible with read_ct=0
+      # forever — health verdicts must not read that as a wedge (issue #359).
+      # Loaded fresh per call (reset + registry + fingerprint queries):
+      # verdicts run on coarse intervals and a long-lived process must see
+      # streams registered since the last check. Degrades to an empty Set
+      # when the registry/pgmq schema is absent or unreadable.
       def stream_queue_names
         StreamQueue.reset_cache!
-        StreamQueue.all_names
+        StreamQueue.known_names
+      end
+
+      # Fingerprint-matched stream queues missing from the registry (issue #366).
+      # Used by HealthAnalyzer to surface a DEGRADED hint pointing at
+      # `rake pgbus:streams:backfill_registry`. Zero when fully backfilled or
+      # when the registry table is absent.
+      def unregistered_stream_queue_count
+        return 0 unless StreamQueue.table_exists?
+
+        (StreamQueue.fingerprint_matched_names - StreamQueue.all_names).size
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::Web] unregistered_stream_queue_count failed: #{e.message}" }
+        0
       end
 
       # The set of physical queue names some configured worker capsule or

@@ -59,15 +59,36 @@ RSpec.describe Pgbus::Web::DataSource do
   end
 
   describe "#stream_queue_names" do
-    it "returns the freshly-loaded registry set (issue #359)" do
+    it "returns the freshly-loaded known set (registry ∪ fingerprints, issues #359/#366)" do
       # Fresh per call: the health verdict runs on coarse intervals, and a
       # long-lived process must see streams registered since the last check.
+      # known_names also includes dormant pre-registry streams by fingerprint.
       allow(Pgbus::StreamQueue).to receive(:reset_cache!)
-      allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(["pgbus_chat_1_messages"]))
+      allow(Pgbus::StreamQueue).to receive(:known_names)
+        .and_return(Set.new(%w[pgbus_chat_1_messages pgbus_dormant_99]))
 
-      expect(data_source.stream_queue_names).to eq(Set.new(["pgbus_chat_1_messages"]))
+      expect(data_source.stream_queue_names)
+        .to eq(Set.new(%w[pgbus_chat_1_messages pgbus_dormant_99]))
       expect(Pgbus::StreamQueue).to have_received(:reset_cache!).ordered
-      expect(Pgbus::StreamQueue).to have_received(:all_names).ordered
+      expect(Pgbus::StreamQueue).to have_received(:known_names).ordered
+    end
+  end
+
+  describe "#unregistered_stream_queue_count" do
+    it "counts fingerprint matches missing from the registry (issue #366)" do
+      allow(Pgbus::StreamQueue).to receive_messages(
+        table_exists?: true,
+        all_names: Set.new(%w[pgbus_chat_1]),
+        fingerprint_matched_names: Set.new(%w[pgbus_chat_1 pgbus_dormant_99 pgbus_checkout_3])
+      )
+
+      expect(data_source.unregistered_stream_queue_count).to eq(2)
+    end
+
+    it "returns 0 when the registry table is absent" do
+      allow(Pgbus::StreamQueue).to receive(:table_exists?).and_return(false)
+
+      expect(data_source.unregistered_stream_queue_count).to eq(0)
     end
   end
 

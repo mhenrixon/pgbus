@@ -165,7 +165,26 @@ module Pgbus
         age = health[:oldest_transaction_age_sec]
         reasons << "oldest open transaction is #{age}s old (MVCC horizon pinning risk)" if age && age > 300
 
+        unregistered_hint = unregistered_stream_hint
+        reasons << unregistered_hint if unregistered_hint
+
         reasons
+      end
+
+      # Issue #366: fingerprint-matched streams excluded from the wedge signal
+      # still need the registry for orphan sweep bookkeeping and durable
+      # wildcard safety. Surface a DEGRADED hint so operators run the backfill.
+      def unregistered_stream_hint
+        return unless @data_source.respond_to?(:unregistered_stream_queue_count)
+
+        count = @data_source.unregistered_stream_queue_count
+        return if count.to_i <= 0
+
+        "#{count} unregistered stream queue(s) detected (dormant pre-registry durable " \
+          "streams). Run: rake pgbus:streams:backfill_registry"
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus::MCP] unregistered stream hint failed: #{e.class}: #{e.message}" }
+        nil
       end
 
       # True when any queue in the backlog holds a visible, never-claimed

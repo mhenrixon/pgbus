@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 
 RSpec.describe Pgbus::Serializer do
   describe ".serialize_job" do
@@ -24,16 +25,14 @@ RSpec.describe Pgbus::Serializer do
   end
 
   describe ".deserialize_job" do
-    it "delegates to ActiveJob::Base.deserialize" do
+    it "delegates to ::ActiveJob::Base.deserialize after the allowlist gate" do
       job_data = { "job_class" => "TestJob", "job_id" => "abc-123", "queue_name" => "default", "arguments" => [] }
       json_string = JSON.generate(job_data)
       fake_job = double("ActiveJob::Base instance")
 
-      # Inside Pgbus::Serializer, `ActiveJob::Base` resolves to `Pgbus::ActiveJob::Base`
-      # because Zeitwerk defines Pgbus::ActiveJob as a namespace module.
-      activejob_base = double("ActiveJob::Base class")
-      allow(activejob_base).to receive(:deserialize).with(job_data).and_return(fake_job)
-      stub_const("Pgbus::ActiveJob::Base", activejob_base)
+      # Use the top-level constant — bare ActiveJob::Base can resolve to
+      # Pgbus::ActiveJob::Base under Zeitwerk (issue #368 path fix).
+      allow(ActiveJob::Base).to receive(:deserialize).with(job_data).and_return(fake_job)
 
       result = described_class.deserialize_job(json_string)
       expect(result).to eq(fake_job)
@@ -41,6 +40,30 @@ RSpec.describe Pgbus::Serializer do
 
     it "raises JSON::ParserError for invalid JSON" do
       expect { described_class.deserialize_job("not json") }.to raise_error(JSON::ParserError)
+    end
+  end
+
+  describe ".deserialize_job_data (issue #368)" do
+    let(:job_data) do
+      { "job_class" => "TestJob", "job_id" => "abc-123", "queue_name" => "default", "arguments" => [] }
+    end
+    let(:fake_job) { double("ActiveJob::Base instance") }
+
+    before do
+      allow(ActiveJob::Base).to receive(:deserialize).with(job_data).and_return(fake_job)
+    end
+
+    it "deserializes a plain job hash via ::ActiveJob::Base" do
+      expect(described_class.deserialize_job_data(job_data)).to eq(fake_job)
+    end
+
+    it "skips the allowlist walk when allowed_global_id_models is nil" do
+      Pgbus.configuration.allowed_global_id_models = nil
+      allow(described_class).to receive(:assert_allowed_global_id!).and_call_original
+
+      described_class.deserialize_job_data(job_data)
+
+      expect(described_class).not_to have_received(:assert_allowed_global_id!)
     end
   end
 

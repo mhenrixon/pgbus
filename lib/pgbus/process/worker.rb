@@ -410,10 +410,12 @@ module Pgbus
         # Stream queues share the job namespace (pgbus_<name>) but must never
         # be adopted by a wildcard worker: a worker would claim durable
         # broadcasts, fail to deserialize them, and DLQ-move them out of the
-        # stream's replay history. The registry is what tells them apart.
-        # Reset first so a stream created since the last resolve is excluded.
+        # stream's replay history. known_names includes fingerprint-matched
+        # dormant pre-registry streams (issue #366) so they are excluded even
+        # before backfill. Reset first so a stream created since the last
+        # resolve is excluded.
         Pgbus::StreamQueue.reset_cache!
-        stream_names = Pgbus::StreamQueue.all_names
+        stream_names = Pgbus::StreamQueue.known_names
 
         # Event-bus subscriber queues also share the job namespace (pgbus_<handler>)
         # but carry event payloads, not ActiveJob jobs. A wildcard worker that
