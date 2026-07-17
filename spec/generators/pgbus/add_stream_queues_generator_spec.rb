@@ -81,7 +81,9 @@ RSpec.describe Pgbus::Generators::AddStreamQueuesGenerator do
         generator.destination_root = tmpdir
 
         expect { generator.invoke_all }.to output(
-          a_string_including("backfill_registry").and(matching(/Dormant durable streams/i))
+          a_string_including("backfill_registry")
+            .and(including("known_names"))
+            .and(matching(/Dormant durable streams/i))
         ).to_stdout
       end
     end

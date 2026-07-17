@@ -30,8 +30,10 @@ module Pgbus
       # every broadcast; the caller (`ensure_stream_queue`) also memoizes
       # per-process, so the DB write happens once per stream per process.
       # Errors are swallowed — a registry hiccup must never abort a broadcast.
+      # Returns true on a successful write, false when the table is absent or
+      # the upsert failed (so callers like `backfill!` can report accurately).
       def record!(queue_name)
-        return unless table_exists?
+        return false unless table_exists?
 
         upsert({ queue_name: queue_name }, unique_by: :queue_name)
         # Keep the in-process cache consistent with the write so a subsequent
@@ -43,9 +45,10 @@ module Pgbus
         # nil lets the next all_names call do a real load, which already
         # includes this row since the upsert above has committed.
         @all_names&.add(queue_name)
-        nil
+        true
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus] Failed to record stream queue #{queue_name}: #{e.message}" }
+        false
       end
 
       # Set of all registered physical stream queue names. Memoized so a
@@ -82,17 +85,18 @@ module Pgbus
       end
 
       # Registers fingerprint-matched queues missing from the registry.
-      # Idempotent. Returns the number of newly registered names.
-      # No-ops (returns 0) when the registry table is absent.
+      # Idempotent. Returns the number of names successfully persisted
+      # (failed upserts are not counted — see `record!`). No-ops (returns 0)
+      # when the registry table is absent.
       def backfill!
         return 0 unless table_exists?
 
         missing = fingerprint_matched_names - all_names
         return 0 if missing.empty?
 
-        missing.each { |name| record!(name) }
-        reset_cache!
-        missing.size
+        registered = missing.count { |name| record!(name) }
+        reset_cache! if registered.positive?
+        registered
       end
 
       def stream?(queue_name)

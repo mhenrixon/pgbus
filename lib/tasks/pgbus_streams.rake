@@ -8,15 +8,17 @@ namespace :pgbus do
     task backfill_registry: :environment do
       unless Pgbus::StreamQueue.table_exists?
         abort "pgbus_stream_queues table is missing. " \
-              "Run: rails generate pgbus:add_stream_queues && rails db:migrate"
+              "Run: rails generate pgbus:add_stream_queues && rails db:migrate " \
+              "(rails db:migrate:pgbus when config.connects_to uses a separate database)"
       end
 
       matched = Pgbus::StreamQueue.fingerprint_matched_names
       already = Pgbus::StreamQueue.all_names
+      already_matched = matched & already
       missing = matched - already
 
       puts "Fingerprint-matched stream queues: #{matched.size}"
-      puts "Already registered:                #{already.size}"
+      puts "Already registered (of matched):   #{already_matched.size}"
       puts "Missing from registry:             #{missing.size}"
 
       if missing.empty?
@@ -26,6 +28,7 @@ namespace :pgbus do
 
       count = Pgbus::StreamQueue.backfill!
       puts "Registered #{count} stream queue(s)."
+      puts "Warning: #{missing.size - count} write(s) failed — re-run after fixing DB errors." if count < missing.size
       missing.sort.each { |name| puts "  + #{name}" }
     end
 

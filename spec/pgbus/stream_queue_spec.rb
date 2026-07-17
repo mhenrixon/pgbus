@@ -33,6 +33,16 @@ RSpec.describe Pgbus::StreamQueue do
       expect { described_class.record!("pgbus_chat_42") }.not_to raise_error
     end
 
+    it "returns true on a successful upsert and false on failure or missing table" do
+      expect(described_class.record!("pgbus_chat_42")).to be(true)
+
+      allow(described_class).to receive(:upsert).and_raise(StandardError, "db down")
+      expect(described_class.record!("pgbus_chat_42")).to be(false)
+
+      allow(described_class).to receive(:table_exists?).and_return(false)
+      expect(described_class.record!("pgbus_chat_42")).to be(false)
+    end
+
     it "adds the name to an already-warm cache without a re-query" do
       relation = instance_double(ActiveRecord::Relation, pluck: [])
       allow(described_class).to receive(:all).and_return(relation)
@@ -184,15 +194,42 @@ RSpec.describe Pgbus::StreamQueue do
         all_names: Set.new(%w[pgbus_chat_1]),
         fingerprint_matched_names: Set.new(%w[pgbus_chat_1 pgbus_dormant_99 pgbus_checkout_3])
       )
-      allow(described_class).to receive(:record!).and_call_original
-      # record! is already stubbed via upsert above; track names passed in.
       recorded = []
-      allow(described_class).to receive(:record!) { |name| recorded << name }
+      allow(described_class).to receive(:record!) do |name|
+        recorded << name
+        true
+      end
 
       count = described_class.backfill!
 
       expect(count).to eq(2)
       expect(recorded).to contain_exactly("pgbus_dormant_99", "pgbus_checkout_3")
+    end
+
+    it "counts only successful writes when some upserts fail" do
+      allow(described_class).to receive_messages(
+        all_names: Set.new,
+        fingerprint_matched_names: Set.new(%w[pgbus_ok pgbus_fail])
+      )
+      allow(described_class).to receive(:record!) do |name|
+        name == "pgbus_ok"
+      end
+      allow(described_class).to receive(:reset_cache!)
+
+      expect(described_class.backfill!).to eq(1)
+      expect(described_class).to have_received(:reset_cache!)
+    end
+
+    it "does not report a successful backfill when every write fails" do
+      allow(described_class).to receive_messages(
+        all_names: Set.new,
+        fingerprint_matched_names: Set.new(%w[pgbus_fail])
+      )
+      allow(described_class).to receive(:record!).and_return(false)
+      allow(described_class).to receive(:reset_cache!)
+
+      expect(described_class.backfill!).to eq(0)
+      expect(described_class).not_to have_received(:reset_cache!)
     end
 
     it "is a no-op when every fingerprint match is already registered" do
@@ -214,12 +251,12 @@ RSpec.describe Pgbus::StreamQueue do
       expect(described_class).not_to have_received(:record!)
     end
 
-    it "resets the name cache after writing so subsequent all_names sees the rows" do
+    it "resets the name cache after a successful write so subsequent all_names sees the rows" do
       allow(described_class).to receive_messages(
         all_names: Set.new,
         fingerprint_matched_names: Set.new(%w[pgbus_dormant_99])
       )
-      allow(described_class).to receive(:record!)
+      allow(described_class).to receive(:record!).and_return(true)
       allow(described_class).to receive(:reset_cache!)
 
       described_class.backfill!
