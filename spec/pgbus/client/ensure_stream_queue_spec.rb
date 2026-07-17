@@ -120,5 +120,55 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
       expect(received_sql).to match(/pgmq\.a_pgbus_test_nopeDROPTABLE/i)
       expect(received_sql).not_to include(";")
     end
+
+    # Stale process-local memo after another process drops the physical queue
+    # (orphan stream sweep, dashboard drop, manual drop_queue). Without recovery
+    # enable_notify_insert raises "Queue does not exist" even though ensure
+    # already ran — the memo skipped pgmq.create.
+    context "when the process-local queue memo is stale" do
+      let(:full_name) { "pgbus_test_chat" }
+      let(:missing_queue_message) do
+        'Queue "pgbus_test_chat" does not exist. Create it first using pgmq.create()'
+      end
+
+      before do
+        real_pgmq_connection_error
+        client.instance_variable_get(:@queues_created)[full_name] = true
+        client.instance_variable_get(:@stream_indexes_created)["chat"] = true
+      end
+
+      it "clears the memo and recreates the queue when enable_notify reports it missing" do
+        calls = 0
+        allow(mock_pgmq).to receive(:enable_notify_insert) do
+          calls += 1
+          raise PGMQ::Errors::ConnectionError, missing_queue_message if calls == 1
+
+          nil
+        end
+
+        expect { client.ensure_stream_queue("chat") }.not_to raise_error
+
+        expect(client).to have_received(:ensure_single_queue).with(full_name).twice
+        expect(client.instance_variable_get(:@queues_created)[full_name]).to be_nil
+        expect(client.instance_variable_get(:@stream_indexes_created)["chat"]).to be(true)
+        expect(calls).to eq(2)
+      end
+
+      it "re-raises unrelated ConnectionErrors without clearing the memo or retrying" do
+        # Use a non-stale ConnectionError so with_stale_connection_retry does not
+        # wrap this path (PQsocket / server-closed match the stale patterns and
+        # would re-enter ensure_single_queue on their own).
+        allow(mock_pgmq).to receive(:enable_notify_insert)
+          .and_raise(PGMQ::Errors::ConnectionError, "permission denied for schema pgmq")
+
+        expect { client.ensure_stream_queue("chat") }
+          .to raise_error(PGMQ::Errors::ConnectionError, /permission denied/)
+
+        expect(client).to have_received(:ensure_single_queue).with(full_name).once
+        expect(client.instance_variable_get(:@queues_created)[full_name]).to be(true)
+      end
+
+    end
   end
 end
+
