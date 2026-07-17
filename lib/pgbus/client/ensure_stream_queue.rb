@@ -29,16 +29,7 @@ module Pgbus
           # raise on the missing bare table. Streams never use priority
           # sub-queues (issue #310).
           ensure_pgmq_schema
-          ensure_single_queue(full_name)
-
-          # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
-          # high-frequency worker queue inserts. Streams are latency-
-          # sensitive and need every broadcast to fire a NOTIFY, even
-          # when several are batched within a single millisecond.
-          # Override the throttle to 0 specifically for stream queues.
-          # Use the idempotent path to avoid deadlocks when multiple
-          # processes race to set up the same stream queue.
-          synchronized { enable_notify_if_needed(full_name, 0) }
+          ensure_stream_queue_tables(full_name, stream_name)
         end
 
         # CREATE INDEX IF NOT EXISTS is idempotent in Postgres but still
@@ -67,6 +58,43 @@ module Pgbus
         Pgbus::StreamQueue.record!(full_name)
 
         @stream_indexes_created[stream_name] = true
+      end
+
+      private
+
+      # Creates the bare stream queue + forces NOTIFY throttle 0. Retries once
+      # when a process-local `@queues_created` memo is stale relative to the
+      # database: another process can drop the physical queue (orphan stream
+      # sweep, dashboard drop, manual `drop_queue`) without invalidating every
+      # peer process's memo. The memoized path then skips `pgmq.create` and
+      # `enable_notify_insert` raises "Queue does not exist".
+      def ensure_stream_queue_tables(full_name, stream_name)
+        ensure_single_queue(full_name)
+
+        # PGMQ's default NOTIFY throttle is 250ms — meant to coalesce
+        # high-frequency worker queue inserts. Streams are latency-
+        # sensitive and need every broadcast to fire a NOTIFY, even
+        # when several are batched within a single millisecond.
+        # Override the throttle to 0 specifically for stream queues.
+        # Use the idempotent path to avoid deadlocks when multiple
+        # processes race to set up the same stream queue.
+        synchronized { enable_notify_if_needed(full_name, 0) }
+      rescue PGMQ::Errors::ConnectionError => e
+        raise unless missing_pgmq_queue_error?(e)
+
+        forget_stream_queue_memo!(full_name, stream_name)
+        ensure_single_queue(full_name)
+        synchronized { enable_notify_if_needed(full_name, 0) }
+      end
+
+      def forget_stream_queue_memo!(full_name, stream_name)
+        @queues_created.delete(full_name)
+        @stream_indexes_created.delete(stream_name)
+      end
+
+      def missing_pgmq_queue_error?(error)
+        message = error.message.to_s
+        message.include?("does not exist") && message.include?("pgmq.create")
       end
     end
   end
