@@ -167,8 +167,6 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
         expect(client).to have_received(:ensure_single_queue).with(full_name).once
         expect(client.instance_variable_get(:@queues_created)[full_name]).to be(true)
       end
-
     end
   end
 end
-
