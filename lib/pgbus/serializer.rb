@@ -26,9 +26,9 @@ module Pgbus
       end
     end
 
-    def deserialize_job(json_string)
+    def deserialize_job(json_string, configuration: Pgbus.configuration)
       Instrumentation.instrument("pgbus.serializer.deserialize", kind: :job) do
-        deserialize_job_data(JSON.parse(json_string))
+        deserialize_job_data(JSON.parse(json_string), configuration: configuration)
       end
     end
 
@@ -36,8 +36,10 @@ module Pgbus
     # `deserialize_job`. When `allowed_global_id_models` is configured, every
     # `_aj_globalid` in the tree is checked before Rails' unrestricted
     # GlobalID::Locator runs (issue #368). Nil allowlist = zero-cost allow-all.
-    def deserialize_job_data(data)
-      assert_job_global_ids_allowed!(data)
+    # Prefer the caller's `configuration` (e.g. Executor's injected config) so a
+    # non-global allowlist is not silently ignored.
+    def deserialize_job_data(data, configuration: Pgbus.configuration)
+      assert_job_global_ids_allowed!(data, configuration: configuration)
       # Top-level constant: bare ActiveJob::Base can resolve to
       # Pgbus::ActiveJob::Base under Zeitwerk's Pgbus::ActiveJob namespace.
       ::ActiveJob::Base.deserialize(data)
@@ -52,11 +54,13 @@ module Pgbus
                     })
     end
 
-    def deserialize_event(json_string)
+    def deserialize_event(json_string, configuration: Pgbus.configuration)
       data = JSON.parse(json_string)
       payload = data["payload"]
 
-      data["payload"] = locate_global_id(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
+      if payload.is_a?(Hash) && payload["_global_id"]
+        data["payload"] = locate_global_id(payload["_global_id"], configuration: configuration)
+      end
 
       Event.new(
         event_id: data["event_id"],
@@ -69,18 +73,18 @@ module Pgbus
     # When allowed_global_id_models is configured, only those model classes
     # can be resolved — prevents loading arbitrary objects from crafted payloads.
     # Shared by EventBus payloads (`_global_id`) and job arguments (`_aj_globalid`).
-    def locate_global_id(gid_string)
-      gid = assert_allowed_global_id!(gid_string)
+    def locate_global_id(gid_string, configuration: Pgbus.configuration)
+      gid = assert_allowed_global_id!(gid_string, configuration: configuration)
       GlobalID::Locator.locate(gid)
     end
 
     # Raises SerializationError unless the GlobalID's model is permitted.
     # Returns the parsed GlobalID on success (so locate can skip re-parse).
-    def assert_allowed_global_id!(gid_string)
+    def assert_allowed_global_id!(gid_string, configuration: Pgbus.configuration)
       gid = GlobalID.parse(gid_string)
       raise Pgbus::SerializationError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
 
-      allowed = Pgbus.configuration.allowed_global_id_models
+      allowed = configuration.allowed_global_id_models
       if allowed && allowed.empty?
         raise Pgbus::SerializationError,
               "GlobalID deserialization is disabled (allowed_global_id_models is empty). " \
@@ -102,19 +106,19 @@ module Pgbus
 
     # Walk a job payload (or any nested structure) and enforce the allowlist on
     # every ActiveJob `_aj_globalid` value. No-op when allowlist is nil.
-    def assert_job_global_ids_allowed!(data)
-      return if Pgbus.configuration.allowed_global_id_models.nil?
+    def assert_job_global_ids_allowed!(data, configuration: Pgbus.configuration)
+      return if configuration.allowed_global_id_models.nil?
 
-      walk_job_global_ids(data)
+      walk_job_global_ids(data, configuration)
     end
 
-    def walk_job_global_ids(value)
+    def walk_job_global_ids(value, configuration)
       case value
       when Hash
-        assert_allowed_global_id!(value[AJ_GLOBALID_KEY]) if value.key?(AJ_GLOBALID_KEY)
-        value.each_value { |child| walk_job_global_ids(child) }
+        assert_allowed_global_id!(value[AJ_GLOBALID_KEY], configuration: configuration) if value.key?(AJ_GLOBALID_KEY)
+        value.each_value { |child| walk_job_global_ids(child, configuration) }
       when Array
-        value.each { |child| walk_job_global_ids(child) }
+        value.each { |child| walk_job_global_ids(child, configuration) }
       end
     end
     private_class_method :walk_job_global_ids

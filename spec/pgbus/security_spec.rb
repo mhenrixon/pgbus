@@ -151,6 +151,20 @@ RSpec.describe "Security" do
         end.to raise_error(Pgbus::SerializationError, /deserialization is disabled/)
       end
     end
+
+    context "when an injected configuration differs from Pgbus.configuration" do
+      it "enforces the injected allowlist, not the global one" do
+        # Global is allow-all; injected config denies everything.
+        Pgbus.configuration.allowed_global_id_models = nil
+        injected = Pgbus::Configuration.new
+        injected.allowed_global_id_models = []
+
+        expect do
+          Pgbus::Serializer.deserialize_job_data(job_data, configuration: injected)
+        end.to raise_error(Pgbus::SerializationError, /deserialization is disabled/)
+        expect(ActiveJob::Base).not_to have_received(:deserialize)
+      end
+    end
   end
 
   describe "Configuration queue name validation" do

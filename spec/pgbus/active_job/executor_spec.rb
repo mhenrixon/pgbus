@@ -105,6 +105,15 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           hash_including(queue_name: queue_name, msg_id: 9)
         )
       end
+
+      it "uses the executor's injected config, not only Pgbus.configuration" do
+        # Global is allow-all; this executor's config still rejects Secret.
+        Pgbus.configuration.allowed_global_id_models = nil
+        config.allowed_global_id_models = [order_class]
+
+        expect(executor.execute(message, queue_name)).to eq(:failed)
+        expect(ActiveJob::Base).not_to have_received(:deserialize)
+      end
     end
 
     context "when job.perform_now raises" do
