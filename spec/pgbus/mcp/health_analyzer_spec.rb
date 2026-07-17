@@ -364,16 +364,35 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
       expect(verdict[:reasons].join).not_to include("no capsule")
     end
 
-    it "does not report an undrained-queue DEGRADED when the queue has been claimed" do
+    it "still reports an undrained-queue DEGRADED even when its messages were once claimed" do
       stub_data_source(
-        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 4)],
+        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 4, visible_unread: 0)],
         processes: [worker(status: :healthy)],
         drained: ["pgbus_default"]
       )
 
-      # A queue with progress (read_ct > 0) that nobody drains isn't wedged and
-      # isn't the "no capsule configured" hazard — something is claiming it.
-      expect(analyzer.verdict[:reasons].join).not_to include("no capsule")
+      # Past reads don't make an undrained queue safe: if no capsule drains it
+      # now, whatever claimed those messages is gone and the backlog will sit
+      # forever. It is DEGRADED (a config hazard), never STALLED (not the wedge).
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("no capsule")
+      expect(verdict[:reasons].join).to include("pgbus_adhoc")
+    end
+
+    it "catches a wedged EventBus handler queue on a consumer-only fleet (no workers)" do
+      # drained_queue_names unions consumer-drained handler queues; the wedge
+      # branch must count consumer liveness, else a fleet with no workers never
+      # runs (the old worker-only guard returned early).
+      stub_data_source(
+        queues: [queue(name: "pgbus_order_handler", length: 6, visible: 6, max_read_ct: 0)],
+        processes: [{ kind: "consumer", status: :healthy }],
+        drained: ["pgbus_order_handler"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("draining process(es) are alive")
     end
   end
 
