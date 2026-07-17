@@ -254,6 +254,9 @@ RSpec.describe Pgbus::Doctor do
       check = gid_check(doctor.run)
       expect(check[:status]).to eq(:warn)
       expect(check[:detail]).to include("allowed_global_id_models")
+      # Issue #368: the warning must name both surfaces the allowlist now guards.
+      expect(check[:detail]).to match(/job arguments/i)
+      expect(check[:detail]).to match(/EventBus/i)
     end
 
     it "does not fail the run — a warning never blocks a deploy" do

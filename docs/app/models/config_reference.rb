@@ -122,7 +122,7 @@ module ConfigReference
     ],
     "Validation" => [
       { name: "eager_validation", type: "Boolean", default: "true", desc: "Validate configuration eagerly at boot." },
-      { name: "allowed_global_id_models", type: "Array, nil", default: "nil", desc: "Allowlist of models permitted as GlobalID event arguments." },
+      { name: "allowed_global_id_models", type: "Array, nil", default: "nil", desc: "Allowlist of Class/Module models permitted as GlobalID job arguments and EventBus payloads. nil = allow-all (default). [] = deny-all. Apps using ActiveStorage attachments should include ActiveStorage::Blob (and related models) so Rails' analyze/purge/transform jobs still deserialize." },
       { name: "pgmq_schema_mode", type: "Symbol", default: ":auto", desc: "PGMQ schema install mode (:auto, :extension, :embedded)." },
       { name: "doctor_on_boot", type: "Symbol, nil", default: "nil", desc: "Run doctor preflight checks inside the booting supervisor (one Rails boot instead of `pgbus doctor` + `pgbus start`). nil/false = off. :report logs the report and always boots; :strict refuses to boot on a fatal check (bad config or an absent PGMQ schema) — transient-shaped failures (Queues/Database) never abort. Set via the --doctor / --doctor-strict start flags too." }
     ]

@@ -69,9 +69,13 @@ module Pgbus
     attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size
     attr_reader :outbox_retention # rubocop:disable Style/AccessorGrouping
 
-    # Event bus
+    # GlobalID allowlist for job arguments (`_aj_globalid`) and EventBus
+    # payloads (`_global_id`). nil = allow-all; [] = deny-all; Array of
+    # Class/Module = only those models may resolve. Enforced in
+    # Serializer (issue #368 for the job path).
     attr_accessor :allowed_global_id_models
-    attr_reader :idempotency_ttl # rubocop:disable Style/AccessorGrouping
+    # Event bus
+    attr_reader :idempotency_ttl
 
     # Logging
     attr_accessor :logger
