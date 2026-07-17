@@ -78,6 +78,35 @@ module Pgbus
         StreamQueue.all_names
       end
 
+      # The set of physical queue names some configured worker capsule or
+      # EventBus handler is set up to drain. Used by the HealthAnalyzer to keep
+      # the silent-worker-wedge verdict from flagging queues nobody drains
+      # (ad-hoc queues, unregistered stream queues — issue #367, #366): live
+      # workers prove nothing about a queue they can never claim from.
+      #
+      # Returns nil when a capsule uses the "*" wildcard — that capsule drains
+      # every job queue (Worker#resolve_wildcard_queues), so there is nothing to
+      # intersect against. Otherwise returns a Set of physical names: each
+      # capsule's explicit logical queues expanded to the physical tables that
+      # actually exist (via the client's queue strategy, so a priority queue's
+      # _p0.._pN sub-tables are matched, not the bare prefixed name priority mode
+      # never creates), unioned with the EventBus handler queues consumers drain.
+      def drained_queue_names
+        capsules = Array(Pgbus.configuration.workers)
+        capsule_queues = capsules.flat_map { |c| c[:queues] || c["queues"] || [] }
+        return nil if capsule_queues.include?("*")
+
+        physical = capsule_queues.flat_map { |q| @client.physical_queue_names(q) }
+        (physical + handler_queue_physical_names).to_set
+      rescue StandardError => e
+        # Fail open: nil means "a wildcard drains everything", which restores the
+        # pre-#367 behavior of intersecting against the whole backlog. A raise
+        # here (e.g. a malformed capsule queue name) must never break the
+        # HealthAnalyzer's "always produces a verdict" contract.
+        Pgbus.logger.debug { "[Pgbus::Web] Error computing drained queues: #{e.class}: #{e.message}" }
+        nil
+      end
+
       # name is the full PGMQ queue name (e.g. "pgbus_default") as returned
       # by queues_with_metrics. No prefix is added.
       def queue_detail(name)
@@ -1132,7 +1161,9 @@ module Pgbus
               (SELECT count(*) FROM pgmq.#{qtable} WHERE vt <= NOW()) AS queue_visible_length,
               (SELECT EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int FROM pgmq.#{qtable}) AS newest_msg_age_sec,
               (SELECT EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int FROM pgmq.#{qtable}) AS oldest_msg_age_sec,
-              (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pgmq.#{seq_name}) AS total_messages
+              (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pgmq.#{seq_name}) AS total_messages,
+              (SELECT max(read_ct) FROM pgmq.#{qtable}) AS max_read_ct,
+              (SELECT count(*) FROM pgmq.#{qtable} WHERE vt <= NOW() AND read_ct = 0) AS visible_unread_length
           SQL
         rescue StandardError => e
           Pgbus.logger.debug { "[Pgbus::Web] Skipping queue metrics for #{name}: #{e.message}" }
@@ -1150,7 +1181,9 @@ module Pgbus
             queue_visible_length: row["queue_visible_length"].to_i,
             oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
             newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
-            total_messages: row["total_messages"].to_i
+            total_messages: row["total_messages"].to_i,
+            max_read_ct: row["max_read_ct"]&.to_i,
+            visible_unread_length: row["visible_unread_length"].to_i
           }
         end
       rescue StandardError => e
@@ -1168,7 +1201,9 @@ module Pgbus
               count(*) AS queue_length,
               count(CASE WHEN vt <= NOW() THEN 1 END) AS queue_visible_length,
               EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int AS newest_msg_age_sec,
-              EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int AS oldest_msg_age_sec
+              EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int AS oldest_msg_age_sec,
+              max(read_ct) AS max_read_ct,
+              count(CASE WHEN vt <= NOW() AND read_ct = 0 THEN 1 END) AS visible_unread_length
             FROM pgmq.#{qtable}
           ),
           all_metrics AS (
@@ -1180,6 +1215,8 @@ module Pgbus
             q_summary.queue_visible_length,
             q_summary.newest_msg_age_sec,
             q_summary.oldest_msg_age_sec,
+            q_summary.max_read_ct,
+            q_summary.visible_unread_length,
             all_metrics.total_messages
           FROM q_summary, all_metrics
         SQL
@@ -1192,7 +1229,9 @@ module Pgbus
           queue_visible_length: row["queue_visible_length"].to_i,
           oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
           newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
-          total_messages: row["total_messages"].to_i
+          total_messages: row["total_messages"].to_i,
+          max_read_ct: row["max_read_ct"]&.to_i,
+          visible_unread_length: row["visible_unread_length"].to_i
         }
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web] Error fetching metrics for #{queue_name}: #{e.class}: #{e.message}" }
