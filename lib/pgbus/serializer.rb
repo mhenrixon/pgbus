@@ -6,6 +6,11 @@ module Pgbus
   module Serializer
     module_function
 
+    # ActiveJob encodes GlobalID job arguments with this key (private constant
+    # on ActiveJob::Arguments). Walked by the job-path allowlist gate (#368).
+    AJ_GLOBALID_KEY = "_aj_globalid"
+    private_constant :AJ_GLOBALID_KEY
+
     def serialize_job(active_job)
       Instrumentation.instrument("pgbus.serializer.serialize", kind: :job) do
         data = active_job.serialize
@@ -23,9 +28,19 @@ module Pgbus
 
     def deserialize_job(json_string)
       Instrumentation.instrument("pgbus.serializer.deserialize", kind: :job) do
-        data = JSON.parse(json_string)
-        ActiveJob::Base.deserialize(data)
+        deserialize_job_data(JSON.parse(json_string))
       end
+    end
+
+    # Job-hash entry point used by the executor (payload already parsed) and by
+    # `deserialize_job`. When `allowed_global_id_models` is configured, every
+    # `_aj_globalid` in the tree is checked before Rails' unrestricted
+    # GlobalID::Locator runs (issue #368). Nil allowlist = zero-cost allow-all.
+    def deserialize_job_data(data)
+      assert_job_global_ids_allowed!(data)
+      # Top-level constant: bare ActiveJob::Base can resolve to
+      # Pgbus::ActiveJob::Base under Zeitwerk's Pgbus::ActiveJob namespace.
+      ::ActiveJob::Base.deserialize(data)
     end
 
     def serialize_event(event)
@@ -53,7 +68,15 @@ module Pgbus
     # Locate a GlobalID with optional type restriction.
     # When allowed_global_id_models is configured, only those model classes
     # can be resolved — prevents loading arbitrary objects from crafted payloads.
+    # Shared by EventBus payloads (`_global_id`) and job arguments (`_aj_globalid`).
     def locate_global_id(gid_string)
+      gid = assert_allowed_global_id!(gid_string)
+      GlobalID::Locator.locate(gid)
+    end
+
+    # Raises SerializationError unless the GlobalID's model is permitted.
+    # Returns the parsed GlobalID on success (so locate can skip re-parse).
+    def assert_allowed_global_id!(gid_string)
       gid = GlobalID.parse(gid_string)
       raise Pgbus::SerializationError, "Invalid GlobalID: #{gid_string.inspect}" unless gid
 
@@ -74,7 +97,26 @@ module Pgbus
               "Add it to Pgbus.configuration.allowed_global_id_models to permit deserialization."
       end
 
-      GlobalID::Locator.locate(gid)
+      gid
     end
+
+    # Walk a job payload (or any nested structure) and enforce the allowlist on
+    # every ActiveJob `_aj_globalid` value. No-op when allowlist is nil.
+    def assert_job_global_ids_allowed!(data)
+      return if Pgbus.configuration.allowed_global_id_models.nil?
+
+      walk_job_global_ids(data)
+    end
+
+    def walk_job_global_ids(value)
+      case value
+      when Hash
+        assert_allowed_global_id!(value[AJ_GLOBALID_KEY]) if value.key?(AJ_GLOBALID_KEY)
+        value.each_value { |child| walk_job_global_ids(child) }
+      when Array
+        value.each { |child| walk_job_global_ids(child) }
+      end
+    end
+    private_class_method :walk_job_global_ids
   end
 end

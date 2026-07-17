@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 
 RSpec.describe "Security" do
   describe "GlobalID type validation" do
@@ -71,6 +72,84 @@ RSpec.describe "Security" do
       expect do
         Pgbus::Serializer.locate_global_id("not-a-gid")
       end.to raise_error(Pgbus::SerializationError, /Invalid GlobalID/)
+    end
+  end
+
+  # Issue #368: the allowlist only applied to EventBus `_global_id` payloads.
+  # Job arguments use ActiveJob's `_aj_globalid` encoding and went through
+  # Rails' unrestricted GlobalID::Locator. Both paths must share the gate.
+  describe "GlobalID type validation on ActiveJob arguments (issue #368)" do
+    let(:order_class) { Class.new }
+    let(:job_data) do
+      {
+        "job_class" => "TestJob",
+        "job_id" => "j-1",
+        "queue_name" => "default",
+        "arguments" => [{ "_aj_globalid" => "gid://pgbus-test/Order/42" }]
+      }
+    end
+
+    before do
+      stub_const("Order", order_class)
+      allow(GlobalID::Locator).to receive(:locate).and_return(double("Order"))
+      fake_job = double("job", perform_now: true)
+      allow(ActiveJob::Base).to receive(:deserialize).and_return(fake_job)
+    end
+
+    after { Pgbus.configuration.allowed_global_id_models = nil }
+
+    context "when allowed_global_id_models is nil (allow-all)" do
+      before { Pgbus.configuration.allowed_global_id_models = nil }
+
+      it "deserializes job arguments without an allowlist walk" do
+        expect { Pgbus::Serializer.deserialize_job_data(job_data) }.not_to raise_error
+        expect(ActiveJob::Base).to have_received(:deserialize).with(job_data)
+      end
+    end
+
+    context "when allowed_global_id_models is configured" do
+      before { Pgbus.configuration.allowed_global_id_models = [order_class] }
+
+      it "allows job arguments whose GlobalID model is on the allowlist" do
+        expect { Pgbus::Serializer.deserialize_job_data(job_data) }.not_to raise_error
+      end
+
+      it "rejects job arguments whose GlobalID model is not on the allowlist" do
+        secret_class = Class.new
+        stub_const("Secret", secret_class)
+        job_data["arguments"] = [{ "_aj_globalid" => "gid://pgbus-test/Secret/1" }]
+
+        expect do
+          Pgbus::Serializer.deserialize_job_data(job_data)
+        end.to raise_error(Pgbus::SerializationError, /not in allowed_global_id_models/)
+        expect(ActiveJob::Base).not_to have_received(:deserialize)
+      end
+
+      it "rejects nested GlobalID arguments in arrays and hashes" do
+        secret_class = Class.new
+        stub_const("Secret", secret_class)
+        job_data["arguments"] = [
+          {
+            "records" => [
+              { "_aj_globalid" => "gid://pgbus-test/Secret/9" }
+            ]
+          }
+        ]
+
+        expect do
+          Pgbus::Serializer.deserialize_job_data(job_data)
+        end.to raise_error(Pgbus::SerializationError, /not in allowed_global_id_models/)
+      end
+    end
+
+    context "when allowed_global_id_models is an empty array (deny-all)" do
+      before { Pgbus.configuration.allowed_global_id_models = [] }
+
+      it "rejects every job GlobalID argument" do
+        expect do
+          Pgbus::Serializer.deserialize_job_data(job_data)
+        end.to raise_error(Pgbus::SerializationError, /deserialization is disabled/)
+      end
     end
   end
 

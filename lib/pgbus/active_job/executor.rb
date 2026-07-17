@@ -80,7 +80,11 @@ module Pgbus
           msg_id: msg_id
         }
         Instrumentation.instrument("pgbus.executor.execute", instrument_payload) do
-          job = ::ActiveJob::Base.deserialize(payload)
+          # Route through Serializer so allowed_global_id_models gates job
+          # arguments the same way it gates EventBus `_global_id` payloads
+          # (issue #368). Previously this called ActiveJob::Base.deserialize
+          # directly and bypassed the allowlist entirely.
+          job = Serializer.deserialize_job_data(payload)
           Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
           execute_job(job)
           Pgbus.logger.debug { "[Pgbus::Executor] perform_returned #{tag} job_class=#{job_class}" }

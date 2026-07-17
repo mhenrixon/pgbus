@@ -73,6 +73,40 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    context "when a GlobalID job argument is rejected by the allowlist (issue #368)" do
+      let(:order_class) { Class.new }
+      let(:job_payload) do
+        {
+          "job_class" => "TestJob",
+          "job_id" => job_id,
+          "queue_name" => queue_name,
+          "arguments" => [{ "_aj_globalid" => "gid://pgbus-test/Secret/1" }]
+        }
+      end
+      let(:message) { build_message_double(msg_id: 9, message: message_json, read_ct: 1) }
+
+      before do
+        stub_const("Order", order_class)
+        stub_const("Secret", Class.new)
+        config.allowed_global_id_models = [order_class]
+        # Serializer must run the real allowlist gate; do not stub deserialize
+        # for the happy path of this context — rejection happens before it.
+        allow(ActiveJob::Base).to receive(:deserialize).and_call_original
+      end
+
+      after { config.allowed_global_id_models = nil }
+
+      it "treats SerializationError as a job failure (not process-fatal)" do
+        result = executor.execute(message, queue_name)
+
+        expect(result).to eq(:failed)
+        expect(ActiveJob::Base).not_to have_received(:deserialize)
+        expect(Pgbus::FailedEventRecorder).to have_received(:record!).with(
+          hash_including(queue_name: queue_name, msg_id: 9)
+        )
+      end
+    end
+
     context "when job.perform_now raises" do
       let(:message) { build_message_double(msg_id: 3, message: message_json, read_ct: 1) }
       let(:error) { StandardError.new("boom") }

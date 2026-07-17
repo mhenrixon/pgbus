@@ -85,7 +85,14 @@ class Views::Docs::Pages::ActiveJob < DocsUI::Page
       md <<~'MD'
         Payloads are **JSON only** — pgbus never uses `Marshal`, so a malicious or
         corrupt payload can't deserialize into arbitrary Ruby. GlobalID arguments
-        (an Active Record record) resolve the same way they do under any adapter.
+        (an Active Record record) resolve through the same
+        `config.allowed_global_id_models` allowlist that EventBus payloads use:
+        when the allowlist is set, a crafted `_aj_globalid` job argument whose
+        model is not listed raises `Pgbus::SerializationError` before Rails'
+        unrestricted `GlobalID::Locator` runs. Leave the config `nil` (default)
+        for allow-all; set `[]` to deny all. Apps that enqueue ActiveStorage
+        analyze/purge/transform jobs need `ActiveStorage::Blob` (and related
+        models) on the allowlist.
       MD
       DocsUI::Callout(:tip) do
         plain "Need at-most-once semantics or a concurrency cap? See "
