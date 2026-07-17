@@ -72,4 +72,18 @@ RSpec.describe Pgbus::Generators::AddStreamQueuesGenerator do
       end
     end
   end
+
+  describe "post-install output (issue #366)" do
+    it "mentions the backfill rake task for dormant pre-registry streams" do
+      Dir.mktmpdir do |tmpdir|
+        FileUtils.mkdir_p(File.join(tmpdir, "db/migrate"))
+        generator = described_class.new([], {})
+        generator.destination_root = tmpdir
+
+        expect { generator.invoke_all }.to output(
+          a_string_including("backfill_registry").and(matching(/Dormant durable streams/i))
+        ).to_stdout
+      end
+    end
+  end
 end

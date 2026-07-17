@@ -14,6 +14,14 @@ module Pgbus
   # is absent — `record!` no-ops and `all_names` returns an empty set, so the
   # pre-registry behavior (streams treated as job queues by maintenance) is
   # preserved rather than raising.
+  #
+  # Pre-registry dormant streams (issue #366): queues created before this
+  # table existed never re-broadcast, so they never call `record!`. Those
+  # queues still carry the archive `a_<name>_msg_id_idx` index that only
+  # `ensure_stream_queue` creates — `fingerprint_matched_names` discovers
+  # them, `known_names` unions them with the registry for classification,
+  # and `backfill!` (via `rake pgbus:streams:backfill_registry`) writes
+  # the missing rows so the registry is complete.
   class StreamQueue < BusRecord
     self.table_name = "pgbus_stream_queues"
 
@@ -47,6 +55,44 @@ module Pgbus
       # their loop.
       def all_names
         @all_names ||= load_names
+      end
+
+      # Registry ∪ fingerprint-matched names. Use this for classification
+      # (health verdict exclusion, orphan sweep, wildcard worker exclusion)
+      # so dormant pre-registry streams are not treated as job queues.
+      # Does not write — call `backfill!` to persist the fingerprint matches.
+      def known_names
+        all_names | fingerprint_matched_names
+      end
+
+      # Physical queue names that carry the stream-only archive msg_id index
+      # (`a_<queue>_msg_id_idx`). Job queues never get this index. Safe to call
+      # when pgmq is absent — returns an empty set rather than raising.
+      def fingerprint_matched_names
+        Set.new(connection.select_values(<<~SQL.squish))
+          SELECT m.queue_name
+          FROM pgmq.meta m
+          INNER JOIN pg_indexes i
+            ON i.schemaname = 'pgmq'
+           AND i.indexname = 'a_' || m.queue_name || '_msg_id_idx'
+        SQL
+      rescue StandardError => e
+        Pgbus.logger.debug { "[Pgbus] Failed to discover stream queue fingerprints: #{e.message}" }
+        Set.new
+      end
+
+      # Registers fingerprint-matched queues missing from the registry.
+      # Idempotent. Returns the number of newly registered names.
+      # No-ops (returns 0) when the registry table is absent.
+      def backfill!
+        return 0 unless table_exists?
+
+        missing = fingerprint_matched_names - all_names
+        return 0 if missing.empty?
+
+        missing.each { |name| record!(name) }
+        reset_cache!
+        missing.size
       end
 
       def stream?(queue_name)

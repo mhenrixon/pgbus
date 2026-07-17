@@ -7,10 +7,11 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
   let(:data_source) { instance_double(Pgbus::Web::DataSource) }
 
-  def stub_data_source(queues: [], processes: [], health: {}, stream_queues: [])
+  def stub_data_source(queues: [], processes: [], health: {}, stream_queues: [], unregistered_streams: 0)
     allow(data_source).to receive_messages(
       queues_with_metrics: queues, processes: processes,
-      queue_health_stats: health, stream_queue_names: Set.new(stream_queues)
+      queue_health_stats: health, stream_queue_names: Set.new(stream_queues),
+      unregistered_stream_queue_count: unregistered_streams
     )
   end
 
@@ -175,7 +176,10 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     before { allow(Pgbus.logger).to receive(:warn) }
 
     it "still produces a verdict when queue_health_stats raises" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], stream_queue_names: Set.new)
+      allow(data_source).to receive_messages(
+        queues_with_metrics: [], processes: [], stream_queue_names: Set.new,
+        unregistered_stream_queue_count: 0
+      )
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
       verdict = analyzer.verdict
@@ -184,7 +188,10 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     end
 
     it "logs the queue_health_stats failure rather than swallowing it" do
-      allow(data_source).to receive_messages(queues_with_metrics: [], processes: [], stream_queue_names: Set.new)
+      allow(data_source).to receive_messages(
+        queues_with_metrics: [], processes: [], stream_queue_names: Set.new,
+        unregistered_stream_queue_count: 0
+      )
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
       analyzer.verdict
@@ -233,6 +240,36 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
       summary = analyzer.verdict[:summary]
       expect(summary[:total_visible]).to eq(1)
       expect(summary[:total_depth]).to eq(2)
+    end
+  end
+
+  describe "fingerprint-matched unregistered streams (issue #366)" do
+    it "excludes dormant pre-registry stream queues from the STALLED wedge signal" do
+      # known_names (via stream_queue_names) includes fingerprint matches even
+      # when they are not yet in the registry — same permanent read_ct=0 shape.
+      stub_data_source(
+        queues: [queue(name: "pgbus_dormant_99", length: 10, visible: 10, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        stream_queues: ["pgbus_dormant_99"],
+        unregistered_streams: 1
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("unregistered stream")
+      expect(verdict[:reasons].join).to include("backfill_registry")
+      expect(verdict[:reasons].join).not_to include("never claimed")
+    end
+
+    it "does not hint when every fingerprint match is already registered" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_chat_1", length: 10, visible: 10, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        stream_queues: ["pgbus_chat_1"],
+        unregistered_streams: 0
+      )
+
+      expect(analyzer.verdict[:status]).to eq("OK")
     end
   end
 

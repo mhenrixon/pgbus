@@ -2,6 +2,33 @@
 
 namespace :pgbus do
   namespace :streams do
+    desc "Register pre-registry durable stream queues into pgbus_stream_queues " \
+         "(issue #366). Detects queues by the archive msg_id index fingerprint " \
+         "that only ensure_stream_queue creates. Idempotent."
+    task backfill_registry: :environment do
+      unless Pgbus::StreamQueue.table_exists?
+        abort "pgbus_stream_queues table is missing. " \
+              "Run: rails generate pgbus:add_stream_queues && rails db:migrate"
+      end
+
+      matched = Pgbus::StreamQueue.fingerprint_matched_names
+      already = Pgbus::StreamQueue.all_names
+      missing = matched - already
+
+      puts "Fingerprint-matched stream queues: #{matched.size}"
+      puts "Already registered:                #{already.size}"
+      puts "Missing from registry:             #{missing.size}"
+
+      if missing.empty?
+        puts "Nothing to backfill."
+        next
+      end
+
+      count = Pgbus::StreamQueue.backfill!
+      puts "Registered #{count} stream queue(s)."
+      missing.sort.each { |name| puts "  + #{name}" }
+    end
+
     desc "Fail if any pgbus controller or web component includes ActionController::Live"
     task :lint_no_live do
       # ActionController::Live has well-documented interactions with Puma

@@ -20,16 +20,16 @@ RSpec.describe Pgbus::Process::Dispatcher do
     allow(ActiveRecord::Base).to receive(:connection).and_return(conn)
     allow(Pgbus).to receive_messages(client: mock_client, configuration: config)
     allow(Pgbus::StreamQueue).to receive(:reset_cache!)
-    # Default: no registered streams. Each example that expects a queue to be
-    # treated as a stream registers it explicitly. Real stream queues are
-    # named like job queues (pgbus_test_<name>) — the registry, not the name,
-    # is what tells them apart.
-    allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new)
+    # Default: no known streams (registry ∪ fingerprints). Each example that
+    # expects a queue to be treated as a stream registers it explicitly. Real
+    # stream queues are named like job queues (pgbus_test_<name>) — the
+    # registry/fingerprint, not the name, is what tells them apart.
+    allow(Pgbus::StreamQueue).to receive(:known_names).and_return(Set.new)
   end
 
-  # Helper: mark the given physical queue names as registered streams.
+  # Helper: mark the given physical queue names as known streams.
   def register_streams(*names)
-    allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(names))
+    allow(Pgbus::StreamQueue).to receive(:known_names).and_return(Set.new(names))
   end
 
   describe "#sweep_orphan_streams" do
@@ -171,8 +171,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect(mock_client).not_to have_received(:drop_queue)
     end
 
-    it "skips sweeping when no streams are registered (unmigrated install)" do
-      # all_names is empty by default — the sweep returns early without
+    it "skips sweeping when no streams are known (unmigrated install)" do
+      # known_names is empty by default — the sweep returns early without
       # querying pgmq.meta at all.
       allow(conn).to receive(:select_values)
 
@@ -180,6 +180,24 @@ RSpec.describe Pgbus::Process::Dispatcher do
 
       expect(conn).not_to have_received(:select_values)
       expect(mock_client).not_to have_received(:drop_queue)
+    end
+
+    it "sweeps fingerprint-matched dormant streams that are not yet registered (issue #366)" do
+      # Pre-registry durable streams never re-broadcast, so they never call
+      # record!. known_names includes them via the archive msg_id fingerprint
+      # so the orphan sweep can drain them without a manual backfill first.
+      register_streams("pgbus_test_dormant")
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_test_dormant])
+      allow(conn).to receive(:select_one)
+        .with(a_string_matching(/q_pgbus_test_dormant/), anything)
+        .and_return({ "queue_length" => "7", "age_sec" => (25 * 3600).to_s })
+
+      dispatcher.send(:sweep_orphan_streams)
+
+      expect(mock_client).to have_received(:drop_queue)
+        .with("pgbus_test_dormant", prefixed: false)
     end
 
     it "is wired into the dispatcher maintenance loop" do

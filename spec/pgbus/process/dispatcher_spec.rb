@@ -297,13 +297,13 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(connection).to receive(:select_values).and_return(["#{prefix}_default", "#{prefix}_events"])
       allow(mock_client).to receive(:purge_archive).and_return(0)
       # No streams registered — compact_archives handles only job queues.
-      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, all_names: Set.new)
+      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, known_names: Set.new)
     end
 
     it "skips queues registered as streams (handled by prune_stream_archives)" do
       allow(mock_client).to receive(:purge_archive).and_return(5)
       prefix = dispatcher.config.queue_prefix
-      allow(Pgbus::StreamQueue).to receive(:all_names).and_return(Set.new(["#{prefix}_events"]))
+      allow(Pgbus::StreamQueue).to receive(:known_names).and_return(Set.new(["#{prefix}_events"]))
 
       dispatcher.send(:compact_archives)
 
@@ -402,8 +402,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
       allow(ActiveRecord::Base).to receive(:connection).and_return(connection)
       allow(connection).to receive(:select_values).and_return(stream_names)
       allow(mock_client).to receive(:purge_archive).and_return(0)
-      # Both room queues are registered streams (named like job queues).
-      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, all_names: Set.new(stream_names))
+      # Both room queues are known streams (named like job queues).
+      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, known_names: Set.new(stream_names))
     end
 
     it "prunes every stream queue when no shutdown occurs" do
@@ -469,7 +469,7 @@ RSpec.describe Pgbus::Process::Dispatcher do
         select_one: { "queue_length" => 0 }
       )
       allow(mock_client).to receive(:drop_queue).and_return(true)
-      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, all_names: Set.new(stream_names))
+      allow(Pgbus::StreamQueue).to receive_messages(reset_cache!: nil, known_names: Set.new(stream_names))
     end
 
     it "drops every empty orphan queue when no shutdown occurs" do

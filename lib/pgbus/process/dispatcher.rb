@@ -637,12 +637,14 @@ module Pgbus
 
       # Fresh set of physical stream-queue names for this maintenance pass.
       # Reset first so a stream created since the last hourly pass is picked
-      # up without a process restart. Empty on unmigrated installs (registry
-      # table absent) — callers then treat every queue as a job queue, which
-      # is the pre-registry behavior.
+      # up without a process restart. Includes fingerprint-matched dormant
+      # streams that never re-registered after the registry migration
+      # (issue #366) so orphan sweep / stream-archive prune can still see
+      # them. Empty only when neither the registry nor any fingerprint
+      # matches exist — callers then treat every queue as a job queue.
       def current_stream_queue_names
         Pgbus::StreamQueue.reset_cache!
-        Pgbus::StreamQueue.all_names
+        Pgbus::StreamQueue.known_names
       end
 
       def cleanup_recurring_executions

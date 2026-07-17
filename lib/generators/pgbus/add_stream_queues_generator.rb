@@ -31,12 +31,16 @@ module Pgbus
         say ""
         say "Without this table, stream queues are indistinguishable from job"
         say "queues: per-stream archive retention and the orphan sweep skip them,"
-        say "and wildcard ('*') workers can claim durable broadcasts. Existing"
+        say "and wildcard ('*') workers can claim durable broadcasts. Active"
         say "streams register themselves on their next broadcast after migrating."
+        say "Dormant durable streams (completed checkout flows, ended chats) never"
+        say "broadcast again — backfill those into the registry so the doctor and"
+        say "orphan sweep can see them (issue #366)."
         say ""
         say "Next steps:"
         say "  1. Run: rails db:migrate#{migrate_command_suffix}"
-        say "  2. Restart pgbus: bin/pgbus start"
+        say "  2. Backfill dormant streams: rake pgbus:streams:backfill_registry"
+        say "  3. Restart pgbus: bin/pgbus start"
         say ""
       end
 
