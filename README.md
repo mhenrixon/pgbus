@@ -1862,7 +1862,7 @@ pgbus help      # Show help
 
 #### pgbus doctor
 
-A single preflight command that answers "is this environment healthy enough to run?" — useful as a deploy or CI gate. It runs six checks and never raises; a broken environment turns every probe into a failed/warned check instead of a crash:
+A single preflight command that answers "is this environment healthy enough to run?" — useful as a deploy or CI gate. It runs 10 checks and never raises; a broken environment turns every probe into a failed/warned check instead of a crash:
 
 | Check | Fails (`:fail`) when | Warns (`:warn`) when |
 |---|---|---|
@@ -1872,6 +1872,10 @@ A single preflight command that answers "is this environment healthy enough to r
 | Queues | A configured queue has no PGMQ table | — |
 | LISTEN/NOTIFY | — | A configured queue is missing its insert trigger (falls back to polling) |
 | Process liveness | Verdict is `STALLED` | Verdict is `DEGRADED` |
+| GlobalID allowlist | — | `allowed_global_id_models` is `nil` (allow-all) in production |
+| Broadcast queue | — | Turbo broadcasts share the default queue in production, or `streams_broadcast_queue` is set but no worker capsule drains it |
+| Primary affinity | — | Job connection is on a read-only replica (`pg_is_in_recovery`) — a read/write-splitting pooler may be stalling jobs |
+| Dedicated connections | Streamer LISTEN and/or worker notify dedicated path cannot connect | — |
 
 ```bash
 pgbus doctor       # prints the report; exit 1 unless every check passed
@@ -2058,12 +2062,19 @@ PostgreSQL + PGMQ
 
 ### Configuration reference
 
+Curated headline options for the README. The full operator reference (with types, groups, and drift-checked accessors) lives on the [Configuration](https://pgbus.zoolutions.llc/docs/configuration) docs page.
+
 | Option | Default | Description |
 |--------|---------|-------------|
 | `database_url` | `nil` | PostgreSQL connection URL (auto-detected in Rails) |
+| `connection_params` | `nil` | Extra connection parameters merged into the pool |
+| `connects_to` | `nil` | Rails multi-database config for a dedicated pgbus database (`{ database: { writing: :pgbus } }`) |
+| `require_primary` | `false` | Reject a job connection that lands on a read-only replica (`pg_is_in_recovery`) at boot — pooler safety against a read/write splitter |
+| `connection_guc_mode` | `:options` | How database.yml GUCs (`variables:`) reach pgbus connections — `:options` (libpq startup) or `:session` (post-connect `SET`, for transaction-mode PgBouncer) |
 | `queue_prefix` | `"pgbus"` | Prefix for all PGMQ queue names |
 | `default_queue` | `"default"` | Default queue for jobs without explicit queue |
 | `pool_size` | `nil` (auto) | Connection pool size. Auto-tuned from worker thread counts: `sum(workers.threads) + sum(event_consumers.threads) + 2`. Set explicitly to override. |
+| `pool_timeout` | `5` | Seconds to wait for a pooled connection |
 | `workers` | `[{queues: ["default"], threads: 5}]` | Worker capsule definitions. String DSL (`"default: 5; critical: 10"`), Array, or `nil`. |
 | `event_consumers` | `nil` | Event consumer process definitions (same format as workers) |
 | `roles` | `nil` (all) | Supervisor role filter — usually set via CLI flags (`--workers-only` etc.) |
@@ -2077,18 +2088,25 @@ PostgreSQL + PGMQ
 | `max_memory_mb` | `nil` | Recycle worker when memory exceeds N MB |
 | `max_worker_lifetime` | `nil` | Recycle worker after N seconds. Accepts seconds or Duration. |
 | `listen_notify` | `true` | Use PGMQ's LISTEN/NOTIFY for instant wake-up |
+| `worker_notify_wakeup` | `nil` (follows `listen_notify`) | Dedicated LISTEN connection for worker wake-up. `nil` follows `listen_notify`; set `false` to force polling. |
+| `worker_notify_host` / `worker_notify_port` / `worker_notify_database_url` | `nil` | Override host/port/URL for the worker notify LISTEN connection (e.g. direct primary port when jobs go through PgBouncer) |
 | `prefetch_limit` | `nil` | Max in-flight messages per worker (nil = unlimited) |
 | `dispatch_interval` | `1.0` | Seconds between dispatcher maintenance ticks |
 | `circuit_breaker_enabled` | `true` | Enable auto-pause on consecutive failures (threshold and backoff are tuned via `Pgbus::CircuitBreaker` constants) |
+| `zombie_detection` | `true` | Detect and reclaim work from crashed workers |
 | `read_timeout` | `30` | Seconds before a single PGMQ read is bounded (libpq `statement_timeout` + `tcp_user_timeout` on a dedicated connection; nil disables) |
+| `drain_timeout` | `30` | Seconds to wait for in-flight jobs during graceful shutdown before abandoning them |
+| `stall_threshold` | `300` | Seconds without progress before a worker is considered stalled |
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
+| `group_mode` | `nil` | Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise. |
 | `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |
 | `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
 | `outbox_batch_size` | `100` | Max entries per outbox poll cycle |
 | `outbox_retention` | `1.day` | How long to keep published outbox entries. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `idempotency_ttl` | `7.days` | How long to keep processed event records. Accepts seconds, Duration, or `nil` to disable cleanup |
+| `allowed_global_id_models` | `nil` | Allowlist of Class/Module models permitted as GlobalID **job arguments** and EventBus payloads. `nil` = allow-all (default). `[]` = deny-all. Apps with ActiveStorage should include `ActiveStorage::Blob` (and related models). |
 | `base_controller_class` | `"::ActionController::Base"` | Base class for dashboard controllers (string, constantized at load time) |
 | `return_to_app_url` | `nil` | URL for "back to app" button in dashboard nav (nil hides the button) |
 | `web_auth` | `nil` | Lambda for dashboard authentication |
@@ -2098,6 +2116,22 @@ PostgreSQL + PGMQ
 | `stats_retention` | `30.days` | How long to keep job stats. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `stats_flush_size` | `100` | Buffered stat entries per worker before a bulk insert flush. Positive integer. Lower = tighter SIGKILL loss window. |
 | `stats_flush_interval` | `5` | Seconds between periodic stat buffer flushes. Positive number. |
+| `streams_enabled` | `true` | Enable the SSE streams transport |
+| `streams_default_retention` | `300` | Default stream archive retention in **seconds** (5 minutes). Chat-style apps raise this. |
+| `streams_retention` | `{}` | Per-stream retention overrides (exact string or `Regexp` keys → seconds/Duration) |
+| `streams_orphan_threshold` | `86400` | Age (seconds) after which a durable stream queue is eligible for the orphan sweep (default **24h**). `nil` disables age-based drop. Empty queues are dropped regardless. |
+| `streams_orphan_sweep_interval` | `3600` | Seconds between orphan stream sweeps (default **hourly**). `nil` disables the sweep. |
+| `streams_durable_patterns` | `[]` | Streams (exact string or `Regexp`) that default to durable broadcast mode |
+| `streams_default_broadcast_mode` | `:ephemeral` | Default broadcast mode when no pattern matches (`:ephemeral` or `:durable`) |
+| `streams_presence_patterns` | `[]` | Streams (exact string or `Regexp`) that get connection-driven presence. Experimental. |
+| `streams_presence_member` | `nil` | Custom `->(context) { { id:, metadata: } }` extractor for presence. Experimental. |
+| `streams_broadcast_queue` | `nil` | Dedicated queue for turbo-rails async broadcast jobs. `nil` leaves them on the default queue (can wait behind long jobs). Set a name and back it with a worker capsule. |
+| `streams_pool_size` | `5` | Dedicated DB pool size for durable-stream publish + replay (isolated from the job pool) |
+| `streams_pool_timeout` | `5` | Seconds to wait for a streams-pool connection |
+| `streams_pool_autoscale` | `false` | Grow/shrink the streams pool from live Postgres headroom under saturation (opt-in) |
+| `streams_pool_max` | `nil` | Optional hard ceiling for streams-pool autoscaling |
+| `streams_database_url` / `streams_host` / `streams_port` | `nil` | Override the streamer's LISTEN connection target (e.g. direct primary port when workers use a pooler) |
+| `streams_pool_database_url` / `streams_pool_host` / `streams_pool_port` | `nil` | Override the streams **pool** target independently of LISTEN (so pool traffic can stay on the pooler while LISTEN stays direct) |
 | `streams_test_mode` | `false` | Return a stub SSE response without hijack or background threads. Auto-enabled by `Pgbus::Testing.fake!`/`.inline!`. See [SSE streams in tests](#sse-streams-in-tests). |
 | `streams_stats_enabled` | `false` | Record stream broadcast/connect/disconnect stats (opt-in, can be high volume) |
 | `streams_path` | `nil` | Custom URL path for the SSE endpoint (nil = auto-detected from engine mount) |
@@ -2110,6 +2144,8 @@ PostgreSQL + PGMQ
 | `statsd_port` | `8125` | StatsD UDP port (used when `metrics_backend = :statsd`) |
 | `health_port` | `nil` | Port for standalone HTTP liveness/readiness probes served by the supervisor; nil disables |
 | `health_bind` | `"127.0.0.1"` | Bind address for the standalone health server |
+| `pgmq_schema_mode` | `:auto` | PGMQ schema install mode (`:auto`, `:extension`, `:embedded`) |
+| `doctor_on_boot` | `nil` | Run doctor inside the booting supervisor: `nil`/`false` = off, `:report` = log and boot, `:strict` = refuse to boot on a fatal check. Also via `--doctor` / `--doctor-strict`. |
 | `eager_validation` | `true` | Run `Configuration#validate!` automatically after the `Pgbus.configure` block yields; an invalid value raises `Pgbus::ConfigurationError` at boot. Set `false` to suppress and validate manually. |
 
 ## Development
