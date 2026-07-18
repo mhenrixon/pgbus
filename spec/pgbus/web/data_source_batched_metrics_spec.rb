@@ -40,6 +40,75 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result.last[:total_messages]).to eq(200)
     end
 
+    it "selects max(read_ct) and exposes it as :max_read_ct" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_default])
+
+      allow(conn).to receive(:quote) { |v| "'#{v}'" }
+
+      captured_sql = nil
+      allow(conn).to receive(:select_all) do |sql, _label|
+        captured_sql = sql
+        double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "5",
+                        "queue_visible_length" => "3", "newest_msg_age_sec" => "10",
+                        "oldest_msg_age_sec" => "100", "total_messages" => "500",
+                        "max_read_ct" => "2", "visible_unread_length" => "0" }])
+      end
+
+      result = data_source.queues_with_metrics
+
+      expect(captured_sql).to include("max(read_ct)")
+      expect(captured_sql).to include("max_read_ct")
+      expect(result.first[:max_read_ct]).to eq(2)
+    end
+
+    it "counts visible unread (read_ct=0) messages, scoped to visible rows only" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_default])
+
+      allow(conn).to receive(:quote) { |v| "'#{v}'" }
+
+      captured_sql = nil
+      allow(conn).to receive(:select_all) do |sql, _label|
+        captured_sql = sql
+        double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "5",
+                        "queue_visible_length" => "5", "newest_msg_age_sec" => "10",
+                        "oldest_msg_age_sec" => "100", "total_messages" => "500",
+                        "max_read_ct" => "3", "visible_unread_length" => "4" }])
+      end
+
+      result = data_source.queues_with_metrics
+
+      # The wedge signal must count only claimable (visible) never-claimed rows,
+      # so an in-flight or retried message (read_ct>0, or invisible) cannot veto
+      # the signal for a pile of visible read_ct=0 jobs (issue #367 review).
+      expect(captured_sql).to include("read_ct = 0")
+      expect(captured_sql).to include("vt <= NOW()")
+      expect(captured_sql).to include("visible_unread_length")
+      expect(result.first[:visible_unread_length]).to eq(4)
+    end
+
+    it "maps a NULL max_read_ct (empty queue) to nil, not 0" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_default])
+
+      allow(conn).to receive(:quote) { |v| "'#{v}'" }
+
+      allow(conn).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "0",
+                                    "queue_visible_length" => "0", "newest_msg_age_sec" => nil,
+                                    "oldest_msg_age_sec" => nil, "total_messages" => "0",
+                                    "max_read_ct" => nil }]))
+
+      result = data_source.queues_with_metrics
+
+      expect(result.first[:max_read_ct]).to be_nil
+    end
+
     it "handles empty queue list" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))

@@ -7,17 +7,29 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
 
   let(:data_source) { instance_double(Pgbus::Web::DataSource) }
 
-  def stub_data_source(queues: [], processes: [], health: {}, stream_queues: [], unregistered_streams: 0)
+  # drained: nil (default) means "a wildcard capsule drains every queue", which
+  # keeps the legacy specs — written before the drain-intersection existed —
+  # asserting on the full backlog. Pass an explicit array to restrict the
+  # drained set (issue #367 defect 2). unregistered_streams stubs the #366
+  # dormant-stream hint count.
+  def stub_data_source(queues: [], processes: [], health: {}, stream_queues: [], drained: nil, unregistered_streams: 0)
     allow(data_source).to receive_messages(
       queues_with_metrics: queues, processes: processes,
       queue_health_stats: health, stream_queue_names: Set.new(stream_queues),
+      drained_queue_names: drained.nil? ? nil : Set.new(drained),
       unregistered_stream_queue_count: unregistered_streams
     )
   end
 
-  def queue(name:, length: 0, visible: 0, paused: false, max_read_ct: nil)
+  # visible_unread_length is the precise wedge signal: visible rows with
+  # read_ct=0 (issue #367 review). When not given, it defaults from max_read_ct
+  # so the legacy specs keep their meaning — a fully-unclaimed backlog
+  # (max_read_ct 0 or absent) reports every visible row as unread; a claimed
+  # one (max_read_ct > 0) reports none.
+  def queue(name:, length: 0, visible: 0, paused: false, max_read_ct: nil, visible_unread: nil)
     h = { name: name, queue_length: length, queue_visible_length: visible, paused: paused }
     h[:max_read_ct] = max_read_ct unless max_read_ct.nil?
+    h[:visible_unread_length] = visible_unread || (max_read_ct.to_i.zero? ? visible : 0)
     h
   end
 
@@ -178,7 +190,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     it "still produces a verdict when queue_health_stats raises" do
       allow(data_source).to receive_messages(
         queues_with_metrics: [], processes: [], stream_queue_names: Set.new,
-        unregistered_stream_queue_count: 0
+        drained_queue_names: nil, unregistered_stream_queue_count: 0
       )
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
@@ -190,7 +202,7 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
     it "logs the queue_health_stats failure rather than swallowing it" do
       allow(data_source).to receive_messages(
         queues_with_metrics: [], processes: [], stream_queue_names: Set.new,
-        unregistered_stream_queue_count: 0
+        drained_queue_names: nil, unregistered_stream_queue_count: 0
       )
       allow(data_source).to receive(:queue_health_stats).and_raise(StandardError, "boom")
 
@@ -283,6 +295,178 @@ RSpec.describe Pgbus::MCP::HealthAnalyzer do
       verdict = analyzer.verdict
       expect(verdict[:status]).to eq("DEGRADED")
       expect(verdict[:reasons].join).to include("paused")
+    end
+  end
+
+  # Issue #367 defect 2: the wedge verdict must only reason about queues some
+  # configured capsule (or EventBus handler) can actually drain. Live workers
+  # prove nothing about a queue they could never claim from.
+  describe "#verdict drain-intersection (issue #367 defect 2)" do
+    it "does NOT flag STALLED for a backlog queue no capsule drains" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        drained: ["pgbus_default"]
+      )
+
+      expect(analyzer.verdict[:status]).not_to eq("STALLED")
+    end
+
+    it "reports an undrained backlog as DEGRADED with a 'no capsule' reason" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        drained: ["pgbus_default"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("no capsule")
+      expect(verdict[:reasons].join).to include("pgbus_adhoc")
+    end
+
+    it "still flags STALLED for a drained queue while ignoring an undrained one" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_default", length: 5, visible: 5, max_read_ct: 0),
+                 queue(name: "pgbus_adhoc", length: 9, visible: 9, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        drained: ["pgbus_default"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("pgbus_default")
+      expect(verdict[:reasons].first).not_to include("pgbus_adhoc")
+    end
+
+    it "treats a wildcard capsule (drained_queue_names nil) as draining every queue" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        drained: nil
+      )
+
+      expect(analyzer.verdict[:status]).to eq("STALLED")
+    end
+
+    it "counts a priority _pN sub-table as drained (drained set is physical-expanded)" do
+      # A worker draining logical "critical" in priority mode drains the physical
+      # pgbus_critical_p0.._pN tables; drained_queue_names returns those expanded
+      # names, so a wedge on the priority sub-table is still caught as STALLED.
+      stub_data_source(
+        queues: [queue(name: "pgbus_critical_p0", length: 5, visible: 5, max_read_ct: 0)],
+        processes: [worker(status: :healthy)],
+        drained: %w[pgbus_critical_p0 pgbus_critical_p1]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].join).not_to include("no capsule")
+    end
+
+    it "still reports an undrained-queue DEGRADED even when its messages were once claimed" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_adhoc", length: 5, visible: 5, max_read_ct: 4, visible_unread: 0)],
+        processes: [worker(status: :healthy)],
+        drained: ["pgbus_default"]
+      )
+
+      # Past reads don't make an undrained queue safe: if no capsule drains it
+      # now, whatever claimed those messages is gone and the backlog will sit
+      # forever. It is DEGRADED (a config hazard), never STALLED (not the wedge).
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("DEGRADED")
+      expect(verdict[:reasons].join).to include("no capsule")
+      expect(verdict[:reasons].join).to include("pgbus_adhoc")
+    end
+
+    it "catches a wedged EventBus handler queue on a consumer-only fleet (no workers)" do
+      # drained_queue_names unions consumer-drained handler queues; the wedge
+      # branch must count consumer liveness, else a fleet with no workers never
+      # runs (the old worker-only guard returned early).
+      stub_data_source(
+        queues: [queue(name: "pgbus_order_handler", length: 6, visible: 6, max_read_ct: 0)],
+        processes: [{ kind: "consumer", status: :healthy }],
+        drained: ["pgbus_order_handler"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("draining process(es) are alive")
+    end
+  end
+
+  # Issue #367 defect 1: max_read_ct is now populated, so read_ct > 0 must NOT
+  # produce the "read_ct=0 (never claimed)" reason string.
+  describe "#verdict does not assert 'never claimed' about claimed messages (issue #367 defect 1)" do
+    it "is OK (not STALLED) when a drained queue's backlog has been read mid-burst" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_default", length: 10, visible: 10, max_read_ct: 1)],
+        processes: [worker(status: :healthy)]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("OK")
+      expect(verdict[:reasons].join).not_to include("never claimed")
+    end
+  end
+
+  # Issue #367 review: the wedge signal must count VISIBLE never-claimed rows,
+  # not max(read_ct) over the whole table — one retried/in-flight message
+  # (read_ct > 0) must not veto the signal for a pile of visible read_ct=0 jobs.
+  describe "#verdict partial-wedge detection (issue #367 review)" do
+    it "is STALLED when visible read_ct=0 jobs pile up despite a lingering retried message" do
+      # 500 fresh unclaimed jobs (the wedge) + 1 message that retried once, so
+      # max_read_ct=1 but 500 visible rows have never been claimed.
+      stub_data_source(
+        queues: [queue(name: "pgbus_default", length: 501, visible: 501,
+                       max_read_ct: 1, visible_unread: 500)],
+        processes: [worker(status: :healthy)]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("never claimed")
+    end
+
+    it "is OK when every visible message has been claimed (visible_unread=0) even if some are read once" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_default", length: 5, visible: 5,
+                       max_read_ct: 2, visible_unread: 0)],
+        processes: [worker(status: :healthy)]
+      )
+
+      expect(analyzer.verdict[:status]).to eq("OK")
+    end
+  end
+
+  # Issue #367 review: a heart-beating-but-stalled worker is a wedge regardless
+  # of WHICH queue holds the visible backlog — the stalled-worker branch must
+  # run against the full active backlog, not only the drained partition.
+  describe "#verdict stalled-worker precedence across undrained backlog (issue #367 review)" do
+    it "is STALLED (not DEGRADED) when a worker is stalled and the backlog is on an undrained queue" do
+      stub_data_source(
+        queues: [queue(name: "pgbus_y", length: 8, visible: 8, max_read_ct: 0)],
+        processes: [worker(status: :stalled)],
+        drained: ["pgbus_x"]
+      )
+
+      verdict = analyzer.verdict
+      expect(verdict[:status]).to eq("STALLED")
+      expect(verdict[:reasons].first).to include("stalled")
+    end
+  end
+
+  # Issue #367 minor: a reason string listing hundreds of queues is a multi-KB
+  # log line. Truncate to the first ~10 with a (+N more) suffix.
+  describe "#verdict truncates long backlog name lists (issue #367 minor)" do
+    it "lists at most 10 queue names and appends (+N more)" do
+      queues = (1..25).map { |i| queue(name: "pgbus_q#{i}", length: 2, visible: 2, max_read_ct: 0) }
+      stub_data_source(queues: queues, processes: [worker(status: :healthy)])
+
+      reason = analyzer.verdict[:reasons].first
+      expect(reason).to include("(+15 more)")
+      expect(reason.scan(/pgbus_q\d+/).size).to eq(10)
     end
   end
 end

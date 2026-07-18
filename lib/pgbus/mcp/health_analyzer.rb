@@ -23,6 +23,18 @@ module Pgbus
       # heartbeats while doing no work — exactly the case we must catch.
       WORKER_KIND = "worker"
 
+      # Process kinds that claim from queues: workers drain job queues, consumers
+      # drain EventBus handler queues. `drained_queue_names` unions both kinds'
+      # queues, so the wedge signal must count both kinds as liveness evidence —
+      # otherwise a consumer-only fleet with a wedged handler queue is missed
+      # (the worker set is empty and the branch never runs).
+      DRAINING_KINDS = %w[worker consumer].freeze
+
+      # Cap on how many queue names a reason string lists before truncating to
+      # "(+N more)" — keeps a flagged fleet of hundreds of queues from producing
+      # a multi-KB log line (issue #367 minor).
+      NAME_LIMIT = 10
+
       def initialize(data_source)
         @data_source = data_source
       end
@@ -48,8 +60,14 @@ module Pgbus
         backlog = non_dlq.select { |q| q[:queue_visible_length].to_i.positive? }
         active_backlog = backlog.reject { |q| q[:paused] }
 
-        stalled  = stalled_reasons(active_backlog, processes)
-        degraded = degraded_reasons(queues, backlog, processes, health, health_error)
+        # Split the active backlog by whether some configured capsule or handler
+        # drains the queue (issue #367 defect 2). Live workers say nothing about
+        # a queue they can never claim from, so only the drained side can be the
+        # silent-worker-wedge; the undrained side is its own DEGRADED hazard.
+        drained, undrained = partition_by_drain(active_backlog)
+
+        stalled  = stalled_reasons(active_backlog, drained, processes)
+        degraded = degraded_reasons(queues, backlog, undrained, processes, health, health_error)
 
         status = if stalled.any?
                    "STALLED"
@@ -73,6 +91,18 @@ module Pgbus
         queue[:name].to_s.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
       end
 
+      # Partition a backlog into [drained, undrained] using the set of queues
+      # some configured capsule or EventBus handler drains. A nil drained set
+      # means a wildcard capsule drains everything, so nothing is undrained.
+      def partition_by_drain(backlog)
+        return [backlog, []] if backlog.empty?
+
+        drained_names = @data_source.drained_queue_names
+        return [backlog, []] if drained_names.nil?
+
+        backlog.partition { |q| drained_names.include?(q[:name].to_s) }
+      end
+
       # Returns [health_hash, error_or_nil]. We never raise — pgbus_health
       # must always produce a verdict — but we DO surface the failure so the
       # caller knows the verdict was built from partial data, and we log it
@@ -84,31 +114,42 @@ module Pgbus
         [{}, e]
       end
 
-      # STALLED detection: an active (non-paused) backed-up queue while a
-      # worker is in the :stalled state, or backed up with live-but-idle
-      # workers present.
-      def stalled_reasons(backlog, processes)
-        return [] if backlog.empty?
-
-        workers = processes.select { |p| p[:kind] == WORKER_KIND }
-        return [] if workers.empty?
-
-        stalled_workers = workers.select { |w| w[:status].to_s == "stalled" }
-        live_workers    = workers.select { |w| %w[healthy stalled].include?(w[:status].to_s) }
+      # STALLED detection. Two distinct wedge signatures, with different scopes:
+      #
+      #   * A worker self-reporting :stalled (heart-beating but claim loop frozen)
+      #     is a wedge regardless of WHICH queue holds the backlog — the worker is
+      #     broken. So this branch reasons against the FULL active backlog. This
+      #     is the specific #179 signature and stays worker-scoped.
+      #   * Live-but-idle draining processes with a never-claimed backlog is only
+      #     a wedge for queues those processes can actually claim from — so this
+      #     branch reasons against the DRAINED backlog only (issue #367 defect 2).
+      #     Liveness is the evidence, and `drained_queue_names` covers both
+      #     worker-drained job queues and consumer-drained handler queues, so a
+      #     live process of either draining kind counts (a consumer-only fleet
+      #     must still catch a wedged handler queue).
+      def stalled_reasons(active_backlog, drained_backlog, processes)
+        stalled_workers = processes.select { |p| p[:kind] == WORKER_KIND && p[:status].to_s == "stalled" }
+        live_drainers   = processes.select do |p|
+          DRAINING_KINDS.include?(p[:kind].to_s) && %w[healthy stalled].include?(p[:status].to_s)
+        end
 
         reasons = []
-        if stalled_workers.any?
+        if stalled_workers.any? && active_backlog.any?
           reasons << "#{stalled_workers.size} worker(s) stalled (heart-beating but claim loop not advancing) " \
-                     "while #{backlog.size} queue(s) have visible backlog: #{backlog_names(backlog)}"
-        elsif live_workers.any? && all_unread?(backlog)
-          reasons << "#{backlog.size} queue(s) have visible messages with read_ct=0 (never claimed) " \
-                     "while #{live_workers.size} worker(s) are alive: #{backlog_names(backlog)}"
+                     "while #{active_backlog.size} queue(s) have visible backlog: #{backlog_names(active_backlog)}"
+        elsif live_drainers.any? && drained_backlog.any? && any_unread?(drained_backlog)
+          unread = drained_backlog.select { |q| unread?(q) }
+          reasons << "#{unread.size} queue(s) have visible messages with read_ct=0 (never claimed) " \
+                     "while #{live_drainers.size} draining process(es) are alive: #{backlog_names(unread)}"
         end
         reasons
       end
 
       # DEGRADED detection: conditions worth surfacing that are not the wedge.
-      def degraded_reasons(queues, backlog, processes, health, health_error)
+      # +undrained+ is the active backlog on queues no configured capsule/handler
+      # drains (issue #367 defect 2) — a real hazard (nothing will empty them),
+      # but not the worker wedge, so it is DEGRADED rather than STALLED.
+      def degraded_reasons(queues, backlog, undrained, processes, health, health_error)
         reasons = []
 
         reasons << "queue health stats unavailable: #{health_error.class}: #{health_error.message}" if health_error
@@ -118,6 +159,16 @@ module Pgbus
 
         paused_backlog = backlog.select { |q| q[:paused] }
         reasons << "#{paused_backlog.size} paused queue(s) holding a backlog: #{backlog_names(paused_backlog)}" if paused_backlog.any?
+
+        # Every active undrained queue is the "nobody drains this" hazard: it
+        # holds a visible backlog and no configured capsule/handler will empty
+        # it. Past reads don't make it safe — if nothing drains it now, whatever
+        # read those messages is gone. (`undrained` is already the visible,
+        # non-paused backlog on queues no capsule drains.)
+        if undrained.any?
+          reasons << "#{undrained.size} queue(s) hold messages but no capsule is " \
+                     "configured to drain them: #{backlog_names(undrained)}"
+        end
 
         dlq = queues.select { |q| dlq?(q) && q[:queue_length].to_i.positive? }
         reasons << "#{dlq.size} dead-letter queue(s) hold messages" if dlq.any?
@@ -147,15 +198,33 @@ module Pgbus
         nil
       end
 
-      # The strongest wedge signal: visible messages that have never been read.
-      # When queue metrics don't expose read_ct we conservatively treat the
-      # backlog as unread (the wedge default) so we don't miss the condition.
-      def all_unread?(backlog)
-        backlog.all? { |q| !q.key?(:max_read_ct) || q[:max_read_ct].to_i.zero? }
+      # True when any queue in the backlog holds a visible, never-claimed
+      # message — the wedge signal.
+      def any_unread?(backlog)
+        backlog.any? { |q| unread?(q) }
       end
 
+      # True when a queue has at least one visible (claimable) message with
+      # read_ct=0. This counts per visible message (issue #367 review), so one
+      # retried or in-flight message (read_ct>0) can no longer veto the signal
+      # for a pile of genuinely-unclaimed jobs the way max(read_ct) did.
+      #
+      # When metrics don't expose the count (an old hash / a stubbed test) we
+      # conservatively treat the queue as unread so we never miss the wedge.
+      def unread?(queue)
+        return true unless queue.key?(:visible_unread_length)
+
+        queue[:visible_unread_length].to_i.positive?
+      end
+
+      # Join backlog queue names for a reason string, truncated so a flagged
+      # fleet of hundreds of queues doesn't produce a multi-KB log line
+      # (issue #367 minor). Lists the first NAME_LIMIT, then "(+N more)".
       def backlog_names(queues)
-        queues.map { |q| q[:name] }.join(", ")
+        names = queues.map { |q| q[:name] }
+        shown = names.first(NAME_LIMIT).join(", ")
+        overflow = names.size - NAME_LIMIT
+        overflow.positive? ? "#{shown} (+#{overflow} more)" : shown
       end
 
       def build_summary(queues, non_dlq, processes, health)
