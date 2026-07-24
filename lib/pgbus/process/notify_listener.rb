@@ -30,11 +30,23 @@ module Pgbus
     # blocking IO call where the mutex MUST NOT be held), so wait_once reads
     # the connection out of the mutex first and operates on a local. Reconnect
     # publishes the new connection + channel set under the mutex.
+    #
+    # The mutex only makes the ivar READ safe. PG::Connection itself is not
+    # thread-safe, so the connection is single-owner: the listener thread is
+    # the ONLY thread that may exec, wait, or close on it, from build through
+    # teardown. #stop signals by clearing @running and joining — it never
+    # touches the connection, because #close is PQfinish and freeing the
+    # PGconn under a concurrent libpq call is a process-killing SEGV, not a
+    # rescuable PG::Error (issue #375).
     class NotifyListener
       CHANNEL_PREFIX = "pgmq.q_"
       CHANNEL_SUFFIX = ".INSERT"
 
       RECONNECT_BACKOFF_SECONDS = 0.5
+
+      # Grace added to one health-check cycle when #stop joins the listener
+      # thread. See #stop_join_timeout.
+      STOP_JOIN_GRACE_SECONDS = 5
 
       def initialize(physical_queues:, on_wake:, connection_options:,
                      health_check_ms: 1000, logger: Pgbus.logger)
@@ -80,22 +92,20 @@ module Pgbus
       end
 
       def stop
-        conn_to_close = nil
         @state_mutex.synchronize do
           return self unless @running
 
           @running = false
-          conn_to_close = @conn
         end
         @commands << [:stop]
-        # Interrupt the blocking wait by closing the socket; the rescue in
-        # wait_once sees @running == false and exits cleanly.
-        begin
-          conn_to_close&.close if conn_to_close.respond_to?(:close)
-        rescue StandardError
-          nil
-        end
-        @thread&.join(5)
+        # Deliberately does NOT touch @conn. PG::Connection is not thread-safe
+        # and #close is PQfinish: it frees the PGconn and its OpenSSL objects
+        # out from under whatever libpq call the listener thread is making on
+        # the same connection. That is a use-after-free — a process-killing
+        # SEGV, not a rescuable PG::Error (issue #375). The listener thread is
+        # the sole owner of @conn for its entire life and closes it in
+        # run_loop's ensure; clearing @running above is the whole stop signal.
+        @thread&.join(stop_join_timeout)
         @thread = nil
         self
       end
@@ -153,9 +163,26 @@ module Pgbus
         # Clear @running so #start can spawn a fresh thread after a fatal exit
         # (e.g. build_connection raising at boot). Without this, the dead
         # thread's @running stays true and #start returns early forever.
-        @state_mutex.synchronize { @running = false }
-        safe_unlisten_all
-        safe_close
+        #
+        # The LISTEN set is dropped as bookkeeping only — no UNLISTEN
+        # round-trip. We close on the next line and closing the session
+        # deregisters every LISTEN server-side, so the exec bought nothing
+        # while being the statement that raced #stop into a SEGV (issue #375).
+        #
+        # Capturing @conn in the SAME critical section that clears @running is
+        # what makes restart safe. #start is public and guarded only by
+        # @running, so a caller watching running? may spawn a fresh thread the
+        # instant it flips. If teardown read @conn in a later critical section
+        # it could pick up the NEW thread's connection and PQfinish it mid-use
+        # — the same use-after-free, reached through restart instead of #stop.
+        conn = @state_mutex.synchronize do
+          @running = false
+          @listening_to.clear
+          c = @conn
+          @conn = nil
+          c
+        end
+        close_quietly(conn)
       end
 
       def wait_once
@@ -166,7 +193,10 @@ module Pgbus
         got_notify = conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
           @on_wake.call
         end
-        run_health_check(conn) unless got_notify
+        # Skip the keepalive when a stop landed during the wait: the loop is
+        # about to exit and close this connection anyway, so the round-trip
+        # would only add latency to shutdown.
+        run_health_check(conn) if !got_notify && running?
       rescue IOError, PG::Error => e
         return unless running?
 
@@ -270,14 +300,14 @@ module Pgbus
         end
       end
 
-      def safe_unlisten_all
-        channels, conn = @state_mutex.synchronize { [@listening_to.to_a, @conn] }
-        channels.each do |channel|
-          conn&.exec(%(UNLISTEN "#{channel}"))
-        rescue PG::Error
-          nil
-        end
-        @state_mutex.synchronize { @listening_to.clear }
+      # How long #stop waits for the listener thread to notice the cleared
+      # @running and finish teardown. The thread can be parked in
+      # wait_for_notify for one full health-check cycle before it re-checks the
+      # flag, so the budget is that cycle plus grace — a flat timeout would
+      # expire before a listener with a large health_check_ms had even one
+      # chance to observe the stop.
+      def stop_join_timeout
+        (@health_check_ms / 1000.0) + STOP_JOIN_GRACE_SECONDS
       end
 
       def safe_close
@@ -289,8 +319,10 @@ module Pgbus
         close_quietly(conn)
       end
 
-      # Close an unpublished PG::Connection (one that never made it into @conn,
-      # e.g. a half-built reconnect attempt where LISTEN raised). Best-effort.
+      # Close a PG::Connection we are done with — a half-built reconnect
+      # attempt that never made it into @conn, or the connection captured out
+      # of @conn during teardown. Always called on the listener thread, which
+      # owns the connection. Best-effort.
       def close_quietly(conn)
         conn&.close if conn.respond_to?(:close)
       rescue StandardError
