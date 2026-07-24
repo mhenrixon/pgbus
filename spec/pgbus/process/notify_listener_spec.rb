@@ -563,6 +563,35 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       expect(listener_thread).not_to be_alive
     end
+
+    # run_loop's ensure captures @conn in the SAME critical section that clears
+    # @running. #start is public and guarded only by @running, so a caller
+    # watching running? can spawn a fresh thread the instant it flips; if
+    # teardown read @conn afterwards it could close the NEW thread's connection
+    # mid-use — the same use-after-free reached through restart instead of
+    # #stop. This is a regression guard for that ordering, not a deterministic
+    # reproduction: the atomicity is guaranteed by the single critical section.
+    it "does not close the successor connection when the same instance is restarted" do
+      second_pg = fake_pg.class.new
+      call_sequence = [fake_pg, second_pg]
+      allow(listener).to receive(:build_connection) { call_sequence.shift }
+
+      listener.start
+      wait_until { listener.listening_to.size == 2 }
+      # Kill the first thread the way a fatal error would, then restart the
+      # SAME instance the moment running? reports the thread is gone. The
+      # reconnect stub is installed BEFORE the error is pushed so the thread
+      # can't recover first and leave running? true forever.
+      allow(listener).to receive(:reconnect!).and_raise(PG::Error.new("fatal"))
+      fake_pg.push_error(PG::Error.new("connection reset"))
+      wait_until { !listener.running? }
+
+      listener.start
+      wait_until { listener.listening_to.size == 2 }
+
+      expect(second_pg.close_threads).to be_empty
+      expect(fake_pg).to be_closed
+    end
   end
 
   describe "#stop" do

@@ -155,13 +155,18 @@ module Pgbus
 
             timeout_s = @health_check_ms / 1000.0
             begin
-              @conn.wait_for_notify(timeout_s) do |channel, _pid, payload|
+              got_notify = @conn.wait_for_notify(timeout_s) do |channel, _pid, payload|
                 handle_notify(channel, payload)
-              end || run_health_check
+              end
+              # Skip the keepalive when a stop landed during the wait: the loop
+              # is about to exit and close this connection anyway, so the
+              # round-trip would only add latency to shutdown.
+              run_health_check if !got_notify && @running
             rescue IOError => e
-              # #stop closes the PG connection to interrupt
-              # wait_for_notify, which raises IOError ("stream closed
-              # in another thread"). This is expected — exit cleanly.
+              # #stop no longer closes the connection to interrupt the wait
+              # (issue #375), so an IOError here is a genuine socket failure,
+              # not the expected shutdown signal. Reconnect unless we're
+              # stopping, in which case exit cleanly.
               break unless @running
 
               @logger.warn { "[Pgbus::Streamer::Listener] IO error (#{e.class}: #{e.message}) — reconnecting" }

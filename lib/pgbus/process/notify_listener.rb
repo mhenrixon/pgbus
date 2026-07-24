@@ -165,14 +165,24 @@ module Pgbus
         # thread's @running stays true and #start returns early forever.
         #
         # The LISTEN set is dropped as bookkeeping only — no UNLISTEN
-        # round-trip. safe_close runs on the next line and closing the session
+        # round-trip. We close on the next line and closing the session
         # deregisters every LISTEN server-side, so the exec bought nothing
         # while being the statement that raced #stop into a SEGV (issue #375).
-        @state_mutex.synchronize do
+        #
+        # Capturing @conn in the SAME critical section that clears @running is
+        # what makes restart safe. #start is public and guarded only by
+        # @running, so a caller watching running? may spawn a fresh thread the
+        # instant it flips. If teardown read @conn in a later critical section
+        # it could pick up the NEW thread's connection and PQfinish it mid-use
+        # — the same use-after-free, reached through restart instead of #stop.
+        conn = @state_mutex.synchronize do
           @running = false
           @listening_to.clear
+          c = @conn
+          @conn = nil
+          c
         end
-        safe_close
+        close_quietly(conn)
       end
 
       def wait_once
@@ -183,7 +193,10 @@ module Pgbus
         got_notify = conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
           @on_wake.call
         end
-        run_health_check(conn) unless got_notify
+        # Skip the keepalive when a stop landed during the wait: the loop is
+        # about to exit and close this connection anyway, so the round-trip
+        # would only add latency to shutdown.
+        run_health_check(conn) if !got_notify && running?
       rescue IOError, PG::Error => e
         return unless running?
 
@@ -306,8 +319,10 @@ module Pgbus
         close_quietly(conn)
       end
 
-      # Close an unpublished PG::Connection (one that never made it into @conn,
-      # e.g. a half-built reconnect attempt where LISTEN raised). Best-effort.
+      # Close a PG::Connection we are done with — a half-built reconnect
+      # attempt that never made it into @conn, or the connection captured out
+      # of @conn during teardown. Always called on the listener thread, which
+      # owns the connection. Best-effort.
       def close_quietly(conn)
         conn&.close if conn.respond_to?(:close)
       rescue StandardError
