@@ -518,5 +518,59 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       expect(listener.running?).to be(false)
     end
+
+    # Issue #375: #stop closed the PG connection to interrupt wait_for_notify but
+    # left @conn non-nil. The listener thread then ran safe_unlisten_all in ensure
+    # and exec'd UNLISTEN on the concurrently closed (often SSL-freed) connection
+    # — a C-level SEGV that rescue PG::Error cannot catch. Fix: take @conn out of
+    # circulation under the mutex before close, and skip UNLISTEN entirely
+    # (closing the session deregisters LISTENs server-side).
+    it "does not exec UNLISTEN after the stop-side close (issue #375 SEGV)" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      # Snapshot so we can assert nothing new is executed after close races.
+      executed_before_stop = fake_pg.executed.dup
+      listener.stop
+
+      unlistens_after_stop = (fake_pg.executed - executed_before_stop).select do |sql|
+        sql.start_with?("UNLISTEN")
+      end
+      expect(unlistens_after_stop).to be_empty
+    end
+
+    it "nils @conn under the mutex before closing so ensure cannot reuse it (issue #375)" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      # If #stop leaves @conn set while close is in flight, the listener ensure
+      # can PQsendQuery on a freed SSL object. Capture @conn on the *first*
+      # close only (the stop-side interrupt); a later safe_close must not mask
+      # a still-live ivar at the dangerous moment.
+      seen_conn_during_first_close = :unset
+      original_close = fake_pg.method(:close)
+      allow(fake_pg).to receive(:close) do
+        seen_conn_during_first_close = listener.instance_variable_get(:@conn) if seen_conn_during_first_close == :unset
+        original_close.call
+      end
+
+      listener.stop
+
+      expect(seen_conn_during_first_close).to be_nil
+      expect(listener.instance_variable_get(:@conn)).to be_nil
+    end
+
+    it "still closes the dedicated connection exactly once" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.size == 2 }
+
+      listener.stop
+
+      expect(fake_pg.close_count).to eq(1)
+      expect(fake_pg).to be_closed
+    end
   end
 end

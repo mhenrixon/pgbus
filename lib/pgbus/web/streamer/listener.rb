@@ -101,11 +101,17 @@ module Pgbus
           # Interrupt the blocking wait_for_notify by closing the PG
           # connection. Without this, the listener thread would sit
           # inside wait_for_notify until a NOTIFY arrived, which may
-          # never happen. Closing the socket raises PG::Error inside
-          # wait_for_notify; our rescue clause sees @running == false
-          # on the next iteration and exits cleanly.
+          # never happen. Closing the socket raises PG::Error / IOError
+          # inside wait_for_notify; our rescue clause sees @running ==
+          # false on the next iteration and exits cleanly.
+          #
+          # Take @conn out of circulation before close so run_loop's
+          # ensure (safe_unlisten_all) cannot exec on a concurrently
+          # closed connection — same SEGV class as NotifyListener #375.
+          conn_to_close = @conn
+          @conn = nil
           begin
-            @conn.close if @conn.respond_to?(:close)
+            conn_to_close.close if conn_to_close.respond_to?(:close)
           rescue StandardError
             # best effort — connection may already be gone
           end
@@ -146,11 +152,18 @@ module Pgbus
             drain_commands
             break unless @running
 
+            # Snapshot @conn: #stop nils the ivar before close (issue #375), so
+            # a mid-cycle timeout must not call health-check methods via the
+            # ivar after ownership transferred. Local conn is the wait owner.
+            conn = @conn
+            break unless conn
+
             timeout_s = @health_check_ms / 1000.0
             begin
-              @conn.wait_for_notify(timeout_s) do |channel, _pid, payload|
+              got_notify = conn.wait_for_notify(timeout_s) do |channel, _pid, payload|
                 handle_notify(channel, payload)
-              end || run_health_check
+              end
+              run_health_check(conn) unless got_notify
             rescue IOError => e
               # #stop closes the PG connection to interrupt
               # wait_for_notify, which raises IOError ("stream closed
@@ -208,7 +221,10 @@ module Pgbus
           channel = channel_for(queue_name)
           return if @listening_to.include?(channel)
 
-          @conn.exec(%(LISTEN "#{channel}"))
+          conn = @conn
+          return unless conn
+
+          conn.exec(%(LISTEN "#{channel}"))
           @listening_to.add(channel)
         end
 
@@ -216,7 +232,10 @@ module Pgbus
           channel = channel_for(queue_name)
           return unless @listening_to.include?(channel)
 
-          @conn.exec(%(UNLISTEN "#{channel}"))
+          conn = @conn
+          return unless conn
+
+          conn.exec(%(UNLISTEN "#{channel}"))
           @listening_to.delete(channel)
         end
 
@@ -247,24 +266,27 @@ module Pgbus
           @dispatch_queue << WakeMessage.new(queue_name: queue_name, payload: payload)
         end
 
-        def run_health_check
-          @conn.exec("SELECT 1")
-          run_maintenance
+        def run_health_check(conn)
+          return unless conn
+
+          conn.exec("SELECT 1")
+          run_maintenance(conn)
         end
 
         # Periodic maintenance on the idle LISTEN connection, throttled to
         # @maintenance.interval (issue #323). Runs on the listener thread, so it
-        # is the only place the non-thread-safe @conn may be queried outside
+        # is the only place the non-thread-safe connection may be queried outside
         # wait_for_notify. Fail-soft: a raising maintenance callback is logged and
         # never disturbs the listen loop.
-        def run_maintenance
+        def run_maintenance(conn)
           return unless @maintenance
+          return unless conn
 
           now = @clock.call
           return if @maintenance_last && (now - @maintenance_last) < @maintenance.interval
 
           @maintenance_last = now
-          @maintenance.run(@conn)
+          @maintenance.run(conn)
         rescue StandardError => e
           @logger.debug { "[Pgbus::Streamer::Listener] maintenance raised: #{e.class}: #{e.message}" }
         end
@@ -322,14 +344,12 @@ module Pgbus
           nil
         end
 
+        # Bookkeeping only. Invoked from run_loop's ensure on teardown —
+        # closing the session deregisters LISTENs server-side, so an UNLISTEN
+        # round-trip buys nothing. After #stop has closed the socket, any
+        # concurrent exec races libpq's TLS write into a freed OpenSSL object
+        # (SEGV, same class as NotifyListener #375).
         def safe_unlisten_all
-          @listening_to.each do |channel|
-            # @conn may be nil if #stop interrupted the reconnect loop between
-            # closing the old connection and publishing a new one.
-            @conn&.exec(%(UNLISTEN "#{channel}"))
-          rescue PG::Error
-            # connection may be dead; nothing we can do
-          end
           @listening_to.clear
         end
 

@@ -29,7 +29,10 @@ module Pgbus
     # @state_mutex. The listener thread owns @conn during wait_for_notify (a
     # blocking IO call where the mutex MUST NOT be held), so wait_once reads
     # the connection out of the mutex first and operates on a local. Reconnect
-    # publishes the new connection + channel set under the mutex.
+    # publishes the new connection + channel set under the mutex. #stop takes
+    # @conn out of circulation under the same critical section that flips
+    # @running, then closes the local — so ensure teardown never execs on a
+    # concurrently closed connection (issue #375).
     class NotifyListener
       CHANNEL_PREFIX = "pgmq.q_"
       CHANNEL_SUFFIX = ".INSERT"
@@ -85,7 +88,14 @@ module Pgbus
           return self unless @running
 
           @running = false
+          # Take @conn out of circulation in the same critical section that
+          # flips @running. Without this, the listener thread's ensure path
+          # (safe_unlisten_all / safe_close) re-reads the still-non-nil ivar
+          # and races the close below — PQsendQuery into a freed SSL object
+          # (SEGV, issue #375). PG::Connection is not thread-safe; the mutex
+          # must serialize ownership of the pointer, not just the ivar read.
           conn_to_close = @conn
+          @conn = nil
         end
         @commands << [:stop]
         # Interrupt the blocking wait by closing the socket; the rescue in
@@ -270,13 +280,12 @@ module Pgbus
         end
       end
 
+      # Bookkeeping only. Invoked from run_loop's ensure immediately before
+      # safe_close — and closing a session deregisters its LISTENs server-side,
+      # so an UNLISTEN round-trip buys nothing. Worse: after #stop has closed
+      # the socket, any concurrent exec races libpq's TLS write into a freed
+      # OpenSSL object (SEGV, issue #375). rescue PG::Error cannot catch that.
       def safe_unlisten_all
-        channels, conn = @state_mutex.synchronize { [@listening_to.to_a, @conn] }
-        channels.each do |channel|
-          conn&.exec(%(UNLISTEN "#{channel}"))
-        rescue PG::Error
-          nil
-        end
         @state_mutex.synchronize { @listening_to.clear }
       end
 

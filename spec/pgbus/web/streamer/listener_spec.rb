@@ -132,6 +132,43 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       listener.stop
       expect(listener.listening_to).to be_empty
     end
+
+    # Same SEGV class as NotifyListener #375: #stop closed @conn without
+    # nilling it; run_loop ensure then exec'd UNLISTEN on the closed (often
+    # SSL-freed) connection. Closing the session already deregisters LISTENs.
+    it "does not exec UNLISTEN after the stop-side close (issue #375 SEGV)" do
+      listener.start
+      listener.ensure_listening("pgbus_stream_chat")
+      fake_pg.push_timeout
+      wait_until { listener.listening_to.include?("pgmq.q_pgbus_stream_chat.INSERT") }
+
+      executed_before_stop = fake_pg.executed.dup
+      listener.stop
+
+      unlistens_after_stop = (fake_pg.executed - executed_before_stop).select do |sql|
+        sql.start_with?("UNLISTEN")
+      end
+      expect(unlistens_after_stop).to be_empty
+      expect(listener.listening_to).to be_empty
+    end
+
+    it "nils @conn before closing so ensure cannot reuse it (issue #375)" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { fake_pg.executed.include?("SELECT 1") }
+
+      seen_conn_during_first_close = :unset
+      original_close = fake_pg.method(:close)
+      allow(fake_pg).to receive(:close) do
+        seen_conn_during_first_close = listener.instance_variable_get(:@conn) if seen_conn_during_first_close == :unset
+        original_close.call
+      end
+
+      listener.stop
+
+      expect(seen_conn_during_first_close).to be_nil
+      expect(listener.instance_variable_get(:@conn)).to be_nil
+    end
   end
 
   describe "channel naming" do
