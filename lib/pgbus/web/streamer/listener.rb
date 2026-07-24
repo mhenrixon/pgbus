@@ -15,7 +15,12 @@ module Pgbus
       #     only running `wait_for_notify` — all LISTEN/UNLISTEN SQL goes
       #     through a command queue that the listener thread drains between
       #     notifies
-      #   - #stop joins the thread cleanly
+      #   - #stop clears @running and joins; it never touches the connection
+      #   - the connection is SINGLE-OWNER: the listener thread is the only
+      #     thread that may exec, wait, or close on it, from construction
+      #     through teardown. PG::Connection is not thread-safe and #close is
+      #     PQfinish — freeing the PGconn under a concurrent libpq call is a
+      #     process-killing SEGV, not a rescuable PG::Error (issue #375)
       #
       # Health check: `wait_for_notify(timeout)` returns nil on timeout. When
       # it does, the listener runs `SELECT 1` as a TCP keepalive. If that
@@ -40,6 +45,10 @@ module Pgbus
         CHANNEL_SUFFIX = ".INSERT"
 
         RECONNECT_BACKOFF_SECONDS = 0.5
+
+        # Grace added to one health-check cycle when #stop joins the listener
+        # thread. See #stop_join_timeout.
+        STOP_JOIN_GRACE_SECONDS = 5
 
         attr_reader :listening_to
 
@@ -98,18 +107,16 @@ module Pgbus
 
           @running = false
           @commands << [:stop]
-          # Interrupt the blocking wait_for_notify by closing the PG
-          # connection. Without this, the listener thread would sit
-          # inside wait_for_notify until a NOTIFY arrived, which may
-          # never happen. Closing the socket raises PG::Error inside
-          # wait_for_notify; our rescue clause sees @running == false
-          # on the next iteration and exits cleanly.
-          begin
-            @conn.close if @conn.respond_to?(:close)
-          rescue StandardError
-            # best effort — connection may already be gone
-          end
-          @thread&.join(5)
+          # Deliberately does NOT touch @conn. PG::Connection is not
+          # thread-safe and #close is PQfinish: it frees the PGconn and its
+          # OpenSSL objects out from under whatever libpq call the listener
+          # thread is making on the same connection. That is a use-after-free —
+          # a process-killing SEGV, not a rescuable PG::Error (issue #375).
+          # The listener thread is the sole owner of @conn and closes it in
+          # run_loop's ensure; clearing @running above is the whole stop signal.
+          # It is observed within one wait_for_notify timeout (health_check_ms),
+          # which is what the join budget below is sized against.
+          @thread&.join(stop_join_timeout)
           @thread = nil
           self
         end
@@ -167,7 +174,15 @@ module Pgbus
             end
           end
         ensure
-          safe_unlisten_all
+          # Bookkeeping only — no UNLISTEN round-trip. We close the connection
+          # on the next line and closing the session deregisters every LISTEN
+          # server-side, so the exec bought nothing while being the statement
+          # that raced #stop's PQfinish into a SEGV (issue #375).
+          @listening_to.clear
+          # The listener thread owns this connection, so the listener thread is
+          # the one that closes it — #stop only clears @running.
+          close_quietly(@conn)
+          @conn = nil
         end
 
         def drain_commands
@@ -202,6 +217,16 @@ module Pgbus
         # hanging if the listener thread is dead.
         def ack_timeout
           (@health_check_ms / 1000.0) + 1.0
+        end
+
+        # How long #stop waits for the listener thread to notice the cleared
+        # @running and finish teardown. The thread can be parked in
+        # wait_for_notify for one full health-check cycle before it re-checks
+        # the flag, so the budget is that cycle plus grace — a flat timeout
+        # would expire before a listener with a large health_check_ms had even
+        # one chance to observe the stop.
+        def stop_join_timeout
+          (@health_check_ms / 1000.0) + STOP_JOIN_GRACE_SECONDS
         end
 
         def do_listen(queue_name)
@@ -320,17 +345,6 @@ module Pgbus
           conn&.close if conn.respond_to?(:close)
         rescue StandardError
           nil
-        end
-
-        def safe_unlisten_all
-          @listening_to.each do |channel|
-            # @conn may be nil if #stop interrupted the reconnect loop between
-            # closing the old connection and publishing a new one.
-            @conn&.exec(%(UNLISTEN "#{channel}"))
-          rescue PG::Error
-            # connection may be dead; nothing we can do
-          end
-          @listening_to.clear
         end
 
         def channel_for(queue_name)

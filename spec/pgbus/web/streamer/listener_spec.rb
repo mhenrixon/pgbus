@@ -33,18 +33,26 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
   # blocking semantics without needing a real Postgres.
   let(:fake_pg) do
     Class.new do
-      attr_reader :executed, :reset_count, :close_count
+      attr_reader :executed, :reset_count, :close_count, :close_threads, :exec_after_close
 
       def initialize
         @executed = []
         @events = Queue.new
         @reset_count = 0
         @close_count = 0
-        @closed = false
+        @close_threads = []
+        @exec_after_close = []
         @raise_on_next_listen = false
+        @block_next_wait = false
       end
 
+      # Real pg is inside PQsendQuery here with the GVL released. If another
+      # thread has already run #close (PQfinish), the PGconn and its OpenSSL
+      # objects are freed and this is the use-after-free that segfaults the
+      # whole process (issue #375). Record it rather than pretending it's a
+      # rescuable PG::Error — a C-level SEGV is not catchable.
       def exec(sql)
+        @exec_after_close << sql if @close_count.positive?
         @executed << sql
         if sql.start_with?("LISTEN") && @raise_on_next_listen
           @raise_on_next_listen = false
@@ -55,16 +63,17 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
       # Mirrors PG::Connection#wait_for_notify(timeout) { |channel, pid, payload| ... }
       #   - yields on notify and returns the channel
-      #   - returns nil on timeout
+      #   - returns nil once the timeout elapses, so a listener whose stop
+      #     signal is a cleared flag (not a socket close) gets to observe it
       #   - raises on scripted error
-      def wait_for_notify(_timeout)
-        event = @events.pop
-        case event[0]
+      def wait_for_notify(timeout)
+        event = @block_next_wait ? blocking_pop : @events.pop(timeout: timeout)
+        case event&.first
+        when nil, :timeout
+          nil
         when :notify
           yield event[1], 0, nil
           event[1]
-        when :timeout
-          nil
         when :raise
           raise event[1]
         when :close
@@ -72,16 +81,24 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
         end
       end
 
+      # Pin the listener thread inside its NEXT wait_for_notify — ignoring the
+      # timeout — until an event is pushed. One-shot, so a test can hold the
+      # thread still to observe pre-ack state without making #stop wait.
+      def block_next_wait!
+        @block_next_wait = true
+      end
+
       def reset
         @reset_count += 1
       end
 
-      # Called by Listener#stop and by the factory reconnect loop when it
-      # discards the old/partial connection. Pushes a :close event to
-      # unblock any thread currently sitting inside wait_for_notify.
+      # Called by the listener thread's teardown and by the reconnect loop when
+      # it discards the old/partial connection. Records the calling thread: the
+      # fix for #375 is that ONLY the listener thread may ever touch this
+      # connection.
       def close
-        @closed = true
         @close_count += 1
+        @close_threads << Thread.current
         @events << [:close]
       end
 
@@ -107,6 +124,13 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       def fail_next_listen!
         @raise_on_next_listen = true
       end
+
+      private
+
+      def blocking_pop
+        @block_next_wait = false
+        @events.pop
+      end
     end.new
   end
 
@@ -131,6 +155,62 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
       fake_pg.push_timeout # unblock the wait_for_notify so stop can proceed
       listener.stop
       expect(listener.listening_to).to be_empty
+    end
+  end
+
+  # A PG::Connection is not thread-safe, and #close is PQfinish — it frees the
+  # PGconn and its OpenSSL objects. #stop used to call it from the shutting-down
+  # request/dispatcher thread while the listener thread was still using the same
+  # connection, so the UNLISTEN in run_loop's ensure walked into freed TLS state
+  # and SEGV'd the Puma worker on every deploy. Same defect as
+  # Process::NotifyListener (issue #375); the invariant these specs pin is the
+  # same: the listener thread is the SOLE user of the connection for its life.
+  describe "shutdown thread-safety (issue #375)" do
+    def start_and_wait_for_subscription
+      listener.start
+      listener.ensure_listening("pgbus_stream_chat")
+      wait_until { listener.listening_to.size == 1 }
+      listener.instance_variable_get(:@thread)
+    end
+
+    it "closes the connection only from the listener thread, never from the stopping thread" do
+      listener_thread = start_and_wait_for_subscription
+
+      listener.stop
+
+      expect(fake_pg.close_threads).to eq([listener_thread])
+    end
+
+    it "never execs on a connection that has already been closed" do
+      start_and_wait_for_subscription
+
+      listener.stop
+
+      expect(fake_pg.exec_after_close).to be_empty
+    end
+
+    it "skips the UNLISTEN round-trip on teardown (closing the session deregisters LISTENs)" do
+      start_and_wait_for_subscription
+
+      listener.stop
+
+      expect(fake_pg.executed.select { |sql| sql.start_with?("UNLISTEN") }).to be_empty
+    end
+
+    it "releases the listener's connection exactly once so the LISTEN slot is freed" do
+      start_and_wait_for_subscription
+
+      listener.stop
+
+      expect(fake_pg.close_count).to eq(1)
+    end
+
+    it "joins the listener thread within one health-check cycle" do
+      listener_thread = start_and_wait_for_subscription
+
+      listener.stop
+
+      expect(listener_thread).not_to be_alive
     end
   end
 
@@ -287,10 +367,10 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
           nil
         end
 
-        def wait_for_notify(_timeout)
-          event = @events.pop
-          case event[0]
-          when :timeout then nil
+        def wait_for_notify(timeout)
+          event = @events.pop(timeout: timeout)
+          case event&.first
+          when nil, :timeout then nil
           when :raise then raise event[1]
           when :close then raise PG::Error, "closed"
           end
@@ -588,6 +668,10 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
 
   describe "ensure_listening synchronous handshake" do
     it "blocks until the listener thread has actually executed the LISTEN" do
+      # Hold the listener thread inside its first wait_for_notify so the
+      # observation window below is deterministic: without this the wait would
+      # time out after health_check_ms and ack while we're still asserting.
+      fake_pg.block_next_wait!
       listener.start
 
       # Run ensure_listening on a separate thread so we can observe

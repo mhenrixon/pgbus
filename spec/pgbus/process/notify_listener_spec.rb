@@ -30,30 +30,41 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
   let(:fake_pg) do
     Class.new do
-      attr_reader :executed, :close_count
+      attr_reader :executed, :close_count, :close_threads, :exec_after_close
 
       def initialize
         @executed = []
         @events = Queue.new
         @exec_errors = []
         @close_count = 0
+        @close_threads = []
+        @exec_after_close = []
       end
 
+      # Real pg is inside PQsendQuery here with the GVL released. If another
+      # thread has already run #close (PQfinish), the PGconn and its OpenSSL
+      # objects are freed and this is the use-after-free that segfaults the
+      # whole process (issue #375). Record it rather than pretending it's a
+      # rescuable PG::Error — a C-level SEGV is not catchable.
       def exec(sql)
+        @exec_after_close << sql if closed?
         @executed << sql
         raise @exec_errors.shift if @exec_errors.any?
 
         nil
       end
 
-      def wait_for_notify(_timeout)
-        event = @events.pop
-        case event[0]
+      # Mirrors PG::Connection#wait_for_notify(timeout): returns nil once the
+      # timeout elapses, so a listener whose stop signal is a cleared flag
+      # (not a socket close) still gets to observe it.
+      def wait_for_notify(timeout)
+        event = @events.pop(timeout: timeout)
+        case event&.first
+        when nil, :timeout
+          nil
         when :notify
           yield event[1], 0, nil
           event[1]
-        when :timeout
-          nil
         when :raise
           raise event[1]
         when :close
@@ -61,8 +72,11 @@ RSpec.describe Pgbus::Process::NotifyListener do
         end
       end
 
+      # Records the calling thread: the fix for #375 is that ONLY the listener
+      # thread may ever touch this connection.
       def close
         @close_count += 1
+        @close_threads << Thread.current
         @events << [:close]
       end
 
@@ -494,6 +508,60 @@ RSpec.describe Pgbus::Process::NotifyListener do
       wait_until { !listener.running? }
 
       expect(listener.running?).to be(false)
+    end
+  end
+
+  # A PG::Connection is not thread-safe, and #close is PQfinish — it frees the
+  # PGconn and its OpenSSL objects. #stop used to call it from the supervisor
+  # thread while the listener thread was still using the same connection, so
+  # the UNLISTEN in run_loop's ensure walked into freed TLS state and SEGV'd
+  # the whole process on every deploy. The invariant these specs pin: the
+  # listener thread is the SOLE user of the connection for its entire life.
+  describe "shutdown thread-safety (issue #375)" do
+    def start_and_wait_for_subscriptions
+      listener.start
+      wait_until { listener.listening_to.size == 2 }
+      listener.instance_variable_get(:@thread)
+    end
+
+    it "closes the connection only from the listener thread, never from the stopping thread" do
+      listener_thread = start_and_wait_for_subscriptions
+
+      listener.stop
+
+      expect(fake_pg.close_threads).to eq([listener_thread])
+    end
+
+    it "never execs on a connection that has already been closed" do
+      start_and_wait_for_subscriptions
+
+      listener.stop
+
+      expect(fake_pg.exec_after_close).to be_empty
+    end
+
+    it "skips the UNLISTEN round-trip on teardown (closing the session deregisters LISTENs)" do
+      start_and_wait_for_subscriptions
+
+      listener.stop
+
+      expect(fake_pg.executed.select { |sql| sql.start_with?("UNLISTEN") }).to be_empty
+    end
+
+    it "still releases the connection exactly once" do
+      start_and_wait_for_subscriptions
+
+      listener.stop
+
+      expect(fake_pg.close_count).to eq(1)
+    end
+
+    it "joins the listener thread within one health-check cycle" do
+      listener_thread = start_and_wait_for_subscriptions
+
+      listener.stop
+
+      expect(listener_thread).not_to be_alive
     end
   end
 

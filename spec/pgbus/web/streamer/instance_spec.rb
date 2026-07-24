@@ -35,14 +35,19 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
         nil
       end
 
-      def wait_for_notify(_timeout)
-        event = @events.pop
-        case event[0]
+      # Mirrors PG::Connection#wait_for_notify(timeout): returns nil once the
+      # timeout elapses. Honoring the timeout matters because Listener#stop
+      # signals shutdown by clearing a flag the listener thread checks between
+      # waits — it no longer closes the connection out from under that thread
+      # (issue #375).
+      def wait_for_notify(timeout)
+        event = @events.pop(timeout: timeout)
+        case event&.first
+        when nil, :timeout
+          nil
         when :notify
           yield event[1], 0, nil
           event[1]
-        when :timeout
-          nil
         when :close
           raise PG::Error, "closed"
         end
