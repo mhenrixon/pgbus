@@ -23,7 +23,7 @@ gem "pgbus", path: "..", require: "pgbus/version"
 # zoolutions docs fleet is consumed by agents. Pinned (pre-1.0, so ~> 0.22.0
 # tracks only 0.22.x patches) so a routine bundle update can't pull a breaking
 # release into this public endpoint.
-gem "mcp", "~> 0.22.0"
+gem "mcp", "~> 0.23.0"
 
 # Throttle the public, unauthenticated AI endpoints (/mcp, /llms*, /docs/search)
 # by IP — they're bare ActionController::Base controllers in the gem, so a
