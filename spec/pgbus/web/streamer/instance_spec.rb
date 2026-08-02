@@ -129,7 +129,8 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
       described_class.new(client: client, config: streamer_config, logger: Logger.new(IO::NULL))
 
-      expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app")
+      expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app",
+                             fallback_application_name: "pgbus-listen")
     end
 
     it "runs the LISTEN/NOTIFY self-probe on the freshly built connection" do
@@ -244,7 +245,8 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
         described_class.new(client: client, config: session_config, logger: Logger.new(IO::NULL))
 
-        expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app")
+        expect(captured).to eq(host: "pooler.example", port: 5432, dbname: "app", user: "app",
+                               fallback_application_name: "pgbus-listen")
       end
 
       it "keeps the GUCs by applying them via post-connect SET" do

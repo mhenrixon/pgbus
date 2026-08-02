@@ -11,6 +11,7 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
   def content
     cli
     boot_banner
+    shared_listen
     roles
     recycling
     circuit_breaker
@@ -44,7 +45,7 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
         [Pgbus] boot: pgbus 0.9.8 pid=42317
         [Pgbus] boot: connection=host/dbname pool=12
         [Pgbus] boot: pgmq_schema_mode=auto pgmq_version=1.4.0
-        [Pgbus] boot: listen_notify=true worker_notify_wakeup=true
+        [Pgbus] boot: listen_notify=true worker_notify_wakeup=true worker_notify_scope=supervisor
         [Pgbus] boot: roles=workers,dispatcher,scheduler
         [Pgbus] boot: capsule=critical queues=critical threads=5 mode=threads
         [Pgbus] boot: capsule=default queues=default,mailers threads=10 mode=threads
@@ -60,6 +61,49 @@ class Views::Docs::Pages::RunningWorkers < DocsUI::Page
         plain "Every DB-dependent field degrades to "
         code { "unknown" }
         plain " on a transient failure — the banner can never abort boot."
+      end
+    end
+  end
+
+  def shared_listen
+    DocsUI::Section("Shared LISTEN connection", description: "One direct connection per host, not per fork.") do
+      md <<~'MD'
+        Workers wake instantly on job inserts via a persistent `LISTEN`
+        connection. That connection must bypass a transaction-pooling PgBouncer
+        (LISTEN does not survive transaction boundaries), so it lands on the
+        direct port's scarce `max_connections` budget.
+
+        By default (`worker_notify_scope = :supervisor`) the **supervisor owns
+        one shared listener for the whole host**: it LISTENs on the union of
+        every capsule's and consumer's queue channels and wakes the right
+        fork(s) over a per-fork pipe. A job host pins **exactly one** direct
+        LISTEN connection, regardless of how many capsules and consumers it
+        runs.
+      MD
+      DocsUI::Code(<<~'RUBY', lexer: :ruby, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |c|
+          c.worker_notify_scope = :supervisor  # default: 1 LISTEN connection per host
+          # c.worker_notify_scope = :fork      # previous behavior: 1 per worker/consumer fork
+        end
+      RUBY
+      md <<~'MD'
+        Health is fail-safe in both directions: if the shared connection dies,
+        the supervisor broadcasts a degraded signal and every fork drops to
+        fast polling until the listener reconnects (typically well under a
+        second); if the supervisor itself disappears, the pipes reach EOF and
+        forks keep processing on plain polling. `pgbus doctor`'s **Connection
+        budget** check prints the pinned count for the current config, and the
+        connections are census-tagged for capacity audits:
+      MD
+      DocsUI::Code(<<~'SQL', lexer: :sql)
+        SELECT count(*) FROM pg_stat_activity WHERE application_name = 'pgbus-listen';
+      SQL
+      DocsUI::Callout(:note) do
+        plain "Use "
+        code { "worker_notify_scope = :fork" }
+        plain " to restore the per-fork listeners — for example while bisecting "
+        plain "a wake-latency regression, or on single-capsule hosts where the "
+        plain "footprint is identical anyway."
       end
     end
   end
