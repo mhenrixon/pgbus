@@ -78,6 +78,19 @@ RSpec.describe Pgbus::Web::Streamer::FailoverListener do
     end
   end
 
+  describe "replay failure after the factory started the listener" do
+    it "stops the never-swapped listener so its LISTEN connection cannot leak" do
+      failover.ensure_listening("pgbus_stream_chat")
+      allow(local_listener).to receive(:ensure_listening).and_raise(StandardError, "replay boom")
+      allow(logger).to receive(:error)
+
+      failover.fail_over!
+
+      expect(local_listener).to have_received(:stop)
+      expect(logger).to have_received(:error)
+    end
+  end
+
   describe "double failure (local listener factory raises)" do
     let(:local_listener_factory) { -> { raise StandardError, "db down" } }
 

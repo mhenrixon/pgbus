@@ -29,6 +29,7 @@ DATABASE_URL = ENV.fetch("PGBUS_DATABASE_URL") do
 end
 
 SAMPLES = Integer(ENV.fetch("HUB_BENCH_SAMPLES", "50"))
+abort "HUB_BENCH_SAMPLES must be a positive integer (got #{SAMPLES})" unless SAMPLES.positive?
 
 ActiveRecord::Base.establish_connection(DATABASE_URL)
 

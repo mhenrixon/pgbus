@@ -79,6 +79,7 @@ module Pgbus
         # The blocking build + replay runs OUTSIDE @state_mutex so concurrent
         # ensure/remove/stop calls never stall behind it.
         def fail_over!
+          local = nil
           @failover_mutex.synchronize do
             return if @state_mutex.synchronize { @failed_over }
 
@@ -90,8 +91,18 @@ module Pgbus
               @impl = local
               @failed_over = true
             end
+            # Ownership transferred to @impl — the rescue must not stop it.
+            local = nil
           end
         rescue StandardError => e
+          # A listener the factory STARTED but that never swapped in (the
+          # replay raised) would otherwise leak its thread and LISTEN
+          # connection alongside the dead hub client.
+          begin
+            local&.stop
+          rescue StandardError
+            nil
+          end
           # Hub dead AND the local listener can't be built (DB down, config
           # broken). Mark failed-over so callers stop rebuilding; @impl stays
           # on the dead client — every ensure_listening resolves nil and the

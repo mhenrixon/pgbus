@@ -102,6 +102,15 @@ module Pgbus
           log(:info) { "[Pgbus::Streamer::MasterHubBoot] master hub listening at #{@socket_path}" }
         rescue StandardError => e
           @state_mutex.synchronize { @hub = nil }
+          # The method-scoped hub may have STARTED before a later step raised
+          # (e.g. a failing logger after registration) — stop it here or its
+          # LISTEN connection outlives the boot failure. MasterHub#stop is
+          # idempotent and safe on a never-started hub.
+          begin
+            hub&.stop
+          rescue StandardError
+            nil
+          end
           log(:error) do
             "[Pgbus::Streamer::MasterHubBoot] master hub failed to start " \
               "(#{e.class}: #{e.message}) — workers fall back to per-worker listeners"
