@@ -51,6 +51,10 @@ module ConfigReference
       { name: "worker_notify_scope", type: "Symbol", default: ":supervisor",
         desc: "Where the LISTEN connection lives: :supervisor shares ONE direct connection per host " \
               "(forks woken over pipes); :fork keeps one dedicated connection per worker/consumer fork." },
+      { name: "streams_listen_scope", type: "Symbol", default: ":master",
+        desc: "Where the streams LISTEN connection lives: :master shares ONE connection per web host " \
+              "(Puma workers connect to a master hub, with automatic per-worker fallback); " \
+              ":process keeps one per web process." },
       { name: "zombie_detection", type: "Boolean", default: "true", desc: "Detect and reclaim work from crashed workers." }
     ],
     "Dispatcher & maintenance" => [
