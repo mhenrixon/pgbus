@@ -45,6 +45,8 @@ Pgbus.configure do |c|
   c.pgmq_schema_mode = :embedded
   c.listen_notify = true
   c.stats_enabled = false if c.respond_to?(:stats_enabled=)
+  # The NotifyHub derives its LISTEN union from the capsule list.
+  c.workers = [{ queues: %w[default], threads: 1 }]
 end
 
 client = Pgbus.client
@@ -120,14 +122,34 @@ if defined?(Pgbus::Process::NotifyHub)
   hub.start
   hub.register_fork(pid: 999_999, queues: [PHYSICAL_QUEUE], pipe: writer)
   sleep 1
+  begin
+    reader.read_nonblock(64) # drain the registration status byte
+  rescue IO::WaitReadable
+    nil
+  end
+
+  # Status bytes (H/P) share the pipe with wakes, so wait for a W byte
+  # specifically rather than the first readable byte.
+  wait_for_wake = lambda do
+    deadline = monotonic_ms + 10_000
+    loop do
+      abort "hub wake never arrived" if monotonic_ms > deadline
+      next unless reader.wait_readable(0.5)
+
+      data = begin
+        reader.read_nonblock(64)
+      rescue IO::WaitReadable
+        ""
+      end
+      return monotonic_ms if data.include?("W")
+    end
+  end
 
   hub_samples = []
   SAMPLES.times do |i|
     t0 = monotonic_ms
     client.send_message("default", { "bench" => i })
-    reader.wait_readable(10) or abort "hub wake never arrived"
-    t_wake = monotonic_ms
-    reader.read_nonblock(64) # drain W (+ any status bytes)
+    t_wake = wait_for_wake.call
     hub_samples << (t_wake - t0)
     sleep THROTTLE_GAP_S
   end
