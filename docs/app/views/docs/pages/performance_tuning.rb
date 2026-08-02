@@ -13,6 +13,7 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
     autovacuum
     archive
     job_burst_tuning
+    streams_master_hub
     streams_pool_autoscaling
     fanout_throughput
     health_metrics
@@ -89,6 +90,46 @@ class Views::Docs::Pages::PerformanceTuning < DocsUI::Page
         plain " for your peak fan-out fleet (measured with "
         code { "bench:one[writer_burst_bench]" }
         plain ")."
+      end
+    end
+  end
+
+  def streams_master_hub
+    DocsUI::Section("Streams master hub", description: "One streams LISTEN connection per web host.") do
+      md <<~'MD'
+        Each Puma worker used to open its own dedicated streams `LISTEN`
+        connection on first SSE use — one direct connection per worker, on the
+        same scarce direct-port budget the job-side supervisor scope protects.
+        By default (`streams_listen_scope = :master`) the `pgbus_streams`
+        plugin now runs **one shared listener in the Puma master**; workers
+        connect to it lazily over a Unix socket and receive every wake —
+        including ephemeral broadcast payloads — as framed messages.
+      MD
+      DocsUI::Code(<<~'RUBY', lexer: :ruby, filename: "config/puma.rb")
+        preload_app!            # required for :master — the hub waits for the pgbus initializer
+        plugin :pgbus_streams
+      RUBY
+      md <<~'MD'
+        Delivery semantics are unchanged: the synchronous subscribe/ack
+        contract crosses the process boundary, durable wakes self-heal via
+        `read_after`, and ephemeral wakes are never dropped by the transport.
+        The measured cost of the extra hop is noise-level (single-broadcast
+        SSE roundtrip p50 16.0ms via the hub vs 16.9ms per-worker on the same
+        machine).
+      MD
+      DocsUI::Callout(:note) do
+        plain "Fail-safe in every direction: if the hub is absent or dies "
+        plain "(no "
+        code { "preload_app!" }
+        plain ", single-mode Puma, crash), each worker falls back to its own "
+        plain "listener — the connection footprint balloons back to one per "
+        plain "worker (visible in "
+        code { "pgbus doctor" }
+        plain "'s Connection budget and the "
+        code { "pgbus-listen" }
+        plain " census) but no broadcast is ever lost. Roll back with "
+        code { "streams_listen_scope = :process" }
+        plain "."
       end
     end
   end

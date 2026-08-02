@@ -31,6 +31,7 @@ to guess.
 | Fan-out writer throughput | does the writer pool scale with thread count? (issue #323 phase 1) | `writer_burst_bench.rb` |
 | NOTIFY wake path | every job-insert wake-up (direct listener vs supervisor hub, issue #381) | `notify_wake_bench.rb` |
 | NotifyHub failure modes | killed LISTEN backend, wedged fork, FD churn, fan-out cost (issue #381) | `notify_chaos_bench.rb` |
+| Streams master-hub hop | broadcast→SSE roundtrip, per-worker vs master hub (issue #382) | `streams_hub_bench.rb` |
 
 ## Measuring
 
@@ -47,6 +48,7 @@ rake bench:one[streams_read_pool_bench]  # streamer replay-read pool (requires P
 rake bench:execution_modes  # threads vs async DB-connection consumption (requires PGBUS_DATABASE_URL)
 rake bench:notify_wake      # NOTIFY wake latency + LISTEN census (requires PGBUS_DATABASE_URL)
 rake bench:notify_chaos     # NotifyHub failure-mode measurements (requires PGBUS_DATABASE_URL)
+rake bench:streams_hub      # streams master-hub hop cost + census (requires PGBUS_DATABASE_URL)
 ```
 
 - **Unit benches** (`benchmarks/*_bench.rb`) isolate gem overhead with a mocked
@@ -87,6 +89,26 @@ fork (full pipe) leaves sibling wake latency unaffected; 50 fork
 register/deregister cycles leak **0** FDs; hub fan-out costs **10.5µs** per
 NOTIFY to 10 forks (the pgmq trigger throttle caps real NOTIFY load at
 4/s/queue, so the hub is never the bottleneck).
+
+### Streams master hub (issue #382)
+
+One `Web::Streamer::Listener` in the Puma master serves every worker over a
+Unix socket instead of one dedicated LISTEN connection per worker. Measured
+on the same machine (`streams_hub_bench.rb`, n=50, durable broadcasts,
+single-broadcast SSE roundtrip):
+
+| Mode | p50 | p95 | LISTEN connections (host) |
+|------|-----|-----|---------------------------|
+| `:process` (per-worker, pre-#382) | 16.93ms | 26.67ms | 1 per worker |
+| `:master` (hub → socket hop) | 16.00ms | 19.19ms | **1** |
+
+The master→worker frame hop is noise-level free — the DB round trips
+(`read_after` + NOTIFY) dominate. Like #381, this is a
+**connection-footprint win, not a latency win**. On hub outage every worker
+falls back to its own listener (census-visible balloon, unchanged
+semantics) — verified end-to-end by
+`spec/integration/streams/master_hub_e2e_spec.rb` (census 1 → 2 across a
+mid-stream hub death with zero missed broadcasts).
 
 ### Streamer connection model (issue #315)
 
