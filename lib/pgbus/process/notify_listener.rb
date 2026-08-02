@@ -42,6 +42,14 @@ module Pgbus
       CHANNEL_PREFIX = "pgmq.q_"
       CHANNEL_SUFFIX = ".INSERT"
 
+      # Inverse of #channel_for: map a NOTIFY channel back to the physical
+      # queue name. Class-level because the channel format is owned here —
+      # NotifyHub (wake routing + union refresh) and Worker (queue-set sync)
+      # both consume it.
+      def self.physical_for(channel)
+        channel.delete_prefix(CHANNEL_PREFIX).delete_suffix(CHANNEL_SUFFIX)
+      end
+
       RECONNECT_BACKOFF_SECONDS = 0.5
 
       # Grace added to one health-check cycle when #stop joins the listener

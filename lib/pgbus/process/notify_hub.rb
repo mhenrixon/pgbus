@@ -260,7 +260,7 @@ module Pgbus
       end
 
       def channel_to_physical(channel)
-        channel.delete_prefix(NotifyListener::CHANNEL_PREFIX).delete_suffix(NotifyListener::CHANNEL_SUFFIX)
+        NotifyListener.physical_for(channel)
       end
 
       def close_quietly(pipe)

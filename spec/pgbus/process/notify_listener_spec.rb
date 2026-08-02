@@ -155,6 +155,12 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
   end
 
+  describe ".physical_for" do
+    it "maps a NOTIFY channel back to its physical queue name (inverse of channel_for)" do
+      expect(described_class.physical_for("pgmq.q_pgbus_default.INSERT")).to eq("pgbus_default")
+    end
+  end
+
   describe "#close_inherited_socket! (forked-child hygiene, issue #381)" do
     # A just-forked child holds a COPY of the LISTEN socket fd. PQfinish
     # (#close) would send a libpq Terminate over the socket shared with the
