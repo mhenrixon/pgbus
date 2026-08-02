@@ -1099,6 +1099,15 @@ RSpec.describe Pgbus::Process::Worker do
           .to eq(["#{prefix}_default", "#{prefix}_low"])
       end
 
+      it "normalizes names the same way queue creation does (LISTEN channel parity)" do
+        # config.queue_name normalizes (hyphens → underscores); the queue
+        # TABLE is created under the normalized name and the NOTIFY channel
+        # derives from the table, so a raw-concat listener would be deaf for
+        # a name like "orders-handler".
+        hyphen_worker = described_class.new(queues: %w[orders-handler], threads: 1)
+        expect(hyphen_worker.send(:physical_queue_names)).to eq(["#{prefix}_orders_handler"])
+      end
+
       it "uses the current queues, not the initial set (post-eviction safe)" do
         # Build with two queues so @initial_queues stays %w[default events], then
         # drive a real eviction of `default` so @queues diverges to %w[events].

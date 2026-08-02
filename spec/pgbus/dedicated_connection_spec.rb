@@ -74,6 +74,18 @@ RSpec.describe Pgbus::DedicatedConnection do
         expect(captured[:args].first).to eq("postgres://u@h/db?application_name=custom")
       end
 
+      it "leaves a URL untouched when it already sets a fallback_application_name" do
+        described_class.connect("postgres://u@h/db?fallback_application_name=mine")
+
+        expect(captured[:args].first).to eq("postgres://u@h/db?fallback_application_name=mine")
+      end
+
+      it "leaves a keyword conninfo untouched when it already sets a fallback_application_name" do
+        described_class.connect("host=db.example fallback_application_name=mine")
+
+        expect(captured[:args].first).to eq("host=db.example fallback_application_name=mine")
+      end
+
       it "merges fallback_application_name into a Hash" do
         described_class.connect(host: "db.example", dbname: "app")
 

@@ -34,7 +34,7 @@ RSpec.describe "Multi-queue read priority contract (issue #381)", :integration d
   end
 
   it "fills a limited read_multi from earlier-listed queues first" do
-    messages = Pgbus.client.read_multi(queues, qty: 5, limit: 5)
+    messages = Pgbus.client.read_multi(queues, qty: 5, limit: 5, vt: 30)
 
     expect(messages.size).to eq(5)
     by_queue = messages.group_by { |m| m.queue_name.delete_prefix("#{Pgbus.configuration.queue_prefix}_") }
@@ -47,7 +47,7 @@ RSpec.describe "Multi-queue read priority contract (issue #381)", :integration d
   end
 
   it "honors a reversed list order" do
-    messages = Pgbus.client.read_multi(queues.reverse, qty: 4, limit: 4)
+    messages = Pgbus.client.read_multi(queues.reverse, qty: 4, limit: 4, vt: 30)
 
     by_queue = messages.group_by { |m| m.queue_name.delete_prefix("#{Pgbus.configuration.queue_prefix}_") }
 

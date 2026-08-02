@@ -431,9 +431,10 @@ module Pgbus
         @notify_listener = nil
       end
 
+      # Through config.queue_name so normalized subscriber queue names LISTEN
+      # on the channel their table actually notifies (see Worker's twin).
       def physical_queue_names
-        prefix = "#{config.queue_prefix}_"
-        @queue_names.map { |q| "#{prefix}#{q}" }
+        @queue_names.map { |q| config.queue_name(q) }
       end
 
       def start_heartbeat

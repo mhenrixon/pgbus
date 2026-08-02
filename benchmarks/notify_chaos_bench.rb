@@ -182,7 +182,8 @@ extra = Array.new(10) do |i|
   hub.register_fork(pid: 20_000 + i, queues: [PHYSICAL_QUEUE], pipe: w)
   [r, w]
 end
-channel = "pgmq.q_#{PHYSICAL_QUEUE}.INSERT"
+channel = "#{Pgbus::Process::NotifyListener::CHANNEL_PREFIX}#{PHYSICAL_QUEUE}" \
+          "#{Pgbus::Process::NotifyListener::CHANNEL_SUFFIX}"
 elapsed = Benchmark.realtime do
   100_000.times { hub.send(:route, channel) }
 end

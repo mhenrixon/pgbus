@@ -712,9 +712,14 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] NotifyListener queue sync failed: #{e.class}: #{e.message}" }
       end
 
+      # Through config.queue_name (not raw concatenation) so a logical name
+      # needing normalization (e.g. "orders-handler" → "orders_handler")
+      # yields the SAME physical name the queue table was created with — the
+      # NOTIFY channel derives from the table name, so a raw concat would
+      # LISTEN on a channel that never fires. Keeps the fork-local (:fork
+      # scope) channels identical to the NotifyHub's (issue #381 review).
       def physical_queue_names
-        prefix = "#{config.queue_prefix}_"
-        queues.map { |q| "#{prefix}#{q}" }
+        queues.map { |q| config.queue_name(q) }
       end
 
       def channel_to_physical(channel)

@@ -102,7 +102,8 @@ SAMPLES.times do |i|
   woke.clear
   t0 = monotonic_ms
   client.send_message("default", { "bench" => i })
-  t_wake = woke.pop # blocks until on_wake
+  t_wake = woke.pop(timeout: 10)
+  abort "direct listener wake never arrived (sample #{i})" if t_wake.nil?
   direct_samples << (t_wake - t0)
   sleep THROTTLE_GAP_S
 end
@@ -170,7 +171,7 @@ puts "\n--- 3. Empty-read cost (idle queue) ---"
 
 result = Benchmark.ips do |x|
   x.config(time: 5, warmup: 1)
-  x.report("empty read_batch") { client.read_batch("default", qty: 5) }
+  x.report("empty read_batch") { client.read_batch("default", qty: 5, vt: 30) }
 end
 ips = result.entries.first.ips
 puts format("  one empty read: %.2fms DB round-trip (%.0f reads/s possible)", 1000.0 / ips, ips)

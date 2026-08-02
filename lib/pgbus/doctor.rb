@@ -387,10 +387,11 @@ module Pgbus
         end
 
       detail = format(
-        "%<count>d direct LISTEN connection%<plural>s pinned (scope=%<scope>s; %<capsules>d capsules + " \
-        "%<consumers>d consumers%<share>s)",
+        "%<count>d direct LISTEN connection%<plural>s pinned (scope=%<scope>s; " \
+        "%<capsules>d capsule%<cap_plural>s + %<consumers>d consumer%<con_plural>s%<share>s)",
         count: count, plural: count == 1 ? "" : "s", scope: @config.worker_notify_scope,
-        capsules: capsules, consumers: consumers,
+        capsules: capsules, cap_plural: capsules == 1 ? "" : "s",
+        consumers: consumers, con_plural: consumers == 1 ? "" : "s",
         share: count == 1 && @config.worker_notify_scope == :supervisor ? " share it" : ""
       )
       detail += " + 1 per web-server process (streams)" if @config.streams_enabled

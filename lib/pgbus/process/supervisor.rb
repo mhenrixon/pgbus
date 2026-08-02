@@ -326,13 +326,19 @@ module Pgbus
       # Hand the hub a worker fork's routing entry: explicit queues as
       # physical names, "*" as the unconditional wildcard flag (the hub wakes
       # wildcard forks for every channel, so the fork's own resolved set never
-      # needs to be reported upstream).
+      # needs to be reported upstream). Registration must never abort the fork
+      # bookkeeping that follows it — queue_name can raise on a malformed
+      # name — so on error the fork registers with an empty set and rides its
+      # poll ceiling (symmetric with register_consumer_with_hub).
       def register_fork_with_hub(pid, wake_writer, queues)
         return unless @notify_hub && wake_writer
 
         wildcard = queues.include?("*")
         physical = queues.reject { |q| q == "*" }.map { |q| config.queue_name(q) }
         @notify_hub.register_fork(pid: pid, queues: physical, wildcard: wildcard, pipe: wake_writer)
+      rescue StandardError => e
+        ErrorReporter.report(e, { action: "register_fork_with_hub", queues: queues })
+        @notify_hub.register_fork(pid: pid, queues: [], wildcard: false, pipe: wake_writer)
       end
 
       def fork_dispatcher
@@ -426,7 +432,9 @@ module Pgbus
       end
 
       def fork_consumer(consumer_config, slot: nil)
-        topics = consumer_config[:topics]
+        # Array() so a consumer entry without :topics can't NoMethodError the
+        # supervisor on the topics.join log lines below.
+        topics = Array(consumer_config[:topics])
         threads = consumer_config[:threads] || 3
 
         # OS-level liveness channel: the consumer writes a byte each loop

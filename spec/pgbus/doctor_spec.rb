@@ -499,6 +499,14 @@ RSpec.describe Pgbus::Doctor do
       expect(budget_check[:detail]).to match(/\A3 direct LISTEN connections pinned/)
     end
 
+    it "singularizes capsule/consumer counts of exactly 1" do
+      config.workers = [{ queues: %w[default], threads: 1 }]
+      config.event_consumers = [{ topics: ["orders.#"], threads: 1 }]
+
+      expect(budget_check[:detail]).to include("1 capsule + 1 consumer ")
+      expect(budget_check[:detail]).not_to include("1 capsules")
+    end
+
     it "notes the per-web-process streams listener when streams are enabled" do
       allow(config).to receive(:streams_enabled).and_return(true)
 

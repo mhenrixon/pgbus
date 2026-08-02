@@ -78,6 +78,9 @@ RSpec.describe "Supervisor-owned shared LISTEN (issue #381)", :integration do
     reader_b, writer_b = IO.pipe
 
     begin
+      # Baseline before OUR hub starts, so a stray listener from another
+      # example (or a future parallel runner) can't break the census delta.
+      baseline_pids = listen_backend_pids
       hub.start
       wait_until(timeout: 10) { hub.healthy? }
       hub.register_fork(pid: 100, queues: [config.queue_name("wake_a")], pipe: writer_a)
@@ -86,12 +89,18 @@ RSpec.describe "Supervisor-owned shared LISTEN (issue #381)", :integration do
       drain(reader_b)
 
       # Acceptance: the whole "host" (two forks) pins exactly ONE direct
-      # LISTEN connection, countable via the census application_name.
-      expect(listen_backend_pids.size).to eq(1)
+      # LISTEN connection beyond the baseline, countable via the census
+      # application_name.
+      expect((listen_backend_pids - baseline_pids).size).to eq(1)
 
-      # Targeted routing: an insert on wake_a wakes fork A only.
+      # Targeted routing: an insert on wake_a wakes fork A only. The hub
+      # writes each fork's pipe independently, so give a mis-routed byte for
+      # fork B a bounded settle window before asserting its absence —
+      # otherwise the negative assertion could pass against a byte still in
+      # flight.
       Pgbus.client.send_message("wake_a", { "n" => 1 })
       expect(wait_for_wake(reader_a)).to include("W")
+      sleep 0.2
       expect(drain(reader_b)).not_to include("W")
 
       # Chaos: kill the shared LISTEN backend out from under the hub.
