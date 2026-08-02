@@ -6,7 +6,9 @@ RSpec.describe Pgbus::Process::NotifyListener do
   subject(:listener) do
     described_class.new(
       physical_queues: %w[pgbus_default pgbus_low],
-      on_wake: -> { wakes << :woke },
+      # on_wake receives the notifying channel (issue #381) so a hub caller
+      # can route the wake; fork callers ignore it with ->(_channel).
+      on_wake: ->(channel) { wakes << channel },
       connection_options: { dbname: "fake" },
       health_check_ms: 50,
       logger: logger
@@ -132,14 +134,14 @@ RSpec.describe Pgbus::Process::NotifyListener do
   end
 
   describe "NOTIFY handling" do
-    it "fires on_wake for any INSERT notification" do
+    it "fires on_wake with the notifying channel" do
       listener.start
       fake_pg.push_timeout
       wait_until { listener.listening_to.size == 2 }
 
       fake_pg.push_notify("pgmq.q_pgbus_default.INSERT")
 
-      expect(wakes.pop).to eq(:woke)
+      expect(wakes.pop).to eq("pgmq.q_pgbus_default.INSERT")
     end
 
     it "coalesces into a single wake per notification" do
@@ -148,8 +150,36 @@ RSpec.describe Pgbus::Process::NotifyListener do
       wait_until { listener.listening_to.size == 2 }
 
       fake_pg.push_notify("pgmq.q_pgbus_low.INSERT")
-      expect(wakes.pop).to eq(:woke)
+      expect(wakes.pop).to eq("pgmq.q_pgbus_low.INSERT")
       expect(wakes).to be_empty
+    end
+  end
+
+  describe "#connected?" do
+    # The hub (issue #381) broadcasts degraded status to forks while the
+    # listener is between connections — running? stays true during a
+    # reconnect, so connected? is the signal that distinguishes "parked in
+    # wait_for_notify" from "rebuilding the connection".
+    it "is false before start" do
+      expect(listener.connected?).to be false
+    end
+
+    it "is true once the connection is published" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      expect(listener.connected?).to be true
+    end
+
+    it "is false again after stop" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      listener.stop
+
+      expect(listener.connected?).to be false
     end
   end
 
@@ -329,7 +359,8 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       session_listener.send(:build_connection)
 
-      expect(captured).to eq(host: "pooler.example", dbname: "app")
+      expect(captured).to eq(host: "pooler.example", dbname: "app",
+                             fallback_application_name: "pgbus-listen")
     end
 
     it "keeps the GUCs by applying them via post-connect SET" do

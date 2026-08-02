@@ -357,7 +357,7 @@ module Pgbus
 
         @notify_listener = NotifyListener.new(
           physical_queues: physical_queue_names,
-          on_wake: -> { @wake_signal.notify! },
+          on_wake: ->(_channel) { @wake_signal.notify! },
           connection_options: config.worker_notify_connection_options,
           health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
           logger: Pgbus.logger

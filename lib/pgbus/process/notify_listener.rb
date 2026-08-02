@@ -70,6 +70,16 @@ module Pgbus
         @state_mutex.synchronize { @listening_to.dup }
       end
 
+      # Whether a live PG connection is currently published. running? stays
+      # true during a reconnect (the thread is alive, looping in reconnect!),
+      # so this is the signal that distinguishes "parked in wait_for_notify"
+      # from "between connections". The supervisor NotifyHub (issue #381)
+      # consults it to broadcast degraded status to forks the moment the
+      # shared connection drops, and healthy again once it is rebuilt.
+      def connected?
+        @state_mutex.synchronize { !@conn.nil? }
+      end
+
       # Whether the start-time self-probe confirmed this connection can actually
       # receive a NOTIFY. False when a transaction-mode pooler or replica
       # silently drops LISTEN: the thread is still alive (running? == true) but
@@ -190,8 +200,11 @@ module Pgbus
         return reconnect! unless conn
 
         timeout_s = @health_check_ms / 1000.0
-        got_notify = conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
-          @on_wake.call
+        got_notify = conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
+          # The channel rides along so a hub caller (issue #381) can route the
+          # wake to the fork(s) reading that queue; fork-owned listeners take
+          # ->(_channel) and ignore it.
+          @on_wake.call(channel)
         end
         # Skip the keepalive when a stop landed during the wait: the loop is
         # about to exit and close this connection anyway, so the round-trip
