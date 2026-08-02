@@ -48,6 +48,9 @@ module ConfigReference
       { name: "retry_backoff_jitter", type: "Float", default: "0.15", desc: "Jitter factor (0–1) added to retry delays." },
       { name: "circuit_breaker_enabled", type: "Boolean", default: "true", desc: "Auto-pause a queue after consecutive failures." },
       { name: "listen_notify", type: "Boolean", default: "true", desc: "Use PGMQ LISTEN/NOTIFY for instant wake-up." },
+      { name: "worker_notify_scope", type: "Symbol", default: ":supervisor",
+        desc: "Where the LISTEN connection lives: :supervisor shares ONE direct connection per host " \
+              "(forks woken over pipes); :fork keeps one dedicated connection per worker/consumer fork." },
       { name: "zombie_detection", type: "Boolean", default: "true", desc: "Detect and reclaim work from crashed workers." }
     ],
     "Dispatcher & maintenance" => [
