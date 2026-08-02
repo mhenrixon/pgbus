@@ -1648,6 +1648,36 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#streams_listen_scope" do
+    # Where the streams LISTEN connection lives (issue #382): :master (default)
+    # runs ONE shared listener in the preforking master (workers connect over
+    # a Unix socket); :process keeps one listener per web process.
+
+    it "defaults to :master" do
+      expect(config.streams_listen_scope).to eq(:master)
+    end
+
+    it "accepts :process" do
+      config.streams_listen_scope = :process
+      expect(config.streams_listen_scope).to eq(:process)
+    end
+
+    it "coerces a String" do
+      config.streams_listen_scope = "process"
+      expect(config.streams_listen_scope).to eq(:process)
+    end
+
+    it "rejects an unknown scope with an actionable error" do
+      expect { config.streams_listen_scope = :hosted }
+        .to raise_error(Pgbus::ConfigurationError, /streams_listen_scope.*:master.*:process/m)
+    end
+
+    it "rejects a non-symbolizable value" do
+      expect { config.streams_listen_scope = 42 }
+        .to raise_error(Pgbus::ConfigurationError, /streams_listen_scope/)
+    end
+  end
+
   describe "#worker_notify_connection_options" do
     # Mirrors streams_connection_options: defaults to connection_options,
     # overridable so the listener's persistent LISTEN connection can be

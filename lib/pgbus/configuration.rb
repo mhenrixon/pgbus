@@ -270,6 +270,7 @@ module Pgbus
 
       @worker_notify_wakeup = nil
       @worker_notify_scope = :supervisor
+      @streams_listen_scope = :master
       @worker_notify_host = nil
       @worker_notify_port = nil
       @worker_notify_database_url = nil
@@ -630,6 +631,34 @@ module Pgbus
       end
 
       @doctor_on_boot = coerced
+    end
+
+    # Where the streams LISTEN connection lives (issue #382):
+    #   :master (default) — ONE shared listener in the preforking web master
+    #     (MasterHub); workers connect lazily over a Unix socket and fall back
+    #     to a per-worker listener whenever the hub is absent or dies.
+    #   :process — one listener per web process: the pre-0.13 behavior, and
+    #     the automatic behavior on single-mode / non-preforking servers.
+    attr_reader :streams_listen_scope
+
+    VALID_STREAMS_LISTEN_SCOPES = %i[master process].freeze
+
+    def streams_listen_scope=(scope)
+      coerced = case scope
+                when Symbol then scope
+                when String then scope.to_sym
+                else
+                  raise Pgbus::ConfigurationError,
+                        "Invalid streams_listen_scope type: #{scope.class}. " \
+                        "Must be :master (one shared LISTEN connection per web host) or :process (one per worker)"
+                end
+      unless VALID_STREAMS_LISTEN_SCOPES.include?(coerced)
+        raise Pgbus::ConfigurationError,
+              "Invalid streams_listen_scope: #{coerced.inspect}. " \
+              "Must be :master (one shared LISTEN connection per web host) or :process (one per worker)"
+      end
+
+      @streams_listen_scope = coerced
     end
 
     VALID_WORKER_NOTIFY_SCOPES = %i[supervisor fork].freeze

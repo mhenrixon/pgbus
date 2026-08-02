@@ -41,8 +41,11 @@ module Pgbus
           end
         end
 
-        CHANNEL_PREFIX = "pgmq.q_"
-        CHANNEL_SUFFIX = ".INSERT"
+        # Single-sourced from NotifyListener, which owns the pgmq channel
+        # format (issue #381 review — the two copies had already drifted apart
+        # once in spirit if not in bytes).
+        CHANNEL_PREFIX = Pgbus::Process::NotifyListener::CHANNEL_PREFIX
+        CHANNEL_SUFFIX = Pgbus::Process::NotifyListener::CHANNEL_SUFFIX
 
         RECONNECT_BACKOFF_SECONDS = 0.5
 
@@ -100,6 +103,18 @@ module Pgbus
           @running = true
           @thread = Thread.new { run_loop }
           self
+        end
+
+        # Health signals for the MasterHub's status broadcasts (issue #382).
+        # Read cross-thread without synchronization: ivar assignment is atomic
+        # in MRI and a momentarily stale value only delays one status tick —
+        # these must never touch the connection itself (single-owner, #375).
+        def alive?
+          !!@thread&.alive?
+        end
+
+        def connected?
+          !@conn.nil?
         end
 
         def stop

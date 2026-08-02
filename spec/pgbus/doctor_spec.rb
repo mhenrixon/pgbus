@@ -55,7 +55,7 @@ RSpec.describe Pgbus::Doctor do
     it "returns hashes with :name, :status, :detail keys" do
       doctor.run.each do |check|
         expect(check).to include(:name, :status, :detail)
-        expect(check[:status]).to be_in(%i[ok warn fail])
+        expect(check[:status]).to(satisfy { |status| %i[ok warn fail].include?(status) })
       end
     end
 
@@ -507,8 +507,15 @@ RSpec.describe Pgbus::Doctor do
       expect(budget_check[:detail]).not_to include("1 capsules")
     end
 
-    it "notes the per-web-process streams listener when streams are enabled" do
+    it "notes one streams connection per web host under :master scope (the default)" do
       allow(config).to receive(:streams_enabled).and_return(true)
+
+      expect(budget_check[:detail]).to include("+ 1 per web host (streams master hub")
+    end
+
+    it "notes the per-web-process streams listener under :process scope" do
+      allow(config).to receive(:streams_enabled).and_return(true)
+      config.streams_listen_scope = :process
 
       expect(budget_check[:detail]).to include("+ 1 per web-server process (streams)")
     end
@@ -617,7 +624,7 @@ RSpec.describe Pgbus::Doctor do
     it "returns the same hash shape as #run" do
       doctor.boot_checks.each do |check|
         expect(check).to include(:name, :status, :detail)
-        expect(check[:status]).to be_in(%i[ok warn fail])
+        expect(check[:status]).to(satisfy { |status| %i[ok warn fail].include?(status) })
       end
     end
   end

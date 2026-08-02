@@ -39,7 +39,6 @@ module Pgbus
           @dispatch_queue = dispatch_queue || Queue.new
 
           @stream_counter = StreamCounter.new
-          @pg_connection = pg_connection || build_pg_connection
           # Self-tuning streams-pool autoscaler (issue #323). Opt-in; nil unless
           # enabled AND on the dedicated connection path (the shared-AR streams
           # pool aliases the non-thread-safe job pool and resize is a no-op there).
@@ -50,25 +49,7 @@ module Pgbus
             if @config.streams_pool_autoscale && !@client.shared_connection?
               Pgbus::Streams::PoolAutoscaler.new(client: @client, config: @config, logger: @logger)
             end
-          @listener = Listener.new(
-            pg_connection: @pg_connection,
-            dispatch_queue: @dispatch_queue,
-            health_check_ms: @config.streams_listen_health_check_ms,
-            # Opt-in dispatch-queue backpressure (issue #315 item 3). 0 =
-            # unbounded (default). The queue itself stays an unbounded
-            # Queue.new so the request-thread Connect push and the dispatcher's
-            # own prune_dead self-post never block.
-            dispatch_queue_limit: @config.streams_dispatch_queue_limit,
-            maintenance: build_autoscale_maintenance,
-            logger: @logger,
-            # On reconnect the Listener rebuilds its OWN connection via this
-            # factory (fresh connect re-resolves DNS, converges on the promoted
-            # primary after a failover) instead of resetting a possibly-dead
-            # socket. Always provided — even when an initial pg_connection: is
-            # injected, the reconnect path builds a fresh raw connection. A test
-            # can inject its own factory to avoid touching real configuration.
-            connection_factory: connection_factory || -> { build_raw_pg_connection }
-          )
+          @listener = build_listener(pg_connection, connection_factory)
           # Off-thread durable fanout writer (issue #321). Built only when
           # streams_writer_threads > 0; nil means fanout writes stay inline on
           # the dispatcher thread (the default, pre-#321 behavior). The pump
@@ -168,6 +149,74 @@ module Pgbus
         end
 
         private
+
+        # Selects the wake source by streams_listen_scope (issue #382).
+        # :master with a reachable hub socket → FailoverListener over a
+        # HubClient (NO per-worker LISTEN connection is opened). Anything
+        # else — scope :process, no socket exported (single mode,
+        # non-preforking server, hub failed to start), or a refused connect —
+        # keeps today's per-worker Listener.
+        def build_listener(pg_connection, connection_factory)
+          hub = build_hub_listener(connection_factory)
+          return hub if hub
+
+          build_local_listener(pg_connection || build_pg_connection, connection_factory)
+        end
+
+        def build_hub_listener(connection_factory)
+          return nil unless @config.streams_listen_scope == :master
+
+          socket_path = ENV.fetch("PGBUS_STREAMS_HUB_SOCKET", nil)
+          return nil if socket_path.nil? || socket_path.empty?
+
+          # The worker's ack deadline must exceed the master's own internal
+          # ensure_listening budget (its listener's health-check cycle + 1s).
+          failover = nil
+          client = HubClient.new(
+            socket_path: socket_path,
+            dispatch_queue: @dispatch_queue,
+            ack_timeout: (@config.streams_listen_health_check_ms / 1000.0) + 2.0,
+            # failover is assigned right below; a transport death in the gap
+            # is caught by the FailoverListener's synchronous ensure path.
+            on_failure: -> { failover&.fail_over! },
+            logger: @logger
+          )
+          client.connect
+          failover = FailoverListener.new(
+            hub_client: client,
+            local_listener_factory: lambda do
+              build_local_listener(build_pg_connection, connection_factory).tap(&:start)
+            end,
+            logger: @logger
+          )
+        rescue HubClient::HubUnavailableError => e
+          @logger.info do
+            "[Pgbus::Streamer] master hub not reachable (#{e.message}) — using a per-worker listener"
+          end
+          nil
+        end
+
+        def build_local_listener(pg_connection, connection_factory)
+          Listener.new(
+            pg_connection: pg_connection,
+            dispatch_queue: @dispatch_queue,
+            health_check_ms: @config.streams_listen_health_check_ms,
+            # Opt-in dispatch-queue backpressure (issue #315 item 3). 0 =
+            # unbounded (default). The queue itself stays an unbounded
+            # Queue.new so the request-thread Connect push and the dispatcher's
+            # own prune_dead self-post never block.
+            dispatch_queue_limit: @config.streams_dispatch_queue_limit,
+            maintenance: build_autoscale_maintenance,
+            logger: @logger,
+            # On reconnect the Listener rebuilds its OWN connection via this
+            # factory (fresh connect re-resolves DNS, converges on the promoted
+            # primary after a failover) instead of resetting a possibly-dead
+            # socket. Always provided — even when an initial pg_connection: is
+            # injected, the reconnect path builds a fresh raw connection. A test
+            # can inject its own factory to avoid touching real configuration.
+            connection_factory: connection_factory || -> { build_raw_pg_connection }
+          )
+        end
 
         def safely
           yield

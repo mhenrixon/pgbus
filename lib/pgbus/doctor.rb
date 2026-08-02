@@ -394,10 +394,21 @@ module Pgbus
         consumers: consumers, con_plural: consumers == 1 ? "" : "s",
         share: count == 1 && @config.worker_notify_scope == :supervisor ? " share it" : ""
       )
-      detail += " + 1 per web-server process (streams)" if @config.streams_enabled
+      detail += streams_budget_clause if @config.streams_enabled
       Check.new(name: "Connection budget", status: :ok, detail: detail)
     rescue StandardError => e
       Check.new(name: "Connection budget", status: :warn, detail: "#{e.class}: #{e.message}")
+    end
+
+    # Streams add their own LISTEN footprint on web hosts: one per host with
+    # the master hub (#382, the default — workers fall back per-worker only
+    # during a hub outage), one per web process under :process scope.
+    def streams_budget_clause
+      if @config.streams_listen_scope == :master
+        " + 1 per web host (streams master hub; per-worker fallback during a hub outage costs 1 per web process)"
+      else
+        " + 1 per web-server process (streams)"
+      end
     end
 
     # Open one dedicated connection the way the runtime does, verify it

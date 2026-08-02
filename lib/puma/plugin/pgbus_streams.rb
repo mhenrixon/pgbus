@@ -22,13 +22,49 @@ require "puma/plugin"
 # and a non-Rails use case). Explicit opt-in is safer.
 Puma::Plugin.create do
   def start(launcher)
+    # Master-side streams hub (issue #382): in cluster mode, ONE LISTEN
+    # connection in the master serves every worker over a Unix socket. The
+    # socket path is exported to ENV here (pre-fork, so workers inherit it);
+    # the hub itself starts once the preloaded app has configured Pgbus (see
+    # MasterHubBoot). Any failure means no socket — workers keep their own
+    # per-worker listeners, trading connections for unchanged semantics.
+    boot_master_hub(launcher)
+
     launcher.events.register(:after_stopped) do
+      teardown_master_hub(launcher)
       teardown_streamer(launcher)
     end
 
     launcher.events.register(:before_restart) do
+      teardown_master_hub(launcher)
       teardown_streamer(launcher)
     end
+  end
+
+  def boot_master_hub(launcher)
+    return unless defined?(Pgbus::Web::Streamer::MasterHubBoot)
+    # Single mode: the master IS the (only) serving process — one listener
+    # per host already; a hub would just add a socket hop.
+    return unless cluster_mode?(launcher)
+
+    @master_hub_boot = Pgbus::Web::Streamer::MasterHubBoot.new
+    @master_hub_boot.start
+  rescue StandardError => e
+    @master_hub_boot = nil
+    log_error(launcher, e, "master hub boot")
+  end
+
+  def cluster_mode?(launcher)
+    launcher.respond_to?(:options) && launcher.options[:workers].to_i.positive?
+  rescue StandardError
+    false
+  end
+
+  def teardown_master_hub(launcher)
+    @master_hub_boot&.stop
+    @master_hub_boot = nil
+  rescue StandardError => e
+    log_error(launcher, e, "master hub teardown")
   end
 
   def teardown_streamer(launcher)
@@ -43,8 +79,8 @@ Puma::Plugin.create do
     log_error(launcher, e)
   end
 
-  def log_error(launcher, error)
-    message = "[Pgbus::Puma::Plugin] streamer teardown raised: #{error.class}: #{error.message}"
+  def log_error(launcher, error, operation = "streamer teardown")
+    message = "[Pgbus::Puma::Plugin] #{operation} raised: #{error.class}: #{error.message}"
     if launcher.respond_to?(:log_writer)
       launcher.log_writer.log(message)
     elsif defined?(Pgbus) && Pgbus.respond_to?(:logger)

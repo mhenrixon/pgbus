@@ -549,4 +549,68 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       end
     end
   end
+
+  describe "listener selection by streams_listen_scope (issue #382)" do
+    require "tmpdir"
+
+    let(:tmpdir) { Dir.mktmpdir("pgbus-instance-hub") }
+    let(:socket_path) { File.join(tmpdir, "hub.sock") }
+    let(:hub_server) { UNIXServer.new(socket_path) }
+
+    after do
+      hub_server.close if File.socket?(socket_path) && !hub_server.closed?
+      FileUtils.remove_entry(tmpdir) if File.directory?(tmpdir)
+    end
+
+    around do |example|
+      original = ENV.fetch("PGBUS_STREAMS_HUB_SOCKET", nil)
+      example.run
+    ensure
+      original ? ENV["PGBUS_STREAMS_HUB_SOCKET"] = original : ENV.delete("PGBUS_STREAMS_HUB_SOCKET")
+    end
+
+    it "uses a FailoverListener (no per-worker LISTEN connection) when the hub socket is reachable" do
+      hub_server # bind before the instance connects
+      ENV["PGBUS_STREAMS_HUB_SOCKET"] = socket_path
+      config.streams_listen_scope = :master
+      allow(PG).to receive(:connect) # must NOT be called — that's the whole point
+
+      instance = described_class.new(client: client, config: config, logger: Logger.new(IO::NULL))
+
+      expect(instance.listener).to be_a(Pgbus::Web::Streamer::FailoverListener)
+      expect(PG).not_to have_received(:connect)
+      instance.listener.stop
+    end
+
+    it "falls back to a per-worker Listener when the socket path is exported but dead" do
+      ENV["PGBUS_STREAMS_HUB_SOCKET"] = socket_path # nothing bound there
+      config.streams_listen_scope = :master
+
+      instance = described_class.new(
+        client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL)
+      )
+
+      expect(instance.listener).to be_a(Pgbus::Web::Streamer::Listener)
+    end
+
+    it "uses a per-worker Listener under scope :process even with a live hub socket" do
+      hub_server
+      ENV["PGBUS_STREAMS_HUB_SOCKET"] = socket_path
+      config.streams_listen_scope = :process
+
+      instance = described_class.new(
+        client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL)
+      )
+
+      expect(instance.listener).to be_a(Pgbus::Web::Streamer::Listener)
+    end
+
+    it "uses a per-worker Listener when no socket path is exported (single mode)" do
+      instance = described_class.new(
+        client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL)
+      )
+
+      expect(instance.listener).to be_a(Pgbus::Web::Streamer::Listener)
+    end
+  end
 end
