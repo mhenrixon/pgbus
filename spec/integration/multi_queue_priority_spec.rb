@@ -37,22 +37,23 @@ RSpec.describe "Multi-queue read priority contract (issue #381)", :integration d
     messages = Pgbus.client.read_multi(queues, qty: 5, limit: 5, vt: 30)
 
     expect(messages.size).to eq(5)
-    by_queue = messages.group_by { |m| m.queue_name.delete_prefix("#{Pgbus.configuration.queue_prefix}_") }
+    by_queue = messages.group_by(&:queue_name)
 
     # All of the first-listed queue's messages win; the last-listed queue
-    # contributes nothing at this limit.
-    expect(by_queue.fetch("prio_a", []).size).to eq(3)
-    expect(by_queue.fetch("prio_b", []).size).to eq(2)
-    expect(by_queue.fetch("prio_c", [])).to be_empty
+    # contributes nothing at this limit. Expected keys through
+    # config.queue_name so the physical (normalized) names are compared.
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_a"), []).size).to eq(3)
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_b"), []).size).to eq(2)
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_c"), [])).to be_empty
   end
 
   it "honors a reversed list order" do
     messages = Pgbus.client.read_multi(queues.reverse, qty: 4, limit: 4, vt: 30)
 
-    by_queue = messages.group_by { |m| m.queue_name.delete_prefix("#{Pgbus.configuration.queue_prefix}_") }
+    by_queue = messages.group_by(&:queue_name)
 
-    expect(by_queue.fetch("prio_c", []).size).to eq(3)
-    expect(by_queue.fetch("prio_b", []).size).to eq(1)
-    expect(by_queue.fetch("prio_a", [])).to be_empty
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_c"), []).size).to eq(3)
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_b"), []).size).to eq(1)
+    expect(by_queue.fetch(Pgbus.configuration.queue_name("prio_a"), [])).to be_empty
   end
 end

@@ -135,6 +135,25 @@ module Pgbus
         @state_mutex.synchronize { @running }
       end
 
+      # Called ONLY inside a just-forked child (issue #381 hub hygiene): drop
+      # this process's copy of the LISTEN socket fd WITHOUT PQfinish — #close
+      # would send a libpq Terminate over the socket shared with the parent,
+      # killing the parent's LISTEN session. Closing the IO wrapper just
+      # closes the child's fd. The listener thread does not exist in the
+      # child (fork copies only the calling thread), so there is no
+      # concurrent owner and the single-owner rule (#375) does not apply.
+      def close_inherited_socket!
+        conn = @state_mutex.synchronize do
+          c = @conn
+          @conn = nil
+          @running = false
+          c
+        end
+        conn&.socket_io&.close
+      rescue StandardError
+        nil
+      end
+
       private
 
       def run_loop

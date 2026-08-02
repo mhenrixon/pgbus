@@ -91,6 +91,20 @@ module Pgbus
         self
       end
 
+      # Called ONLY inside a just-forked child: release the child's copies of
+      # the parent's hub resources — the LISTEN socket fd (without a libpq
+      # Terminate, see NotifyListener#close_inherited_socket!) and the fork
+      # table's pipe write ends. Never touches parent state (fork copied it).
+      def close_inherited!
+        @listener&.close_inherited_socket!
+        @listener = nil
+        @table_mutex.synchronize do
+          @forks.each_value { |entry| close_quietly(entry[:pipe]) }
+          @forks.clear
+        end
+        self
+      end
+
       # One supervisor monitor-loop beat: self-heal the listener, refresh the
       # LISTEN union, keep fork status fresh.
       def tick

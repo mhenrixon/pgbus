@@ -632,12 +632,21 @@ module Pgbus
       end
 
       # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
-      # watcher is the wake source. :fork scope (or no pipe from the
-      # supervisor): the fork-local NotifyListener, exactly as before.
+      # watcher is the wake source. A missing pipe under that scope means the
+      # hub failed to start — plain polling, NEVER a local listener, or a hub
+      # outage would balloon the host back to one direct connection per fork
+      # (the exact budget the scope exists to protect). :fork scope: the
+      # fork-local NotifyListener, exactly as before.
       def start_wake_source
         return @wake_pipe.start if @wake_pipe
 
-        start_notify_listener
+        start_notify_listener if local_listener_scope?
+      end
+
+      # Local NotifyListener lifecycle (start + self-heal) is allowed only
+      # under :fork scope.
+      def local_listener_scope?
+        config.worker_notify_scope == :fork
       end
 
       def stop_wake_source
@@ -670,8 +679,11 @@ module Pgbus
       # reset; a still-failing restart doubles the backoff up to the cap.
       def ensure_notify_listener
         # Supervisor scope: listener self-healing is the hub's job (it runs
-        # once per host in the supervisor's monitor tick).
+        # once per host in the supervisor's monitor tick), and a pipe-less
+        # fork under that scope must stay on plain polling — self-healing a
+        # listener it was never allowed to start would leak a connection.
         return if @wake_pipe
+        return unless local_listener_scope?
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at

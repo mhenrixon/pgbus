@@ -270,15 +270,10 @@ module Pgbus
         wake_reader, wake_writer = IO.pipe if @notify_hub
 
         pid = fork do
-          # Child owns the liveness writer + wake reader. A fork copies the
-          # whole parent FD table, so this child also inherits every earlier
-          # sibling's liveness reader AND wake writer (they live in @forks) —
-          # close them, or each new worker accumulates stale sibling FDs and a
-          # dead sibling's wake pipe never reaches EOF. (Sibling liveness
-          # *writers* / wake *readers* are never inherited: the parent closes
-          # its copies below before forking the next worker.) Finally close
-          # this fork's own copies of the parent-side ends.
-          close_inherited_fork_pipes
+          # Child owns the liveness writer + wake reader; close this fork's
+          # own copies of the parent-side ends. Sibling pipe ends and the
+          # hub's LISTEN socket are released in setup_child_process, which
+          # every child type runs.
           liveness_reader.close
           wake_writer&.close
           restore_signals
@@ -446,11 +441,8 @@ module Pgbus
         wake_reader, wake_writer = IO.pipe if @notify_hub
 
         pid = fork do
-          # Child owns the liveness writer + wake reader. Close every earlier
-          # sibling's inherited pipe ends and this fork's own copies of the
-          # parent-side ends before becoming a Consumer (see fork_worker for
-          # the full rationale).
-          close_inherited_fork_pipes
+          # Child owns the liveness writer + wake reader; close this fork's
+          # own copies of the parent-side ends (see fork_worker).
           liveness_reader.close
           wake_writer&.close
           restore_signals
@@ -737,6 +729,13 @@ module Pgbus
       end
 
       def setup_child_process
+        # Every child type (worker, consumer, dispatcher, scheduler, outbox
+        # poller) releases its copies of the parent's per-fork resources —
+        # a dispatcher child holding a sibling worker's wake WRITER would
+        # keep that sibling's pipe from ever reaching EOF after the
+        # supervisor dies, pinning the sibling to the 15s NOTIFY ceiling
+        # with no wake source (issue #381 review).
+        close_inherited_parent_resources
         # Reset the PGMQ client so this forked process gets a fresh
         # PG::Connection instead of inheriting the parent's (which is
         # in undefined state post-fork and not thread-safe to share).
@@ -840,17 +839,19 @@ module Pgbus
         nil
       end
 
-      # Close every sibling pipe end this fork inherited from the parent's FD
-      # table: liveness readers AND wake writers (issue #381). Called only
-      # inside a just-forked child, before it becomes a Worker/Consumer, so
-      # the child never holds its siblings' pipe ends — a leaked sibling wake
-      # writer would keep that sibling's pipe from ever reaching EOF after the
-      # supervisor dies.
-      def close_inherited_fork_pipes
+      # Called only inside a just-forked child: close every sibling pipe end
+      # inherited from the parent's FD table (liveness readers AND wake
+      # writers), and release the child's copy of the NotifyHub's LISTEN
+      # socket without a libpq Terminate (PQfinish would kill the PARENT's
+      # session over the shared socket — see
+      # NotifyListener#close_inherited_socket!).
+      def close_inherited_parent_resources
         @forks.each_value do |info|
           close_pipe(info[:liveness_reader])
           close_pipe(info[:wake_writer])
         end
+        @notify_hub&.close_inherited!
+        @notify_hub = nil
       end
 
       # Build the host-level shared LISTEN hub (issue #381). Only under

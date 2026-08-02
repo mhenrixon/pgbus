@@ -156,8 +156,12 @@ module Pgbus
       private
 
       def setup_subscriptions
-        # Shared with the supervisor-owned NotifyHub (issue #381) so the LISTEN
-        # union covers exactly the queues this fork reads.
+        # An injected queue_names: seed (test seam — the ctor documents nil as
+        # "derive from the registry") survives #run. Derivation is shared with
+        # the supervisor-owned NotifyHub (issue #381) so the LISTEN union
+        # covers exactly the queues this fork reads.
+        return unless @queue_names.nil?
+
         @queue_names = @registry.queue_names_for_topics(topics)
       end
 
@@ -368,11 +372,17 @@ module Pgbus
       end
 
       # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
-      # watcher is the wake source. :fork scope: the fork-local NotifyListener.
+      # watcher is the wake source, and a missing pipe (hub failed to start)
+      # means plain polling — never a local listener (see Worker's twin).
+      # :fork scope: the fork-local NotifyListener.
       def start_wake_source
         return @wake_pipe.start if @wake_pipe
 
-        start_notify_listener
+        start_notify_listener if local_listener_scope?
+      end
+
+      def local_listener_scope?
+        config.worker_notify_scope == :fork
       end
 
       def stop_wake_source
@@ -402,8 +412,10 @@ module Pgbus
       # a persistent outage retries on 5s→…→300s intervals, not every tick
       # (mirrors Worker#ensure_notify_listener).
       def ensure_notify_listener
-        # Supervisor scope: self-healing is the hub's job (once per host).
+        # Supervisor scope: self-healing is the hub's job (once per host);
+        # a pipe-less fork under that scope stays on plain polling.
         return if @wake_pipe
+        return unless local_listener_scope?
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at

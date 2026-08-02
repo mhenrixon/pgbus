@@ -155,6 +155,32 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
   end
 
+  describe "#close_inherited_socket! (forked-child hygiene, issue #381)" do
+    # A just-forked child holds a COPY of the LISTEN socket fd. PQfinish
+    # (#close) would send a libpq Terminate over the socket shared with the
+    # parent, killing the parent's session — the child must close only its
+    # own fd via the IO wrapper.
+    let(:socket_io) { instance_double(IO, close: nil) }
+
+    before { allow(fake_pg).to receive(:socket_io).and_return(socket_io) }
+
+    it "closes the socket IO without PQfinish and drops the connection" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      listener.close_inherited_socket!
+
+      expect(socket_io).to have_received(:close)
+      expect(fake_pg.close_count).to eq(0)
+      expect(listener.connected?).to be false
+    end
+
+    it "is a no-op before start" do
+      expect { listener.close_inherited_socket! }.not_to raise_error
+    end
+  end
+
   describe "#connected?" do
     # The hub (issue #381) broadcasts degraded status to forks while the
     # listener is between connections — running? stays true during a

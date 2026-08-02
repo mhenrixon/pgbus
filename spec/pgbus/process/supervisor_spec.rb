@@ -1082,5 +1082,29 @@ RSpec.describe Pgbus::Process::Supervisor do
         expect(hub).to have_received(:stop)
       end
     end
+
+    describe "close_inherited_parent_resources (runs in EVERY forked child)" do
+      # Called from setup_child_process, so dispatcher/scheduler/outbox
+      # children release sibling pipe ends and the hub's socket copy too — a
+      # dispatcher holding a sibling worker's wake WRITER would keep that
+      # sibling's pipe from ever reaching EOF after the supervisor dies.
+      it "closes sibling liveness readers, sibling wake writers, and the hub copy" do
+        allow(hub).to receive(:close_inherited!)
+        liveness_r, liveness_w = IO.pipe
+        wake_r, wake_w = IO.pipe
+        supervisor = described_class.new(
+          notify_hub: hub,
+          forks: { 3001 => { type: :worker, liveness_reader: liveness_r, wake_writer: wake_w } }
+        )
+
+        supervisor.send(:close_inherited_parent_resources)
+
+        expect(liveness_r).to be_closed
+        expect(wake_w).to be_closed
+        expect(hub).to have_received(:close_inherited!)
+        expect(supervisor.notify_hub).to be_nil
+        [liveness_w, wake_r].each(&:close)
+      end
+    end
   end
 end

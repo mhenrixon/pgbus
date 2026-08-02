@@ -91,6 +91,14 @@ RSpec.describe Pgbus::Process::Consumer do
 
       expect(consumer.queue_names).to eq(["q_payments"])
     end
+
+    it "preserves an injected queue_names seed instead of re-deriving" do
+      consumer = described_class.new(topics: ["payments.completed"], queue_names: %w[seeded])
+      consumer.send(:setup_subscriptions)
+
+      expect(consumer.queue_names).to eq(%w[seeded])
+      expect(registry).not_to have_received(:queue_names_for_topics)
+    end
   end
 
   describe "handle_message (private)" do
@@ -387,6 +395,35 @@ RSpec.describe Pgbus::Process::Consumer do
     end
   end
 
+  describe ":supervisor scope WITHOUT a wake pipe (hub failed to start)" do
+    # Poll-only guarantee, mirroring Worker: a hub outage must not balloon
+    # the host back to one direct LISTEN connection per fork (issue #381
+    # review).
+    let(:bare_consumer) { described_class.new(topics: ["orders.#"], queue_names: ["orders"]) }
+
+    before do
+      allow(bare_consumer).to receive(:notify_wakeup?).and_return(true)
+      allow(bare_consumer.config).to receive(:worker_notify_scope).and_return(:supervisor)
+    end
+
+    it "start_wake_source builds no local listener" do
+      allow(Pgbus::Process::NotifyListener).to receive(:new)
+
+      bare_consumer.send(:start_wake_source)
+
+      expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
+    end
+
+    it "self-healing does not resurrect a local listener either" do
+      allow(bare_consumer).to receive(:start_notify_listener)
+      bare_consumer.notify_retry_at = 0.0
+
+      bare_consumer.send(:ensure_notify_listener)
+
+      expect(bare_consumer).not_to have_received(:start_notify_listener)
+    end
+  end
+
   describe "#start_notify_listener (private)" do
     let(:consumer) { described_class.new(topics: ["orders.#"], queue_names: ["orders"]) }
 
@@ -440,6 +477,9 @@ RSpec.describe Pgbus::Process::Consumer do
     let(:elapsed_retry_at) { consumer.send(:monotonic_now) - 1 }
 
     before do
+      # The local-listener lifecycle exists only under :fork scope; the
+      # default is :supervisor (issue #381).
+      allow(consumer.config).to receive(:worker_notify_scope).and_return(:fork)
       allow(consumer).to receive(:notify_wakeup?).and_return(true)
     end
 

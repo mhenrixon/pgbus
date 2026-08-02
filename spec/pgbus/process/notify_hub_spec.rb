@@ -296,6 +296,22 @@ RSpec.describe Pgbus::Process::NotifyHub do
     end
   end
 
+  describe "#close_inherited! (forked-child hygiene, issue #381)" do
+    it "drops the child's socket copy without stop (no libpq Terminate) and closes pipe copies" do
+      allow(fake_listener).to receive(:close_inherited_socket!)
+      reader, writer = make_pipe
+      hub.start
+      hub.register_fork(pid: 100, queues: %w[pgbus_test_critical], pipe: writer)
+
+      hub.close_inherited!
+
+      expect(fake_listener).to have_received(:close_inherited_socket!)
+      expect(fake_listener).not_to have_received(:stop)
+      expect(writer).to be_closed
+      reader.close
+    end
+  end
+
   describe "wake routing after a wildcard refresh" do
     # A queue created after boot reaches a wildcard fork's W routing as soon
     # as the refresh adds it to the union — the routing check for wildcard
