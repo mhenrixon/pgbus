@@ -404,34 +404,10 @@ module Pgbus
       def resolve_wildcard_queues
         return unless @wildcard
 
-        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
-        prefix = "#{config.queue_prefix}_"
-
-        # Stream queues share the job namespace (pgbus_<name>) but must never
-        # be adopted by a wildcard worker: a worker would claim durable
-        # broadcasts, fail to deserialize them, and DLQ-move them out of the
-        # stream's replay history. known_names includes fingerprint-matched
-        # dormant pre-registry streams (issue #366) so they are excluded even
-        # before backfill. Reset first so a stream created since the last
-        # resolve is excluded.
-        Pgbus::StreamQueue.reset_cache!
-        stream_names = Pgbus::StreamQueue.known_names
-
-        # Event-bus subscriber queues also share the job namespace (pgbus_<handler>)
-        # but carry event payloads, not ActiveJob jobs. A wildcard worker that
-        # adopts one hands the event to the executor, which fails to deserialize
-        # it and DLQ-moves it out of the consumer's reach — so an app running the
-        # event bus had to hand-maintain an explicit queue list. Exclude them,
-        # like stream queues (issue #333).
-        event_names = Pgbus::EventBus::Registry.instance.event_queue_names
-
-        conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
-        all_queues = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        resolved = all_queues
-                   .reject { |q| q.end_with?(dlq_suffix) }
-                   .reject { |q| stream_names.include?(q) }
-                   .reject { |q| event_names.include?(q) }
-                   .map { |q| q.delete_prefix(prefix) }
+        # Exclusion rationale (streams, event queues, DLQs) lives with the
+        # shared resolver — the NotifyHub uses the same one, so the LISTEN
+        # union and the fork's adopted set can't drift (issue #381).
+        resolved = WildcardQueueResolver.resolve(config: config)
 
         if resolved.empty?
           Pgbus.logger.warn { "[Pgbus] Wildcard queue '*' resolved to no queues — falling back to default" }

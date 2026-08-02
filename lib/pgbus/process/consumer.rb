@@ -150,10 +150,9 @@ module Pgbus
       private
 
       def setup_subscriptions
-        matching = @registry.subscribers.select do |s|
-          topics.any? { |t| pattern_overlaps?(t, s.pattern) }
-        end
-        @queue_names = matching.map(&:queue_name).uniq
+        # Shared with the supervisor-owned NotifyHub (issue #381) so the LISTEN
+        # union covers exactly the queues this fork reads.
+        @queue_names = @registry.queue_names_for_topics(topics)
       end
 
       def consume
@@ -271,13 +270,6 @@ module Pgbus
           logical = m.queue_name&.delete_prefix(prefix) || active_queues.first
           [logical, m]
         end
-      end
-
-      def pattern_overlaps?(topic_filter, subscription_pattern)
-        # Simple check: if either is a subset of the other
-        topic_filter == subscription_pattern ||
-          topic_filter.end_with?("#") ||
-          subscription_pattern.start_with?(topic_filter.delete_suffix(".#"))
       end
 
       # Signal the loop to exit cleanly once a recycle limit is hit. The clean

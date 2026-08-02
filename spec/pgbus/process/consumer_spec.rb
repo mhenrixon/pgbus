@@ -25,7 +25,11 @@ RSpec.describe Pgbus::Process::Consumer do
   let(:subscriber_a) { instance_double(Pgbus::EventBus::Subscriber, pattern: "orders.#", queue_name: "q_orders") }
   let(:subscriber_b) { instance_double(Pgbus::EventBus::Subscriber, pattern: "payments.completed", queue_name: "q_payments") }
   let(:subscriber_c) { instance_double(Pgbus::EventBus::Subscriber, pattern: "shipping.label", queue_name: "q_shipping") }
-  let(:registry) { instance_double(Pgbus::EventBus::Registry, subscribers: [subscriber_a, subscriber_b, subscriber_c]) }
+  let(:registry) do
+    instance_double(Pgbus::EventBus::Registry,
+                    subscribers: [subscriber_a, subscriber_b, subscriber_c],
+                    queue_names_for_topics: [])
+  end
 
   before do
     allow(Pgbus).to receive(:client).and_return(mock_client)
@@ -76,12 +80,16 @@ RSpec.describe Pgbus::Process::Consumer do
   end
 
   describe "setup_subscriptions (private)" do
-    it "filters registry by topic overlap and collects unique queue names" do
+    # Overlap semantics are pinned in registry_spec — the consumer only
+    # delegates, so the hub (issue #381) and the fork derive the same set.
+    it "delegates queue-name derivation to the registry" do
+      allow(registry).to receive(:queue_names_for_topics)
+        .with(["payments.completed"]).and_return(["q_payments"])
+
       consumer = described_class.new(topics: ["payments.completed"])
       consumer.send(:setup_subscriptions)
 
-      expect(consumer.queue_names).to include("q_payments")
-      expect(consumer.queue_names).not_to include("q_shipping")
+      expect(consumer.queue_names).to eq(["q_payments"])
     end
   end
 
@@ -137,26 +145,6 @@ RSpec.describe Pgbus::Process::Consumer do
       consumer.send(:fetch_multi_consumer, %w[q_orders q_payments q_shipping], 3)
       expect(mock_client).to have_received(:read_multi)
         .with(%w[q_orders q_payments q_shipping], qty: 3, limit: 3)
-    end
-  end
-
-  describe "pattern_overlaps? (private)" do
-    let(:consumer) { described_class.new(topics: ["orders.#"]) }
-
-    it "returns true for exact match" do
-      expect(consumer.send(:pattern_overlaps?, "orders.created", "orders.created")).to be true
-    end
-
-    it "returns true when topic filter ends with #" do
-      expect(consumer.send(:pattern_overlaps?, "orders.#", "orders.created")).to be true
-    end
-
-    it "returns true when subscription starts with topic prefix" do
-      expect(consumer.send(:pattern_overlaps?, "orders.created", "orders.created.v2")).to be true
-    end
-
-    it "returns false for unrelated patterns" do
-      expect(consumer.send(:pattern_overlaps?, "payments.completed", "shipping.label")).to be false
     end
   end
 
