@@ -19,6 +19,14 @@ module Pgbus
     #   *    wildcard, matches all queues
     #   *_   trailing wildcard, prefix match (e.g. "staging_*")
     #
+    # "List order = strict priority" is enforced two ways at runtime: with
+    # priority_levels > 1 the worker reads queues one at a time in list order
+    # (Worker#fetch_prioritized); otherwise it relies on Client#read_multi's
+    # UNION ALL filling its LIMIT from earlier-listed queues first — an
+    # Append-node behavior Postgres does not formally promise, pinned by
+    # spec/integration/multi_queue_priority_spec.rb (see Client#read_multi
+    # for the contract and its vt-claim caveat).
+    #
     # Returns +Array<Hash>+ in the same shape as the legacy +workers:+ array,
     # so the rest of the codebase can consume it without changes:
     #
