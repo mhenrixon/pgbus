@@ -434,6 +434,21 @@ module Pgbus
     # caller receives up to `queue_count * qty` messages. Pass `limit:` to cap
     # the total across all queues — required when feeding a fixed-size pool,
     # otherwise the pool can overflow on multi-queue reads (issue #123).
+    #
+    # STRICT-PRIORITY CONTRACT (issue #381): when `limit:` is smaller than the
+    # total available, earlier-listed queues win — the capsule DSL's "list
+    # order = strict priority" promise rides on this. The mechanism is
+    # incidental: pgmq-ruby builds `pgmq.read(q1) UNION ALL pgmq.read(q2) …
+    # LIMIT n`, and Postgres's Append node fills the LIMIT from the subqueries
+    # in written order. Nothing upstream promises that, so the contract is
+    # pinned by spec/integration/multi_queue_priority_spec.rb — if that canary
+    # ever breaks, switch callers to ordered per-queue reads (the
+    # Worker#fetch_prioritized pattern) instead of relying on this method.
+    #
+    # vt-claim caveat: each subquery may claim (set vt on) up to `qty` rows
+    # even when the outer LIMIT discards them — a discarded row goes invisible
+    # for one visibility timeout without being processed. Size `qty`/`limit`
+    # accordingly on latency-sensitive queues.
     def read_multi(queue_names, qty:, vt: nil, limit: nil)
       full_names = queue_names.map { |q| config.queue_name(q) }
       guarded_read do

@@ -22,6 +22,12 @@ group :test do
   # System tests
   gem "capybara", require: false
   gem "capybara-playwright-driver", require: false
+  # Keep the ruby client in lockstep with the node driver pinned in bun.lock
+  # (package.json "playwright"). The gem is otherwise unpinned+transitive, so a
+  # fresh CI bundle grabs the newest client, which speaks a newer protocol than
+  # the pinned driver and every browser launch dies with
+  # "timeout: expected float, got undefined". Bump BOTH together.
+  gem "playwright-ruby-client", "~> 1.58.0", require: false
   gem "puma"
   gem "sqlite3"
 

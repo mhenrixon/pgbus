@@ -80,6 +80,28 @@ module Pgbus
         @mutex.synchronize { @subscribers.clear }
       end
 
+      # Logical queue names a consumer subscribed to +topics+ reads from — the
+      # derivation Consumer#setup_subscriptions uses, exposed here so the
+      # supervisor-owned NotifyHub (issue #381) computes the same LISTEN set
+      # the consumer forks actually read. The overlap check is deliberately
+      # coarse: any topic filter ending in "#" claims every subscriber (read
+      # more queues rather than risk an uncovered subscriber).
+      def queue_names_for_topics(topics)
+        subscribers = @mutex.synchronize { @subscribers.dup }
+        subscribers
+          .select { |s| topics.any? { |t| pattern_overlaps?(t, s.pattern) } }
+          .map(&:queue_name)
+          .uniq
+      end
+
+      # Preserved verbatim from Consumer#pattern_overlaps?: true when either
+      # side is a superset of the other by the cheap prefix/suffix rules.
+      def pattern_overlaps?(topic_filter, subscription_pattern)
+        topic_filter == subscription_pattern ||
+          topic_filter.end_with?("#") ||
+          subscription_pattern.start_with?(topic_filter.delete_suffix(".#"))
+      end
+
       private
 
       # Rake task-name prefixes during which pgbus must NOT open a PGMQ

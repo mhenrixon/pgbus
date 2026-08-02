@@ -48,8 +48,8 @@ RSpec.describe Pgbus::Doctor do
   end
 
   describe "#run" do
-    it "runs ten checks" do
-      expect(doctor.run.size).to eq(10)
+    it "runs eleven checks" do
+      expect(doctor.run.size).to eq(11)
     end
 
     it "returns hashes with :name, :status, :detail keys" do
@@ -456,6 +456,70 @@ RSpec.describe Pgbus::Doctor do
     end
   end
 
+  describe "the connection-budget check (issue #381)" do
+    # Informational, config-only, always :ok — it exists so operators can do
+    # direct-connection capacity math from the doctor output alone.
+    def budget_check
+      doctor.run.find { |c| c[:name] == "Connection budget" }
+    end
+
+    before do
+      config.workers = [
+        { queues: %w[critical], threads: 1 },
+        { queues: %w[default], threads: 1 },
+        { queues: %w[mailers], threads: 1 }
+      ]
+      config.event_consumers = [{ topics: ["orders.#"], threads: 1 }, { topics: ["payments.#"], threads: 1 }]
+    end
+
+    it "reports 1 pinned connection under :supervisor scope" do
+      config.worker_notify_scope = :supervisor
+
+      expect(budget_check[:status]).to eq(:ok)
+      expect(budget_check[:detail]).to match(/\A1 direct LISTEN connection pinned \(scope=supervisor/)
+      expect(budget_check[:detail]).to include("3 capsules + 2 consumers")
+    end
+
+    it "reports one connection per fork under :fork scope" do
+      config.worker_notify_scope = :fork
+
+      expect(budget_check[:detail]).to match(/\A5 direct LISTEN connections pinned \(scope=fork/)
+    end
+
+    it "reports 0 when worker notify wakeup is off" do
+      config.listen_notify = false
+
+      expect(budget_check[:detail]).to start_with("0 direct LISTEN connections pinned")
+    end
+
+    it "honors a narrowed role set" do
+      config.worker_notify_scope = :fork
+      config.roles = [:workers]
+
+      expect(budget_check[:detail]).to match(/\A3 direct LISTEN connections pinned/)
+    end
+
+    it "singularizes capsule/consumer counts of exactly 1" do
+      config.workers = [{ queues: %w[default], threads: 1 }]
+      config.event_consumers = [{ topics: ["orders.#"], threads: 1 }]
+
+      expect(budget_check[:detail]).to include("1 capsule + 1 consumer ")
+      expect(budget_check[:detail]).not_to include("1 capsules")
+    end
+
+    it "notes the per-web-process streams listener when streams are enabled" do
+      allow(config).to receive(:streams_enabled).and_return(true)
+
+      expect(budget_check[:detail]).to include("+ 1 per web-server process (streams)")
+    end
+
+    it "omits the streams clause when streams are disabled" do
+      config.streams_enabled = false
+
+      expect(budget_check[:detail]).not_to include("streams")
+    end
+  end
+
   describe "#report" do
     it "renders one line per check" do
       report = doctor.report
@@ -538,7 +602,7 @@ RSpec.describe Pgbus::Doctor do
     end
 
     it "runs the other nine checks" do
-      expect(doctor.boot_checks.size).to eq(9)
+      expect(doctor.boot_checks.size).to eq(10)
     end
 
     it "never invokes the HealthAnalyzer — the excluded check does zero work" do

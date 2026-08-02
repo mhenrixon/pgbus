@@ -179,13 +179,21 @@ module Pgbus
                   :streams_pool_autoscale_interval, :streams_application_name
     attr_reader :streams_default_broadcast_mode # rubocop:disable Style/AccessorGrouping
 
-    # NOTIFY-gated worker wakeups. When true, each Worker fork owns a
-    # dedicated NotifyListener PG connection that LISTENs on its queues'
-    # INSERT channels and wakes the loop on a real insert. Defaults to the
-    # value of listen_notify. The worker_notify_* overrides mirror
-    # streams_* so the LISTEN connection can bypass PgBouncer.
+    # NOTIFY-gated worker wakeups. When true, workers are woken by a
+    # NotifyListener PG connection that LISTENs on their queues' INSERT
+    # channels instead of blind-polling. Defaults to the value of
+    # listen_notify. The worker_notify_* overrides mirror streams_* so the
+    # LISTEN connection can bypass PgBouncer.
     attr_accessor :worker_notify_wakeup,
                   :worker_notify_host, :worker_notify_port, :worker_notify_database_url
+
+    # Where the LISTEN connection lives (issue #381):
+    #   :supervisor (default) — ONE shared NotifyListener in the supervisor
+    #     process for the whole host; forks are woken over per-fork pipes.
+    #     Direct-connection footprint: 1, regardless of capsule/consumer count.
+    #   :fork — one NotifyListener (and one dedicated PG connection) per
+    #     worker/consumer fork: the pre-0.13 behavior, kept as an escape hatch.
+    attr_reader :worker_notify_scope
 
     # AppSignal integration (auto-loaded when ::Appsignal is defined and this is true).
     # Set to false to opt out without uninstalling the appsignal gem.
@@ -261,6 +269,7 @@ module Pgbus
       @listen_notify = true
 
       @worker_notify_wakeup = nil
+      @worker_notify_scope = :supervisor
       @worker_notify_host = nil
       @worker_notify_port = nil
       @worker_notify_database_url = nil
@@ -621,6 +630,28 @@ module Pgbus
       end
 
       @doctor_on_boot = coerced
+    end
+
+    VALID_WORKER_NOTIFY_SCOPES = %i[supervisor fork].freeze
+
+    # Validated at assignment time like the other enum options. A String is
+    # coerced so YAML-ish configs work.
+    def worker_notify_scope=(scope)
+      coerced = case scope
+                when Symbol then scope
+                when String then scope.to_sym
+                else
+                  raise Pgbus::ConfigurationError,
+                        "Invalid worker_notify_scope type: #{scope.class}. " \
+                        "Must be :supervisor (one shared LISTEN connection per host) or :fork (one per fork)"
+                end
+      unless VALID_WORKER_NOTIFY_SCOPES.include?(coerced)
+        raise Pgbus::ConfigurationError,
+              "Invalid worker_notify_scope: #{coerced.inspect}. " \
+              "Must be :supervisor (one shared LISTEN connection per host) or :fork (one per fork)"
+      end
+
+      @worker_notify_scope = coerced
     end
 
     def validate!

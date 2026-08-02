@@ -1099,6 +1099,15 @@ RSpec.describe Pgbus::Process::Worker do
           .to eq(["#{prefix}_default", "#{prefix}_low"])
       end
 
+      it "normalizes names the same way queue creation does (LISTEN channel parity)" do
+        # config.queue_name normalizes (hyphens → underscores); the queue
+        # TABLE is created under the normalized name and the NOTIFY channel
+        # derives from the table, so a raw-concat listener would be deaf for
+        # a name like "orders-handler".
+        hyphen_worker = described_class.new(queues: %w[orders-handler], threads: 1)
+        expect(hyphen_worker.send(:physical_queue_names)).to eq(["#{prefix}_orders_handler"])
+      end
+
       it "uses the current queues, not the initial set (post-eviction safe)" do
         # Build with two queues so @initial_queues stays %w[default events], then
         # drive a real eviction of `default` so @queues diverges to %w[events].
@@ -1167,6 +1176,127 @@ RSpec.describe Pgbus::Process::Worker do
         allow(fake_listener).to receive_messages(running?: true, delivering?: false)
         worker.notify_listener = fake_listener
         expect(worker.send(:wake_timeout)).to eq(worker.config.polling_interval)
+      end
+    end
+
+    describe ":supervisor scope (supervisor-mediated wakes, issue #381)" do
+      let(:pipe_ios) { IO.pipe }
+      let(:piped_worker) { described_class.new(queues: %w[default], threads: 5, wake_pipe: pipe_ios[0]) }
+
+      after do
+        piped_worker.wake_pipe&.stop
+        pipe_ios.each { |io| io.close unless io.closed? }
+      end
+
+      def wait_for(timeout: 2)
+        deadline = Time.now + timeout
+        until yield
+          raise "timed out waiting for condition" if Time.now > deadline
+
+          sleep 0.01
+        end
+      end
+
+      it "does not construct a local NotifyListener" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+        allow(Pgbus::Process::NotifyListener).to receive(:new)
+
+        piped_worker.send(:start_wake_source)
+
+        expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
+      end
+
+      it "starts the wake-pipe watcher instead" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+
+        piped_worker.send(:start_wake_source)
+
+        expect(piped_worker.wake_pipe.running?).to be true
+      end
+
+      it "wakes the loop on a W byte from the supervisor" do
+        piped_worker.send(:start_wake_source)
+
+        pipe_ios[1].write(Pgbus::Process::WakePipe::WAKE)
+
+        expect(piped_worker.wake_signal.wait(timeout: 2)).to be true
+      end
+
+      it "skips the per-fork listener self-healing loop" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+        allow(piped_worker).to receive(:start_notify_listener)
+        piped_worker.notify_retry_at = 0.0
+
+        piped_worker.send(:ensure_notify_listener)
+
+        expect(piped_worker).not_to have_received(:start_notify_listener)
+      end
+
+      it "uses the NOTIFY ceiling while the hub reports delivering" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+        piped_worker.send(:start_wake_source)
+
+        expect(piped_worker.send(:wake_timeout)).to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
+      end
+
+      it "falls back to fast polling when the hub broadcasts degraded" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+        piped_worker.send(:start_wake_source)
+
+        pipe_ios[1].write(Pgbus::Process::WakePipe::DEGRADED)
+        wait_for { !piped_worker.wake_pipe.delivering? }
+
+        expect(piped_worker.send(:wake_timeout)).to eq(piped_worker.config.polling_interval)
+      end
+
+      it "falls back to fast polling when the supervisor pipe reaches EOF" do
+        allow(piped_worker).to receive(:notify_wakeup?).and_return(true)
+        piped_worker.send(:start_wake_source)
+
+        pipe_ios[1].close
+        wait_for { !piped_worker.wake_pipe.delivering? }
+
+        expect(piped_worker.send(:wake_timeout)).to eq(piped_worker.config.polling_interval)
+      end
+
+      it "stops the watcher via stop_wake_source" do
+        piped_worker.send(:start_wake_source)
+        piped_worker.send(:stop_wake_source)
+
+        expect(piped_worker.wake_pipe.running?).to be false
+      end
+    end
+
+    describe ":supervisor scope WITHOUT a wake pipe (hub failed to start)" do
+      # The poll-only guarantee: a hub outage must not balloon the host back
+      # to one direct LISTEN connection per fork — the fork polls until the
+      # supervisor restarts (issue #381 review).
+      let(:bare_worker) { described_class.new(queues: %w[default], threads: 5) }
+
+      before do
+        allow(bare_worker).to receive(:notify_wakeup?).and_return(true)
+        allow(bare_worker.config).to receive(:worker_notify_scope).and_return(:supervisor)
+      end
+
+      it "start_wake_source builds no local listener" do
+        allow(Pgbus::Process::NotifyListener).to receive(:new)
+
+        bare_worker.send(:start_wake_source)
+
+        expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
+      end
+
+      it "self-healing does not resurrect a local listener either" do
+        allow(bare_worker).to receive(:start_notify_listener)
+        bare_worker.notify_retry_at = 0.0
+
+        bare_worker.send(:ensure_notify_listener)
+
+        expect(bare_worker).not_to have_received(:start_notify_listener)
+      end
+
+      it "wake_timeout stays at the fast polling interval" do
+        expect(bare_worker.send(:wake_timeout)).to eq(bare_worker.config.polling_interval)
       end
     end
 
@@ -1264,7 +1394,12 @@ RSpec.describe Pgbus::Process::Worker do
       # start attempts every tick.
       let(:base) { described_class::NOTIFY_RETRY_BASE_SECONDS }
 
-      before { allow(worker).to receive(:notify_wakeup?).and_return(true) }
+      before do
+        allow(worker).to receive(:notify_wakeup?).and_return(true)
+        # The local-listener lifecycle exists only under :fork scope; the
+        # default is :supervisor (issue #381).
+        allow(worker.config).to receive(:worker_notify_scope).and_return(:fork)
+      end
 
       it "is a no-op when notify_wakeup? is off" do
         allow(worker).to receive(:notify_wakeup?).and_return(false)

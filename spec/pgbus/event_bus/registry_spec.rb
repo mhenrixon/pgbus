@@ -121,4 +121,51 @@ RSpec.describe Pgbus::EventBus::Registry do
       end
     end
   end
+
+  describe "#queue_names_for_topics" do
+    # The topic → queue derivation the Consumer uses in setup_subscriptions,
+    # exposed on the registry so the supervisor-owned NotifyHub (issue #381)
+    # computes the same LISTEN set the consumer forks read from.
+    let(:orders_handler) do
+      klass = Class.new(Pgbus::EventBus::Handler)
+      stub_const("OrdersHandler", klass)
+      klass
+    end
+    let(:payments_handler) do
+      klass = Class.new(Pgbus::EventBus::Handler)
+      stub_const("PaymentsHandler", klass)
+      klass
+    end
+
+    before do
+      registry.subscribe("orders.#", orders_handler)
+      registry.subscribe("payments.captured", payments_handler, queue_name: "payments_q")
+    end
+
+    it "matches by exact pattern equality" do
+      expect(registry.queue_names_for_topics(["payments.captured"])).to eq(%w[payments_q])
+    end
+
+    it "matches subscriptions the topic filter prefixes" do
+      expect(registry.queue_names_for_topics(["orders"])).to eq(%w[orders_handler])
+    end
+
+    # The overlap check is deliberately coarse (Consumer#pattern_overlaps?
+    # behavior, preserved verbatim by the extraction): ANY topic filter ending
+    # in "#" claims every subscriber. The consumer reads more queues than
+    # strictly necessary rather than risking an uncovered subscriber.
+    it "matches every subscriber for a topic filter ending in #" do
+      expect(registry.queue_names_for_topics(["orders.#"])).to contain_exactly("orders_handler", "payments_q")
+    end
+
+    it "returns an empty array when nothing overlaps" do
+      expect(registry.queue_names_for_topics(["inventory.restocked"])).to eq([])
+    end
+
+    it "de-duplicates queue names shared by multiple matching subscribers" do
+      registry.subscribe("orders.created", orders_handler, queue_name: "orders_handler")
+
+      expect(registry.queue_names_for_topics(["orders"])).to eq(%w[orders_handler])
+    end
+  end
 end

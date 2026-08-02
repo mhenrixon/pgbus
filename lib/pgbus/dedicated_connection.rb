@@ -16,10 +16,17 @@ module Pgbus
   module DedicatedConnection
     module_function
 
+    # Stable census tag for every dedicated LISTEN connection, so operators can
+    # count them: SELECT count(*) FROM pg_stat_activity WHERE application_name
+    # = 'pgbus-listen' (issue #381 connection budget). Applied as
+    # fallback_application_name so an explicit application_name in the URL /
+    # hash — or PGAPPNAME in the environment — always wins.
+    APP_NAME = "pgbus-listen"
+
     def connect(opts)
       require "pg" unless defined?(::PG::Connection)
       case opts
-      when String then ::PG.connect(opts)
+      when String then ::PG.connect(with_app_name(opts))
       when Hash then connect_from_hash(opts)
       else
         raise Pgbus::ConfigurationError,
@@ -28,9 +35,23 @@ module Pgbus
       end
     end
 
+    # Append the census tag to a conninfo String — URL query-param style for
+    # postgres:// URLs, space-separated keyword style otherwise. A string that
+    # already mentions application_name (either keyword) is left untouched.
+    def with_app_name(conninfo)
+      return conninfo if conninfo.include?("application_name")
+
+      if conninfo.include?("://")
+        separator = conninfo.include?("?") ? "&" : "?"
+        "#{conninfo}#{separator}fallback_application_name=#{APP_NAME}"
+      else
+        "#{conninfo} fallback_application_name=#{APP_NAME}".strip
+      end
+    end
+
     def connect_from_hash(opts)
       variables = opts[:variables]
-      conn = ::PG.connect(**opts.except(:variables))
+      conn = ::PG.connect(**with_app_name_hash(opts.except(:variables)))
       begin
         variables&.each { |name, value| conn.exec("SET #{name} = '#{value}'") }
       rescue StandardError
@@ -42,6 +63,12 @@ module Pgbus
         raise
       end
       conn
+    end
+
+    def with_app_name_hash(opts)
+      return opts if opts.key?(:application_name) || opts.key?(:fallback_application_name)
+
+      opts.merge(fallback_application_name: APP_NAME)
     end
 
     def close_quietly(conn)

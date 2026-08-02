@@ -19,6 +19,11 @@ module Pgbus
       # between calls, and simulate start_notify_listener assigning the listener
       # from inside a stub (production mutates all three in the run loop).
       attr_accessor :notify_listener, :notify_retry_at, :notify_retry_backoff
+      # Supervisor-mediated wake source (issue #381, worker_notify_scope:
+      # :supervisor). Non-nil iff the supervisor forked us with a wake pipe;
+      # its presence switches the whole notify lifecycle from a fork-local
+      # NotifyListener to the shared hub. Readable as a test seam.
+      attr_reader :wake_pipe
 
       # The collaborators below (rate_counter, wake_signal, stat_buffer) and the
       # recycle clock (started_at_monotonic) accept injected seeds so tests can
@@ -30,7 +35,7 @@ module Pgbus
                      rate_counter: nil, wake_signal: nil, stat_buffer: :default,
                      notify_listener: nil, notify_retry_at: 0.0,
                      notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
-                     started_at_monotonic: nil)
+                     started_at_monotonic: nil, wake_pipe: nil)
         @queues = Array(queues)
         @initial_queues = @queues.dup.freeze
         @wildcard = @queues.include?("*")
@@ -98,6 +103,10 @@ module Pgbus
         # so the watchdog can detect a wedged worker even when the database (and
         # thus the Heartbeat's loop_tick_at) is unavailable.
         @liveness_pipe = liveness_pipe
+        # Supervisor wake pipe (read end, inherited across fork). When present
+        # the fork owns NO LISTEN connection: wakes and listener-health status
+        # arrive as bytes from the supervisor's NotifyHub.
+        @wake_pipe = wake_pipe ? WakePipe.new(wake_pipe, wake_signal: @wake_signal) : nil
       end
 
       def stats
@@ -150,7 +159,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
-        start_notify_listener
+        start_wake_source
         @lifecycle.transition_to!(:running)
         Pgbus.logger.info do
           "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} " \
@@ -404,34 +413,10 @@ module Pgbus
       def resolve_wildcard_queues
         return unless @wildcard
 
-        dlq_suffix = Pgbus::DEAD_LETTER_SUFFIX
-        prefix = "#{config.queue_prefix}_"
-
-        # Stream queues share the job namespace (pgbus_<name>) but must never
-        # be adopted by a wildcard worker: a worker would claim durable
-        # broadcasts, fail to deserialize them, and DLQ-move them out of the
-        # stream's replay history. known_names includes fingerprint-matched
-        # dormant pre-registry streams (issue #366) so they are excluded even
-        # before backfill. Reset first so a stream created since the last
-        # resolve is excluded.
-        Pgbus::StreamQueue.reset_cache!
-        stream_names = Pgbus::StreamQueue.known_names
-
-        # Event-bus subscriber queues also share the job namespace (pgbus_<handler>)
-        # but carry event payloads, not ActiveJob jobs. A wildcard worker that
-        # adopts one hands the event to the executor, which fails to deserialize
-        # it and DLQ-moves it out of the consumer's reach — so an app running the
-        # event bus had to hand-maintain an explicit queue list. Exclude them,
-        # like stream queues (issue #333).
-        event_names = Pgbus::EventBus::Registry.instance.event_queue_names
-
-        conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
-        all_queues = conn.select_values("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-        resolved = all_queues
-                   .reject { |q| q.end_with?(dlq_suffix) }
-                   .reject { |q| stream_names.include?(q) }
-                   .reject { |q| event_names.include?(q) }
-                   .map { |q| q.delete_prefix(prefix) }
+        # Exclusion rationale (streams, event queues, DLQs) lives with the
+        # shared resolver — the NotifyHub uses the same one, so the LISTEN
+        # union and the fork's adopted set can't drift (issue #381).
+        resolved = WildcardQueueResolver.resolve(config: config)
 
         if resolved.empty?
           Pgbus.logger.warn { "[Pgbus] Wildcard queue '*' resolved to no queues — falling back to default" }
@@ -627,6 +612,10 @@ module Pgbus
       end
 
       def listener_delivering?
+        # Supervisor scope: the hub's H/P broadcasts (via WakePipe) stand in
+        # for the local listener's health — same fast-poll fallback rules.
+        return @wake_pipe.delivering? if @wake_pipe
+
         @notify_listener&.running? && @notify_listener.delivering?
       end
 
@@ -642,12 +631,35 @@ module Pgbus
         config.polling_interval
       end
 
+      # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
+      # watcher is the wake source. A missing pipe under that scope means the
+      # hub failed to start — plain polling, NEVER a local listener, or a hub
+      # outage would balloon the host back to one direct connection per fork
+      # (the exact budget the scope exists to protect). :fork scope: the
+      # fork-local NotifyListener, exactly as before.
+      def start_wake_source
+        return @wake_pipe.start if @wake_pipe
+
+        start_notify_listener if local_listener_scope?
+      end
+
+      # Local NotifyListener lifecycle (start + self-heal) is allowed only
+      # under :fork scope.
+      def local_listener_scope?
+        config.worker_notify_scope == :fork
+      end
+
+      def stop_wake_source
+        @wake_pipe&.stop
+        @notify_listener&.stop
+      end
+
       def start_notify_listener
         return unless notify_wakeup?
 
         @notify_listener = NotifyListener.new(
           physical_queues: physical_queue_names,
-          on_wake: -> { @wake_signal.notify! },
+          on_wake: ->(_channel) { @wake_signal.notify! },
           connection_options: config.worker_notify_connection_options,
           health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
           logger: Pgbus.logger
@@ -666,6 +678,12 @@ module Pgbus
       # its queue subscription reconciled (wildcard workers) and the backoff
       # reset; a still-failing restart doubles the backoff up to the cap.
       def ensure_notify_listener
+        # Supervisor scope: listener self-healing is the hub's job (it runs
+        # once per host in the supervisor's monitor tick), and a pipe-less
+        # fork under that scope must stay on plain polling — self-healing a
+        # listener it was never allowed to start would leak a connection.
+        return if @wake_pipe
+        return unless local_listener_scope?
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at
@@ -706,13 +724,18 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] NotifyListener queue sync failed: #{e.class}: #{e.message}" }
       end
 
+      # Through config.queue_name (not raw concatenation) so a logical name
+      # needing normalization (e.g. "orders-handler" → "orders_handler")
+      # yields the SAME physical name the queue table was created with — the
+      # NOTIFY channel derives from the table name, so a raw concat would
+      # LISTEN on a channel that never fires. Keeps the fork-local (:fork
+      # scope) channels identical to the NotifyHub's (issue #381 review).
       def physical_queue_names
-        prefix = "#{config.queue_prefix}_"
-        queues.map { |q| "#{prefix}#{q}" }
+        queues.map { |q| config.queue_name(q) }
       end
 
       def channel_to_physical(channel)
-        channel.delete_prefix(NotifyListener::CHANNEL_PREFIX).delete_suffix(NotifyListener::CHANNEL_SUFFIX)
+        NotifyListener.physical_for(channel)
       end
 
       def start_heartbeat
@@ -767,7 +790,7 @@ module Pgbus
 
       def shutdown
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
-        @notify_listener&.stop
+        stop_wake_source
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop

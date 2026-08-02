@@ -1618,6 +1618,36 @@ RSpec.describe Pgbus::Configuration do
     end
   end
 
+  describe "#worker_notify_scope" do
+    # Where the LISTEN connection lives (issue #381): :supervisor (default)
+    # runs ONE shared NotifyListener in the supervisor and wakes forks over
+    # pipes; :fork restores the previous one-listener-per-fork behavior.
+
+    it "defaults to :supervisor" do
+      expect(config.worker_notify_scope).to eq(:supervisor)
+    end
+
+    it "accepts :fork" do
+      config.worker_notify_scope = :fork
+      expect(config.worker_notify_scope).to eq(:fork)
+    end
+
+    it "coerces a String" do
+      config.worker_notify_scope = "fork"
+      expect(config.worker_notify_scope).to eq(:fork)
+    end
+
+    it "rejects an unknown scope with an actionable error" do
+      expect { config.worker_notify_scope = :hosted }
+        .to raise_error(Pgbus::ConfigurationError, /worker_notify_scope.*:supervisor.*:fork/m)
+    end
+
+    it "rejects a non-symbolizable value" do
+      expect { config.worker_notify_scope = 42 }
+        .to raise_error(Pgbus::ConfigurationError, /worker_notify_scope/)
+    end
+  end
+
   describe "#worker_notify_connection_options" do
     # Mirrors streams_connection_options: defaults to connection_options,
     # overridable so the listener's persistent LISTEN connection can be

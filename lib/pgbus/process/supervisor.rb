@@ -21,23 +21,29 @@ module Pgbus
       RESTART_BACKOFF_MAX = 60
 
       attr_reader :config
+      # The host-level shared LISTEN hub (issue #381). nil under :fork scope,
+      # when notify wakeups are off entirely, or when no worker/consumer role
+      # is enabled. Readable as a test seam.
+      attr_reader :notify_hub
       # forks is readable everywhere; the writer exists only so tests can seed a
       # known set of children before exercising the reap/watchdog paths (in
       # production forks is populated by fork_* as children spawn).
       attr_accessor :forks
 
-      # The child-fork bookkeeping (`forks`, `pending_restarts`) and the
-      # `shutting_down` flag accept injected seeds so tests can drive the
-      # monitor/reap loops from a known state without poking private ivars. All
-      # default to the empty/false values production always starts from.
+      # The child-fork bookkeeping (`forks`, `pending_restarts`), the
+      # `shutting_down` flag, and `notify_hub` accept injected seeds so tests
+      # can drive the monitor/reap loops from a known state without poking
+      # private ivars. All default to the empty/false values production always
+      # starts from.
       def initialize(config: Pgbus.configuration, forks: {}, shutting_down: false,
-                     pending_restarts: [], last_watchdog_at: nil)
+                     pending_restarts: [], last_watchdog_at: nil, notify_hub: nil)
         @config = config
         @forks = forks
         @shutting_down = shutting_down
         @last_watchdog_at = last_watchdog_at || monotonic_now
         @pending_restarts = pending_restarts
         @crash_counts = Hash.new(0)
+        @notify_hub = notify_hub
       end
 
       def shutting_down?
@@ -84,6 +90,12 @@ module Pgbus
         # genuinely-fatal finding; :report only logs. Off by default.
         run_doctor_preflight unless config.doctor_on_boot.nil?
 
+        # Host-level shared LISTEN (issue #381): under :supervisor scope, ONE
+        # NotifyListener lives here and forks are woken over pipes — started
+        # before any child forks so every fork_worker/fork_consumer can hand
+        # its child a wake pipe.
+        start_notify_hub
+
         boot_processes
         monitor_loop
       ensure
@@ -122,7 +134,9 @@ module Pgbus
           "[Pgbus] boot: pgmq_schema_mode=#{config.pgmq_schema_mode} pgmq_version=#{installed_pgmq_version}"
         end
         Pgbus.logger.info do
-          "[Pgbus] boot: listen_notify=#{config.listen_notify} worker_notify_wakeup=#{config.worker_notify_wakeup?}"
+          "[Pgbus] boot: listen_notify=#{config.listen_notify} " \
+            "worker_notify_wakeup=#{config.worker_notify_wakeup?} " \
+            "worker_notify_scope=#{config.worker_notify_scope}"
         end
         Pgbus.logger.info { "[Pgbus] boot: roles=#{enabled_roles.join(",")}" }
         log_capsule_banner
@@ -250,17 +264,18 @@ module Pgbus
         # iteration, the parent drains the reader in monitor_loop. This lets
         # the watchdog detect a wedged worker without the database.
         liveness_reader, liveness_writer = IO.pipe
+        # Wake channel, opposite direction (issue #381): the NotifyHub writes
+        # W/H/P bytes, the child's WakePipe watcher reads them. Only under
+        # :supervisor scope (hub present).
+        wake_reader, wake_writer = IO.pipe if @notify_hub
 
         pid = fork do
-          # Child owns the writer end. A fork copies the whole parent FD
-          # table, so this child also inherits every earlier sibling's
-          # liveness reader (they live in @forks). Close them — otherwise each
-          # new worker accumulates N-1 stale reader FDs. (Sibling *writers*
-          # are never inherited: the parent closes each writer below before
-          # forking the next worker, so a dead sibling's pipe still reaches
-          # EOF correctly.) Finally close this fork's own reader copy.
-          close_inherited_liveness_readers
+          # Child owns the liveness writer + wake reader; close this fork's
+          # own copies of the parent-side ends. Sibling pipe ends and the
+          # hub's LISTEN socket are released in setup_child_process, which
+          # every child type runs.
           liveness_reader.close
+          wake_writer&.close
           restore_signals
           setup_child_process
           load_rails_app
@@ -269,7 +284,7 @@ module Pgbus
             queues: queues, threads: threads, config: config,
             single_active_consumer: single_active, consumer_priority: priority,
             execution_mode: exec_mode, group_mode: grp_mode,
-            liveness_pipe: liveness_writer
+            liveness_pipe: liveness_writer, wake_pipe: wake_reader
           )
           worker.run
         end
@@ -277,22 +292,48 @@ module Pgbus
         unless pid
           close_pipe(liveness_reader)
           close_pipe(liveness_writer)
+          close_pipe(wake_reader)
+          close_pipe(wake_writer)
           Pgbus.logger.error { "[Pgbus] Failed to fork worker for queues=#{queues.join(",")}" }
           return
         end
 
-        # Parent keeps the reader, discards its writer copy so the pipe reaches
-        # EOF once the (sole remaining) child writer closes.
+        # Parent keeps the liveness reader + wake writer, discards its copies
+        # of the child-side ends so each pipe reaches EOF once its sole owner
+        # closes.
         close_pipe(liveness_writer)
+        close_pipe(wake_reader)
+        register_fork_with_hub(pid, wake_writer, queues)
         @forks[pid] = {
           type: :worker, config: worker_config, slot: slot, spawned_at: monotonic_now,
-          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false
+          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false,
+          wake_writer: wake_writer
         }
         Pgbus.logger.info { "[Pgbus] Forked worker pid=#{pid} queues=#{queues.join(",")} mode=#{exec_mode}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         close_pipe(liveness_reader)
         close_pipe(liveness_writer)
+        close_pipe(wake_reader)
+        close_pipe(wake_writer)
         ErrorReporter.report(e, { action: "fork_worker", queues: queues })
+      end
+
+      # Hand the hub a worker fork's routing entry: explicit queues as
+      # physical names, "*" as the unconditional wildcard flag (the hub wakes
+      # wildcard forks for every channel, so the fork's own resolved set never
+      # needs to be reported upstream). Registration must never abort the fork
+      # bookkeeping that follows it — queue_name can raise on a malformed
+      # name — so on error the fork registers with an empty set and rides its
+      # poll ceiling (symmetric with register_consumer_with_hub).
+      def register_fork_with_hub(pid, wake_writer, queues)
+        return unless @notify_hub && wake_writer
+
+        wildcard = queues.include?("*")
+        physical = queues.reject { |q| q == "*" }.map { |q| config.queue_name(q) }
+        @notify_hub.register_fork(pid: pid, queues: physical, wildcard: wildcard, pipe: wake_writer)
+      rescue StandardError => e
+        ErrorReporter.report(e, { action: "register_fork_with_hub", queues: queues })
+        @notify_hub.register_fork(pid: pid, queues: [], wildcard: false, pipe: wake_writer)
       end
 
       def fork_dispatcher
@@ -386,7 +427,9 @@ module Pgbus
       end
 
       def fork_consumer(consumer_config, slot: nil)
-        topics = consumer_config[:topics]
+        # Array() so a consumer entry without :topics can't NoMethodError the
+        # supervisor on the topics.join log lines below.
+        topics = Array(consumer_config[:topics])
         threads = consumer_config[:threads] || 3
 
         # OS-level liveness channel: the consumer writes a byte each loop
@@ -394,39 +437,64 @@ module Pgbus
         # watchdog detect a wedged consumer without the database (issue #274),
         # exactly as fork_worker does for workers.
         liveness_reader, liveness_writer = IO.pipe
+        # Wake channel from the NotifyHub (issue #381), as in fork_worker.
+        wake_reader, wake_writer = IO.pipe if @notify_hub
 
         pid = fork do
-          # Child owns the writer end. Close every earlier sibling's inherited
-          # liveness reader and this fork's own reader copy before becoming a
-          # Consumer (see fork_worker for the full rationale).
-          close_inherited_liveness_readers
+          # Child owns the liveness writer + wake reader; close this fork's
+          # own copies of the parent-side ends (see fork_worker).
           liveness_reader.close
+          wake_writer&.close
           restore_signals
           setup_child_process
           load_rails_app
-          consumer = Consumer.new(topics: topics, threads: threads, config: config, liveness_pipe: liveness_writer)
+          consumer = Consumer.new(topics: topics, threads: threads, config: config,
+                                  liveness_pipe: liveness_writer, wake_pipe: wake_reader)
           consumer.run
         end
 
         unless pid
           close_pipe(liveness_reader)
           close_pipe(liveness_writer)
+          close_pipe(wake_reader)
+          close_pipe(wake_writer)
           Pgbus.logger.error { "[Pgbus] Failed to fork consumer for topics=#{topics.join(",")}" }
           return
         end
 
-        # Parent keeps the reader, discards its writer copy so the pipe reaches
-        # EOF once the (sole remaining) child writer closes.
+        # Parent keeps the liveness reader + wake writer, discards its copies
+        # of the child-side ends.
         close_pipe(liveness_writer)
+        close_pipe(wake_reader)
+        register_consumer_with_hub(pid, wake_writer, topics)
         @forks[pid] = {
           type: :consumer, config: consumer_config, slot: slot, spawned_at: monotonic_now,
-          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false
+          liveness_reader: liveness_reader, last_pipe_tick_at: monotonic_now, pipe_seen: false,
+          wake_writer: wake_writer
         }
         Pgbus.logger.info { "[Pgbus] Forked consumer pid=#{pid} topics=#{topics.join(",")}" }
       rescue Errno::EAGAIN, Errno::ENOMEM => e
         close_pipe(liveness_reader)
         close_pipe(liveness_writer)
+        close_pipe(wake_reader)
+        close_pipe(wake_writer)
         ErrorReporter.report(e, { action: "fork_consumer", topics: topics })
+      end
+
+      # A consumer's routing entry mirrors Consumer#setup_subscriptions: the
+      # registry derives the queue set from the topic list. Registry lookups
+      # never abort a fork — on error the fork registers with an empty set and
+      # rides its poll ceiling until the next supervisor restart.
+      def register_consumer_with_hub(pid, wake_writer, topics)
+        return unless @notify_hub && wake_writer
+
+        physical = EventBus::Registry.instance
+                                     .queue_names_for_topics(Array(topics))
+                                     .map { |q| config.queue_name(q) }
+        @notify_hub.register_fork(pid: pid, queues: physical, wildcard: false, pipe: wake_writer)
+      rescue StandardError => e
+        ErrorReporter.report(e, { action: "register_consumer_with_hub", topics: topics })
+        @notify_hub.register_fork(pid: pid, queues: [], wildcard: false, pipe: wake_writer)
       end
 
       def boot_outbox_poller
@@ -465,6 +533,9 @@ module Pgbus
           unless @shutting_down
             process_pending_restarts
             check_stalled_workers
+            # One hub beat per monitor pass: listener self-heal, LISTEN union
+            # refresh, and fork status broadcast (issue #381).
+            @notify_hub&.tick
           end
           interruptible_sleep(FORK_WAIT)
         end
@@ -480,8 +551,11 @@ module Pgbus
 
           # Close the liveness reader as the fork leaves @forks so a crash-loop
           # (restart deferred up to RESTART_BACKOFF_MAX) can't leak an FD per
-          # crash. Scrub the key so the closed IO never rides into a restart.
+          # crash. Scrub the keys so a closed IO never rides into a restart.
+          # The wake writer is closed by the hub's deregister (same IO object).
           close_pipe(info.delete(:liveness_reader))
+          info.delete(:wake_writer)
+          @notify_hub&.deregister_fork(pid)
 
           if @shutting_down
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
@@ -655,6 +729,13 @@ module Pgbus
       end
 
       def setup_child_process
+        # Every child type (worker, consumer, dispatcher, scheduler, outbox
+        # poller) releases its copies of the parent's per-fork resources —
+        # a dispatcher child holding a sibling worker's wake WRITER would
+        # keep that sibling's pipe from ever reaching EOF after the
+        # supervisor dies, pinning the sibling to the 15s NOTIFY ceiling
+        # with no wake source (issue #381 review).
+        close_inherited_parent_resources
         # Reset the PGMQ client so this forked process gets a fresh
         # PG::Connection instead of inheriting the parent's (which is
         # in undefined state post-fork and not thread-safe to share).
@@ -758,11 +839,40 @@ module Pgbus
         nil
       end
 
-      # Close every sibling liveness reader this fork inherited from the
-      # parent's FD table. Called only inside a just-forked child, before it
-      # becomes a Worker, so the worker never holds its siblings' pipe ends.
-      def close_inherited_liveness_readers
-        @forks.each_value { |info| close_pipe(info[:liveness_reader]) }
+      # Called only inside a just-forked child: close every sibling pipe end
+      # inherited from the parent's FD table (liveness readers AND wake
+      # writers), and release the child's copy of the NotifyHub's LISTEN
+      # socket without a libpq Terminate (PQfinish would kill the PARENT's
+      # session over the shared socket — see
+      # NotifyListener#close_inherited_socket!).
+      def close_inherited_parent_resources
+        @forks.each_value do |info|
+          close_pipe(info[:liveness_reader])
+          close_pipe(info[:wake_writer])
+        end
+        @notify_hub&.close_inherited!
+        @notify_hub = nil
+      end
+
+      # Build the host-level shared LISTEN hub (issue #381). Only under
+      # :supervisor scope, with notify wakeups on, and with at least one role
+      # that reads queues. A hub that fails to start degrades to no hub: forks
+      # get no wake pipe and fall back to fast polling, exactly like a failed
+      # per-fork listener under :fork scope.
+      def start_notify_hub
+        return unless config.worker_notify_wakeup?
+        return unless config.worker_notify_scope == :supervisor
+        return unless config.role_enabled?(:workers) || config.role_enabled?(:consumers)
+
+        hub = NotifyHub.new(config: config)
+        hub.start
+        @notify_hub = hub
+      rescue StandardError => e
+        @notify_hub = nil
+        ErrorReporter.report(e, { action: "start_notify_hub" })
+        Pgbus.logger.error do
+          "[Pgbus] NotifyHub failed to start — forks fall back to polling: #{e.class}: #{e.message}"
+        end
       end
 
       def shutdown
@@ -778,9 +888,11 @@ module Pgbus
         signal_children("KILL") unless @forks.empty?
 
         # Close any liveness readers still open on un-reaped children so the
-        # supervisor never leaks FDs across a restart of itself.
+        # supervisor never leaks FDs across a restart of itself. (Wake writers
+        # are closed by the hub's stop below.)
         @forks.each_value { |info| close_pipe(info[:liveness_reader]) }
 
+        @notify_hub&.stop
         @health_server&.stop
         @heartbeat&.stop
         restore_signals

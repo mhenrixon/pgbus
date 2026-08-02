@@ -29,6 +29,8 @@ to guess.
 | Streams-pool autoscaler | per-tick decision cost + grow-under-load (issue #323) | `pool_autoscale_bench.rb` |
 | Job-burst limiter gate | is the job pool or the DB pool the burst ceiling? (issue #323 phase 3) | `job_burst_bench.rb` |
 | Fan-out writer throughput | does the writer pool scale with thread count? (issue #323 phase 1) | `writer_burst_bench.rb` |
+| NOTIFY wake path | every job-insert wake-up (direct listener vs supervisor hub, issue #381) | `notify_wake_bench.rb` |
+| NotifyHub failure modes | killed LISTEN backend, wedged fork, FD churn, fan-out cost (issue #381) | `notify_chaos_bench.rb` |
 
 ## Measuring
 
@@ -43,6 +45,8 @@ rake bench:integration  # real PostgreSQL + PGMQ (requires PGBUS_DATABASE_URL)
 rake bench:streams      # real Puma + SSE fan-out (requires PGBUS_DATABASE_URL)
 rake bench:one[streams_read_pool_bench]  # streamer replay-read pool (requires PGBUS_DATABASE_URL)
 rake bench:execution_modes  # threads vs async DB-connection consumption (requires PGBUS_DATABASE_URL)
+rake bench:notify_wake      # NOTIFY wake latency + LISTEN census (requires PGBUS_DATABASE_URL)
+rake bench:notify_chaos     # NotifyHub failure-mode measurements (requires PGBUS_DATABASE_URL)
 ```
 
 - **Unit benches** (`benchmarks/*_bench.rb`) isolate gem overhead with a mocked
@@ -57,6 +61,32 @@ rake bench:execution_modes  # threads vs async DB-connection consumption (requir
   isolates the per-wake `Client#read_after` cost against a real DB, comparing
   a fresh `PG.connect` per call (the pre-#315 `with_raw_connection` behavior) to
   the dedicated streams pool.
+
+### Supervisor-owned shared LISTEN (issue #381)
+
+One `NotifyListener` in the supervisor serves every fork over per-fork pipes
+instead of one dedicated LISTEN connection per fork. Measured on an M-series
+laptop against local PostgreSQL (n=100, sends spaced past the 250ms NOTIFY
+throttle; `notify_wake_bench.rb`):
+
+| Metric | main (per-fork listener) | #381 `:fork` scope | #381 `:supervisor` (hub → pipe) |
+|--------|--------------------------|--------------------|---------------------------------|
+| wake latency p50 | 1.63ms | 1.68ms | 1.66ms |
+| wake latency p95 | 4.76ms | 5.47ms | 6.04ms |
+| wake latency p99 | 7.54ms | 10.70ms | 15.10ms |
+| direct LISTEN connections (5 forks) | 5 | 5 | **1** |
+
+The supervisor hop is free at the median; the tails differ by single-digit
+milliseconds on a shared machine (noise-level: the empty-read control drifted
+±24% between the same two runs). This is a **connection-footprint win, not a
+throughput win** — the point is the last row.
+
+Failure modes (`notify_chaos_bench.rb`, same machine): killed LISTEN backend →
+fresh backend + healthy in **18ms**, first post-recovery wake 8.8ms; a wedged
+fork (full pipe) leaves sibling wake latency unaffected; 50 fork
+register/deregister cycles leak **0** FDs; hub fan-out costs **10.5µs** per
+NOTIFY to 10 forks (the pgmq trigger throttle caps real NOTIFY load at
+4/s/queue, so the hub is never the bottleneck).
 
 ### Streamer connection model (issue #315)
 

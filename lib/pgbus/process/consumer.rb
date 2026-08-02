@@ -14,6 +14,9 @@ module Pgbus
       # notify_retry_at is writable so a test can re-arm the backoff window
       # between successive ensure_notify_listener calls.
       attr_accessor :notify_listener, :notify_retry_at
+      # Supervisor-mediated wake source (issue #381): non-nil iff the
+      # supervisor forked us with a wake pipe. Readable as a test seam.
+      attr_reader :wake_pipe
       # stat_buffer is writable so a test can swap in a buffer double after
       # construction and assert graceful_shutdown / check_recycle / shutdown flush
       # it (mirrors Worker#stat_buffer).
@@ -57,7 +60,7 @@ module Pgbus
                      queue_names: nil, liveness_pipe: nil, stat_buffer: :default,
                      notify_listener: nil, notify_retry_at: 0.0,
                      notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
-                     started_at_monotonic: nil)
+                     started_at_monotonic: nil, wake_pipe: nil)
         @topics = Array(topics)
         @threads = threads
         @config = config
@@ -96,6 +99,9 @@ module Pgbus
         # supervisor forked us with one. Written from stamp_loop_tick so the
         # watchdog can detect a wedged consumer even when the database is down.
         @liveness_pipe = liveness_pipe
+        # Supervisor wake pipe (read end): when present the fork owns NO
+        # LISTEN connection — wakes and hub health arrive as bytes (issue #381).
+        @wake_pipe = wake_pipe ? WakePipe.new(wake_pipe, wake_signal: @wake_signal) : nil
       end
 
       # The last wall-clock loop-tick stamp (Time.now.to_f) fed to the
@@ -110,7 +116,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         setup_subscriptions
-        start_notify_listener
+        start_wake_source
         Pgbus.logger.info do
           "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads} " \
             "notify_wakeup=#{notify_wakeup?} pid=#{::Process.pid}"
@@ -150,10 +156,13 @@ module Pgbus
       private
 
       def setup_subscriptions
-        matching = @registry.subscribers.select do |s|
-          topics.any? { |t| pattern_overlaps?(t, s.pattern) }
-        end
-        @queue_names = matching.map(&:queue_name).uniq
+        # An injected queue_names: seed (test seam — the ctor documents nil as
+        # "derive from the registry") survives #run. Derivation is shared with
+        # the supervisor-owned NotifyHub (issue #381) so the LISTEN union
+        # covers exactly the queues this fork reads.
+        return unless @queue_names.nil?
+
+        @queue_names = @registry.queue_names_for_topics(topics)
       end
 
       def consume
@@ -273,13 +282,6 @@ module Pgbus
         end
       end
 
-      def pattern_overlaps?(topic_filter, subscription_pattern)
-        # Simple check: if either is a subset of the other
-        topic_filter == subscription_pattern ||
-          topic_filter.end_with?("#") ||
-          subscription_pattern.start_with?(topic_filter.delete_suffix(".#"))
-      end
-
       # Signal the loop to exit cleanly once a recycle limit is hit. The clean
       # exit gets an immediate supervisor restart (supervisor.rb:305-307), so a
       # fresh fork replaces this one before its memory grows unbounded — the
@@ -351,13 +353,41 @@ module Pgbus
       end
 
       def wake_timeout
-        # A dead listener (running? false) will never wake the loop, so treat it
-        # as absent and keep polling at the short interval until
-        # ensure_notify_listener restarts it. Only a live listener earns the
-        # long NOTIFY-mode ceiling.
-        return config.polling_interval unless notify_wakeup? && @notify_listener&.running?
+        # A dead listener (running? false) will never wake the loop, so treat
+        # it as absent and keep polling at the short interval until
+        # ensure_notify_listener restarts it. A live-but-deaf listener
+        # (delivering? false) is the same story (issue #332 — parity with
+        # Worker#wake_timeout). Under :supervisor scope the hub's H/P
+        # broadcasts (via WakePipe) carry the same signal. Only a live,
+        # delivering wake source earns the long NOTIFY-mode ceiling.
+        return config.polling_interval unless notify_wakeup? && wake_source_delivering?
 
         [config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def wake_source_delivering?
+        return @wake_pipe.delivering? if @wake_pipe
+
+        @notify_listener&.running? && @notify_listener.delivering?
+      end
+
+      # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
+      # watcher is the wake source, and a missing pipe (hub failed to start)
+      # means plain polling — never a local listener (see Worker's twin).
+      # :fork scope: the fork-local NotifyListener.
+      def start_wake_source
+        return @wake_pipe.start if @wake_pipe
+
+        start_notify_listener if local_listener_scope?
+      end
+
+      def local_listener_scope?
+        config.worker_notify_scope == :fork
+      end
+
+      def stop_wake_source
+        @wake_pipe&.stop
+        @notify_listener&.stop
       end
 
       def start_notify_listener
@@ -365,7 +395,7 @@ module Pgbus
 
         @notify_listener = NotifyListener.new(
           physical_queues: physical_queue_names,
-          on_wake: -> { @wake_signal.notify! },
+          on_wake: ->(_channel) { @wake_signal.notify! },
           connection_options: config.worker_notify_connection_options,
           health_check_ms: (config.polling_interval * 1000).to_i.clamp(250, 5_000),
           logger: Pgbus.logger
@@ -382,6 +412,10 @@ module Pgbus
       # a persistent outage retries on 5s→…→300s intervals, not every tick
       # (mirrors Worker#ensure_notify_listener).
       def ensure_notify_listener
+        # Supervisor scope: self-healing is the hub's job (once per host);
+        # a pipe-less fork under that scope stays on plain polling.
+        return if @wake_pipe
+        return unless local_listener_scope?
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at
@@ -409,9 +443,10 @@ module Pgbus
         @notify_listener = nil
       end
 
+      # Through config.queue_name so normalized subscriber queue names LISTEN
+      # on the channel their table actually notifies (see Worker's twin).
       def physical_queue_names
-        prefix = "#{config.queue_prefix}_"
-        @queue_names.map { |q| "#{prefix}#{q}" }
+        @queue_names.map { |q| config.queue_name(q) }
       end
 
       def start_heartbeat
@@ -443,7 +478,7 @@ module Pgbus
       end
 
       def shutdown
-        @notify_listener&.stop
+        stop_wake_source
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop

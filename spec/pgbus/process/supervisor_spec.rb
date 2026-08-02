@@ -912,4 +912,199 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect(supervisor.send(:recurring_tasks_configured?)).to be false
     end
   end
+
+  describe "NotifyHub wiring (issue #381)" do
+    let(:hub) do
+      instance_double(Pgbus::Process::NotifyHub,
+                      start: nil, stop: nil, tick: nil,
+                      register_fork: nil, deregister_fork: nil)
+    end
+
+    # worker_notify_scope / roles / workers live on the global config;
+    # snapshot and restore so these examples can't leak into the rest of
+    # the suite.
+    around do |example|
+      original_scope = config.worker_notify_scope
+      original_roles = config.roles
+      original_workers = config.workers
+      example.run
+      config.worker_notify_scope = original_scope
+      config.roles = original_roles
+      config.workers = original_workers
+    end
+
+    describe "start_notify_hub (private)" do
+      before { allow(Pgbus::Process::NotifyHub).to receive(:new).and_return(hub) }
+
+      it "builds and starts the hub under :supervisor scope" do
+        config.worker_notify_scope = :supervisor
+        supervisor = described_class.new
+
+        supervisor.send(:start_notify_hub)
+
+        expect(hub).to have_received(:start)
+        expect(supervisor.notify_hub).to be(hub)
+      end
+
+      it "skips the hub under :fork scope" do
+        config.worker_notify_scope = :fork
+        supervisor = described_class.new
+
+        supervisor.send(:start_notify_hub)
+
+        expect(supervisor.notify_hub).to be_nil
+      end
+
+      it "skips the hub when worker_notify_wakeup? is off" do
+        config.worker_notify_scope = :supervisor
+        allow(config).to receive(:worker_notify_wakeup?).and_return(false)
+        supervisor = described_class.new
+
+        supervisor.send(:start_notify_hub)
+
+        expect(supervisor.notify_hub).to be_nil
+      end
+
+      it "skips the hub when neither workers nor consumers roles are enabled" do
+        config.worker_notify_scope = :supervisor
+        config.roles = [:dispatcher]
+        supervisor = described_class.new
+
+        supervisor.send(:start_notify_hub)
+
+        expect(supervisor.notify_hub).to be_nil
+      end
+
+      it "degrades to no hub (forks poll) when hub start raises" do
+        config.worker_notify_scope = :supervisor
+        allow(hub).to receive(:start).and_raise(StandardError, "boom")
+        supervisor = described_class.new
+
+        expect { supervisor.send(:start_notify_hub) }.not_to raise_error
+        expect(supervisor.notify_hub).to be_nil
+      end
+    end
+
+    describe "wake pipes on fork" do
+      let(:supervisor) do
+        described_class.new(notify_hub: hub).tap do |s|
+          allow(s).to receive(:fork).and_return(4001)
+        end
+      end
+
+      it "registers a worker fork with its physical queues and the pipe write end" do
+        supervisor.send(:fork_worker, { queues: %w[critical], threads: 1 }, slot: 0)
+
+        expect(hub).to have_received(:register_fork).with(
+          pid: 4001,
+          queues: [config.queue_name("critical")],
+          wildcard: false,
+          pipe: an_instance_of(IO)
+        )
+        expect(supervisor.forks[4001][:wake_writer]).to be_an(IO)
+      end
+
+      it "registers a wildcard capsule with wildcard: true" do
+        supervisor.send(:fork_worker, { queues: %w[*], threads: 1 }, slot: 0)
+
+        expect(hub).to have_received(:register_fork).with(
+          pid: 4001, queues: [], wildcard: true, pipe: an_instance_of(IO)
+        )
+      end
+
+      it "registers a consumer fork with registry-derived physical queues" do
+        registry = instance_double(Pgbus::EventBus::Registry)
+        allow(Pgbus::EventBus::Registry).to receive(:instance).and_return(registry)
+        allow(registry).to receive(:queue_names_for_topics)
+          .with(["orders.#"]).and_return(%w[orders_handler])
+
+        supervisor.send(:fork_consumer, { topics: ["orders.#"], threads: 1 }, slot: 0)
+
+        expect(hub).to have_received(:register_fork).with(
+          pid: 4001,
+          queues: [config.queue_name("orders_handler")],
+          wildcard: false,
+          pipe: an_instance_of(IO)
+        )
+      end
+
+      it "creates no wake pipe without a hub" do
+        bare = described_class.new
+        allow(bare).to receive(:fork).and_return(4002)
+
+        bare.send(:fork_worker, { queues: %w[critical], threads: 1 }, slot: 0)
+
+        expect(bare.forks[4002][:wake_writer]).to be_nil
+      end
+    end
+
+    describe "reap deregistration" do
+      it "deregisters a reaped fork from the hub" do
+        supervisor = described_class.new(
+          notify_hub: hub,
+          forks: { 3001 => { type: :worker, config: { queues: ["default"] } } },
+          shutting_down: true
+        )
+        status = instance_double(Process::Status, exitstatus: 0, success?: true)
+        allow(Process).to receive(:waitpid2).and_return([3001, status], nil)
+
+        supervisor.send(:reap_children)
+
+        expect(hub).to have_received(:deregister_fork).with(3001)
+      end
+    end
+
+    describe "monitor tick" do
+      it "beats the hub once per monitor pass" do
+        supervisor = described_class.new(notify_hub: hub)
+        allow(Process).to receive(:waitpid2).and_return(nil)
+        allow(supervisor).to receive(:check_stalled_workers)
+        allow(supervisor).to receive(:interruptible_sleep) do
+          supervisor.graceful_shutdown
+          allow(supervisor).to receive(:reap_children) { supervisor.forks.clear }
+        end
+        allow(Process).to receive(:kill)
+
+        supervisor.send(:monitor_loop)
+
+        expect(hub).to have_received(:tick).at_least(:once)
+      end
+    end
+
+    describe "shutdown" do
+      it "stops the hub" do
+        supervisor = described_class.new(notify_hub: hub)
+        allow(supervisor).to receive(:interruptible_sleep)
+        allow(Process).to receive(:waitpid2).and_raise(Errno::ECHILD)
+
+        supervisor.send(:shutdown)
+
+        expect(hub).to have_received(:stop)
+      end
+    end
+
+    describe "close_inherited_parent_resources (runs in EVERY forked child)" do
+      # Called from setup_child_process, so dispatcher/scheduler/outbox
+      # children release sibling pipe ends and the hub's socket copy too — a
+      # dispatcher holding a sibling worker's wake WRITER would keep that
+      # sibling's pipe from ever reaching EOF after the supervisor dies.
+      it "closes sibling liveness readers, sibling wake writers, and the hub copy" do
+        allow(hub).to receive(:close_inherited!)
+        liveness_r, liveness_w = IO.pipe
+        wake_r, wake_w = IO.pipe
+        supervisor = described_class.new(
+          notify_hub: hub,
+          forks: { 3001 => { type: :worker, liveness_reader: liveness_r, wake_writer: wake_w } }
+        )
+
+        supervisor.send(:close_inherited_parent_resources)
+
+        expect(liveness_r).to be_closed
+        expect(wake_w).to be_closed
+        expect(hub).to have_received(:close_inherited!)
+        expect(supervisor.notify_hub).to be_nil
+        [liveness_w, wake_r].each(&:close)
+      end
+    end
+  end
 end

@@ -158,7 +158,7 @@ RSpec.describe "Connection failure recovery (integration)", :integration do
       wakes = Concurrent::AtomicFixnum.new(0)
       listener = Pgbus::Process::NotifyListener.new(
         physical_queues: [physical_queue],
-        on_wake: -> { wakes.increment },
+        on_wake: ->(_channel) { wakes.increment },
         connection_options: Pgbus.configuration.worker_notify_connection_options,
         health_check_ms: 200
       )

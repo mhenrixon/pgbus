@@ -6,7 +6,9 @@ RSpec.describe Pgbus::Process::NotifyListener do
   subject(:listener) do
     described_class.new(
       physical_queues: %w[pgbus_default pgbus_low],
-      on_wake: -> { wakes << :woke },
+      # on_wake receives the notifying channel (issue #381) so a hub caller
+      # can route the wake; fork callers ignore it with ->(_channel).
+      on_wake: ->(channel) { wakes << channel },
       connection_options: { dbname: "fake" },
       health_check_ms: 50,
       logger: logger
@@ -132,14 +134,14 @@ RSpec.describe Pgbus::Process::NotifyListener do
   end
 
   describe "NOTIFY handling" do
-    it "fires on_wake for any INSERT notification" do
+    it "fires on_wake with the notifying channel" do
       listener.start
       fake_pg.push_timeout
       wait_until { listener.listening_to.size == 2 }
 
       fake_pg.push_notify("pgmq.q_pgbus_default.INSERT")
 
-      expect(wakes.pop).to eq(:woke)
+      expect(wakes.pop).to eq("pgmq.q_pgbus_default.INSERT")
     end
 
     it "coalesces into a single wake per notification" do
@@ -148,8 +150,79 @@ RSpec.describe Pgbus::Process::NotifyListener do
       wait_until { listener.listening_to.size == 2 }
 
       fake_pg.push_notify("pgmq.q_pgbus_low.INSERT")
-      expect(wakes.pop).to eq(:woke)
+      expect(wakes.pop).to eq("pgmq.q_pgbus_low.INSERT")
       expect(wakes).to be_empty
+    end
+  end
+
+  describe ".physical_for" do
+    it "maps a NOTIFY channel back to its physical queue name (inverse of channel_for)" do
+      expect(described_class.physical_for("pgmq.q_pgbus_default.INSERT")).to eq("pgbus_default")
+    end
+  end
+
+  describe "#close_inherited_socket! (forked-child hygiene, issue #381)" do
+    # A just-forked child holds a COPY of the LISTEN socket fd. PQfinish
+    # (#close) would send a libpq Terminate over the socket shared with the
+    # parent, killing the parent's session — the child must close only its
+    # own fd via the IO wrapper.
+    let(:socket_io) { instance_double(IO, close: nil) }
+
+    before { allow(fake_pg).to receive(:socket_io).and_return(socket_io) }
+
+    it "closes the socket IO without PQfinish and drops the connection" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      listener.close_inherited_socket!
+
+      expect(socket_io).to have_received(:close)
+      expect(fake_pg.close_count).to eq(0)
+      expect(listener.connected?).to be false
+    end
+
+    it "is a no-op before start" do
+      expect { listener.close_inherited_socket! }.not_to raise_error
+    end
+
+    it "logs (never raises, never silences) when the socket close fails" do
+      allow(socket_io).to receive(:close).and_raise(IOError, "closed stream")
+      allow(logger).to receive(:warn)
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      expect { listener.close_inherited_socket! }.not_to raise_error
+      expect(logger).to have_received(:warn)
+    end
+  end
+
+  describe "#connected?" do
+    # The hub (issue #381) broadcasts degraded status to forks while the
+    # listener is between connections — running? stays true during a
+    # reconnect, so connected? is the signal that distinguishes "parked in
+    # wait_for_notify" from "rebuilding the connection".
+    it "is false before start" do
+      expect(listener.connected?).to be false
+    end
+
+    it "is true once the connection is published" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      expect(listener.connected?).to be true
+    end
+
+    it "is false again after stop" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      listener.stop
+
+      expect(listener.connected?).to be false
     end
   end
 
@@ -306,7 +379,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
     subject(:session_listener) do
       described_class.new(
         physical_queues: %w[pgbus_default],
-        on_wake: -> {},
+        on_wake: ->(_channel) {},
         connection_options: { host: "pooler.example", dbname: "app",
                               variables: { statement_timeout: "10s", timezone: "UTC" } },
         logger: logger
@@ -329,7 +402,8 @@ RSpec.describe Pgbus::Process::NotifyListener do
 
       session_listener.send(:build_connection)
 
-      expect(captured).to eq(host: "pooler.example", dbname: "app")
+      expect(captured).to eq(host: "pooler.example", dbname: "app",
+                             fallback_application_name: "pgbus-listen")
     end
 
     it "keeps the GUCs by applying them via post-connect SET" do

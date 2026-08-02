@@ -42,6 +42,14 @@ module Pgbus
       CHANNEL_PREFIX = "pgmq.q_"
       CHANNEL_SUFFIX = ".INSERT"
 
+      # Inverse of #channel_for: map a NOTIFY channel back to the physical
+      # queue name. Class-level because the channel format is owned here —
+      # NotifyHub (wake routing + union refresh) and Worker (queue-set sync)
+      # both consume it.
+      def self.physical_for(channel)
+        channel.delete_prefix(CHANNEL_PREFIX).delete_suffix(CHANNEL_SUFFIX)
+      end
+
       RECONNECT_BACKOFF_SECONDS = 0.5
 
       # Grace added to one health-check cycle when #stop joins the listener
@@ -68,6 +76,16 @@ module Pgbus
 
       def listening_to
         @state_mutex.synchronize { @listening_to.dup }
+      end
+
+      # Whether a live PG connection is currently published. running? stays
+      # true during a reconnect (the thread is alive, looping in reconnect!),
+      # so this is the signal that distinguishes "parked in wait_for_notify"
+      # from "between connections". The supervisor NotifyHub (issue #381)
+      # consults it to broadcast degraded status to forks the moment the
+      # shared connection drops, and healthy again once it is rebuilt.
+      def connected?
+        @state_mutex.synchronize { !@conn.nil? }
       end
 
       # Whether the start-time self-probe confirmed this connection can actually
@@ -123,6 +141,30 @@ module Pgbus
       # restart it. Guarded by @state_mutex like every other @running access.
       def running?
         @state_mutex.synchronize { @running }
+      end
+
+      # Called ONLY inside a just-forked child (issue #381 hub hygiene): drop
+      # this process's copy of the LISTEN socket fd WITHOUT PQfinish — #close
+      # would send a libpq Terminate over the socket shared with the parent,
+      # killing the parent's LISTEN session. Closing the IO wrapper just
+      # closes the child's fd. The listener thread does not exist in the
+      # child (fork copies only the calling thread), so there is no
+      # concurrent owner and the single-owner rule (#375) does not apply.
+      def close_inherited_socket!
+        conn = @state_mutex.synchronize do
+          c = @conn
+          @conn = nil
+          @running = false
+          c
+        end
+        conn&.socket_io&.close
+      rescue StandardError => e
+        # Best-effort (a lingering fd copy is benign until the parent dies),
+        # but never silent: the child keeps booting either way.
+        @logger.warn do
+          "[Pgbus::NotifyListener] inherited socket cleanup failed: #{e.class}: #{e.message}"
+        end
+        nil
       end
 
       private
@@ -190,8 +232,11 @@ module Pgbus
         return reconnect! unless conn
 
         timeout_s = @health_check_ms / 1000.0
-        got_notify = conn.wait_for_notify(timeout_s) do |_channel, _pid, _payload|
-          @on_wake.call
+        got_notify = conn.wait_for_notify(timeout_s) do |channel, _pid, _payload|
+          # The channel rides along so a hub caller (issue #381) can route the
+          # wake to the fork(s) reading that queue; fork-owned listeners take
+          # ->(_channel) and ignore it.
+          @on_wake.call(channel)
         end
         # Skip the keepalive when a stop landed during the wait: the loop is
         # about to exit and close this connection anyway, so the round-trip
