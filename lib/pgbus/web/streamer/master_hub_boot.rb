@@ -35,6 +35,11 @@ module Pgbus
           @poll_interval = poll_interval
           @deadline = deadline
           @logger = logger
+          # Guards @hub and @running: written by the caller thread
+          # (start/stop) and the background poller. A hub whose start
+          # outlives stop's join budget is stopped by whichever side sees
+          # the flag last, so teardown can never leave a live hub behind.
+          @state_mutex = Mutex.new
           @hub = nil
           @running = false
           @thread = nil
@@ -42,38 +47,59 @@ module Pgbus
 
         def start
           ENV["PGBUS_STREAMS_HUB_SOCKET"] = @socket_path
-          @running = true
+          @state_mutex.synchronize { @running = true }
           @thread = Thread.new { wait_and_start }
           self
         end
 
         def stop
-          @running = false
+          to_stop = @state_mutex.synchronize do
+            @running = false
+            hub = @hub
+            @hub = nil
+            hub
+          end
           @thread&.join(2)
           @thread = nil
-          @hub&.stop
-          @hub = nil
+          to_stop&.stop
           self
         end
 
         private
 
+        def running?
+          @state_mutex.synchronize { @running }
+        end
+
         def wait_and_start
           waited = 0.0
           until configuration_ready?
-            return unless @running
+            return unless running?
             return give_up if waited >= @deadline
 
             sleep @poll_interval
             waited += @poll_interval
           end
-          return unless @running && master_scope?
+          return unless running? && master_scope?
 
-          @hub = @hub_factory.call(socket_path: @socket_path)
-          @hub.start
+          hub = @hub_factory.call(socket_path: @socket_path)
+          hub.start
+          # Register-or-late-stop: if stop ran while the hub was building,
+          # this thread owns the teardown of the hub stop never saw.
+          late = @state_mutex.synchronize do
+            if @running
+              @hub = hub
+              nil
+            else
+              hub
+            end
+          end
+          late&.stop
+          return if late
+
           log(:info) { "[Pgbus::Streamer::MasterHubBoot] master hub listening at #{@socket_path}" }
         rescue StandardError => e
-          @hub = nil
+          @state_mutex.synchronize { @hub = nil }
           log(:error) do
             "[Pgbus::Streamer::MasterHubBoot] master hub failed to start " \
               "(#{e.class}: #{e.message}) — workers fall back to per-worker listeners"

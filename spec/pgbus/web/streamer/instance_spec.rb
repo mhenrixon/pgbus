@@ -584,6 +584,7 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
 
     it "falls back to a per-worker Listener when the socket path is exported but dead" do
       ENV["PGBUS_STREAMS_HUB_SOCKET"] = socket_path # nothing bound there
+      config.streams_listen_scope = :master
 
       instance = described_class.new(
         client: client, config: config, pg_connection: fake_pg, logger: Logger.new(IO::NULL)

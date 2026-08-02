@@ -27,7 +27,14 @@ module Pgbus
           @hub_client = hub_client
           @local_listener_factory = local_listener_factory
           @logger = logger
-          @mutex = Mutex.new
+          # @state_mutex guards the cheap shared state (@subscriptions, @impl,
+          # @failed_over) and is only ever held for constant-time work — the
+          # dispatcher's ensure/remove path must never wait behind a failover
+          # build. @failover_mutex serializes the (blocking) build + replay:
+          # a fresh PG connect + N re-LISTEN acks can stall for seconds when
+          # the trigger IS a database problem (review on #384).
+          @state_mutex = Mutex.new
+          @failover_mutex = Mutex.new
           @subscriptions = Set.new
           @impl = hub_client
           @failed_over = false
@@ -40,7 +47,7 @@ module Pgbus
         end
 
         def ensure_listening(queue)
-          @mutex.synchronize { @subscriptions.add(queue) }
+          @state_mutex.synchronize { @subscriptions.add(queue) }
           current_impl.ensure_listening(queue)
         rescue HubClient::HubUnavailableError
           fail_over!
@@ -54,29 +61,39 @@ module Pgbus
         end
 
         def remove_listening(queue)
-          @mutex.synchronize { @subscriptions.delete(queue) }
+          @state_mutex.synchronize { @subscriptions.delete(queue) }
           current_impl.remove_listening(queue)
         rescue HubClient::HubUnavailableError
           nil
         end
 
         # Idempotent, callable from the client's on_failure (reader thread)
-        # and from a synchronous ensure failure (dispatcher thread) — the
-        # mutex serializes them; the second caller finds the swap done.
+        # and from a synchronous ensure failure (dispatcher thread).
+        # @failover_mutex serializes concurrent callers — the second blocks
+        # until the first finishes and then no-ops, so a synchronous retry
+        # after fail_over! always lands on the swapped-in local listener.
+        # The blocking build + replay runs OUTSIDE @state_mutex so concurrent
+        # ensure/remove/stop calls never stall behind it.
         def fail_over!
-          @mutex.synchronize do
-            return if @failed_over
+          @failover_mutex.synchronize do
+            return if @state_mutex.synchronize { @failed_over }
 
-            @failed_over = true
             local = @local_listener_factory.call
-            @subscriptions.each { |q| local.ensure_listening(q) }
-            @impl = local
+            @state_mutex.synchronize { @subscriptions.dup }.each { |q| local.ensure_listening(q) }
+            # Subscriptions recorded between the snapshot and this swap arrive
+            # via their own retried ensure_listening call on the new impl.
+            @state_mutex.synchronize do
+              @impl = local
+              @failed_over = true
+            end
           end
         rescue StandardError => e
           # Hub dead AND the local listener can't be built (DB down, config
-          # broken). Leave @impl on the dead client — every ensure_listening
-          # resolves nil and the dispatcher rides its existing timeout
-          # tolerance until the worker recycles.
+          # broken). Mark failed-over so callers stop rebuilding; @impl stays
+          # on the dead client — every ensure_listening resolves nil and the
+          # dispatcher rides its existing timeout tolerance until the worker
+          # recycles.
+          @state_mutex.synchronize { @failed_over = true }
           @logger.error do
             "[Pgbus::Streamer::FailoverListener] fallback listener failed to build " \
               "(#{e.class}: #{e.message}) — streams degraded until this worker recycles"
@@ -90,7 +107,7 @@ module Pgbus
         private
 
         def current_impl
-          @mutex.synchronize { @impl }
+          @state_mutex.synchronize { @impl }
         end
       end
     end

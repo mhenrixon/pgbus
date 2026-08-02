@@ -45,7 +45,10 @@ module Pgbus
           @sock = UNIXSocket.new(@socket_path)
           @reader = Thread.new { reader_loop }
           self
-        rescue SystemCallError => e
+        rescue SystemCallError, IOError, ArgumentError => e
+          # ArgumentError: a socket path over the platform sun_path limit;
+          # IOError: a path that exists but is not a socket. Both must fall
+          # back exactly like a refused connect, never abort worker boot.
           raise HubUnavailableError, "cannot reach master hub at #{@socket_path}: #{e.class}: #{e.message}"
         end
 
@@ -113,6 +116,11 @@ module Pgbus
           mark_dead("master hub protocol error: #{e.message}") unless @stopping
         rescue IOError, Errno::EBADF, Errno::ECONNRESET
           mark_dead("master hub transport error") unless @stopping
+        rescue StandardError => e
+          # The reader thread is the ONLY detector of hub death — an
+          # unexpected error must not let it exit with the client still
+          # reporting healthy, or the worker goes silently deaf.
+          mark_dead("master hub reader crashed: #{e.class}: #{e.message}") unless @stopping
         end
 
         def handle_frame(frame)
@@ -130,10 +138,25 @@ module Pgbus
 
         # Frames must never interleave — all writes go through one mutex
         # (writers: dispatcher thread via ensure/remove; no writer thread
-        # needed client-side, sub/unsub frames are tiny).
+        # needed client-side, sub/unsub frames are tiny). Bounded: a master
+        # that stopped draining its input would otherwise block this write
+        # forever, and the ack deadline only starts ticking AFTER the write
+        # returns — so a stalled write is itself a failover trigger.
         def write_frame(message)
-          @write_mutex.synchronize { @sock.write(HubProtocol.encode(message)) }
-        rescue IOError, Errno::EPIPE, Errno::EBADF, Errno::ECONNRESET => e
+          data = HubProtocol.encode(message)
+          deadline = ::Process.clock_gettime(::Process::CLOCK_MONOTONIC) + @ack_timeout
+          @write_mutex.synchronize do
+            until data.empty?
+              begin
+                written = @sock.write_nonblock(data)
+                data = data.byteslice(written..)
+              rescue IO::WaitWritable
+                remaining = deadline - ::Process.clock_gettime(::Process::CLOCK_MONOTONIC)
+                raise Errno::ETIMEDOUT, "write stalled" if remaining <= 0 || !@sock.wait_writable(remaining)
+              end
+            end
+          end
+        rescue IOError, Errno::EPIPE, Errno::EBADF, Errno::ECONNRESET, Errno::ETIMEDOUT => e
           mark_dead("write to master hub failed: #{e.class}")
           raise HubUnavailableError, "master hub transport is dead"
         end

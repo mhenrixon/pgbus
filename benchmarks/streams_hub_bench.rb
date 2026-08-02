@@ -89,7 +89,10 @@ def measure_roundtrips(label)
   SAMPLES.times do |i|
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     stream.broadcast("<turbo-stream>#{i}</turbo-stream>")
-    client.wait_for_events(count: i + 2, timeout: 10)
+    events = client.wait_for_events(count: i + 2, timeout: 10)
+    # A silently dropped/late wake would otherwise record a ~10s sample
+    # straight into the reported percentiles.
+    abort "#{label}: sample #{i} never delivered (got #{events.size}, expected #{i + 2})" if events.size < i + 2
     samples << ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0)
   end
 

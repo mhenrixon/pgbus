@@ -154,6 +154,7 @@ RSpec.describe "Streams master hub (issue #382)", :integration do
       expect(message&.payload).to include("via fallback")
     ensure
       failover&.stop
+      hub.stop # idempotent — the happy path already stopped it mid-test
     end
   end
 end

@@ -168,10 +168,18 @@ RSpec.describe Pgbus::Web::Streamer::MasterHub do
 
       frame = read_frame_of_type(worker_a, "wake")
       expect(frame).to include("q" => "pgbus_test_chat", "p" => "<div>ephemeral</div>")
-      expect(worker_b.wait_readable(0.3)).to be_falsey.or(satisfy do |r|
-        # Only status frames may arrive on B; never a wake for chat.
-        r && Pgbus::Web::Streamer::HubProtocol.read_frame(worker_b)["t"] != "wake"
-      end)
+      # Drain B for a bounded window: only status frames may arrive there —
+      # never a wake for chat (a single-frame peek could be satisfied by a
+      # status frame while a leaked wake sat behind it).
+      types = []
+      deadline = Time.now + 0.3
+      while Time.now < deadline && worker_b.wait_readable(0.05)
+        b_frame = Pgbus::Web::Streamer::HubProtocol.read_frame(worker_b)
+        break if b_frame.nil?
+
+        types << b_frame["t"]
+      end
+      expect(types).not_to include("wake")
       [worker_a, worker_b].each(&:close)
     end
 
@@ -276,6 +284,13 @@ RSpec.describe Pgbus::Web::Streamer::MasterHub do
       File.write(socket_path, "stale")
       expect { hub.start }.not_to raise_error
       expect(File.socket?(socket_path)).to be true
+    end
+
+    it "creates the socket with owner-only permissions" do
+      # The socket carries every stream wake including ephemeral HTML and has
+      # no peer authentication — the mode IS the access control.
+      hub.start
+      expect(File.stat(socket_path).mode & 0o777).to eq(0o600)
     end
   end
 end

@@ -48,6 +48,11 @@ RSpec.describe Pgbus::Web::Streamer::HubClient do
     sock.write(Pgbus::Web::Streamer::HubProtocol.encode(message))
   end
 
+  def wait_until(timeout: 2.0)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    sleep 0.01 until yield || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+  end
+
   describe "subscription round trip" do
     it "ensure_listening blocks until the master acks" do
       master = accept_master { client.connect }
@@ -105,11 +110,11 @@ RSpec.describe Pgbus::Web::Streamer::HubClient do
       expect(client.hub_healthy?).to be true # optimistic before first status
 
       master_send(master, { "t" => "status", "healthy" => false })
-      sleep 0.1
+      wait_until { client.hub_healthy? == false }
       expect(client.hub_healthy?).to be false
 
       master_send(master, { "t" => "status", "healthy" => true })
-      sleep 0.1
+      wait_until { client.hub_healthy? == true }
       expect(client.hub_healthy?).to be true
     end
   end
@@ -123,11 +128,11 @@ RSpec.describe Pgbus::Web::Streamer::HubClient do
       rescue described_class::HubUnavailableError
         :raised
       end
-      sleep 0.1
+      wait_until { client.instance_variable_get(:@pending_acks).values.flatten.any? }
       master.close
 
       expect(waiter.value).to eq(:raised)
-      sleep 0.1
+      wait_until { failures.any? }
       expect(failures).to eq([:failed])
     end
 

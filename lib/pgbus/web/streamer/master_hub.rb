@@ -63,7 +63,12 @@ module Pgbus
           @dispatch_queue = Queue.new
           @table_mutex = Mutex.new
           @workers = {}
-          @queue_refs = Hash.new { |h, k| h[k] = Set.new }
+          # Plain Hash, entries created ONLY at subscribe time — a default
+          # proc here would leak one empty Set per wake that arrives for an
+          # already-unsubscribed channel (in-flight NOTIFYs after the last
+          # unsub, per-record stream names → unbounded, review on #384).
+          @queue_refs = {}
+          @stop_signal = Queue.new
           @next_id = 0
           @dropped_durable_wakes = 0
           @evicted_workers = 0
@@ -80,10 +85,14 @@ module Pgbus
 
         # The factory must return a STARTED listener wired to +dispatch_queue+.
         def start
-          @running = true
+          @table_mutex.synchronize { @running = true }
           @listener = @listener_factory.call(dispatch_queue: @dispatch_queue)
           FileUtils.rm_f(@socket_path)
           @server = UNIXServer.new(@socket_path)
+          # Owner-only: the socket carries every stream wake including
+          # ephemeral HTML payloads, and there is no peer authentication —
+          # the filesystem mode IS the access control.
+          File.chmod(0o600, @socket_path)
           @accept_thread = Thread.new { accept_loop }
           @fanout_thread = Thread.new { fanout_loop }
           @status_thread = Thread.new { status_loop }
@@ -91,9 +100,12 @@ module Pgbus
         end
 
         def stop
-          return self unless @running
+          @table_mutex.synchronize do
+            return self unless @running
 
-          @running = false
+            @running = false
+          end
+          @stop_signal << :stop
           close_quietly(@server)
           @dispatch_queue << :stop
           worker_ids = @table_mutex.synchronize { @workers.keys }
@@ -122,13 +134,26 @@ module Pgbus
           end
         end
 
+        def running?
+          @table_mutex.synchronize { @running }
+        end
+
         def accept_loop
           loop do
-            sock = @server.accept
-            register_worker(sock)
+            begin
+              sock = @server.accept
+            rescue IOError, Errno::EBADF, Errno::EINVAL
+              # server closed during stop
+              break
+            end
+            begin
+              register_worker(sock)
+            rescue StandardError => e
+              # One bad connection must not stop the hub accepting others.
+              @logger.warn { "[Pgbus::Streamer::MasterHub] failed to register a worker: #{e.class}: #{e.message}" }
+              close_quietly(sock)
+            end
           end
-        rescue IOError, Errno::EBADF, Errno::EINVAL
-          # server closed during stop
         end
 
         def register_worker(sock)
@@ -177,7 +202,7 @@ module Pgbus
         def handle_sub(id, entry, queue)
           @table_mutex.synchronize do
             entry[:subs].add(queue)
-            @queue_refs[queue].add(id)
+            (@queue_refs[queue] ||= Set.new).add(id)
           end
           @listener.ensure_listening(queue)
           enqueue_frame(id, entry, { "t" => "ack", "q" => queue }, droppable: false)
@@ -193,17 +218,21 @@ module Pgbus
             message = @dispatch_queue.pop
             break if message == :stop
 
-            deliver(message)
+            begin
+              deliver(message)
+            rescue StandardError => e
+              # One bad message must not stop wake delivery for the host.
+              @logger.error { "[Pgbus::Streamer::MasterHub] wake delivery failed: #{e.class}: #{e.message}" }
+            end
           end
-        rescue StandardError => e
-          @logger.error { "[Pgbus::Streamer::MasterHub] fanout loop died: #{e.class}: #{e.message}" }
         end
 
         def deliver(message)
           frame = { "t" => "wake", "q" => message.queue_name, "p" => message.payload }
           droppable = message.payload.nil?
           targets = @table_mutex.synchronize do
-            @queue_refs[message.queue_name].filter_map { |id| [id, @workers[id]] if @workers[id] }
+            refs = @queue_refs[message.queue_name]
+            refs ? refs.filter_map { |id| [id, @workers[id]] if @workers[id] } : []
           end
           targets.each { |id, entry| enqueue_frame(id, entry, frame, droppable: droppable) }
         end
@@ -250,7 +279,7 @@ module Pgbus
           close_quietly(entry[:sock])
         end
 
-        def writer_loop(_id, entry)
+        def writer_loop(id, entry)
           loop do
             frame = nil
             entry[:outbox_mutex].synchronize do
@@ -263,23 +292,35 @@ module Pgbus
             entry[:sock].write(HubProtocol.encode(frame))
           end
         rescue IOError, Errno::EPIPE, Errno::ECONNRESET, Errno::EBADF
-          # severed / worker died; reader-side cleanup handles bookkeeping
+          # severed / worker died
+        rescue StandardError => e
+          # e.g. a ProtocolError from encode — never die silently; sever this
+          # worker so its fallback takes over.
+          @logger.warn { "[Pgbus::Streamer::MasterHub] writer for worker #{id} failed: #{e.class}: #{e.message}" }
+        ensure
+          cleanup_worker(id)
         end
 
         def status_loop
           last_status = nil
           ticks_since_broadcast = 0
           loop do
-            sleep @status_interval
-            break unless @running
+            # A stop-signal wait instead of sleep, so #stop wakes the thread
+            # immediately even with a long status_interval.
+            break if @stop_signal.pop(timeout: @status_interval)
+            break unless running?
 
-            healthy = listener_healthy?
-            ticks_since_broadcast += 1
-            next unless healthy != last_status || ticks_since_broadcast >= REBROADCAST_TICKS
+            begin
+              healthy = listener_healthy?
+              ticks_since_broadcast += 1
+              next unless healthy != last_status || ticks_since_broadcast >= REBROADCAST_TICKS
 
-            broadcast_status(healthy)
-            last_status = healthy
-            ticks_since_broadcast = 0
+              broadcast_status(healthy)
+              last_status = healthy
+              ticks_since_broadcast = 0
+            rescue StandardError => e
+              @logger.warn { "[Pgbus::Streamer::MasterHub] status tick failed: #{e.class}: #{e.message}" }
+            end
           end
         end
 
@@ -314,6 +355,8 @@ module Pgbus
           released = @table_mutex.synchronize do
             queues.select do |q|
               refs = @queue_refs[q]
+              next false unless refs
+
               refs.delete(id)
               @queue_refs.delete(q) if refs.empty?
             end
