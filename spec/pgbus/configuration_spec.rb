@@ -1671,6 +1671,11 @@ RSpec.describe Pgbus::Configuration do
       expect { config.streams_listen_scope = :hosted }
         .to raise_error(Pgbus::ConfigurationError, /streams_listen_scope.*:master.*:process/m)
     end
+
+    it "rejects a non-symbolizable value" do
+      expect { config.streams_listen_scope = 42 }
+        .to raise_error(Pgbus::ConfigurationError, /streams_listen_scope/)
+    end
   end
 
   describe "#worker_notify_connection_options" do

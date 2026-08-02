@@ -92,5 +92,21 @@ RSpec.describe Pgbus::Web::Streamer::HubProtocol do
       expect { described_class.read_frame(reader) }
         .to raise_error(described_class::ProtocolError, /malformed/i)
     end
+
+    it "rejects a valid-JSON non-object frame (scalars/arrays would break dispatch)" do
+      body = "[1,2,3]".b
+      writer.write([body.bytesize].pack("N") + body)
+
+      expect { described_class.read_frame(reader) }
+        .to raise_error(described_class::ProtocolError, /expected a JSON object/i)
+    end
+
+    it "rejects invalid UTF-8 bytes" do
+      body = "\xff\xfe{}".b
+      writer.write([body.bytesize].pack("N") + body)
+
+      expect { described_class.read_frame(reader) }
+        .to raise_error(described_class::ProtocolError, /invalid UTF-8/i)
+    end
   end
 end

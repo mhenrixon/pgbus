@@ -58,7 +58,13 @@ module Pgbus
           body = read_exactly(io, length)
           return nil unless body
 
-          JSON.parse(body.force_encoding(Encoding::UTF_8))
+          body = body.force_encoding(Encoding::UTF_8)
+          raise ProtocolError, "malformed frame: invalid UTF-8" unless body.valid_encoding?
+
+          decoded = JSON.parse(body)
+          raise ProtocolError, "malformed frame: expected a JSON object, got #{decoded.class}" unless decoded.is_a?(Hash)
+
+          decoded
         rescue JSON::ParserError => e
           raise ProtocolError, "malformed frame: #{e.message}"
         rescue Errno::ECONNRESET

@@ -63,7 +63,11 @@ module Pgbus
         def remove_listening(queue)
           @state_mutex.synchronize { @subscriptions.delete(queue) }
           current_impl.remove_listening(queue)
-        rescue HubClient::HubUnavailableError
+        rescue HubClient::HubUnavailableError => e
+          @logger.debug do
+            "[Pgbus::Streamer::FailoverListener] remove_listening on a dead hub client " \
+              "(#{e.message}) — ignoring, unlisten GC is best-effort"
+          end
           nil
         end
 

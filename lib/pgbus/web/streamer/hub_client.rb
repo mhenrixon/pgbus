@@ -45,10 +45,14 @@ module Pgbus
           @sock = UNIXSocket.new(@socket_path)
           @reader = Thread.new { reader_loop }
           self
-        rescue SystemCallError, IOError, ArgumentError => e
+        rescue SystemCallError, IOError, ArgumentError, ThreadError => e
           # ArgumentError: a socket path over the platform sun_path limit;
-          # IOError: a path that exists but is not a socket. Both must fall
-          # back exactly like a refused connect, never abort worker boot.
+          # IOError: a path that exists but is not a socket; ThreadError: the
+          # reader thread could not spawn. All must fall back exactly like a
+          # refused connect, never abort worker boot — and never leak the
+          # half-opened socket.
+          close_quietly(@sock)
+          @sock = nil
           raise HubUnavailableError, "cannot reach master hub at #{@socket_path}: #{e.class}: #{e.message}"
         end
 

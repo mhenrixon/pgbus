@@ -119,6 +119,30 @@ RSpec.describe Pgbus::Web::Streamer::MasterHubBoot do
       expect(hub).to have_received(:stop)
     end
 
+    it "stops a hub that finished building only after stop returned (register-or-late-stop)" do
+      gate = Queue.new
+      slow_factory = lambda do |socket_path:|
+        factory_calls << socket_path
+        gate.pop
+        hub
+      end
+      late = described_class.new(
+        socket_path: socket_path, hub_factory: slow_factory,
+        poll_interval: 0.02, deadline: 0.5, logger: logger
+      )
+      allow(late).to receive_messages(configuration_ready?: true, master_scope?: true)
+
+      late.start
+      poller = late.instance_variable_get(:@thread)
+      wait_until { factory_calls.any? } # the poller is now blocked in the factory
+      stopper = Thread.new { late.stop } # join budget expires while blocked
+      stopper.join
+      gate << :built # the build completes AFTER stop returned
+
+      poller.join(2)
+      expect(hub).to have_received(:stop) # the poller thread owned the teardown
+    end
+
     it "cancels a still-waiting poller" do
       allow(boot).to receive(:configuration_ready?).and_return(false)
       boot.start

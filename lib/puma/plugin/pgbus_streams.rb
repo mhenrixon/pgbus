@@ -51,7 +51,7 @@ Puma::Plugin.create do
     @master_hub_boot.start
   rescue StandardError => e
     @master_hub_boot = nil
-    log_error(launcher, e)
+    log_error(launcher, e, "master hub boot")
   end
 
   def cluster_mode?(launcher)
@@ -64,7 +64,7 @@ Puma::Plugin.create do
     @master_hub_boot&.stop
     @master_hub_boot = nil
   rescue StandardError => e
-    log_error(launcher, e)
+    log_error(launcher, e, "master hub teardown")
   end
 
   def teardown_streamer(launcher)
@@ -79,8 +79,8 @@ Puma::Plugin.create do
     log_error(launcher, e)
   end
 
-  def log_error(launcher, error)
-    message = "[Pgbus::Puma::Plugin] streamer teardown raised: #{error.class}: #{error.message}"
+  def log_error(launcher, error, operation = "streamer teardown")
+    message = "[Pgbus::Puma::Plugin] #{operation} raised: #{error.class}: #{error.message}"
     if launcher.respond_to?(:log_writer)
       launcher.log_writer.log(message)
     elsif defined?(Pgbus) && Pgbus.respond_to?(:logger)

@@ -405,7 +405,7 @@ module Pgbus
     # during a hub outage), one per web process under :process scope.
     def streams_budget_clause
       if @config.streams_listen_scope == :master
-        " + 1 per web host (streams master hub)"
+        " + 1 per web host (streams master hub; per-worker fallback during a hub outage costs 1 per web process)"
       else
         " + 1 per web-server process (streams)"
       end

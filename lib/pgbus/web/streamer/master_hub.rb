@@ -84,6 +84,10 @@ module Pgbus
         end
 
         # The factory must return a STARTED listener wired to +dispatch_queue+.
+        # If any step after the listener exists fails (bad socket path, chmod,
+        # thread spawn), the listener — and its dedicated LISTEN connection,
+        # the exact resource this hub conserves — is stopped before the error
+        # propagates; MasterHubBoot's rescue never sees a leaked connection.
         def start
           @table_mutex.synchronize { @running = true }
           @listener = @listener_factory.call(dispatch_queue: @dispatch_queue)
@@ -106,6 +110,12 @@ module Pgbus
           @fanout_thread = Thread.new { fanout_loop }
           @status_thread = Thread.new { status_loop }
           self
+        rescue StandardError
+          @table_mutex.synchronize { @running = false }
+          close_quietly(@server)
+          @listener&.stop
+          @listener = nil
+          raise
         end
 
         def stop
@@ -191,6 +201,10 @@ module Pgbus
           @logger.warn { "[Pgbus::Streamer::MasterHub] worker #{id} protocol error: #{e.message}" }
         rescue IOError, Errno::EBADF, Errno::ECONNRESET
           # severed by eviction or stop
+        rescue StandardError => e
+          # e.g. ensure_listening raising inside handle_sub — the ensure still
+          # severs this worker (its fallback takes over), but never silently.
+          @logger.warn { "[Pgbus::Streamer::MasterHub] reader for worker #{id} failed: #{e.class}: #{e.message}" }
         ensure
           cleanup_worker(id)
         end
