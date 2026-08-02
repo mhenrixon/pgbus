@@ -102,6 +102,18 @@ module Pgbus
           self
         end
 
+        # Health signals for the MasterHub's status broadcasts (issue #382).
+        # Read cross-thread without synchronization: ivar assignment is atomic
+        # in MRI and a momentarily stale value only delays one status tick —
+        # these must never touch the connection itself (single-owner, #375).
+        def alive?
+          !!@thread&.alive?
+        end
+
+        def connected?
+          !@conn.nil?
+        end
+
         def stop
           return unless @running
 
