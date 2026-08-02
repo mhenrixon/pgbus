@@ -5,7 +5,7 @@ require "pgbus/mcp/health_analyzer"
 
 module Pgbus
   # Preflight diagnostics for a pgbus deployment — the single command that
-  # answers "is this environment healthy enough to run?". Runs ten checks and
+  # answers "is this environment healthy enough to run?". Runs eleven checks and
   # returns a machine-readable result plus a human report, so `pgbus doctor`
   # and `rake pgbus:doctor` can gate a deploy or CI run (exit 0 on success,
   # 1 on any failure).
@@ -40,7 +40,8 @@ module Pgbus
       "GlobalID allowlist" => :check_allowed_global_id_models,
       "Broadcast queue" => :check_broadcast_queue,
       "Primary affinity" => :check_primary,
-      "Dedicated connections" => :check_dedicated_connections
+      "Dedicated connections" => :check_dedicated_connections,
+      "Connection budget" => :check_connection_budget
     }.freeze
 
     # Process liveness reads the pgbus_processes table (via HealthAnalyzer), so
@@ -364,6 +365,38 @@ module Pgbus
       end
     rescue StandardError => e
       Check.new(name: "Dedicated connections", status: :fail, detail: "#{e.class}: #{e.message}")
+    end
+
+    # How many direct LISTEN connections this config pins at steady state
+    # (issue #381) — informational (always :ok) so operators can do capacity
+    # math on the pooler's direct-connection budget from the doctor output.
+    # Under :supervisor scope the whole host shares 1; under :fork it is one
+    # per worker/consumer fork. Streams add one per web-server process, which
+    # the doctor cannot count from here, so it is reported as a clause.
+    def check_connection_budget
+      capsules = @config.role_enabled?(:workers) ? Array(@config.workers).size : 0
+      consumers = @config.role_enabled?(:consumers) ? Array(@config.event_consumers).size : 0
+
+      count =
+        if !@config.worker_notify_wakeup?
+          0
+        elsif @config.worker_notify_scope == :supervisor
+          (capsules + consumers).positive? ? 1 : 0
+        else
+          capsules + consumers
+        end
+
+      detail = format(
+        "%<count>d direct LISTEN connection%<plural>s pinned (scope=%<scope>s; %<capsules>d capsules + " \
+        "%<consumers>d consumers%<share>s)",
+        count: count, plural: count == 1 ? "" : "s", scope: @config.worker_notify_scope,
+        capsules: capsules, consumers: consumers,
+        share: count == 1 && @config.worker_notify_scope == :supervisor ? " share it" : ""
+      )
+      detail += " + 1 per web-server process (streams)" if @config.streams_enabled
+      Check.new(name: "Connection budget", status: :ok, detail: detail)
+    rescue StandardError => e
+      Check.new(name: "Connection budget", status: :warn, detail: "#{e.class}: #{e.message}")
     end
 
     # Open one dedicated connection the way the runtime does, verify it
