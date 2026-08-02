@@ -17,7 +17,7 @@ RSpec.describe Pgbus::Process::Consumer do
   let(:fake_listener) do
     instance_double(
       Pgbus::Process::NotifyListener,
-      stop: nil, running?: true,
+      stop: nil, running?: true, delivering?: true,
       listening_to: [], add_queue: nil, remove_queue: nil
     ).tap { |l| allow(l).to receive(:start).and_return(l) }
   end
@@ -312,6 +312,78 @@ RSpec.describe Pgbus::Process::Consumer do
       allow(fake_listener).to receive(:running?).and_return(false)
       consumer.notify_listener = fake_listener
       expect(consumer.send(:wake_timeout)).to eq(consumer.config.polling_interval)
+    end
+
+    it "returns polling_interval when a live listener is not delivering (issue #332 parity with Worker)" do
+      allow(consumer).to receive(:notify_wakeup?).and_return(true)
+      allow(fake_listener).to receive_messages(running?: true, delivering?: false)
+      consumer.notify_listener = fake_listener
+      expect(consumer.send(:wake_timeout)).to eq(consumer.config.polling_interval)
+    end
+  end
+
+  describe ":supervisor scope (supervisor-mediated wakes, issue #381)" do
+    let(:pipe_ios) { IO.pipe }
+    let(:piped_consumer) do
+      described_class.new(topics: ["orders.#"], queue_names: ["orders"], wake_pipe: pipe_ios[0])
+    end
+
+    after do
+      piped_consumer.wake_pipe&.stop
+      pipe_ios.each { |io| io.close unless io.closed? }
+    end
+
+    def wait_for(timeout: 2)
+      deadline = Time.now + timeout
+      until yield
+        raise "timed out waiting for condition" if Time.now > deadline
+
+        sleep 0.01
+      end
+    end
+
+    it "does not construct a local NotifyListener" do
+      allow(piped_consumer).to receive(:notify_wakeup?).and_return(true)
+      allow(Pgbus::Process::NotifyListener).to receive(:new)
+
+      piped_consumer.send(:start_wake_source)
+
+      expect(Pgbus::Process::NotifyListener).not_to have_received(:new)
+    end
+
+    it "skips the per-fork listener self-healing loop" do
+      allow(piped_consumer).to receive(:notify_wakeup?).and_return(true)
+      allow(piped_consumer).to receive(:start_notify_listener)
+      piped_consumer.notify_retry_at = 0.0
+
+      piped_consumer.send(:ensure_notify_listener)
+
+      expect(piped_consumer).not_to have_received(:start_notify_listener)
+    end
+
+    it "wakes the loop on a W byte from the supervisor" do
+      piped_consumer.send(:start_wake_source)
+
+      pipe_ios[1].write(Pgbus::Process::WakePipe::WAKE)
+
+      expect(piped_consumer.wake_signal.wait(timeout: 2)).to be true
+    end
+
+    it "uses the NOTIFY ceiling while the hub reports delivering" do
+      allow(piped_consumer).to receive(:notify_wakeup?).and_return(true)
+      piped_consumer.send(:start_wake_source)
+
+      expect(piped_consumer.send(:wake_timeout)).to eq(described_class::NOTIFY_FALLBACK_POLL_SECONDS)
+    end
+
+    it "falls back to fast polling when the hub broadcasts degraded" do
+      allow(piped_consumer).to receive(:notify_wakeup?).and_return(true)
+      piped_consumer.send(:start_wake_source)
+
+      pipe_ios[1].write(Pgbus::Process::WakePipe::DEGRADED)
+      wait_for { !piped_consumer.wake_pipe.delivering? }
+
+      expect(piped_consumer.send(:wake_timeout)).to eq(piped_consumer.config.polling_interval)
     end
   end
 

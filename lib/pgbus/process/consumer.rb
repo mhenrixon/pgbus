@@ -14,6 +14,9 @@ module Pgbus
       # notify_retry_at is writable so a test can re-arm the backoff window
       # between successive ensure_notify_listener calls.
       attr_accessor :notify_listener, :notify_retry_at
+      # Supervisor-mediated wake source (issue #381): non-nil iff the
+      # supervisor forked us with a wake pipe. Readable as a test seam.
+      attr_reader :wake_pipe
       # stat_buffer is writable so a test can swap in a buffer double after
       # construction and assert graceful_shutdown / check_recycle / shutdown flush
       # it (mirrors Worker#stat_buffer).
@@ -57,7 +60,7 @@ module Pgbus
                      queue_names: nil, liveness_pipe: nil, stat_buffer: :default,
                      notify_listener: nil, notify_retry_at: 0.0,
                      notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
-                     started_at_monotonic: nil)
+                     started_at_monotonic: nil, wake_pipe: nil)
         @topics = Array(topics)
         @threads = threads
         @config = config
@@ -96,6 +99,9 @@ module Pgbus
         # supervisor forked us with one. Written from stamp_loop_tick so the
         # watchdog can detect a wedged consumer even when the database is down.
         @liveness_pipe = liveness_pipe
+        # Supervisor wake pipe (read end): when present the fork owns NO
+        # LISTEN connection — wakes and hub health arrive as bytes (issue #381).
+        @wake_pipe = wake_pipe ? WakePipe.new(wake_pipe, wake_signal: @wake_signal) : nil
       end
 
       # The last wall-clock loop-tick stamp (Time.now.to_f) fed to the
@@ -110,7 +116,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         setup_subscriptions
-        start_notify_listener
+        start_wake_source
         Pgbus.logger.info do
           "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads} " \
             "notify_wakeup=#{notify_wakeup?} pid=#{::Process.pid}"
@@ -343,13 +349,35 @@ module Pgbus
       end
 
       def wake_timeout
-        # A dead listener (running? false) will never wake the loop, so treat it
-        # as absent and keep polling at the short interval until
-        # ensure_notify_listener restarts it. Only a live listener earns the
-        # long NOTIFY-mode ceiling.
-        return config.polling_interval unless notify_wakeup? && @notify_listener&.running?
+        # A dead listener (running? false) will never wake the loop, so treat
+        # it as absent and keep polling at the short interval until
+        # ensure_notify_listener restarts it. A live-but-deaf listener
+        # (delivering? false) is the same story (issue #332 — parity with
+        # Worker#wake_timeout). Under :supervisor scope the hub's H/P
+        # broadcasts (via WakePipe) carry the same signal. Only a live,
+        # delivering wake source earns the long NOTIFY-mode ceiling.
+        return config.polling_interval unless notify_wakeup? && wake_source_delivering?
 
         [config.polling_interval, NOTIFY_FALLBACK_POLL_SECONDS].max
+      end
+
+      def wake_source_delivering?
+        return @wake_pipe.delivering? if @wake_pipe
+
+        @notify_listener&.running? && @notify_listener.delivering?
+      end
+
+      # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
+      # watcher is the wake source. :fork scope: the fork-local NotifyListener.
+      def start_wake_source
+        return @wake_pipe.start if @wake_pipe
+
+        start_notify_listener
+      end
+
+      def stop_wake_source
+        @wake_pipe&.stop
+        @notify_listener&.stop
       end
 
       def start_notify_listener
@@ -374,6 +402,8 @@ module Pgbus
       # a persistent outage retries on 5s→…→300s intervals, not every tick
       # (mirrors Worker#ensure_notify_listener).
       def ensure_notify_listener
+        # Supervisor scope: self-healing is the hub's job (once per host).
+        return if @wake_pipe
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at
@@ -435,7 +465,7 @@ module Pgbus
       end
 
       def shutdown
-        @notify_listener&.stop
+        stop_wake_source
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop

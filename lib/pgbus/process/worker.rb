@@ -19,6 +19,11 @@ module Pgbus
       # between calls, and simulate start_notify_listener assigning the listener
       # from inside a stub (production mutates all three in the run loop).
       attr_accessor :notify_listener, :notify_retry_at, :notify_retry_backoff
+      # Supervisor-mediated wake source (issue #381, worker_notify_scope:
+      # :supervisor). Non-nil iff the supervisor forked us with a wake pipe;
+      # its presence switches the whole notify lifecycle from a fork-local
+      # NotifyListener to the shared hub. Readable as a test seam.
+      attr_reader :wake_pipe
 
       # The collaborators below (rate_counter, wake_signal, stat_buffer) and the
       # recycle clock (started_at_monotonic) accept injected seeds so tests can
@@ -30,7 +35,7 @@ module Pgbus
                      rate_counter: nil, wake_signal: nil, stat_buffer: :default,
                      notify_listener: nil, notify_retry_at: 0.0,
                      notify_retry_backoff: NOTIFY_RETRY_BASE_SECONDS,
-                     started_at_monotonic: nil)
+                     started_at_monotonic: nil, wake_pipe: nil)
         @queues = Array(queues)
         @initial_queues = @queues.dup.freeze
         @wildcard = @queues.include?("*")
@@ -98,6 +103,10 @@ module Pgbus
         # so the watchdog can detect a wedged worker even when the database (and
         # thus the Heartbeat's loop_tick_at) is unavailable.
         @liveness_pipe = liveness_pipe
+        # Supervisor wake pipe (read end, inherited across fork). When present
+        # the fork owns NO LISTEN connection: wakes and listener-health status
+        # arrive as bytes from the supervisor's NotifyHub.
+        @wake_pipe = wake_pipe ? WakePipe.new(wake_pipe, wake_signal: @wake_signal) : nil
       end
 
       def stats
@@ -150,7 +159,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
-        start_notify_listener
+        start_wake_source
         @lifecycle.transition_to!(:running)
         Pgbus.logger.info do
           "[Pgbus] Worker started: queues=#{queues.join(",")} threads=#{threads} " \
@@ -603,6 +612,10 @@ module Pgbus
       end
 
       def listener_delivering?
+        # Supervisor scope: the hub's H/P broadcasts (via WakePipe) stand in
+        # for the local listener's health — same fast-poll fallback rules.
+        return @wake_pipe.delivering? if @wake_pipe
+
         @notify_listener&.running? && @notify_listener.delivering?
       end
 
@@ -616,6 +629,20 @@ module Pgbus
         )
       rescue StandardError
         config.polling_interval
+      end
+
+      # :supervisor scope: the fork opens NO LISTEN connection; the WakePipe
+      # watcher is the wake source. :fork scope (or no pipe from the
+      # supervisor): the fork-local NotifyListener, exactly as before.
+      def start_wake_source
+        return @wake_pipe.start if @wake_pipe
+
+        start_notify_listener
+      end
+
+      def stop_wake_source
+        @wake_pipe&.stop
+        @notify_listener&.stop
       end
 
       def start_notify_listener
@@ -642,6 +669,9 @@ module Pgbus
       # its queue subscription reconciled (wildcard workers) and the backoff
       # reset; a still-failing restart doubles the backoff up to the cap.
       def ensure_notify_listener
+        # Supervisor scope: listener self-healing is the hub's job (it runs
+        # once per host in the supervisor's monitor tick).
+        return if @wake_pipe
         return unless notify_wakeup?
         return if @notify_listener&.running?
         return if monotonic_now < @notify_retry_at
@@ -743,7 +773,7 @@ module Pgbus
 
       def shutdown
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
-        @notify_listener&.stop
+        stop_wake_source
         @pool.shutdown
         @pool.wait_for_termination(30)
         @stat_buffer&.stop
