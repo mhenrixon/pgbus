@@ -158,7 +158,12 @@ module Pgbus
           c
         end
         conn&.socket_io&.close
-      rescue StandardError
+      rescue StandardError => e
+        # Best-effort (a lingering fd copy is benign until the parent dies),
+        # but never silent: the child keeps booting either way.
+        @logger.warn do
+          "[Pgbus::NotifyListener] inherited socket cleanup failed: #{e.class}: #{e.message}"
+        end
         nil
       end
 

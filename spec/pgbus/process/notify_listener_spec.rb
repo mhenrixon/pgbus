@@ -185,6 +185,17 @@ RSpec.describe Pgbus::Process::NotifyListener do
     it "is a no-op before start" do
       expect { listener.close_inherited_socket! }.not_to raise_error
     end
+
+    it "logs (never raises, never silences) when the socket close fails" do
+      allow(socket_io).to receive(:close).and_raise(IOError, "closed stream")
+      allow(logger).to receive(:warn)
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      expect { listener.close_inherited_socket! }.not_to raise_error
+      expect(logger).to have_received(:warn)
+    end
   end
 
   describe "#connected?" do
