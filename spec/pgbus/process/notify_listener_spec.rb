@@ -336,7 +336,7 @@ RSpec.describe Pgbus::Process::NotifyListener do
     subject(:session_listener) do
       described_class.new(
         physical_queues: %w[pgbus_default],
-        on_wake: -> {},
+        on_wake: ->(_channel) {},
         connection_options: { host: "pooler.example", dbname: "app",
                               variables: { statement_timeout: "10s", timezone: "UTC" } },
         logger: logger
