@@ -286,6 +286,35 @@ RSpec.describe Pgbus::Web::Streamer::MasterHub do
       expect(File.socket?(socket_path)).to be true
     end
 
+    it "makes a racing stop WAIT for an in-progress start, then tear everything down" do
+      # Without the lifecycle mutex, stop would return before start had built
+      # anything, and start would then finish constructing a fully live hub —
+      # listener, socket, and threads surviving a completed stop.
+      gate = Queue.new
+      gated_factory = lambda do |dispatch_queue:|
+        captured[:dispatch_queue] = dispatch_queue
+        gate.pop
+        fake_listener
+      end
+      racy = described_class.new(
+        config: config, socket_path: socket_path,
+        listener_factory: gated_factory, status_interval: 0.05, logger: logger
+      )
+
+      starter = Thread.new { racy.start }
+      sleep 0.1 # starter is now blocked inside the factory
+      stopper = Thread.new { racy.stop }
+      sleep 0.1
+      expect(stopper).to be_alive # stop is waiting on the lifecycle mutex
+
+      gate << :go
+      starter.join(5)
+      stopper.join(5)
+
+      expect(fake_listener).to have_received(:stop)
+      expect(File.exist?(socket_path)).to be false
+    end
+
     it "creates the socket with owner-only permissions" do
       # The socket carries every stream wake including ephemeral HTML and has
       # no peer authentication — the mode IS the access control.

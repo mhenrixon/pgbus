@@ -61,6 +61,14 @@ module Pgbus
           @logger = logger
           @listener_factory = listener_factory || default_listener_factory
           @dispatch_queue = Queue.new
+          # Serializes the FULL start and stop sequences: a stop racing an
+          # in-progress start (blocked in the listener factory's PG connect)
+          # must WAIT for it and then tear everything down — otherwise stop
+          # returns having cleaned nothing and start finishes building a live
+          # hub afterwards. Loop threads never take this mutex (they read
+          # @running via @table_mutex), so holding it across the blocking
+          # startup cannot deadlock them.
+          @lifecycle_mutex = Mutex.new
           @table_mutex = Mutex.new
           @workers = {}
           # Plain Hash, entries created ONLY at subscribe time — a default
@@ -89,6 +97,16 @@ module Pgbus
         # the exact resource this hub conserves — is stopped before the error
         # propagates; MasterHubBoot's rescue never sees a leaked connection.
         def start
+          @lifecycle_mutex.synchronize { locked_start }
+        end
+
+        def stop
+          @lifecycle_mutex.synchronize { locked_stop }
+        end
+
+        private
+
+        def locked_start
           @table_mutex.synchronize { @running = true }
           @listener = @listener_factory.call(dispatch_queue: @dispatch_queue)
           FileUtils.rm_f(@socket_path)
@@ -118,7 +136,7 @@ module Pgbus
           raise
         end
 
-        def stop
+        def locked_stop
           @table_mutex.synchronize do
             return self unless @running
 
@@ -134,8 +152,6 @@ module Pgbus
           FileUtils.rm_f(@socket_path)
           self
         end
-
-        private
 
         def default_listener_factory
           lambda do |dispatch_queue:|
