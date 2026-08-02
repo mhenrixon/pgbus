@@ -42,9 +42,12 @@ module Pgbus
           [bytes.bytesize].pack("N") + bytes
         end
 
-        # Returns the decoded Hash, or nil on EOF (clean close or peer death
-        # mid-frame). Raises ProtocolError on an oversized announcement or
-        # malformed JSON.
+        # Returns the decoded Hash, or nil on EOF — clean close, peer death
+        # mid-frame, OR a connection reset: an abrupt close can surface as
+        # ECONNRESET instead of orderly EOF depending on unread data and
+        # platform (Ruby 4.0 reports it deterministically where 3.x saw EOF),
+        # and both mean the same thing here: the peer is gone. Raises
+        # ProtocolError on an oversized announcement or malformed JSON.
         def read_frame(io)
           header = read_exactly(io, HEADER_BYTES)
           return nil unless header
@@ -58,6 +61,8 @@ module Pgbus
           JSON.parse(body.force_encoding(Encoding::UTF_8))
         rescue JSON::ParserError => e
           raise ProtocolError, "malformed frame: #{e.message}"
+        rescue Errno::ECONNRESET
+          nil
         end
 
         # Blocking read of exactly +count+ bytes; nil on EOF (including EOF

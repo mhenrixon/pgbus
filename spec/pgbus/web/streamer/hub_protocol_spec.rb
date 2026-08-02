@@ -60,6 +60,14 @@ RSpec.describe Pgbus::Web::Streamer::HubProtocol do
 
       expect(described_class.read_frame(reader)).to be_nil
     end
+
+    it "reports a connection reset as EOF (abrupt peer close, Ruby-4.0-visible)" do
+      resetting_io = Class.new do
+        def read(_count) = raise Errno::ECONNRESET
+      end.new
+
+      expect(described_class.read_frame(resetting_io)).to be_nil
+    end
   end
 
   describe "guards" do
