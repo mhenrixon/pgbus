@@ -26,7 +26,7 @@ RSpec.describe Pgbus::DedicatedConnection do
 
   describe ".connect" do
     context "with a String conninfo/URL" do
-      it "passes it straight to PG.connect" do
+      it "passes it to PG.connect with the census application name appended" do
         captured = nil
         allow(PG).to receive(:connect) do |arg|
           captured = arg
@@ -35,8 +35,62 @@ RSpec.describe Pgbus::DedicatedConnection do
 
         conn = described_class.connect("postgres://user@localhost:5432/app")
 
-        expect(captured).to eq("postgres://user@localhost:5432/app")
+        expect(captured).to eq("postgres://user@localhost:5432/app?fallback_application_name=pgbus-listen")
         expect(conn).to be(fake_conn)
+      end
+    end
+
+    # Every dedicated LISTEN connection is stamped with a stable
+    # application_name so operators (and the #381 connection-budget work) can
+    # count them in pg_stat_activity. fallback_application_name is used so an
+    # explicit application_name in the URL/hash — or PGAPPNAME — always wins.
+    context "when stamping the census application_name (issue #381)" do
+      let(:captured) { {} }
+
+      before do
+        allow(PG).to receive(:connect) do |*args, **kwargs|
+          captured[:args] = args
+          captured[:kwargs] = kwargs
+          fake_conn
+        end
+      end
+
+      it "appends with & when the URL already has a query string" do
+        described_class.connect("postgres://u@h/db?sslmode=require")
+
+        expect(captured[:args].first)
+          .to eq("postgres://u@h/db?sslmode=require&fallback_application_name=pgbus-listen")
+      end
+
+      it "appends a space-separated keyword to a key=value conninfo string" do
+        described_class.connect("host=db.example dbname=app")
+
+        expect(captured[:args].first).to eq("host=db.example dbname=app fallback_application_name=pgbus-listen")
+      end
+
+      it "leaves a String untouched when it already sets an application_name" do
+        described_class.connect("postgres://u@h/db?application_name=custom")
+
+        expect(captured[:args].first).to eq("postgres://u@h/db?application_name=custom")
+      end
+
+      it "merges fallback_application_name into a Hash" do
+        described_class.connect(host: "db.example", dbname: "app")
+
+        expect(captured[:kwargs]).to eq(host: "db.example", dbname: "app",
+                                        fallback_application_name: "pgbus-listen")
+      end
+
+      it "does not override an explicit application_name in a Hash" do
+        described_class.connect(host: "db.example", dbname: "app", application_name: "custom")
+
+        expect(captured[:kwargs]).to eq(host: "db.example", dbname: "app", application_name: "custom")
+      end
+
+      it "does not override an explicit fallback_application_name in a Hash" do
+        described_class.connect(host: "db.example", dbname: "app", fallback_application_name: "mine")
+
+        expect(captured[:kwargs]).to eq(host: "db.example", dbname: "app", fallback_application_name: "mine")
       end
     end
 
@@ -50,7 +104,8 @@ RSpec.describe Pgbus::DedicatedConnection do
 
         conn = described_class.connect(host: "db.example", port: 5432, dbname: "app", user: "app")
 
-        expect(captured).to eq(host: "db.example", port: 5432, dbname: "app", user: "app")
+        expect(captured).to eq(host: "db.example", port: 5432, dbname: "app", user: "app",
+                               fallback_application_name: "pgbus-listen")
         expect(conn.executed).to be_empty
       end
     end
@@ -70,7 +125,8 @@ RSpec.describe Pgbus::DedicatedConnection do
         described_class.connect(host: "db.example", dbname: "app",
                                 variables: { statement_timeout: "10s" })
 
-        expect(captured).to eq(host: "db.example", dbname: "app")
+        expect(captured).to eq(host: "db.example", dbname: "app",
+                               fallback_application_name: "pgbus-listen")
       end
 
       it "applies each GUC via post-connect SET, in order" do
@@ -151,7 +207,7 @@ RSpec.describe Pgbus::DedicatedConnection do
 
         described_class.connect(dbname: "app", variables: nil)
 
-        expect(captured).to eq(dbname: "app")
+        expect(captured).to eq(dbname: "app", fallback_application_name: "pgbus-listen")
         expect(fake_conn.executed).to be_empty
       end
     end
