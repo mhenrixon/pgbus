@@ -88,10 +88,19 @@ module Pgbus
           @table_mutex.synchronize { @running = true }
           @listener = @listener_factory.call(dispatch_queue: @dispatch_queue)
           FileUtils.rm_f(@socket_path)
-          @server = UNIXServer.new(@socket_path)
           # Owner-only: the socket carries every stream wake including
           # ephemeral HTML payloads, and there is no peer authentication —
-          # the filesystem mode IS the access control.
+          # the filesystem mode IS the access control. The umask covers the
+          # bind itself so there is no window in which the socket exists with
+          # wider permissions; the chmod stays as the second guarantee.
+          # File.umask is process-wide, but this runs once at hub start in
+          # the Puma master and is restored in the ensure.
+          old_umask = File.umask(0o177)
+          begin
+            @server = UNIXServer.new(@socket_path)
+          ensure
+            File.umask(old_umask)
+          end
           File.chmod(0o600, @socket_path)
           @accept_thread = Thread.new { accept_loop }
           @fanout_thread = Thread.new { fanout_loop }
