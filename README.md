@@ -1876,7 +1876,7 @@ A single preflight command that answers "is this environment healthy enough to r
 | Broadcast queue | — | Turbo broadcasts share the default queue in production, or `streams_broadcast_queue` is set but no worker capsule drains it |
 | Primary affinity | — | Job connection is on a read-only replica (`pg_is_in_recovery`) — a read/write-splitting pooler may be stalling jobs |
 | Dedicated connections | Streamer LISTEN and/or worker notify dedicated path cannot connect | — |
-| Connection budget | — (informational: prints how many direct LISTEN connections the current config pins — 1 per host under `worker_notify_scope: :supervisor`, one per fork under `:fork`, plus 1 per web process when streams are enabled) | — |
+| Connection budget | — (informational: prints how many direct LISTEN connections the current config pins — 1 per host under `worker_notify_scope: :supervisor`, one per fork under `:fork`; streams add 1 per web host under `streams_listen_scope: :master` or 1 per web process under `:process`) | — |
 
 ```bash
 pgbus doctor       # prints the report; exit 1 unless every check passed
