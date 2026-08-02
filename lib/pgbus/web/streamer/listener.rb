@@ -41,8 +41,11 @@ module Pgbus
           end
         end
 
-        CHANNEL_PREFIX = "pgmq.q_"
-        CHANNEL_SUFFIX = ".INSERT"
+        # Single-sourced from NotifyListener, which owns the pgmq channel
+        # format (issue #381 review — the two copies had already drifted apart
+        # once in spirit if not in bytes).
+        CHANNEL_PREFIX = Pgbus::Process::NotifyListener::CHANNEL_PREFIX
+        CHANNEL_SUFFIX = Pgbus::Process::NotifyListener::CHANNEL_SUFFIX
 
         RECONNECT_BACKOFF_SECONDS = 0.5
 

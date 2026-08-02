@@ -33,6 +33,12 @@ module Pgbus
           @failed_over = false
         end
 
+        # Interface parity with Listener for Instance#start: the hub client
+        # connected at construction and the fallback starts itself on swap.
+        def start
+          self
+        end
+
         def ensure_listening(queue)
           @mutex.synchronize { @subscriptions.add(queue) }
           current_impl.ensure_listening(queue)
