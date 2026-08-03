@@ -1117,14 +1117,18 @@ For the **HTTP** transport, point the client at the mounted URL with a streamabl
 
 ### Health endpoints (liveness / readiness)
 
-For orchestrators like Kubernetes, Pgbus exposes two HTTP probes: `/livez` (is the serving process up?) and `/readyz` (are queues draining, or is a worker silently wedged?). `/readyz` runs the same `OK` / `DEGRADED` / `STALLED` verdict as the MCP `pgbus_health` tool — `STALLED` (visible backlog while workers heart-beat but don't claim) fails readiness.
+For orchestrators like Kubernetes, Pgbus exposes two HTTP probes: `/livez` (is the serving process up?) and `/readyz`. Readiness means different things in the two places the probes are served:
+
+- **Mounted in Rails** (`Pgbus::Web::HealthApp`): `/readyz` runs the cluster-wide `OK` / `DEGRADED` / `STALLED` verdict, same as the MCP `pgbus_health` tool — `STALLED` (visible backlog while workers heart-beat but don't claim) fails readiness.
+- **Standalone from the supervisor** (`health_port`): `/readyz` is **container-local** — did *this* supervisor finish booting, and are all the children *it* forked alive? That is the signal a rolling deploy's health gate needs; the cluster verdict would let a brand-new container pass on the strength of the *old* container's workers.
 
 | Path | Method | 200 | 503 | Touches DB |
 |---|---|---|---|---|
 | `/livez` | GET | always (`ok`) | never | no |
-| `/readyz` | GET | verdict `OK` or `DEGRADED` | verdict `STALLED`, or DB unreachable (`{"status":"ERROR"}`) | yes |
+| `/readyz` (mounted) | GET | verdict `OK` or `DEGRADED` | verdict `STALLED`, or DB unreachable (`{"status":"ERROR"}`) | yes |
+| `/readyz` (supervisor) | GET | `OK` — booted, all children live | `BOOTING`, `DEGRADED` (child down), `DRAINING` (stopping) | no |
 
-Unknown paths return `404`; non-`GET` methods return `405`. The `/readyz` body is the verdict JSON, so a probe failure is self-describing in the pod's event log.
+Unknown paths return `404`; non-`GET` methods return `405`. The `/readyz` body is JSON, so a probe failure is self-describing in the pod's event log.
 
 #### Mount in your Rails app
 
@@ -1164,6 +1168,61 @@ livenessProbe:
 readinessProbe:
   httpGet: { path: /readyz, port: 9394 }
 ```
+
+The supervisor's `/readyz` answers from its own state, never the database:
+
+```json
+{ "status": "OK", "expected": 3, "live": 3 }
+```
+
+- `BOOTING` (503) until the connection is verified, queues are bootstrapped, and every configured child has been forked. `expected` is stamped at that instant.
+- `OK` (200) while all expected children are in the fork table. A clean worker recycle never dips the count — the snapshot refreshes after reap-and-restart each monitor pass.
+- `DEGRADED` (503) when a child died and is waiting out crash-restart backoff. During a rolling deploy this is the desired failure mode: a crash-looping replacement never goes ready, so the old container keeps running.
+- `DRAINING` (503) the moment a stop signal arrives.
+
+#### `pgbus-health`: container HEALTHCHECK probe
+
+`pgbus-health` ships with the gem: a dependency-free probe (plain Ruby + stdlib sockets — no Bundler, no Rails, nothing else loaded) that GETs `127.0.0.1:<port>/readyz` and exits `0` on 200, `1` on anything else, `2` on usage errors. Cheap enough for a 1–5s `HEALTHCHECK` interval, and it works in images without curl:
+
+```bash
+pgbus-health --port 9394              # or PGBUS_HEALTH_PORT=9394 pgbus-health
+pgbus-health --port 9394 --path /livez --timeout 2
+```
+
+### Rolling restarts (Kamal, docker)
+
+Kamal distributions with per-role health checks (for example the [`dash` branch](https://github.com/mhenrixon/kamal)) can rolling-restart a non-proxied job role: start the new container, poll its docker `HEALTHCHECK` until healthy, and only then `docker stop` the old one. Wire the pgbus container into that gate:
+
+```yaml
+# config/deploy.yml
+servers:
+  job:
+    hosts: [...]
+    cmd: bin/pgbus start
+    healthcheck:
+      cmd: bin/pgbus-health --port 9394
+      interval: 5s
+      start_period: 30s     # cover Rails boot + queue bootstrap
+    stop_timeout: 45        # must exceed pgbus shutdown_timeout (see below)
+env:
+  clear:
+    PGBUS_HEALTH_PORT: 9394
+```
+
+(`bundle binstubs pgbus` generates `bin/pgbus-health`; adjust the path if your image invokes gem executables differently.)
+
+**The shutdown timeline.** On `docker stop`, SIGTERM reaches the supervisor and readiness flips to `DRAINING`; children stop claiming work and drain in-flight jobs for up to `drain_timeout` (default 30s); the supervisor waits `shutdown_timeout` (default `drain_timeout + 5`) before SIGKILLing stragglers. Align the three knobs outside-in:
+
+```
+orchestrator stop_timeout  >  pgbus shutdown_timeout  >  pgbus drain_timeout
+        45s                        35s (derived)                30s
+```
+
+If the orchestrator's stop grace period is *shorter* than `shutdown_timeout`, docker SIGKILLs the whole tree mid-drain and the graceful path never gets to finish. Raising `drain_timeout` raises the derived `shutdown_timeout` automatically; raise `stop_timeout` to match.
+
+**The overlap window is safe by construction.** Between "new container healthy" and "old container stopped", two supervisors run against the same database. Nothing double-fires: queue claims use `FOR UPDATE SKIP LOCKED`, `single_active_consumer` queues arbitrate via session-level advisory locks (released the instant a killed process's connection dies), two live recurring schedulers dedup on the `(task_key, run_at)` unique record, and dispatcher maintenance is idempotent. "One scheduler per deployment" is a steady-state rule; a deploy window may briefly violate it without consequence.
+
+**What a hard kill still costs.** Jobs killed past the drain window are redelivered after their visibility timeout (at-least-once holds) — but PGMQ's `read_ct` increments exactly like a logical failure, so a long-running job that straddles *repeated* deploy kills can be pushed to the DLQ without its code ever raising. `zombie_detection` logs exactly this pattern (`read_ct > 1` with no recorded failure). Keep jobs shorter than `drain_timeout`, or raise it (and `stop_timeout`) for queues that can't be. For `idempotent!` event handlers there is a separate crash-window caveat tracked in [#385](https://github.com/mhenrixon/pgbus/issues/385).
 
 ### Boot diagnostics banner
 
@@ -2111,6 +2170,7 @@ Curated headline options for the README. The full operator reference (with types
 | `zombie_detection` | `true` | Detect and reclaim work from crashed workers |
 | `read_timeout` | `30` | Seconds before a single PGMQ read is bounded (libpq `statement_timeout` + `tcp_user_timeout` on a dedicated connection; nil disables) |
 | `drain_timeout` | `30` | Seconds to wait for in-flight jobs during graceful shutdown before abandoning them |
+| `shutdown_timeout` | `drain_timeout + 5` | Seconds the supervisor waits for children after TERM before SIGKILL; an orchestrator's stop grace period must exceed it |
 | `stall_threshold` | `300` | Seconds without progress before a worker is considered stalled |
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |

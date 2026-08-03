@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Container HEALTHCHECK probe (issue #386). Deliberately loads ONLY the
+# probe file — never the pgbus gem, Bundler, or Rails — because a docker
+# HEALTHCHECK runs this every few seconds.
+require_relative "../lib/pgbus/health_probe"
+
+exit Pgbus::HealthProbe.run(ARGV)

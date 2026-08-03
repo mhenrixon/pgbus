@@ -35,6 +35,16 @@ module Pgbus
     # wait, so recycling/deploy never wedges on a permanently-stuck job.
     attr_accessor :stall_threshold, :read_timeout, :drain_timeout
 
+    # shutdown_timeout bounds how long the supervisor waits for its children
+    # after forwarding TERM before escalating to SIGKILL. nil (default) derives
+    # drain_timeout + SHUTDOWN_TIMEOUT_MARGIN, so raising drain_timeout keeps
+    # the supervisor's deadline above the workers' drain window. An orchestrator
+    # stop grace period (Kamal stop_timeout, Kubernetes terminationGracePeriod)
+    # should exceed this value, or docker SIGKILLs the whole tree first.
+    attr_writer :shutdown_timeout
+
+    SHUTDOWN_TIMEOUT_MARGIN = 5
+
     # Dispatcher settings
     attr_accessor :dispatch_interval
 
@@ -238,6 +248,7 @@ module Pgbus
       @stall_threshold = 90
       @read_timeout = 30
       @drain_timeout = 30
+      @shutdown_timeout = nil
 
       @dispatch_interval = 1.0
 
@@ -712,6 +723,8 @@ module Pgbus
       end
       raise Pgbus::ConfigurationError, "drain_timeout must be > 0" unless drain_timeout.is_a?(Numeric) && drain_timeout.positive?
 
+      validate_shutdown_timeout!
+
       unless stats_flush_size.is_a?(Integer) && stats_flush_size.positive?
         raise Pgbus::ConfigurationError, "stats_flush_size must be a positive integer"
       end
@@ -763,6 +776,25 @@ module Pgbus
       validate_metrics_backend!
 
       self
+    end
+
+    # An explicit shutdown_timeout must be a positive number; nil keeps the
+    # derived drain_timeout + margin default. A value below drain_timeout is
+    # legal but self-defeating (the supervisor SIGKILLs workers mid-drain), so
+    # it warns instead of raising.
+    def validate_shutdown_timeout!
+      explicit = @shutdown_timeout
+      unless explicit.nil? || (explicit.is_a?(Numeric) && explicit.positive?)
+        raise Pgbus::ConfigurationError,
+              "shutdown_timeout must be a positive number or nil (defaults to drain_timeout + #{SHUTDOWN_TIMEOUT_MARGIN})"
+      end
+
+      return unless explicit && explicit < drain_timeout
+
+      Pgbus.logger.warn do
+        "[Pgbus] shutdown_timeout (#{explicit}s) is below drain_timeout (#{drain_timeout}s) — " \
+          "the supervisor will SIGKILL workers before their drain window ends"
+      end
     end
 
     # Pre-1.0 surface-freeze: reject malformed values for core job-path keys at
@@ -1236,6 +1268,12 @@ module Pgbus
     # execution, one for polling, one for headroom. Fibers share connections
     # because only one runs at a time per reactor thread.
     ASYNC_POOL_CONNECTIONS = 3
+
+    # Resolved supervisor SIGKILL deadline: the explicit value when set,
+    # otherwise drain_timeout + SHUTDOWN_TIMEOUT_MARGIN (see attr_writer docs).
+    def shutdown_timeout
+      @shutdown_timeout || (drain_timeout + SHUTDOWN_TIMEOUT_MARGIN)
+    end
 
     def resolved_pool_size
       return pool_size if pool_size

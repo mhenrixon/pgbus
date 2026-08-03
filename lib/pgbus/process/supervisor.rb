@@ -44,6 +44,15 @@ module Pgbus
         @pending_restarts = pending_restarts
         @crash_counts = Hash.new(0)
         @notify_hub = notify_hub
+        @readiness = Concurrent::AtomicReference.new(
+          ReadinessSnapshot.new(booted: false, shutting_down: shutting_down, expected: 0, live: forks.size)
+        )
+      end
+
+      # The current container-local readiness state. Safe to call from any
+      # thread (the health server's accept thread reads it per probe).
+      def readiness_snapshot
+        @readiness.get
       end
 
       def shutting_down?
@@ -97,6 +106,7 @@ module Pgbus
         start_notify_hub
 
         boot_processes
+        mark_booted
         monitor_loop
       ensure
         shutdown
@@ -105,16 +115,39 @@ module Pgbus
       def graceful_shutdown
         Pgbus.logger.info { "[Pgbus] Supervisor: graceful shutdown requested" }
         @shutting_down = true
+        refresh_readiness
         signal_children("TERM")
       end
 
       def immediate_shutdown
         Pgbus.logger.warn { "[Pgbus] Supervisor: immediate shutdown requested" }
         @shutting_down = true
+        refresh_readiness
         signal_children("QUIT")
       end
 
       private
+
+      # Boot is complete: connection verified, queues bootstrapped, every
+      # configured child forked. The fork-table size at this instant becomes
+      # the readiness baseline — roles that legitimately declined to boot
+      # (scheduler with no recurring tasks) are simply absent from it.
+      def mark_booted
+        @booted = true
+        @expected_children = @forks.size
+        refresh_readiness
+      end
+
+      # Publish a fresh snapshot; the swapped-in Data is immutable, so the
+      # health server's accept thread always reads a consistent state.
+      def refresh_readiness
+        @readiness.set(
+          ReadinessSnapshot.new(
+            booted: !!@booted, shutting_down: @shutting_down,
+            expected: @expected_children || 0, live: @forks.size
+          )
+        )
+      end
 
       # Log a single boot diagnostics banner: the settings that actually
       # determine whether this deployment works. One consecutive block of
@@ -537,6 +570,9 @@ module Pgbus
             # refresh, and fork status broadcast (issue #381).
             @notify_hub&.tick
           end
+          # After reap + restarts so a clean recycle (reaped and re-forked in
+          # the same pass) never dips the published live count (issue #386).
+          refresh_readiness
           interruptible_sleep(FORK_WAIT)
         end
       end
@@ -821,7 +857,12 @@ module Pgbus
       def start_health_server
         return unless config.health_port
 
-        @health_server = Pgbus::Web::HealthServer.new(port: config.health_port, bind: config.health_bind)
+        # The standalone server answers /readyz from THIS supervisor's
+        # container-local snapshot — a rolling deploy's health gate must
+        # measure the new container, not the fleet-wide verdict a sibling
+        # container's workers can satisfy (issue #386).
+        app = Pgbus::Web::HealthApp.new(local_readiness: -> { readiness_snapshot })
+        @health_server = Pgbus::Web::HealthServer.new(port: config.health_port, bind: config.health_bind, app: app)
         @health_server.start
       end
 
@@ -876,8 +917,11 @@ module Pgbus
       end
 
       def shutdown
-        # Wait for all children with timeout
-        deadline = Time.now + 30
+        # Wait for children to drain and exit, bounded by config.shutdown_timeout
+        # (default drain_timeout + 5) so raising the drain window can never
+        # mean SIGKILLing workers mid-drain. An orchestrator's stop grace
+        # period should exceed this value (issue #386).
+        deadline = Time.now + config.shutdown_timeout
 
         until @forks.empty? || Time.now > deadline
           reap_children

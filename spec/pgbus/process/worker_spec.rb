@@ -1548,6 +1548,16 @@ RSpec.describe Pgbus::Process::Worker do
         worker.notify_listener = nil
         expect { worker.send(:shutdown) }.not_to raise_error
       end
+
+      it "bounds the residual pool wait with POOL_TERMINATION_WAIT, not a second drain window (issue #386)" do
+        # The drain loop already waited up to config.drain_timeout for in-flight
+        # jobs; a job still running here has proven it won't finish, and a long
+        # residual wait only pushes the worker past the supervisor's
+        # shutdown_timeout deadline.
+        worker.send(:shutdown)
+
+        expect(pool).to have_received(:wait_for_termination).with(described_class::POOL_TERMINATION_WAIT)
+      end
     end
   end
 

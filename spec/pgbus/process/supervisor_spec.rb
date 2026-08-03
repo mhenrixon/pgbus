@@ -873,8 +873,24 @@ RSpec.describe Pgbus::Process::Supervisor do
 
       supervisor.run
 
-      expect(Pgbus::Web::HealthServer).to have_received(:new).with(port: 9394, bind: "0.0.0.0")
+      expect(Pgbus::Web::HealthServer).to have_received(:new)
+        .with(port: 9394, bind: "0.0.0.0", app: an_instance_of(Pgbus::Web::HealthApp))
       expect(health_server).to have_received(:start)
+    end
+
+    it "wires /readyz to the supervisor's container-local readiness (issue #386)" do
+      config.health_port = 9394
+      captured_app = nil
+      allow(Pgbus::Web::HealthServer).to receive(:new) do |**kwargs|
+        captured_app = kwargs[:app]
+        health_server
+      end
+
+      supervisor.run
+      status, _headers, body = captured_app.call("REQUEST_METHOD" => "GET", "PATH_INFO" => "/readyz")
+
+      expect(status).to eq(200)
+      expect(JSON.parse(body.join)).to include("status" => "OK", "expected" => 0, "live" => 0)
     end
 
     it "starts the health server after the heartbeat" do
@@ -894,6 +910,93 @@ RSpec.describe Pgbus::Process::Supervisor do
       supervisor.run
 
       expect(health_server).to have_received(:stop)
+    end
+  end
+
+  describe "readiness snapshot (issue #386)" do
+    it "starts BOOTING and not ready" do
+      snapshot = described_class.new.readiness_snapshot
+
+      expect(snapshot.ready?).to be false
+      expect(snapshot.status).to eq("BOOTING")
+    end
+
+    it "becomes ready once boot completes with all forked children counted" do
+      supervisor = described_class.new(forks: { 101 => { type: :worker }, 102 => { type: :dispatcher } })
+
+      supervisor.send(:mark_booted)
+      snapshot = supervisor.readiness_snapshot
+
+      expect(snapshot.ready?).to be true
+      expect(snapshot.expected).to eq(2)
+      expect(snapshot.live).to eq(2)
+    end
+
+    it "degrades when a child dies and has not been restarted" do
+      supervisor = described_class.new(forks: { 101 => { type: :worker }, 102 => { type: :worker } })
+      supervisor.send(:mark_booted)
+
+      supervisor.forks.delete(102)
+      supervisor.send(:refresh_readiness)
+      snapshot = supervisor.readiness_snapshot
+
+      expect(snapshot.ready?).to be false
+      expect(snapshot.status).to eq("DEGRADED")
+      expect(snapshot.live).to eq(1)
+    end
+
+    it "flips to DRAINING on graceful_shutdown" do
+      supervisor = described_class.new(forks: { 101 => { type: :worker } })
+      supervisor.send(:mark_booted)
+      allow(Process).to receive(:kill)
+
+      supervisor.graceful_shutdown
+
+      expect(supervisor.readiness_snapshot.status).to eq("DRAINING")
+      expect(supervisor.readiness_snapshot.ready?).to be false
+    end
+
+    it "flips to DRAINING on immediate_shutdown" do
+      supervisor = described_class.new(forks: { 101 => { type: :worker } })
+      supervisor.send(:mark_booted)
+      allow(Process).to receive(:kill)
+
+      supervisor.immediate_shutdown
+
+      expect(supervisor.readiness_snapshot.status).to eq("DRAINING")
+    end
+
+    it "is marked booted by #run after boot_processes, before monitor_loop runs" do
+      supervisor = described_class.new
+      mock_client = build_mock_client
+      allow(Pgbus).to receive(:client).and_return(mock_client)
+      allow(mock_client).to receive_messages(
+        verify_connection!: true, ensure_all_queues: nil, pgmq_schema_version: "1.5.0"
+      )
+      allow(supervisor).to receive_messages(setup_signals: nil, log_boot_banner: nil, boot_processes: nil)
+      seen = nil
+      allow(supervisor).to receive(:monitor_loop) { seen = supervisor.readiness_snapshot }
+
+      supervisor.run
+
+      expect(seen.booted).to be true
+    end
+  end
+
+  describe "shutdown deadline (issue #386)" do
+    it "waits config.shutdown_timeout for children before escalating to SIGKILL" do
+      config = Pgbus::Configuration.new
+      config.shutdown_timeout = 42
+      supervisor = described_class.new(config: config, forks: { 5001 => { type: :worker } })
+      allow(supervisor).to receive(:interruptible_sleep)
+      allow(Process).to receive(:waitpid2).and_return(nil)
+      allow(Process).to receive(:kill)
+      t0 = Time.now
+      allow(Time).to receive(:now).and_return(t0, t0 + 41, t0 + 43)
+
+      supervisor.send(:shutdown)
+
+      expect(Process).to have_received(:kill).with("KILL", 5001)
     end
   end
 
