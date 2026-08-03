@@ -77,6 +77,7 @@ module Pgbus
         add_outbox: "pgbus:add_outbox",
         add_recurring: "pgbus:add_recurring",
         add_failed_events_index: "pgbus:add_failed_events_index",
+        add_processed_event_completion: "pgbus:add_processed_event_completion",
         tune_autovacuum: "pgbus:tune_autovacuum",
         tune_fillfactor: "pgbus:tune_fillfactor"
       }.freeze
@@ -95,6 +96,7 @@ module Pgbus
         add_outbox: "outbox entries table (transactional outbox)",
         add_recurring: "recurring tasks + executions tables",
         add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)",
+        add_processed_event_completion: "completed_at on pgbus_processed_events (two-phase idempotency claim)",
         tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables",
         tune_fillfactor: "fillfactor=70 on PGMQ queue tables (reduces page density during update churn)"
       }.freeze
@@ -120,6 +122,7 @@ module Pgbus
           *outbox_migrations,
           *recurring_migrations,
           *failed_events_index_migrations,
+          *processed_event_completion_migrations,
           *autovacuum_migrations,
           *fillfactor_migrations
         ]
@@ -208,6 +211,16 @@ module Pgbus
         return [] if index_exists?("pgbus_failed_events", "idx_pgbus_failed_events_queue_msg")
 
         [:add_failed_events_index]
+      end
+
+      # completed_at backs the two-phase idempotency claim (issue #385).
+      # Without it, idempotent handlers fall back to single-phase claims and
+      # a crash mid-handler silently drops the execution on redelivery.
+      def processed_event_completion_migrations
+        return [] unless table_exists?("pgbus_processed_events")
+        return [] if column_names("pgbus_processed_events").include?("completed_at")
+
+        [:add_processed_event_completion]
       end
 
       # Autovacuum tuning: check if any PGMQ queue table already has

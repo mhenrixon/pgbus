@@ -30,6 +30,9 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
       t.string :event_id, null: false
       t.string :handler_class, null: false
       t.datetime :processed_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
+      # Two-phase idempotency claim: NULL = claimed but not finished (a crash
+      # mid-handler re-runs on redelivery); set = completed, dedup applies.
+      t.datetime :completed_at
     end
 
     add_index :pgbus_processed_events, [:event_id, :handler_class],

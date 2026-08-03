@@ -45,6 +45,7 @@ module Pgbus
         Instrumentation.instrument("pgbus.event_processed", instrument_payload) do
           handle(event)
         end
+        complete_claim!(event.event_id) if self.class.idempotent?
         :handled
       rescue StandardError => e
         instrument(
@@ -100,13 +101,25 @@ module Pgbus
         ActiveSupport::Notifications.instrument(event_name, payload)
       end
 
-      # Atomically claim idempotency: INSERT ... ON CONFLICT DO NOTHING.
-      # Returns true if this handler claimed the event (row was inserted),
-      # false if another handler already processed it (conflict, no insert).
+      # Two-phase idempotency claim (issue #385). Phase 1: atomically claim
+      # via INSERT ... ON CONFLICT DO NOTHING with completed_at NULL — a
+      # *pending* claim. Returns true when this delivery should run handle:
       #
-      # Uses an in-memory dedup cache to skip the DB for recently-seen events.
+      #   - insert won → fresh claim
+      #   - insert lost, completed_at NULL → a prior attempt claimed but was
+      #     killed before finishing (SIGKILL mid-handler); re-run so the crash
+      #     doesn't silently drop the execution. Safe: PGMQ's VT means the
+      #     prior holder is dead or wedged past its timeout — the same
+      #     at-least-once window every non-idempotent handler has.
+      #
+      # Returns false (skip) only for a *completed* execution. Phase 2 is
+      # complete_claim! after handle returns; only completed executions enter
+      # the in-memory dedup cache.
+      #
+      # Legacy fallback: without the completed_at column (upgraded gem,
+      # not-yet-migrated table) this degrades to the old single-phase claim.
       def claim_idempotency?(event_id)
-        cache_key = "#{event_id}:#{self.class.name}"
+        cache_key = dedup_key(event_id)
         return false if self.class.dedup_cache.seen?(cache_key)
 
         result = ProcessedEvent.insert(
@@ -114,9 +127,38 @@ module Pgbus
           unique_by: %i[event_id handler_class]
         )
 
-        claimed = result.rows.any?
+        unless ProcessedEvent.completion_column?
+          self.class.dedup_cache.mark!(cache_key)
+          return result.rows.any?
+        end
+
+        return true if result.rows.any?
+
+        completed_at = ProcessedEvent
+                       .where(event_id: event_id, handler_class: self.class.name)
+                       .pick(:completed_at)
+        return true if completed_at.nil? # pending claim (or purged row) → re-run
+
         self.class.dedup_cache.mark!(cache_key)
-        claimed
+        false
+      end
+
+      # Phase 2: stamp the claim completed and only then admit it to the
+      # dedup cache. Skipped on legacy schemas (single-phase claims are
+      # already cached at claim time). If this write fails, process!'s rescue
+      # re-raises, the consumer leaves the message for VT redelivery, and the
+      # still-pending claim re-runs — at-least-once, never a silent drop.
+      def complete_claim!(event_id)
+        return unless ProcessedEvent.completion_column?
+
+        ProcessedEvent
+          .where(event_id: event_id, handler_class: self.class.name)
+          .update_all(completed_at: Time.now.utc)
+        self.class.dedup_cache.mark!(dedup_key(event_id))
+      end
+
+      def dedup_key(event_id)
+        "#{event_id}:#{self.class.name}"
       end
     end
   end

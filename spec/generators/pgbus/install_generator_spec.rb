@@ -32,6 +32,11 @@ RSpec.describe Pgbus::Generators::InstallGenerator do
       content = File.read(template_path)
       expect(content).to include("pgmq_schema_mode")
     end
+
+    it "creates pgbus_processed_events with the two-phase completed_at column" do
+      content = File.read(template_path)
+      expect(content).to include("t.datetime :completed_at")
+    end
   end
 
   describe "initializer template" do

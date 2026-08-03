@@ -129,33 +129,196 @@ RSpec.describe Pgbus::EventBus::Handler do
       Class.new(described_class) do
         idempotent!
 
+        attr_reader :handled_events
+
         def handle(event)
-          # no-op
+          (@handled_events ||= []) << event
         end
       end
     end
     let(:handler) { handler_class.new }
     let(:insert_result) { double("InsertAll::Result", rows: [[1]]) }
     let(:empty_result) { double("InsertAll::Result", rows: []) }
+    let(:relation) { double("ActiveRecord::Relation", update_all: 1) }
+    let(:cache_key) { "#{event_id}:#{handler_class.name}" }
 
-    it "returns :handled when event was atomically claimed" do
-      allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
-
-      result = handler.process(message)
-
-      expect(result).to eq(:handled)
-      expect(Pgbus::ProcessedEvent).to have_received(:insert).with(
-        hash_including(event_id: event_id, handler_class: handler_class.name),
-        unique_by: %i[event_id handler_class]
-      )
+    before do
+      allow(Pgbus::ProcessedEvent).to receive(:completion_column?).and_return(true)
+      allow(Pgbus::ProcessedEvent).to receive(:where)
+        .with(event_id: event_id, handler_class: handler_class.name)
+        .and_return(relation)
     end
 
-    it "returns :skipped when event was already claimed by another handler" do
-      allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(empty_result)
+    context "with a fresh claim (insert wins)" do
+      before { allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result) }
 
-      result = handler.process(message)
+      it "runs handle and returns :handled" do
+        result = handler.process(message)
 
-      expect(result).to eq(:skipped)
+        expect(result).to eq(:handled)
+        expect(handler.handled_events.size).to eq(1)
+      end
+
+      it "inserts a pending claim (no completed_at) with the unique constraint" do
+        handler.process(message)
+
+        expect(Pgbus::ProcessedEvent).to have_received(:insert).with(
+          { event_id: event_id, handler_class: handler_class.name, processed_at: kind_of(Time) },
+          unique_by: %i[event_id handler_class]
+        )
+      end
+
+      it "completes the claim after handle returns" do
+        handler.process(message)
+
+        expect(relation).to have_received(:update_all).with(completed_at: kind_of(Time))
+      end
+
+      it "marks the dedup cache once the claim is completed" do
+        handler.process(message)
+
+        expect(handler_class.dedup_cache.seen?(cache_key)).to be true
+      end
+    end
+
+    context "with a completed claim (row exists, completed_at set)" do
+      before do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(empty_result)
+        allow(relation).to receive(:pick).with(:completed_at).and_return(Time.now.utc)
+      end
+
+      it "returns :skipped without running handle" do
+        result = handler.process(message)
+
+        expect(result).to eq(:skipped)
+        expect(handler.handled_events).to be_nil
+      end
+
+      it "never writes a completion for a skipped event" do
+        handler.process(message)
+
+        expect(relation).not_to have_received(:update_all)
+      end
+
+      it "marks the dedup cache so the next delivery skips the database" do
+        handler.process(message)
+        handler_class.new.process(message)
+
+        expect(Pgbus::ProcessedEvent).to have_received(:insert).once
+      end
+    end
+
+    context "with a pending claim (prior attempt crashed between claim and handle)" do
+      before do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(empty_result)
+        allow(relation).to receive(:pick).with(:completed_at).and_return(nil)
+      end
+
+      it "re-runs handle instead of skipping" do
+        result = handler.process(message)
+
+        expect(result).to eq(:handled)
+        expect(handler.handled_events.size).to eq(1)
+      end
+
+      it "completes the claim after the re-run" do
+        handler.process(message)
+
+        expect(relation).to have_received(:update_all).with(completed_at: kind_of(Time))
+      end
+    end
+
+    context "when handle raises" do
+      let(:handler_class) do
+        Class.new(described_class) do
+          idempotent!
+
+          def handle(_event)
+            raise "boom"
+          end
+        end
+      end
+
+      before { allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result) }
+
+      it "leaves the claim pending so redelivery re-runs the handler" do
+        expect { handler.process(message) }.to raise_error("boom")
+
+        expect(relation).not_to have_received(:update_all)
+      end
+
+      it "does not mark the dedup cache for an incomplete execution" do
+        expect { handler.process(message) }.to raise_error("boom")
+
+        expect(handler_class.dedup_cache.seen?(cache_key)).to be false
+      end
+    end
+
+    context "when schema detection fails after the claim insert (transient DB error)" do
+      # The pending row is already inserted when completion_column? raises
+      # (detection errors are deliberately not memoized) — the crash-safety
+      # contract of issue #385 requires that this delivery fails loudly and
+      # the pending claim re-runs on the next one.
+      let(:detection_error) { Class.new(StandardError) }
+
+      before do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
+        allow(Pgbus::ProcessedEvent).to receive(:completion_column?)
+          .and_raise(detection_error.new("connection dropped"))
+      end
+
+      it "propagates the error without running handle, leaving the message for VT redelivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        expect(handler.handled_events).to be_nil
+      end
+
+      it "does not mark the dedup cache for the failed delivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        expect(handler_class.dedup_cache.seen?(cache_key)).to be false
+      end
+
+      it "re-runs the still-pending claim once detection recovers on redelivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        allow(Pgbus::ProcessedEvent).to receive_messages(completion_column?: true, insert: empty_result) # row exists now
+        allow(relation).to receive(:pick).with(:completed_at).and_return(nil) # still pending
+
+        expect(handler.process(message)).to eq(:handled)
+        expect(handler.handled_events.size).to eq(1)
+      end
+    end
+
+    context "when the completed_at column has not been migrated yet (legacy fallback)" do
+      before do
+        allow(Pgbus::ProcessedEvent).to receive(:completion_column?).and_return(false)
+      end
+
+      it "returns :handled on insert win without any completion write" do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
+
+        result = handler.process(message)
+
+        expect(result).to eq(:handled)
+        expect(Pgbus::ProcessedEvent).not_to have_received(:where)
+      end
+
+      it "returns :skipped when the row already exists (single-phase claim)" do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(empty_result)
+
+        result = handler.process(message)
+
+        expect(result).to eq(:skipped)
+      end
+
+      it "marks the dedup cache at claim time (legacy behavior)" do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
+
+        handler.process(message)
+
+        expect(handler_class.dedup_cache.seen?(cache_key)).to be true
+      end
     end
   end
 

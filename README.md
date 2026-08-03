@@ -221,6 +221,20 @@ Pgbus::EventBus::Registry.instance.subscribe(
 )
 ```
 
+`idempotent!` uses a **two-phase claim**: a *pending* row in
+`pgbus_processed_events` is inserted before `handle` runs, and only stamped
+`completed_at` after `handle` returns. Deduplication applies to **completed**
+executions only — if the consumer process is killed mid-handler (deploy,
+OOM, supervisor watchdog), the redelivered message finds the pending claim
+and **re-runs the handler** instead of silently skipping it. The semantics
+are at-least-once with dedup of completed executions: the only
+double-execution window is a handler still running past its visibility
+timeout — the same window every non-idempotent handler already has.
+Installs created before this feature need the upgrade migration:
+`rails generate pgbus:add_processed_event_completion` (supports
+`--database`); until it runs, idempotent handlers fall back to the old
+single-phase claim and log a warning.
+
 ### 4. Start workers
 
 ```bash
