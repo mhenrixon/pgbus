@@ -1213,7 +1213,7 @@ env:
 
 **The shutdown timeline.** On `docker stop`, SIGTERM reaches the supervisor and readiness flips to `DRAINING`; children stop claiming work and drain in-flight jobs for up to `drain_timeout` (default 30s); the supervisor waits `shutdown_timeout` (default `drain_timeout + 5`) before SIGKILLing stragglers. Align the three knobs outside-in:
 
-```
+```text
 orchestrator stop_timeout  >  pgbus shutdown_timeout  >  pgbus drain_timeout
         45s                        35s (derived)                30s
 ```

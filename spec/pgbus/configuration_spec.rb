@@ -1086,6 +1086,21 @@ RSpec.describe Pgbus::Configuration do
       expect { config.validate! }.not_to raise_error
     end
 
+    it "rejects an infinite shutdown_timeout" do
+      config.shutdown_timeout = Float::INFINITY
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "rejects a NaN shutdown_timeout" do
+      config.shutdown_timeout = Float::NAN
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "rejects a non-real shutdown_timeout without crashing" do
+      config.shutdown_timeout = Complex(45, 1)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
     it "warns when an explicit shutdown_timeout is below drain_timeout" do
       allow(Pgbus.logger).to receive(:warn)
       config.drain_timeout = 60

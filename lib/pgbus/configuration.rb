@@ -784,9 +784,14 @@ module Pgbus
     # it warns instead of raising.
     def validate_shutdown_timeout!
       explicit = @shutdown_timeout
-      unless explicit.nil? || (explicit.is_a?(Numeric) && explicit.positive?)
+      # Finite real only: Float::INFINITY would blow up Supervisor#shutdown's
+      # `Time.now + shutdown_timeout` before any child cleanup ran, and a
+      # Complex would crash `positive?` — reject both here, at boot.
+      valid = explicit.is_a?(Numeric) && explicit.real? && explicit.finite? && explicit.positive?
+      unless explicit.nil? || valid
         raise Pgbus::ConfigurationError,
-              "shutdown_timeout must be a positive number or nil (defaults to drain_timeout + #{SHUTDOWN_TIMEOUT_MARGIN})"
+              "shutdown_timeout must be a positive finite number or nil " \
+              "(defaults to drain_timeout + #{SHUTDOWN_TIMEOUT_MARGIN})"
       end
 
       return unless explicit && explicit < drain_timeout

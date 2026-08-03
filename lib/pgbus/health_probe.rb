@@ -46,7 +46,9 @@ module Pgbus
       return usage_failure if @usage_error
 
       port = Integer(@port, exception: false)
-      return usage_failure unless port
+      # Out-of-range ports would reach Socket.tcp and raise SocketError — a
+      # backtrace where a HEALTHCHECK needs a deterministic exit code.
+      return usage_failure unless port&.between?(1, 65_535)
 
       probe(port)
     end
@@ -60,14 +62,21 @@ module Pgbus
       until args.empty?
         flag = args.shift
         value = args.shift
+        return @usage_error = true if value.nil?
+
         case flag
         when "--port" then @port = value
         when "--path" then @path = value
-        when "--timeout" then @timeout = value.to_f
+        when "--timeout"
+          # A typo'd timeout must be a usage error, not `to_f`'s silent 0.0 —
+          # a zero deadline reports the container unhealthy on every probe.
+          timeout = Float(value, exception: false)
+          return @usage_error = true unless timeout&.positive?
+
+          @timeout = timeout
         else
           return @usage_error = true
         end
-        return @usage_error = true if value.nil?
       end
     end
 
@@ -81,7 +90,7 @@ module Pgbus
       healthy = status&.between?(200, 299)
       @out.write("pgbus-health: #{@path} -> #{status || "no response"}\n")
       healthy ? EXIT_OK : EXIT_UNHEALTHY
-    rescue SystemCallError, IOError => e
+    rescue SystemCallError, IOError, SocketError => e
       @err.write("pgbus-health: #{@path} -> #{e.class}: #{e.message}\n")
       EXIT_UNHEALTHY
     end

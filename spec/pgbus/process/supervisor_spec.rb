@@ -966,6 +966,32 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect(supervisor.readiness_snapshot.status).to eq("DRAINING")
     end
 
+    it "fails the readiness gate when a boot-time fork failed (intended > live)" do
+      supervisor = described_class.new
+      allow(supervisor).to receive(:fork).and_return(nil)
+
+      supervisor.send(:fork_worker, { queues: ["default"] }, slot: 0)
+      supervisor.send(:mark_booted)
+      snapshot = supervisor.readiness_snapshot
+
+      expect(snapshot.expected).to eq(1)
+      expect(snapshot.live).to eq(0)
+      expect(snapshot.status).to eq("DEGRADED")
+    end
+
+    it "does not inflate the baseline when a child is re-forked after boot" do
+      supervisor = described_class.new
+      allow(supervisor).to receive(:fork).and_return(7001)
+
+      supervisor.send(:fork_worker, { queues: ["default"] }, slot: 0)
+      supervisor.send(:mark_booted)
+      allow(supervisor).to receive(:fork).and_return(7002)
+      supervisor.send(:fork_worker, { queues: ["default"] }, slot: 0)
+      supervisor.send(:refresh_readiness)
+
+      expect(supervisor.readiness_snapshot.expected).to eq(1)
+    end
+
     it "is marked booted by #run after boot_processes, before monitor_loop runs" do
       supervisor = described_class.new
       mock_client = build_mock_client

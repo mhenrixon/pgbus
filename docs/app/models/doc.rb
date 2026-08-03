@@ -21,7 +21,6 @@ class Doc
   page "Installation",  group: "Getting started"
   page "Quick start",   group: "Getting started"
   page "Configuration", group: "Getting started"
-  page "Rolling restarts", group: "Operations"
 
   # Guide
   page "Architecture",             group: "Guide"
@@ -34,7 +33,6 @@ class Doc
   page "Recurring tasks",          group: "Guide", slug: "recurring-tasks", view: "RecurringTasks"
   page "Transactional outbox",     group: "Guide", slug: "outbox", view: "Outbox"
   page "Real-time streams",        group: "Guide", slug: "streams", view: "Streams"
-  page "Rolling restarts", group: "Operations"
 
   # Operations
   page "Running workers",       group: "Operations", slug: "running-workers", view: "RunningWorkers"
@@ -42,21 +40,18 @@ class Doc
   page "Observability",         group: "Operations"
   page "Performance & tuning",  group: "Operations", slug: "performance-tuning", view: "PerformanceTuning"
   page "Separate database",     group: "Operations", slug: "separate-database", view: "SeparateDatabase"
-  page "Rolling restarts", group: "Operations"
+  page "Rolling restarts",      group: "Operations"
 
   # Testing
   page "Testing", group: "Testing"
-  page "Rolling restarts", group: "Operations"
 
   # Migrate
   page "Upgrading pgbus", group: "Migrate", slug: "upgrading-pgbus", view: "UpgradingPgbus"
   page "From Sidekiq",    group: "Migrate", slug: "from-sidekiq", view: "FromSidekiq"
   page "From SolidQueue", group: "Migrate", slug: "from-solid-queue", view: "FromSolidQueue"
   page "From GoodJob",    group: "Migrate", slug: "from-good-job", view: "FromGoodJob"
-  page "Rolling restarts", group: "Operations"
 
   # Reference
   page "Configuration reference", group: "Reference", slug: "configuration-reference", view: "ConfigurationReference"
   page "CLI & generators",        group: "Reference", slug: "cli-generators", view: "CliGenerators"
-  page "Rolling restarts", group: "Operations"
 end

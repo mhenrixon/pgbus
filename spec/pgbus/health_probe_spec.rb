@@ -89,6 +89,19 @@ RSpec.describe Pgbus::HealthProbe do
     expect(run_probe(["--port", "banana"])).to eq(described_class::EXIT_USAGE)
   end
 
+  it "exits 2 on an out-of-range port instead of crashing in Socket.tcp" do
+    expect(run_probe(["--port", "0"])).to eq(described_class::EXIT_USAGE)
+    expect(run_probe(["--port", "70000"])).to eq(described_class::EXIT_USAGE)
+  end
+
+  it "exits 2 on a non-numeric --timeout instead of silently probing with 0" do
+    expect(run_probe(["--port", "9394", "--timeout", "abc"])).to eq(described_class::EXIT_USAGE)
+  end
+
+  it "exits 2 on a non-positive --timeout" do
+    expect(run_probe(["--port", "9394", "--timeout", "0"])).to eq(described_class::EXIT_USAGE)
+  end
+
   # The whole point of the probe: a docker HEALTHCHECK runs it every few
   # seconds, so it must never drag in Bundler, Zeitwerk, or the pgbus gem.
   it "loads standalone without pulling in the gem" do

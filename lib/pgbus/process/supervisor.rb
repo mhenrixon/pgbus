@@ -44,6 +44,7 @@ module Pgbus
         @pending_restarts = pending_restarts
         @crash_counts = Hash.new(0)
         @notify_hub = notify_hub
+        @intended_children = 0
         @readiness = Concurrent::AtomicReference.new(
           ReadinessSnapshot.new(booted: false, shutting_down: shutting_down, expected: 0, live: forks.size)
         )
@@ -129,13 +130,24 @@ module Pgbus
       private
 
       # Boot is complete: connection verified, queues bootstrapped, every
-      # configured child forked. The fork-table size at this instant becomes
-      # the readiness baseline — roles that legitimately declined to boot
-      # (scheduler with no recurring tasks) are simply absent from it.
+      # configured child fork ATTEMPTED. The baseline is the larger of the
+      # intended-attempt count and the fork-table size: a boot-time fork
+      # failure (EAGAIN/ENOMEM, logged-and-swallowed in fork_*) leaves
+      # intended > live, so the readiness gate reports DEGRADED instead of
+      # blessing a container that is missing workers. Roles that legitimately
+      # declined to boot (scheduler with no recurring tasks) never reach a
+      # fork_* method and are counted by neither side.
       def mark_booted
         @booted = true
-        @expected_children = @forks.size
+        @expected_children = [@intended_children, @forks.size].max
         refresh_readiness
+      end
+
+      # Count a child the configuration intends this boot to run. Called at
+      # the top of every fork_* method — before the fork can fail — and only
+      # pre-boot, so restart_child's re-forks never inflate the baseline.
+      def note_intended_child
+        @intended_children += 1 unless @booted
       end
 
       # Publish a fresh snapshot; the swapped-in Data is immutable, so the
@@ -286,6 +298,7 @@ module Pgbus
       end
 
       def fork_worker(worker_config, slot: nil)
+        note_intended_child
         queues = worker_config[:queues] || [config.default_queue]
         threads = worker_config[:threads] || 5
         single_active = worker_config[:single_active_consumer] || false
@@ -370,6 +383,7 @@ module Pgbus
       end
 
       def fork_dispatcher
+        note_intended_child
         pid = fork do
           restore_signals
           setup_child_process
@@ -397,6 +411,7 @@ module Pgbus
       end
 
       def fork_scheduler
+        note_intended_child
         pid = fork do
           restore_signals
           setup_child_process
@@ -460,6 +475,7 @@ module Pgbus
       end
 
       def fork_consumer(consumer_config, slot: nil)
+        note_intended_child
         # Array() so a consumer entry without :topics can't NoMethodError the
         # supervisor on the topics.join log lines below.
         topics = Array(consumer_config[:topics])
@@ -537,6 +553,7 @@ module Pgbus
       end
 
       def fork_outbox_poller
+        note_intended_child
         pid = fork do
           restore_signals
           setup_child_process
