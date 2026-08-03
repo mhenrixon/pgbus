@@ -254,6 +254,42 @@ RSpec.describe Pgbus::EventBus::Handler do
       end
     end
 
+    context "when schema detection fails after the claim insert (transient DB error)" do
+      # The pending row is already inserted when completion_column? raises
+      # (detection errors are deliberately not memoized) — the crash-safety
+      # contract of issue #385 requires that this delivery fails loudly and
+      # the pending claim re-runs on the next one.
+      let(:detection_error) { Class.new(StandardError) }
+
+      before do
+        allow(Pgbus::ProcessedEvent).to receive(:insert).and_return(insert_result)
+        allow(Pgbus::ProcessedEvent).to receive(:completion_column?)
+          .and_raise(detection_error.new("connection dropped"))
+      end
+
+      it "propagates the error without running handle, leaving the message for VT redelivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        expect(handler.handled_events).to be_nil
+      end
+
+      it "does not mark the dedup cache for the failed delivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        expect(handler_class.dedup_cache.seen?(cache_key)).to be false
+      end
+
+      it "re-runs the still-pending claim once detection recovers on redelivery" do
+        expect { handler.process(message) }.to raise_error(detection_error)
+
+        allow(Pgbus::ProcessedEvent).to receive_messages(completion_column?: true, insert: empty_result) # row exists now
+        allow(relation).to receive(:pick).with(:completed_at).and_return(nil) # still pending
+
+        expect(handler.process(message)).to eq(:handled)
+        expect(handler.handled_events.size).to eq(1)
+      end
+    end
+
     context "when the completed_at column has not been migrated yet (legacy fallback)" do
       before do
         allow(Pgbus::ProcessedEvent).to receive(:completion_column?).and_return(false)
