@@ -155,6 +155,12 @@ module Pgbus
       NOTIFY_RETRY_BASE_SECONDS = 5
       NOTIFY_RETRY_MAX_SECONDS = 300
 
+      # Residual pool wait in #shutdown, AFTER the drain loop already spent up
+      # to config.drain_timeout on in-flight jobs. Short by design: a job still
+      # running has proven it won't finish, and this wait competes with the
+      # supervisor's shutdown_timeout deadline (issue #386).
+      POOL_TERMINATION_WAIT = 5
+
       def run
         setup_signals
         start_heartbeat
@@ -175,9 +181,9 @@ module Pgbus
 
           break if @lifecycle.stopped?
           # quiesced? (all slots free), not idle? (any slot free) — exiting
-          # with work still in flight abandons those jobs to the 30s
-          # wait_for_termination timeout in shutdown. Bounded by
-          # config.drain_timeout so a stuck job can't wedge the loop forever.
+          # with work still in flight abandons those jobs to shutdown's short
+          # POOL_TERMINATION_WAIT residual. Bounded by config.drain_timeout so
+          # a stuck job can't wedge the loop forever.
           break if @lifecycle.draining? && (@pool.quiesced? || drain_deadline_exceeded?)
 
           claim_and_execute if @lifecycle.can_process?
@@ -792,7 +798,11 @@ module Pgbus
         Pgbus.logger.info { "[Pgbus] Worker draining thread pool..." }
         stop_wake_source
         @pool.shutdown
-        @pool.wait_for_termination(30)
+        # Residual wait only: the drain loop already waited up to
+        # config.drain_timeout for in-flight jobs. A job still running here has
+        # proven it won't finish; waiting another full window would push the
+        # worker past the supervisor's shutdown_timeout deadline (issue #386).
+        @pool.wait_for_termination(POOL_TERMINATION_WAIT)
         @stat_buffer&.stop
         @queue_lock&.unlock_all
         @heartbeat&.stop

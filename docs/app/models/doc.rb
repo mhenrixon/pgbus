@@ -40,6 +40,7 @@ class Doc
   page "Observability",         group: "Operations"
   page "Performance & tuning",  group: "Operations", slug: "performance-tuning", view: "PerformanceTuning"
   page "Separate database",     group: "Operations", slug: "separate-database", view: "SeparateDatabase"
+  page "Rolling restarts",      group: "Operations"
 
   # Testing
   page "Testing", group: "Testing"

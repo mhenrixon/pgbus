@@ -169,6 +169,22 @@ RSpec.describe Pgbus::Configuration do
       expect(config.drain_timeout).to eq(30)
     end
 
+    it "defaults shutdown_timeout to drain_timeout + 5" do
+      expect(config.shutdown_timeout).to eq(35)
+    end
+
+    it "keeps shutdown_timeout above a raised drain_timeout" do
+      config.drain_timeout = 60
+
+      expect(config.shutdown_timeout).to eq(65)
+    end
+
+    it "respects an explicit shutdown_timeout over the derived default" do
+      config.shutdown_timeout = 120
+
+      expect(config.shutdown_timeout).to eq(120)
+    end
+
     it "enables eager_validation by default" do
       expect(config.eager_validation).to be(true)
     end
@@ -1053,6 +1069,55 @@ RSpec.describe Pgbus::Configuration do
     it "accepts a positive drain_timeout" do
       config.drain_timeout = 60
       expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects non-numeric shutdown_timeout" do
+      config.shutdown_timeout = "45"
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "rejects zero shutdown_timeout" do
+      config.shutdown_timeout = 0
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "accepts nil shutdown_timeout (derived default)" do
+      config.shutdown_timeout = nil
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects an infinite shutdown_timeout" do
+      config.shutdown_timeout = Float::INFINITY
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "rejects a NaN shutdown_timeout" do
+      config.shutdown_timeout = Float::NAN
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "rejects a non-real shutdown_timeout without crashing" do
+      config.shutdown_timeout = Complex(45, 1)
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /shutdown_timeout/)
+    end
+
+    it "warns when an explicit shutdown_timeout is below drain_timeout" do
+      allow(Pgbus.logger).to receive(:warn)
+      config.drain_timeout = 60
+      config.shutdown_timeout = 45
+
+      config.validate!
+
+      expect(Pgbus.logger).to have_received(:warn)
+    end
+
+    it "does not warn when shutdown_timeout covers drain_timeout" do
+      allow(Pgbus.logger).to receive(:warn)
+      config.shutdown_timeout = 45
+
+      config.validate!
+
+      expect(Pgbus.logger).not_to have_received(:warn)
     end
 
     it "rejects zero stats_flush_size" do

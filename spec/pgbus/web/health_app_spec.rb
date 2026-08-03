@@ -133,6 +133,93 @@ RSpec.describe Pgbus::Web::HealthApp do
     end
   end
 
+  describe "container-local readiness (issue #386)" do
+    subject(:app) { described_class.new(local_readiness: -> { snapshot }) }
+
+    let(:snapshot) do
+      Pgbus::Process::ReadinessSnapshot.new(booted: true, shutting_down: false, expected: 3, live: 3)
+    end
+
+    it "returns 200 with the local status when the snapshot is ready" do
+      status, headers, = get("/readyz")
+
+      expect(status).to eq(200)
+      expect(headers["Content-Type"]).to eq("application/json")
+    end
+
+    it "includes status, expected, and live in the body" do
+      body = JSON.parse(body_of(get("/readyz")))
+
+      expect(body).to eq("status" => "OK", "expected" => 3, "live" => 3)
+    end
+
+    it "never builds the cluster analyzer in local mode" do
+      get("/readyz")
+
+      expect(Pgbus::MCP::HealthAnalyzer).not_to have_received(:new)
+    end
+
+    it "leaves /livez unconditional" do
+      status, = get("/livez")
+
+      expect(status).to eq(200)
+    end
+
+    context "when the container is still booting" do
+      let(:snapshot) do
+        Pgbus::Process::ReadinessSnapshot.new(booted: false, shutting_down: false, expected: 0, live: 0)
+      end
+
+      it "returns 503 BOOTING" do
+        status, = get("/readyz")
+
+        expect(status).to eq(503)
+        expect(JSON.parse(body_of(get("/readyz")))["status"]).to eq("BOOTING")
+      end
+    end
+
+    context "when the container is draining" do
+      let(:snapshot) do
+        Pgbus::Process::ReadinessSnapshot.new(booted: true, shutting_down: true, expected: 3, live: 3)
+      end
+
+      it "returns 503 DRAINING" do
+        status, = get("/readyz")
+
+        expect(status).to eq(503)
+        expect(JSON.parse(body_of(get("/readyz")))["status"]).to eq("DRAINING")
+      end
+    end
+
+    context "when a child is missing" do
+      let(:snapshot) do
+        Pgbus::Process::ReadinessSnapshot.new(booted: true, shutting_down: false, expected: 3, live: 2)
+      end
+
+      it "returns 503 DEGRADED with the counts" do
+        status, = get("/readyz")
+        body = JSON.parse(body_of(get("/readyz")))
+
+        expect(status).to eq(503)
+        expect(body).to eq("status" => "DEGRADED", "expected" => 3, "live" => 2)
+      end
+    end
+
+    context "when the readiness callable raises" do
+      subject(:app) { described_class.new(local_readiness: -> { raise StandardError, "boom" }) }
+
+      it "returns 503 with an ERROR body and logs" do
+        allow(Pgbus.logger).to receive(:error)
+
+        status, = get("/readyz")
+
+        expect(status).to eq(503)
+        expect(JSON.parse(body_of(get("/readyz")))["status"]).to eq("ERROR")
+        expect(Pgbus.logger).to have_received(:error).at_least(:once)
+      end
+    end
+  end
+
   describe "default DataSource" do
     it "builds a fresh Pgbus::Web::DataSource when none is injected" do
       allow(Pgbus::Web::DataSource).to receive(:new).and_return(data_source)

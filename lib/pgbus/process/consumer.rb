@@ -480,7 +480,10 @@ module Pgbus
       def shutdown
         stop_wake_source
         @pool.shutdown
-        @pool.wait_for_termination(30)
+        # The consumer has no quiesce-gated drain loop like Worker's, so this
+        # wait IS its drain window — bound it by the same knob workers use
+        # instead of a hardcoded 30s (issue #386).
+        @pool.wait_for_termination(config.drain_timeout)
         @stat_buffer&.stop
         @heartbeat&.stop
         restore_signals

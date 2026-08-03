@@ -626,6 +626,16 @@ RSpec.describe Pgbus::Process::Consumer do
       consumer.send(:shutdown)
       expect(fake_listener).to have_received(:stop)
     end
+
+    it "bounds the drain wait by config.drain_timeout, not a hardcoded 30s (issue #386)" do
+      config = Pgbus::Configuration.new
+      config.drain_timeout = 42
+      consumer = described_class.new(topics: ["orders.#"], config: config)
+
+      consumer.send(:shutdown)
+
+      expect(mock_pool).to have_received(:wait_for_termination).with(42)
+    end
   end
 
   # Operational parity with Worker (issue #274). A consumer fork must be

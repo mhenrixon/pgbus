@@ -49,8 +49,15 @@ module Pgbus
       # @param data_source [Pgbus::Web::DataSource, nil] read layer for /readyz.
       #   nil (the default) builds a fresh DataSource per readiness check, which
       #   avoids serving stale metrics from a long-lived app's memoized instance.
-      def initialize(data_source: nil)
+      # @param local_readiness [#call, nil] when set, /readyz answers from this
+      #   callable's {Process::ReadinessSnapshot} instead of the cluster-wide
+      #   analyzer — the supervisor's standalone HealthServer passes its own
+      #   snapshot so a rolling deploy's health gate measures THIS container,
+      #   not the fleet (issue #386). The Rails-mounted app leaves it nil and
+      #   keeps the cluster verdict.
+      def initialize(data_source: nil, local_readiness: nil)
         @data_source = data_source
+        @local_readiness = local_readiness
       end
 
       def call(env)
@@ -69,6 +76,8 @@ module Pgbus
       end
 
       def readyz
+        return local_readyz if @local_readiness
+
         # HealthAnalyzer lives in the MCP namespace, which is excluded from
         # Zeitwerk (its *tools* subclass the optional `mcp` gem). The analyzer
         # itself has no gem dependency, so require just that one file — the
@@ -80,6 +89,19 @@ module Pgbus
         [status, JSON_HEADERS.dup, [verdict.to_json]]
       rescue StandardError => e
         Pgbus.logger.error { "[Pgbus::Web::HealthApp] readiness check failed: #{e.class}: #{e.message}" }
+        [503, JSON_HEADERS.dup, [{ status: "ERROR", error: e.message }.to_json]]
+      end
+
+      # Container-local readiness: no database, no analyzer — just the
+      # supervisor's published snapshot. The error path mirrors the cluster
+      # readyz: 503 ERROR, logged, never swallowed.
+      def local_readyz
+        snapshot = @local_readiness.call
+        status = snapshot.ready? ? 200 : 503
+        body = { status: snapshot.status, expected: snapshot.expected, live: snapshot.live }
+        [status, JSON_HEADERS.dup, [body.to_json]]
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus::Web::HealthApp] local readiness check failed: #{e.class}: #{e.message}" }
         [503, JSON_HEADERS.dup, [{ status: "ERROR", error: e.message }.to_json]]
       end
 
