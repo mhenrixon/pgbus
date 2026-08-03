@@ -187,6 +187,26 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
     end
 
+    context "with processed event completion detection" do
+      it "queues add_processed_event_completion when the completed_at column is missing" do
+        stub_columns("pgbus_processed_events", %w[id event_id handler_class processed_at])
+
+        expect(detector.missing_migrations).to include(:add_processed_event_completion)
+      end
+
+      it "does not queue it when completed_at is already present" do
+        stub_columns("pgbus_processed_events", %w[id event_id handler_class processed_at completed_at])
+
+        expect(detector.missing_migrations).not_to include(:add_processed_event_completion)
+      end
+
+      it "does not queue it when the table itself is missing" do
+        remove_table("pgbus_processed_events")
+
+        expect(detector.missing_migrations).not_to include(:add_processed_event_completion)
+      end
+    end
+
     context "with outbox detection" do
       it "queues add_outbox when pgbus_outbox_entries is missing" do
         expect(detector.missing_migrations).to include(:add_outbox)
@@ -376,6 +396,7 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
           :add_presence,
           :add_queue_states,
           :add_outbox,
+          :add_processed_event_completion,
           :tune_autovacuum,
           :tune_fillfactor
         )
@@ -403,18 +424,10 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       # silently skip it. Verify the mapping is complete by scanning
       # every code path through the detector.
       keys = %i[
-        uniqueness_keys
-        add_job_stats
-        add_job_stats_latency
-        add_job_stats_queue_index
-        add_stream_stats
-        add_presence
-        add_queue_states
-        add_outbox
-        add_recurring
-        add_failed_events_index
-        tune_autovacuum
-        tune_fillfactor
+        uniqueness_keys add_job_stats add_job_stats_latency
+        add_job_stats_queue_index add_stream_stats add_presence
+        add_queue_states add_outbox add_recurring add_failed_events_index
+        add_processed_event_completion tune_autovacuum tune_fillfactor
       ]
 
       keys.each do |key|

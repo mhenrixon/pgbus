@@ -1,0 +1,19 @@
+class AddPgbusProcessedEventCompletion < ActiveRecord::Migration<%= migration_version %>
+  def up
+    add_column :pgbus_processed_events, :completed_at, :datetime
+
+    # Backfill legacy rows as completed: a row written by the single-phase
+    # code means handle() was at least started — treating it as completed
+    # preserves the old skip behavior instead of retroactively re-running
+    # history on the next delivery of an old event.
+    execute <<~SQL
+      UPDATE pgbus_processed_events
+      SET completed_at = processed_at
+      WHERE completed_at IS NULL
+    SQL
+  end
+
+  def down
+    remove_column :pgbus_processed_events, :completed_at
+  end
+end
