@@ -106,7 +106,10 @@ module ConfigReference
       { name: "health_bind", type: "String", default: '"127.0.0.1"', desc: "Bind address for the health server." },
       { name: "stall_threshold", type: "Numeric", default: "300", desc: "Seconds without progress before a worker is stalled." },
       { name: "read_timeout", type: "Numeric", default: "30", desc: "Read timeout for worker fetches." },
-      { name: "drain_timeout", type: "Numeric", default: "30", desc: "Seconds to wait for in-flight jobs to finish during graceful shutdown before abandoning them." }
+      { name: "drain_timeout", type: "Numeric", default: "30", desc: "Seconds to wait for in-flight jobs to finish during graceful shutdown before abandoning them." },
+      { name: "shutdown_timeout", type: "Numeric, nil", default: "drain_timeout + 5",
+        desc: "Seconds the supervisor waits for children after TERM before SIGKILL. nil derives drain_timeout + 5; " \
+              "an orchestrator's stop grace period (Kamal stop_timeout, K8s terminationGracePeriodSeconds) must exceed it." }
     ],
     "Streams (SSE)" => [
       { name: "streams_enabled", type: "Boolean", default: "true", desc: "Enable the SSE streams transport." },

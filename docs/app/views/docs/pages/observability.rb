@@ -199,17 +199,23 @@ class Views::Docs::Pages::Observability < DocsUI::Page
     DocsUI::Section("Health endpoints", description: "Liveness and readiness for Kubernetes.") do
       md <<~'MD'
         Pgbus exposes two HTTP probes: `/livez` (is the serving process up?) and
-        `/readyz` (are queues draining, or is a worker silently wedged?). `/readyz`
-        runs the same `OK` / `DEGRADED` / `STALLED` verdict as the MCP
-        `pgbus_health` tool — `DEGRADED` deliberately stays ready; only the
-        silent-wedge `STALLED` signal fails readiness.
+        `/readyz`. Readiness means different things in the two places it is served.
+        Mounted in Rails, `/readyz` runs the same cluster-wide `OK` / `DEGRADED` /
+        `STALLED` verdict as the MCP `pgbus_health` tool — `DEGRADED` deliberately
+        stays ready; only the silent-wedge `STALLED` signal fails readiness. Served
+        standalone from the supervisor (`health_port`), `/readyz` is
+        **container-local**: did *this* supervisor finish booting, and are all the
+        children it forked alive? That is the signal a rolling deploy's health gate
+        needs — see [Rolling restarts](/docs/rolling-restarts).
       MD
       DocsUI::Table(
         [ "Path", "Method", "200", "503", "Touches DB" ],
         [
           [ [ :code, "/livez" ], "GET", [ :md, "always (`ok`)" ], "never", "no" ],
-          [ [ :code, "/readyz" ], "GET", [ :md, "verdict `OK` or `DEGRADED`" ],
-            [ :md, "verdict `STALLED`, or DB unreachable (`{\"status\":\"ERROR\"}`)" ], "yes" ]
+          [ [ :md, "`/readyz` (mounted)" ], "GET", [ :md, "verdict `OK` or `DEGRADED`" ],
+            [ :md, "verdict `STALLED`, or DB unreachable (`{\"status\":\"ERROR\"}`)" ], "yes" ],
+          [ [ :md, "`/readyz` (supervisor)" ], "GET", [ :md, "`OK` — booted, all children live" ],
+            [ :md, "`BOOTING`, `DEGRADED` (child down), `DRAINING` (stopping)" ], "no" ]
         ]
       )
       md <<~'MD'
