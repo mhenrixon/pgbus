@@ -518,6 +518,7 @@ pt:
           scheduled: 'Agendado:'
           timezone: 'Fuso horário:'
           visible_at: 'Visível em:'
+        oldest: 'Mais antigo:'
         oldest_claimable: 'Mais antigo disponível:'
         parked: 'Adiados:'
         pause: Pausar

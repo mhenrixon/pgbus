@@ -471,7 +471,7 @@ RSpec.describe Pgbus::Client do
   describe "#oldest_claimable_ages" do
     let(:raw_conn) { double("PG::Connection") }
 
-    before { allow(client).to receive(:with_raw_connection).and_yield(raw_conn) }
+    before { allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn) }
 
     context "with a queue_name" do
       it "returns the vt-aware age of the oldest claimable message in the prefixed queue" do

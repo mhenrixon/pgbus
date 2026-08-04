@@ -518,6 +518,7 @@ fr:
           scheduled: 'Planifié :'
           timezone: 'Fuseau horaire :'
           visible_at: 'Visible à :'
+        oldest: 'Plus ancien :'
         oldest_claimable: 'Plus ancien disponible :'
         parked: 'Différés :'
         pause: Pause

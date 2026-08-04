@@ -518,6 +518,7 @@ es:
           scheduled: 'Programado:'
           timezone: 'Zona horaria:'
           visible_at: 'Visible en:'
+        oldest: 'Más antiguo:'
         oldest_claimable: 'Más antiguo disponible:'
         parked: 'Aparcados:'
         pause: Pausar

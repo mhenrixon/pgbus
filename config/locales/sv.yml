@@ -518,6 +518,7 @@ sv:
           scheduled: 'Schemalagt:'
           timezone: 'Tidszon:'
           visible_at: 'Synlig vid:'
+        oldest: 'Äldsta:'
         oldest_claimable: 'Äldsta tillgänglig:'
         parked: 'Parkerade:'
         pause: Pausa

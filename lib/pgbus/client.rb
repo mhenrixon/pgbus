@@ -554,12 +554,16 @@ module Pgbus
     # With a queue name: the age for that (prefixed) queue, or nil.
     # Without: a hash of every physical queue in pgmq.meta to its age.
     #
-    # synchronized: on the shared-Proc path with_raw_connection yields the same
-    # AR raw connection every @pgmq operation runs on — an unserialized query
-    # here could interleave with a concurrent PGMQ call mid-protocol.
+    # Routes through the pooled @pgmq.with_connection (health-checked, bounded
+    # by the statement/socket timeouts applied at Client#initialize) rather
+    # than a fresh unbounded PG.connect per call — same rationale as
+    # notify_trigger_current?. synchronized: on the shared-Proc path @pgmq
+    # rides the AR raw connection, so the query must serialize against
+    # concurrent PGMQ operations. One checkout spans all per-queue queries;
+    # nothing nests inside it, so the shared pool_size=1 path is safe.
     def oldest_claimable_ages(queue_name = nil)
       synchronized do
-        with_raw_connection do |conn|
+        @pgmq.with_connection do |conn|
           if queue_name
             claimable_age_for(conn, config.queue_name(queue_name))
           else

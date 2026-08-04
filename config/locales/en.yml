@@ -518,6 +518,7 @@ en:
           scheduled: 'Scheduled at:'
           timezone: 'Timezone:'
           visible_at: 'Visible at:'
+        oldest: 'Oldest:'
         oldest_claimable: 'Oldest claimable:'
         parked: 'Parked:'
         pause: Pause

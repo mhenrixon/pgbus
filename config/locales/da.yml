@@ -518,6 +518,7 @@ da:
           scheduled: 'Planlagt:'
           timezone: 'Tidszone:'
           visible_at: 'Synlig fra:'
+        oldest: 'Ældste:'
         oldest_claimable: 'Ældste tilgængelig:'
         parked: 'Parkeret:'
         pause: Pause

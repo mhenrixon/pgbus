@@ -518,6 +518,7 @@ ja:
           scheduled: スケジュール済み：
           timezone: タイムゾーン：
           visible_at: 表示可能日時：
+        oldest: '最古:'
         oldest_claimable: '取得可能な最古:'
         parked: '待機中:'
         pause: 一時停止

@@ -518,6 +518,7 @@ de:
           scheduled: 'Geplant:'
           timezone: 'Zeitzone:'
           visible_at: 'Sichtbar ab:'
+        oldest: 'Älteste:'
         oldest_claimable: 'Älteste verfügbar:'
         parked: 'Geparkt:'
         pause: Pause

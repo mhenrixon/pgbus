@@ -518,6 +518,7 @@ fi:
           scheduled: 'Aikataulutettu:'
           timezone: 'Aikavyöhyke:'
           visible_at: 'Näkyvissä:'
+        oldest: 'Vanhin:'
         oldest_claimable: 'Vanhin saatavilla:'
         parked: 'Pysäköidyt:'
         pause: Tauko

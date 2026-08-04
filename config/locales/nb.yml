@@ -518,6 +518,7 @@ nb:
           scheduled: 'Planlagt:'
           timezone: 'Tidssone:'
           visible_at: 'Synlig fra:'
+        oldest: 'Eldste:'
         oldest_claimable: 'Eldste tilgjengelig:'
         parked: 'Parkert:'
         pause: Pause
