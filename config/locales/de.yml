@@ -65,7 +65,8 @@ de:
         empty: Keine Warteschlangen gefunden
         headers:
           depth: Tiefe
-          oldest: Älteste (s)
+          oldest_claimable: Älteste verfügbar (s)
+          parked: Geparkt
           queue: Warteschlange
           total: Gesamt
           visible: Sichtbar
@@ -475,7 +476,8 @@ de:
           actions: Aktionen
           depth: Tiefe
           newest: Neueste (s)
-          oldest: Älteste (s)
+          oldest_claimable: Älteste verfügbar (s)
+          parked: Geparkt
           queue: Warteschlange
           total_ever: Insgesamt jemals
           visible: Sichtbar
@@ -516,6 +518,9 @@ de:
           scheduled: 'Geplant:'
           timezone: 'Zeitzone:'
           visible_at: 'Sichtbar ab:'
+        oldest: 'Älteste:'
+        oldest_claimable: 'Älteste verfügbar:'
+        parked: 'Geparkt:'
         pause: Pause
         pause_confirm: Verarbeitung pausieren?
         purge_confirm: Alle Nachrichten löschen?

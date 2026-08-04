@@ -310,20 +310,37 @@ RSpec.describe Pgbus::CLI do
   end
 
   describe ".list_queues" do
-    it "prints formatted table with queue metrics" do
+    it "prints formatted table with queue metrics including the claimable age" do
       metric = double("metric",
                       queue_name: "pgbus_test_default",
                       queue_length: 10,
                       queue_visible_length: 8,
                       oldest_msg_age_sec: 42,
                       total_messages: 100)
-      allow(mock_client).to receive(:metrics).and_return([metric])
+      allow(mock_client).to receive_messages(metrics: [metric],
+                                             oldest_claimable_ages: { "pgbus_test_default" => 12 })
 
       output = capture_stdout { described_class.list_queues }
 
       expect(output).to include("QUEUE")
+      expect(output).to include("CLAIMABLE")
       expect(output).to include("pgbus_test_default")
-      expect(output).to include("10")
+      expect(output).to include("12")
+    end
+
+    it "prints a dash for a queue holding only vt-parked messages" do
+      metric = double("metric",
+                      queue_name: "pgbus_test_webhooks",
+                      queue_length: 1,
+                      queue_visible_length: 0,
+                      oldest_msg_age_sec: 17_045,
+                      total_messages: 500)
+      allow(mock_client).to receive_messages(metrics: [metric],
+                                             oldest_claimable_ages: { "pgbus_test_webhooks" => nil })
+
+      output = capture_stdout { described_class.list_queues }
+
+      expect(output).to match(/pgbus_test_webhooks.*17045.*-/)
     end
   end
 

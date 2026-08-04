@@ -6,7 +6,8 @@
           <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.queue") %></th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.depth") %></th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.visible") %></th>
-          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.oldest") %></th>
+          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.parked") %></th>
+          <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.oldest_claimable") %></th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.newest") %></th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.total_ever") %></th>
           <th class="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><%= t("pgbus.queues.queues_list.headers.actions") %></th>
@@ -24,7 +25,8 @@
             </td>
             <td data-label="Depth" class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_length]) %></td>
             <td data-label="Visible" class="px-4 py-3 text-sm text-right font-mono text-gray-700"><%= pgbus_number(q[:queue_visible_length]) %></td>
-            <td data-label="Oldest" class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:oldest_msg_age_sec] || "—" %></td>
+            <td data-label="Parked" class="px-4 py-3 text-sm text-right font-mono text-gray-500"><%= pgbus_number(q[:parked_length]) %></td>
+            <td data-label="Oldest claimable" class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:oldest_claimable_age_sec] || "—" %></td>
             <td data-label="Newest" class="px-4 py-3 text-sm text-right text-gray-500"><%= q[:newest_msg_age_sec] || "—" %></td>
             <td data-label="Total" class="px-4 py-3 text-sm text-right text-gray-500"><%= pgbus_number(q[:total_messages]) %></td>
             <td data-label="Actions" class="px-4 py-3 text-sm text-right space-x-2">
@@ -51,7 +53,7 @@
           </tr>
         <% end %>
         <% if @queues.empty? %>
-          <tr><td colspan="7" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.queues.queues_list.empty") %></td></tr>
+          <tr><td colspan="8" class="px-4 py-8 text-center text-sm text-gray-400"><%= t("pgbus.queues.queues_list.empty") %></td></tr>
         <% end %>
       </tbody>
     </table>

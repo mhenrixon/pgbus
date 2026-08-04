@@ -65,7 +65,8 @@ it:
         empty: Nessuna coda trovata
         headers:
           depth: Profondità
-          oldest: Più vecchio (s)
+          oldest_claimable: Più vecchio disponibile (s)
+          parked: Posticipati
           queue: Coda
           total: Totale
           visible: Visibile
@@ -475,7 +476,8 @@ it:
           actions: Azioni
           depth: Profondità
           newest: Più recente (s)
-          oldest: Più vecchio (s)
+          oldest_claimable: Più vecchio disponibile (s)
+          parked: Posticipati
           queue: Coda
           total_ever: Totale mai
           visible: Visibile
@@ -516,6 +518,9 @@ it:
           scheduled: 'Programmato:'
           timezone: 'Fuso orario:'
           visible_at: 'Visibile alle:'
+        oldest: 'Più vecchio:'
+        oldest_claimable: 'Più vecchio disponibile:'
+        parked: 'Posticipati:'
         pause: Pausa
         pause_confirm: Mettere in pausa l'elaborazione?
         purge_confirm: Eliminare tutti i messaggi?

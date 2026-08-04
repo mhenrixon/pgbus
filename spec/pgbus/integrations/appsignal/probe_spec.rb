@@ -20,8 +20,14 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
     Class.new do
       def queues_with_metrics
         [
-          { name: "pgbus_default", queue_length: 42, queue_visible_length: 30, oldest_msg_age_sec: 5.0, paused: false },
-          { name: "pgbus_critical", queue_length: 0, queue_visible_length: 0, oldest_msg_age_sec: nil, paused: true }
+          { name: "pgbus_default", queue_length: 42, queue_visible_length: 30, oldest_msg_age_sec: 5.0,
+            oldest_claimable_age_sec: 3.0, paused: false },
+          { name: "pgbus_critical", queue_length: 0, queue_visible_length: 0, oldest_msg_age_sec: nil,
+            oldest_claimable_age_sec: nil, paused: true },
+          # The issue #389 incident shape: one backoff-parked message (future vt) —
+          # raw age grows at wall-clock rate while nothing is claimable.
+          { name: "pgbus_webhooks", queue_length: 1, queue_visible_length: 0, oldest_msg_age_sec: 17_045.0,
+            oldest_claimable_age_sec: nil, paused: false }
         ]
       end
 
@@ -95,22 +101,45 @@ RSpec.describe "Pgbus::Integrations::Appsignal::Probe" do
     expect(depth_gauge[2]).to eq(queue: "pgbus_default")
   end
 
-  it "records queue latency gauge per queue without a hostname tag" do
+  it "records queue latency from the claimable age, not the raw message age" do
     runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
     runner.call
 
     latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_default" }
     expect(latency).not_to be_nil
-    expect(latency[1]).to eq(5000.0)
+    expect(latency[1]).to eq(3000.0)
     expect(latency[2]).to eq(queue: "pgbus_default")
   end
 
-  it "skips queue latency when oldest_msg_age_sec is nil" do
+  it "reports zero queue latency when nothing is claimable, even with a vt-parked message" do
     runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
     runner.call
 
-    critical_latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_critical" }
-    expect(critical_latency).to be_nil
+    parked_latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_webhooks" }
+    expect(parked_latency).not_to be_nil
+    expect(parked_latency[1]).to eq(0)
+
+    empty_latency = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_latency" && g[2][:queue] == "pgbus_critical" }
+    expect(empty_latency).not_to be_nil
+    expect(empty_latency[1]).to eq(0)
+  end
+
+  it "records the claimable age gauge only when a claimable backlog exists" do
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
+    runner.call
+
+    claimable = appsignal_class.gauges.select { |g| g[0] == "pgbus_queue_oldest_claimable_age_seconds" }
+    expect(claimable.map { |g| g[2][:queue] }).to eq(["pgbus_default"])
+    expect(claimable.first[1]).to eq(3.0)
+  end
+
+  it "keeps the raw oldest message age gauge for vt-parked messages" do
+    runner = Pgbus::Integrations::Appsignal::Probe::Runner.new(data_source: fake_data_source)
+    runner.call
+
+    raw = appsignal_class.gauges.find { |g| g[0] == "pgbus_queue_oldest_message_age_seconds" && g[2][:queue] == "pgbus_webhooks" }
+    expect(raw).not_to be_nil
+    expect(raw[1]).to eq(17_045.0)
   end
 
   it "records active_processes scoped to the current host with hostname tag" do

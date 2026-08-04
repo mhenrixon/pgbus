@@ -10,11 +10,14 @@ RSpec.describe Pgbus::Web::MetricsSerializer do
   let(:queue_metrics) do
     [
       { name: "pgbus_default", queue_length: 42, queue_visible_length: 40,
-        total_messages: 1000, oldest_msg_age_sec: 120, newest_msg_age_sec: 1, paused: false },
+        total_messages: 1000, oldest_msg_age_sec: 120, oldest_claimable_age_sec: 90,
+        newest_msg_age_sec: 1, paused: false },
       { name: "pgbus_default_dlq", queue_length: 3, queue_visible_length: 3,
-        total_messages: 50, oldest_msg_age_sec: 3600, newest_msg_age_sec: 60, paused: false },
+        total_messages: 50, oldest_msg_age_sec: 3600, oldest_claimable_age_sec: 3600,
+        newest_msg_age_sec: 60, paused: false },
       { name: "pgbus_critical", queue_length: 0, queue_visible_length: 0,
-        total_messages: 500, oldest_msg_age_sec: nil, newest_msg_age_sec: nil, paused: true }
+        total_messages: 500, oldest_msg_age_sec: nil, oldest_claimable_age_sec: nil,
+        newest_msg_age_sec: nil, paused: true }
     ]
   end
 
@@ -108,6 +111,14 @@ RSpec.describe Pgbus::Web::MetricsSerializer do
 
     it "omits oldest message age when nil" do
       expect(output).not_to include('pgbus_queue_oldest_message_age_seconds{queue="pgbus_critical"}')
+    end
+
+    it "includes vt-aware oldest claimable age" do
+      expect(output).to include('pgbus_queue_oldest_claimable_age_seconds{queue="pgbus_default"} 90')
+    end
+
+    it "omits oldest claimable age when no claimable backlog exists" do
+      expect(output).not_to include('pgbus_queue_oldest_claimable_age_seconds{queue="pgbus_critical"}')
     end
 
     it "includes queue paused gauge (1 for paused, 0 for active)" do

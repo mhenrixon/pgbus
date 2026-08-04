@@ -177,14 +177,16 @@ module Pgbus
     def list_queues
       Pgbus.client.list_queues
       metrics = Pgbus.client.metrics
+      claimable_ages = Pgbus.client.oldest_claimable_ages
 
-      puts "QUEUE                                    DEPTH      VISIBLE    OLDEST (s)      TOTAL          "
-      puts "-" * 95
+      puts "QUEUE                                    DEPTH      VISIBLE    OLDEST (s)      CLAIMABLE (s)   TOTAL          "
+      puts "-" * 111
 
       Array(metrics).each do |m|
-        puts format("%-40s %-10s %-10s %-15s %-15s",
+        puts format("%-40s %-10s %-10s %-15s %-15s %-15s",
                     m.queue_name, m.queue_length, m.queue_visible_length,
-                    m.oldest_msg_age_sec || "-", m.total_messages)
+                    m.oldest_msg_age_sec || "-", claimable_ages[m.queue_name] || "-",
+                    m.total_messages)
       end
     end
 

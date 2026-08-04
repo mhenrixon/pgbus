@@ -54,6 +54,15 @@ module Pgbus
           end
         end
 
+        gauge(lines, "pgbus_queue_oldest_claimable_age_seconds",
+              "Age of the oldest message eligible for pickup (visibility timeout elapsed)") do
+          queues.filter_map do |q|
+            next unless q[:oldest_claimable_age_sec]
+
+            [q[:oldest_claimable_age_sec], { queue: q[:name] }]
+          end
+        end
+
         gauge(lines, "pgbus_queue_paused", "Whether the queue is paused (1) or active (0)") do
           queues.map { |q| [q[:paused] ? 1 : 0, { queue: q[:name] }] }
         end

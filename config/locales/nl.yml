@@ -65,7 +65,8 @@ nl:
         empty: Geen wachtrijen gevonden
         headers:
           depth: Diepte
-          oldest: Oudste (s)
+          oldest_claimable: Oudste beschikbaar (s)
+          parked: Geparkeerd
           queue: Wachtrij
           total: Totaal
           visible: Zichtbaar
@@ -475,7 +476,8 @@ nl:
           actions: Acties
           depth: Diepte
           newest: Nieuwste (s)
-          oldest: Oudste (s)
+          oldest_claimable: Oudste beschikbaar (s)
+          parked: Geparkeerd
           queue: Wachtrij
           total_ever: Totaal ooit
           visible: Zichtbaar
@@ -516,6 +518,9 @@ nl:
           scheduled: 'Gepland:'
           timezone: 'Tijdzone:'
           visible_at: 'Zichtbaar op:'
+        oldest: 'Oudste:'
+        oldest_claimable: 'Oudste beschikbaar:'
+        parked: 'Geparkeerd:'
         pause: Pauzeren
         pause_confirm: Verwerking pauzeren?
         purge_confirm: Alle berichten verwijderen?

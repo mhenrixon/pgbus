@@ -543,6 +543,38 @@ module Pgbus
       end
     end
 
+    # Age (seconds) of the oldest message actually eligible for pickup, i.e.
+    # whose visibility timeout has elapsed. Unlike pgmq's oldest_msg_age_sec
+    # (computed from enqueued_at), a scheduled or backoff-parked message —
+    # future vt — contributes nothing until it comes due, so a queue holding
+    # only parked messages reads nil ("no claimable backlog") instead of an
+    # age growing at wall-clock rate (issue #389). pgmq's metrics_result type
+    # is frozen upstream, so this lives here rather than in the SQL function.
+    #
+    # With a queue name: the age for that (prefixed) queue, or nil.
+    # Without: a hash of every physical queue in pgmq.meta to its age.
+    #
+    # Routes through the pooled @pgmq.with_connection (health-checked, bounded
+    # by the statement/socket timeouts applied at Client#initialize) rather
+    # than a fresh unbounded PG.connect per call — same rationale as
+    # notify_trigger_current?. synchronized: on the shared-Proc path @pgmq
+    # rides the AR raw connection, so the query must serialize against
+    # concurrent PGMQ operations. One checkout spans all per-queue queries;
+    # nothing nests inside it, so the shared pool_size=1 path is safe.
+    def oldest_claimable_ages(queue_name = nil)
+      synchronized do
+        @pgmq.with_connection do |conn|
+          if queue_name
+            claimable_age_for(conn, config.queue_name(queue_name))
+          else
+            names = conn.exec("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+                        .map { |row| row["queue_name"] }
+            names.to_h { |name| [name, claimable_age_for(conn, name)] }
+          end
+        end
+      end
+    end
+
     # Snapshot of the PGMQ connection pool: {size:, available:, pool_timeout:}.
     #
     # Reads pgmq-ruby's own pool counters (@pgmq.stats -> {size:, available:})
@@ -946,6 +978,18 @@ module Pgbus
           conn.exec(PgmqSchema.install_sql)
         end
       end
+    end
+
+    # queue_name is a physical (already prefixed) queue name; sanitized to a
+    # bare identifier before interpolation, same as the dashboard's DataSource.
+    def claimable_age_for(conn, queue_name)
+      qtable = "q_#{QueueNameValidator.sanitize!(queue_name)}"
+      row = conn.exec(<<~SQL).first
+        SELECT EXTRACT(epoch FROM (NOW() - min(vt)))::int AS age_sec
+        FROM pgmq.#{qtable}
+        WHERE vt <= NOW()
+      SQL
+      row && row["age_sec"]&.to_i
     end
 
     def with_raw_connection

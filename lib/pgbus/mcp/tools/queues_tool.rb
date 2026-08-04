@@ -14,6 +14,12 @@ module Pgbus
           (messages whose visibility timeout has expired and are ready to be
           claimed), oldest/newest message age in seconds, lifetime total, and
           paused state. Use this to answer "are any queues backed up?".
+          oldest_claimable_age_sec is the age of the oldest message actually
+          eligible for pickup — nil means no message is currently claimable:
+          every remaining message is scheduled, backoff-parked, or in flight
+          with a future visibility timeout. A queue whose oldest_msg_age_sec
+          keeps growing while oldest_claimable_age_sec stays nil has no
+          starving backlog — nothing is waiting for a worker.
         DESC
 
         input_schema(properties: {}, required: [])

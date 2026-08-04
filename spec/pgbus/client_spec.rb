@@ -468,6 +468,47 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#oldest_claimable_ages" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before { allow(mock_pgmq).to receive(:with_connection).and_yield(raw_conn) }
+
+    context "with a queue_name" do
+      it "returns the vt-aware age of the oldest claimable message in the prefixed queue" do
+        allow(raw_conn).to receive(:exec)
+          .with(/min\(vt\).*FROM pgmq\.q_pgbus_test_default.*WHERE vt <= NOW\(\)/m)
+          .and_return([{ "age_sec" => "42" }])
+
+        expect(client.oldest_claimable_ages("default")).to eq(42)
+      end
+
+      it "returns nil when only vt-parked (scheduled/retrying) messages remain" do
+        allow(raw_conn).to receive(:exec).and_return([{ "age_sec" => nil }])
+
+        expect(client.oldest_claimable_ages("default")).to be_nil
+      end
+    end
+
+    context "without a queue_name" do
+      it "maps every queue in pgmq.meta to its claimable age" do
+        allow(raw_conn).to receive(:exec)
+          .with(/FROM pgmq\.meta/)
+          .and_return([{ "queue_name" => "pgbus_test_default" }, { "queue_name" => "pgbus_test_mailers" }])
+        allow(raw_conn).to receive(:exec)
+          .with(/FROM pgmq\.q_pgbus_test_default/m)
+          .and_return([{ "age_sec" => "10" }])
+        allow(raw_conn).to receive(:exec)
+          .with(/FROM pgmq\.q_pgbus_test_mailers/m)
+          .and_return([{ "age_sec" => nil }])
+
+        expect(client.oldest_claimable_ages).to eq(
+          "pgbus_test_default" => 10,
+          "pgbus_test_mailers" => nil
+        )
+      end
+    end
+  end
+
   describe "#pool_stats" do
     it "returns pgmq pool stats merged with the configured pool_timeout" do
       allow(mock_pgmq).to receive(:stats).and_return({ size: 5, available: 3 })

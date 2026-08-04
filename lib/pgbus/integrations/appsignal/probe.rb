@@ -85,10 +85,14 @@ module Pgbus
               gauge "queue_visible_depth", q[:queue_visible_length], tags
               gauge "queue_paused", q[:paused] ? 1 : 0, tags
               age = q[:oldest_msg_age_sec]
-              if age
-                gauge "queue_oldest_message_age_seconds", age, tags
-                gauge "queue_latency", age * 1_000, tags
-              end
+              gauge "queue_oldest_message_age_seconds", age, tags if age
+              claimable_age = q[:oldest_claimable_age_sec]
+              gauge "queue_oldest_claimable_age_seconds", claimable_age, tags if claimable_age
+              # Latency = time the oldest *claimable* message has waited for
+              # pickup; a queue holding only vt-parked (scheduled/backoff)
+              # messages is healthy, so 0 — not the raw enqueued_at age, which
+              # grows at wall-clock rate on a parked message (issue #389).
+              gauge "queue_latency", (claimable_age || 0) * 1_000, tags
             end
           rescue StandardError => e
             log_failure("queue metrics", e)

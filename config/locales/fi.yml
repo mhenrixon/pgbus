@@ -65,7 +65,8 @@ fi:
         empty: Jonot eivät löytyneet
         headers:
           depth: Syvyys
-          oldest: Vanhin (s)
+          oldest_claimable: Vanhin saatavilla (s)
+          parked: Pysäköidyt
           queue: Jono
           total: Yhteensä
           visible: Näkyvissä
@@ -475,7 +476,8 @@ fi:
           actions: Toiminnot
           depth: Syvyys
           newest: Uusimmat (s)
-          oldest: Vanhimmat (s)
+          oldest_claimable: Vanhin saatavilla (s)
+          parked: Pysäköidyt
           queue: Jono
           total_ever: Yhteensä koskaan
           visible: Näkyvissä
@@ -516,6 +518,9 @@ fi:
           scheduled: 'Aikataulutettu:'
           timezone: 'Aikavyöhyke:'
           visible_at: 'Näkyvissä:'
+        oldest: 'Vanhin:'
+        oldest_claimable: 'Vanhin saatavilla:'
+        parked: 'Pysäköidyt:'
         pause: Tauko
         pause_confirm: Keskeytetäänkö käsittely?
         purge_confirm: Tyhjennetäänkö kaikki viestit?

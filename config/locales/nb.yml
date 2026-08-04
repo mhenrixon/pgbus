@@ -65,7 +65,8 @@ nb:
         empty: Ingen køer funnet
         headers:
           depth: Dybde
-          oldest: Eldste (s)
+          oldest_claimable: Eldste tilgjengelig (s)
+          parked: Parkert
           queue: Kø
           total: Totalt
           visible: Synlig
@@ -475,7 +476,8 @@ nb:
           actions: Handlinger
           depth: Dybde
           newest: Nyeste (s)
-          oldest: Eldste (s)
+          oldest_claimable: Eldste tilgjengelig (s)
+          parked: Parkert
           queue: Kø
           total_ever: Totalt noensinne
           visible: Synlig
@@ -516,6 +518,9 @@ nb:
           scheduled: 'Planlagt:'
           timezone: 'Tidssone:'
           visible_at: 'Synlig fra:'
+        oldest: 'Eldste:'
+        oldest_claimable: 'Eldste tilgjengelig:'
+        parked: 'Parkert:'
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle meldinger?
