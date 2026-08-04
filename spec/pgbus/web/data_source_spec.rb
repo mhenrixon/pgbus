@@ -158,6 +158,28 @@ RSpec.describe Pgbus::Web::DataSource do
 
       expect(data_source.queue_detail("missing")).to be_nil
     end
+
+    it "exposes a vt-aware oldest_claimable_age_sec, nil when only parked messages remain" do
+      captured_sql = nil
+      allow(mock_connection).to receive(:select_one) do |sql, _label|
+        captured_sql = sql
+        {
+          "queue_length" => 1,
+          "queue_visible_length" => 0,
+          "oldest_msg_age_sec" => 17_045,
+          "newest_msg_age_sec" => 17_045,
+          "oldest_claimable_age_sec" => nil,
+          "total_messages" => 500
+        }
+      end
+
+      result = data_source.queue_detail("pgbus_critical")
+
+      expect(captured_sql).to include("oldest_claimable_age_sec")
+      expect(captured_sql).to include("min(vt)")
+      expect(result[:oldest_msg_age_sec]).to eq(17_045)
+      expect(result[:oldest_claimable_age_sec]).to be_nil
+    end
   end
 
   describe "#summary_stats" do

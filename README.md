@@ -991,6 +991,7 @@ When `config.metrics_enabled = true` (default), the dashboard exposes Prometheus
 
 | Metric | Description |
 |--------|-------------|
+| `pgbus_queue_oldest_claimable_age_seconds` | Age of the oldest message eligible for pickup (visibility timeout elapsed) — safe to alert on: scheduled/backoff-parked messages don't count until due |
 | `pgbus_table_dead_tuples` | Dead tuple count per PGMQ table |
 | `pgbus_table_live_tuples` | Live tuple count per PGMQ table |
 | `pgbus_table_bloat_ratio` | Dead / (dead + live) per table |

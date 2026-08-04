@@ -90,6 +90,56 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result.first[:visible_unread_length]).to eq(4)
     end
 
+    it "selects a vt-aware oldest_claimable_age_sec scoped to claimable rows" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_default])
+
+      allow(conn).to receive(:quote) { |v| "'#{v}'" }
+
+      captured_sql = nil
+      allow(conn).to receive(:select_all) do |sql, _label|
+        captured_sql = sql
+        double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "5",
+                        "queue_visible_length" => "3", "newest_msg_age_sec" => "10",
+                        "oldest_msg_age_sec" => "100", "total_messages" => "500",
+                        "max_read_ct" => "2", "visible_unread_length" => "0",
+                        "oldest_claimable_age_sec" => "42" }])
+      end
+
+      result = data_source.queues_with_metrics
+
+      # Age of the oldest message eligible for pickup: min(vt) over claimable
+      # rows, so a scheduled/backoff-parked message (future vt) contributes
+      # nothing until it comes due (issue #389).
+      expect(captured_sql).to include("min(vt)")
+      expect(captured_sql).to include("oldest_claimable_age_sec")
+      expect(result.first[:oldest_claimable_age_sec]).to eq(42)
+    end
+
+    it "reports nil claimable age for a queue holding only vt-parked messages" do
+      allow(conn).to receive(:select_values)
+        .with(a_string_matching(/pgmq\.meta/))
+        .and_return(%w[pgbus_default])
+
+      allow(conn).to receive(:quote) { |v| "'#{v}'" }
+
+      # The issue #389 incident: one retry-parked message (future vt) — the raw
+      # age grows at wall-clock rate while nothing is eligible for pickup.
+      allow(conn).to receive(:select_all)
+        .with(anything, "Pgbus Batched Queue Metrics")
+        .and_return(double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "1",
+                                    "queue_visible_length" => "0", "newest_msg_age_sec" => "17045",
+                                    "oldest_msg_age_sec" => "17045", "total_messages" => "500",
+                                    "max_read_ct" => "0", "visible_unread_length" => "0",
+                                    "oldest_claimable_age_sec" => nil }]))
+
+      result = data_source.queues_with_metrics
+
+      expect(result.first[:oldest_msg_age_sec]).to eq(17_045)
+      expect(result.first[:oldest_claimable_age_sec]).to be_nil
+    end
+
     it "maps a NULL max_read_ct (empty queue) to nil, not 0" do
       allow(conn).to receive(:select_values)
         .with(a_string_matching(/pgmq\.meta/))

@@ -65,7 +65,8 @@ en:
         empty: No queues found
         headers:
           depth: Depth
-          oldest: Oldest (s)
+          oldest_claimable: Oldest claimable (s)
+          parked: Parked
           queue: Queue
           total: Total
           visible: Visible
@@ -475,7 +476,8 @@ en:
           actions: Actions
           depth: Depth
           newest: Newest (s)
-          oldest: Oldest (s)
+          oldest_claimable: Oldest claimable (s)
+          parked: Parked
           queue: Queue
           total_ever: Total Ever
           visible: Visible
@@ -516,6 +518,8 @@ en:
           scheduled: 'Scheduled at:'
           timezone: 'Timezone:'
           visible_at: 'Visible at:'
+        oldest_claimable: 'Oldest claimable:'
+        parked: 'Parked:'
         pause: Pause
         pause_confirm: Pause processing?
         purge_confirm: Purge all messages?

@@ -65,7 +65,8 @@ fr:
         empty: Aucune file d'attente trouvée
         headers:
           depth: Profondeur
-          oldest: Le plus ancien (s)
+          oldest_claimable: Plus ancien disponible (s)
+          parked: Différés
           queue: File d'attente
           total: Total
           visible: Visible
@@ -475,7 +476,8 @@ fr:
           actions: Actions
           depth: Profondeur
           newest: Le plus récent (s)
-          oldest: Le plus ancien (s)
+          oldest_claimable: Plus ancien disponible (s)
+          parked: Différés
           queue: File d'attente
           total_ever: Total jamais
           visible: Visible
@@ -516,6 +518,8 @@ fr:
           scheduled: 'Planifié :'
           timezone: 'Fuseau horaire :'
           visible_at: 'Visible à :'
+        oldest_claimable: 'Plus ancien disponible :'
+        parked: 'Différés :'
         pause: Pause
         pause_confirm: Mettre en pause le traitement ?
         purge_confirm: Purger tous les messages ?

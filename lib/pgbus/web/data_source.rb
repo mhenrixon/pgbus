@@ -1177,7 +1177,8 @@ module Pgbus
               (SELECT EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int FROM pgmq.#{qtable}) AS oldest_msg_age_sec,
               (SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pgmq.#{seq_name}) AS total_messages,
               (SELECT max(read_ct) FROM pgmq.#{qtable}) AS max_read_ct,
-              (SELECT count(*) FROM pgmq.#{qtable} WHERE vt <= NOW() AND read_ct = 0) AS visible_unread_length
+              (SELECT count(*) FROM pgmq.#{qtable} WHERE vt <= NOW() AND read_ct = 0) AS visible_unread_length,
+              (SELECT EXTRACT(epoch FROM (NOW() - min(vt)))::int FROM pgmq.#{qtable} WHERE vt <= NOW()) AS oldest_claimable_age_sec
           SQL
         rescue StandardError => e
           Pgbus.logger.debug { "[Pgbus::Web] Skipping queue metrics for #{name}: #{e.message}" }
@@ -1194,6 +1195,7 @@ module Pgbus
             queue_length: row["queue_length"].to_i,
             queue_visible_length: row["queue_visible_length"].to_i,
             oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
+            oldest_claimable_age_sec: row["oldest_claimable_age_sec"]&.to_i,
             newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
             total_messages: row["total_messages"].to_i,
             max_read_ct: row["max_read_ct"]&.to_i,
@@ -1216,6 +1218,7 @@ module Pgbus
               count(CASE WHEN vt <= NOW() THEN 1 END) AS queue_visible_length,
               EXTRACT(epoch FROM (NOW() - max(enqueued_at)))::int AS newest_msg_age_sec,
               EXTRACT(epoch FROM (NOW() - min(enqueued_at)))::int AS oldest_msg_age_sec,
+              EXTRACT(epoch FROM (NOW() - min(vt) FILTER (WHERE vt <= NOW())))::int AS oldest_claimable_age_sec,
               max(read_ct) AS max_read_ct,
               count(CASE WHEN vt <= NOW() AND read_ct = 0 THEN 1 END) AS visible_unread_length
             FROM pgmq.#{qtable}
@@ -1229,6 +1232,7 @@ module Pgbus
             q_summary.queue_visible_length,
             q_summary.newest_msg_age_sec,
             q_summary.oldest_msg_age_sec,
+            q_summary.oldest_claimable_age_sec,
             q_summary.max_read_ct,
             q_summary.visible_unread_length,
             all_metrics.total_messages
@@ -1242,6 +1246,7 @@ module Pgbus
           queue_length: row["queue_length"].to_i,
           queue_visible_length: row["queue_visible_length"].to_i,
           oldest_msg_age_sec: row["oldest_msg_age_sec"]&.to_i,
+          oldest_claimable_age_sec: row["oldest_claimable_age_sec"]&.to_i,
           newest_msg_age_sec: row["newest_msg_age_sec"]&.to_i,
           total_messages: row["total_messages"].to_i,
           max_read_ct: row["max_read_ct"]&.to_i,

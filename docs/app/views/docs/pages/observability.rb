@@ -144,7 +144,13 @@ class Views::Docs::Pages::Observability < DocsUI::Page
         Load the `appsignal` gem and pgbus auto-installs a subscriber and a minutely
         probe — background-job transactions for every job and handler, `pgbus_`
         counters and distributions, and gauges for queue depth, oldest-message age,
-        DLQ depth, dead tuples, and MVCC horizon. Four importable dashboards ship
+        DLQ depth, dead tuples, and MVCC horizon. `pgbus_queue_latency` is computed
+        from the oldest *claimable* message (visibility timeout elapsed), so a
+        queue holding only scheduled or backoff-parked jobs reads 0 — alert on it
+        without false positives from one delayed job; the raw
+        `pgbus_queue_oldest_message_age_seconds` gauge keeps enqueue-time
+        semantics, and `pgbus_queue_oldest_claimable_age_seconds` reports the
+        claimable age itself. Four importable dashboards ship
         with the gem — `pgbus dashboard --list` enumerates them and
         `pgbus dashboard <name>` prints import-ready JSON for AppSignal's
         "Import dashboard" dialog. Opt out with `config.appsignal_enabled = false`.

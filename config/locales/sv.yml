@@ -65,7 +65,8 @@ sv:
         empty: Inga köer hittades
         headers:
           depth: Djup
-          oldest: Äldst (s)
+          oldest_claimable: Äldsta tillgänglig (s)
+          parked: Parkerade
           queue: Kö
           total: Totalt
           visible: Synliga
@@ -475,7 +476,8 @@ sv:
           actions: Åtgärder
           depth: Djup
           newest: Nyaste (s)
-          oldest: Äldsta (s)
+          oldest_claimable: Äldsta tillgänglig (s)
+          parked: Parkerade
           queue: Kö
           total_ever: Totalt någonsin
           visible: Synliga
@@ -516,6 +518,8 @@ sv:
           scheduled: 'Schemalagt:'
           timezone: 'Tidszon:'
           visible_at: 'Synlig vid:'
+        oldest_claimable: 'Äldsta tillgänglig:'
+        parked: 'Parkerade:'
         pause: Pausa
         pause_confirm: Pausa bearbetning?
         purge_confirm: Rensa alla meddelanden?

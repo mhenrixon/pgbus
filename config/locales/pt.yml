@@ -65,7 +65,8 @@ pt:
         empty: Nenhuma fila encontrada
         headers:
           depth: Profundidade
-          oldest: Mais antigo (s)
+          oldest_claimable: Mais antigo disponível (s)
+          parked: Adiados
           queue: Fila
           total: Total
           visible: Visível
@@ -475,7 +476,8 @@ pt:
           actions: Ações
           depth: Profundidade
           newest: Mais novo (s)
-          oldest: Mais antigo (s)
+          oldest_claimable: Mais antigo disponível (s)
+          parked: Adiados
           queue: Fila
           total_ever: Total de todos os tempos
           visible: Visível
@@ -516,6 +518,8 @@ pt:
           scheduled: 'Agendado:'
           timezone: 'Fuso horário:'
           visible_at: 'Visível em:'
+        oldest_claimable: 'Mais antigo disponível:'
+        parked: 'Adiados:'
         pause: Pausar
         pause_confirm: Pausar processamento?
         purge_confirm: Limpar todas as mensagens?

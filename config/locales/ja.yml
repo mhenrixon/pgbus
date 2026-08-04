@@ -65,7 +65,8 @@ ja:
         empty: キューが見つかりません
         headers:
           depth: 深さ
-          oldest: 最古 (秒)
+          oldest_claimable: 取得可能な最古 (秒)
+          parked: 待機中
           queue: キュー
           total: 合計
           visible: 表示中
@@ -475,7 +476,8 @@ ja:
           actions: アクション
           depth: 深さ
           newest: 最新 (秒)
-          oldest: 最古 (秒)
+          oldest_claimable: 取得可能な最古 (秒)
+          parked: 待機中
           queue: キュー
           total_ever: 合計数
           visible: 表示中
@@ -516,6 +518,8 @@ ja:
           scheduled: スケジュール済み：
           timezone: タイムゾーン：
           visible_at: 表示可能日時：
+        oldest_claimable: '取得可能な最古:'
+        parked: '待機中:'
         pause: 一時停止
         pause_confirm: 処理を一時停止しますか？
         purge_confirm: すべてのメッセージを削除しますか？

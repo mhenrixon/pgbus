@@ -65,7 +65,8 @@ es:
         empty: No se encontraron colas
         headers:
           depth: Profundidad
-          oldest: El más antiguo (s)
+          oldest_claimable: Más antiguo disponible (s)
+          parked: Aparcados
           queue: Cola
           total: Total
           visible: Visible
@@ -475,7 +476,8 @@ es:
           actions: Acciones
           depth: Profundidad
           newest: Más nuevo (s)
-          oldest: Más antiguo (s)
+          oldest_claimable: Más antiguo disponible (s)
+          parked: Aparcados
           queue: Cola
           total_ever: Total acumulado
           visible: Visible
@@ -516,6 +518,8 @@ es:
           scheduled: 'Programado:'
           timezone: 'Zona horaria:'
           visible_at: 'Visible en:'
+        oldest_claimable: 'Más antiguo disponible:'
+        parked: 'Aparcados:'
         pause: Pausar
         pause_confirm: "¿Pausar el procesamiento?"
         purge_confirm: "¿Purgar todos los mensajes?"

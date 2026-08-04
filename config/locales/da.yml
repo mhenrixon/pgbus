@@ -65,7 +65,8 @@ da:
         empty: Ingen køer fundet
         headers:
           depth: Dybde
-          oldest: Ældste (s)
+          oldest_claimable: Ældste tilgængelig (s)
+          parked: Parkeret
           queue: Kø
           total: Total
           visible: Synlig
@@ -475,7 +476,8 @@ da:
           actions: Handlinger
           depth: Dybde
           newest: Nyeste (s)
-          oldest: Ældste (s)
+          oldest_claimable: Ældste tilgængelig (s)
+          parked: Parkeret
           queue: Kø
           total_ever: Total nogensinde
           visible: Synlig
@@ -516,6 +518,8 @@ da:
           scheduled: 'Planlagt:'
           timezone: 'Tidszone:'
           visible_at: 'Synlig fra:'
+        oldest_claimable: 'Ældste tilgængelig:'
+        parked: 'Parkeret:'
         pause: Pause
         pause_confirm: Pause behandling?
         purge_confirm: Rens alle beskeder?
