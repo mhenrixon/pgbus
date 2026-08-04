@@ -128,7 +128,9 @@ RSpec.describe Pgbus::Streams::Coalescer do
       scheduler.run_all
 
       expect(Pgbus::ErrorReporter).to have_received(:report).with(
-        boom, hash_including(stream: "chat", target: "cursor")
+        boom, hash_including(
+                component: "streams.coalescer", stream: "chat", target: "cursor"
+              )
       )
     end
 

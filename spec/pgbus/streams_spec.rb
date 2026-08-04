@@ -222,7 +222,9 @@ RSpec.describe Pgbus::Streams do
         ephemeral = described_class.new("chat", client: client, durable: false)
         ephemeral.broadcast("x", coalesce: 50, target: "t")
 
-        expect(coalescer).to have_received(:submit).with(hash_including(target: "t"))
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(target: "t", opts: hash_including(durable: false))
+        )
         expect(transaction.callbacks).to be_empty
       end
     end

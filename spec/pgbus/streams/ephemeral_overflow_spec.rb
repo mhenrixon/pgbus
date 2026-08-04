@@ -50,9 +50,13 @@ RSpec.describe Pgbus::Streams::Stream do
     end
 
     it "warn-logs the fallback with stream and byte count" do
-      allow(Pgbus.logger).to receive(:warn)
+      warning = nil
+      allow(Pgbus.logger).to receive(:warn) { |&block| warning = block.call }
       stream.broadcast(big_html)
-      expect(Pgbus.logger).to have_received(:warn)
+      expect(warning).to include(
+        '"probe"',
+        "#{JSON.generate({ "html" => big_html }).bytesize} bytes"
+      )
     end
 
     it "carries visible_to through to the durable publish" do
