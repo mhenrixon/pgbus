@@ -192,8 +192,10 @@ RSpec.describe Pgbus::Streams do
         tx = transaction
         conn = Object.new
         conn.define_singleton_method(:current_transaction) { tx }
+        pool = Object.new
+        pool.define_singleton_method(:active_connection?) { conn }
         ar_base = Class.new
-        ar_base.define_singleton_method(:connection) { conn }
+        ar_base.define_singleton_method(:connection_pool) { pool }
         stub_const("ActiveRecord::Base", ar_base)
       end
 
@@ -394,7 +396,10 @@ RSpec.describe Pgbus::Streams do
         double("ActiveRecord::ConnectionAdapters::AbstractAdapter", current_transaction: transaction)
       end
 
-      let(:ar_base) { double("ActiveRecord::Base", connection: ar_connection) }
+      # The probe reads connection_pool.active_connection? — the existing
+      # lease, never a fresh checkout (see Stream#current_open_transaction).
+      let(:ar_pool) { double("ActiveRecord::ConnectionAdapters::ConnectionPool", active_connection?: ar_connection) }
+      let(:ar_base) { double("ActiveRecord::Base", connection_pool: ar_pool) }
 
       before { stub_const("ActiveRecord::Base", ar_base) }
 
