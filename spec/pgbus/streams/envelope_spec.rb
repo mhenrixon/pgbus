@@ -15,18 +15,50 @@ RSpec.describe Pgbus::Streams::Envelope do
       )
     end
 
-    it "strips newlines from data so the SSE parser sees one logical event" do
+    it "frames a multiline payload as consecutive data: lines (SSE spec, issue #392)" do
       data = "<turbo-stream>\n  <template>x</template>\n</turbo-stream>"
       result = described_class.message(id: 1, event: "turbo-stream", data: data)
-      # Newlines collapsed; surrounding spaces preserved
-      expect(result).not_to include("\n  <template>")
-      expect(result).to include("data: <turbo-stream>  <template>x</template></turbo-stream>")
+      expect(result).to eq(
+        "id: 1\n" \
+        "event: turbo-stream\n" \
+        "data: <turbo-stream>\n" \
+        "data:   <template>x</template>\n" \
+        "data: </turbo-stream>\n" \
+        "\n"
+      )
     end
 
-    it "strips carriage returns from data" do
+    it "round-trips a multiline payload through an EventSource-style rejoin" do
+      data = "<pre>\n  significant\n\n  whitespace\n</pre>"
+      result = described_class.message(id: 1, event: "msg", data: data)
+      rejoined = result.lines.grep(/\Adata:/).map { |l| l.chomp.delete_prefix("data:").delete_prefix(" ") }.join("\n")
+      expect(rejoined).to eq(data)
+    end
+
+    it "treats \\r\\n and lone \\r as line breaks (SSE cannot carry a raw \\r)" do
       data = "a\r\nb\rc"
       result = described_class.message(id: 1, event: "msg", data: data)
-      expect(result).to include("data: abc\n")
+      expect(result).to include("data: a\ndata: b\ndata: c\n")
+      expect(result).not_to include("\r")
+    end
+
+    it "preserves a trailing newline in the payload (empty final data: line)" do
+      result = described_class.message(id: 1, event: "msg", data: "a\n")
+      expect(result).to include("data: a\ndata: \n\n")
+      rejoined = result.lines.grep(/\Adata:/).map { |l| l.chomp.delete_prefix("data:").delete_prefix(" ") }.join("\n")
+      expect(rejoined).to eq("a\n")
+    end
+
+    it "cannot be used to inject SSE fields via newlines in data (every line is data:-prefixed)" do
+      result = described_class.message(id: 1, event: "msg", data: "x\nid: 999\nevent: evil")
+      expect(result.scan(/^id:/).size).to eq(1)
+      expect(result.scan(/^event:/).size).to eq(1)
+      expect(result).to include("data: x\ndata: id: 999\ndata: event: evil\n")
+    end
+
+    it "emits a single empty data: line for an empty payload" do
+      result = described_class.message(id: 1, event: "msg", data: "")
+      expect(result).to eq("id: 1\nevent: msg\ndata: \n\n")
     end
 
     it "preserves UTF-8 characters in data" do

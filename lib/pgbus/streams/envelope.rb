@@ -12,13 +12,17 @@ module Pgbus
     #   - `comment(text)` — a heartbeat or sentinel that the SSE parser ignores
     #   - `retry_directive(ms)` — tells `EventSource` how long to wait before reconnecting
     #
-    # All frames end with `\n\n` (the SSE event terminator). `data:` lines must not
-    # contain newlines — the SSE spec uses `\n` as the field terminator, so a multi-line
-    # payload would arrive as multiple events. We strip `\r` and `\n` from data and
-    # comment text rather than splitting into multiple `data:` lines, because Turbo
-    # Stream HTML is already flat and the simpler encoding is easier to debug.
+    # All frames end with `\n\n` (the SSE event terminator). A multiline payload is
+    # framed as consecutive `data:` lines (issue #392) — the client rejoins them with
+    # `\n`, so delivery is lossless. `\r\n` and lone `\r` are also SSE line terminators,
+    # so they become `data:` line breaks too (rejoined as `\n`; SSE cannot represent a
+    # raw `\r`). Every payload line carries the `data: ` prefix, so a crafted payload
+    # cannot inject forged id:/event: fields. Single-line fields (`event:`, comments)
+    # still strip newlines — there a `\r`/`\n` would terminate the field early and
+    # permit SSE field injection.
     module Envelope
       NEWLINES = /[\r\n]+/
+      DATA_LINE_BREAK = /\r\n|\r|\n/
 
       RESPONSE_HEADERS = "HTTP/1.1 200 OK\r\n" \
                          "content-type: text/event-stream\r\n" \
@@ -31,11 +35,13 @@ module Pgbus
         raise ArgumentError, "id is required" if id.nil?
         raise ArgumentError, "event is required" if event.nil? || event.to_s.empty?
 
-        # Strip newlines from BOTH event and data, not just data: each is
-        # interpolated into its own SSE field line, so an unescaped \r/\n in
-        # either would terminate the field early and let a crafted value
-        # inject extra SSE fields (a forged id:/data:) into the frame.
-        "id: #{id}\nevent: #{strip_newlines(event.to_s)}\ndata: #{strip_newlines(data.to_s)}\n\n"
+        # The event name is a single SSE field line, so newlines are stripped —
+        # an unescaped \r/\n would terminate the field early and let a crafted
+        # value inject extra SSE fields (a forged id:/data:) into the frame.
+        # The payload is framed as one `data:` line per payload line instead:
+        # every line carries the `data: ` prefix, which is both spec-correct
+        # (the client rejoins with \n) and injection-safe.
+        "id: #{id}\nevent: #{strip_newlines(event.to_s)}\n#{data_lines(data.to_s)}\n"
       end
 
       def self.comment(text)
@@ -71,7 +77,16 @@ module Pgbus
         str.gsub(NEWLINES, "")
       end
 
-      private_class_method :strip_newlines
+      # One `data: <line>\n` per payload line. The -1 limit keeps trailing
+      # empty strings, so a payload ending in \n round-trips as an empty
+      # final `data:` line (the client's rejoin restores the newline).
+      def self.data_lines(str)
+        lines = str.split(DATA_LINE_BREAK, -1)
+        lines = [""] if lines.empty? # "".split → [] — an empty payload still gets its data: line
+        lines.map { |line| "data: #{line}\n" }.join
+      end
+
+      private_class_method :strip_newlines, :data_lines
     end
   end
 end

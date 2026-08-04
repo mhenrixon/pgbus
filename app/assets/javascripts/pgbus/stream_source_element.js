@@ -225,13 +225,17 @@ class PgbusStreamSourceElement extends HTMLElement {
 
     let id = null
     let event = "message"
-    let data = ""
+    const dataLines = []
 
     for (const line of block.split("\n")) {
       if (line.startsWith("id:")) id = line.slice(3).trim()
       else if (line.startsWith("event:")) event = line.slice(6).trim()
-      else if (line.startsWith("data:")) data += line.slice(5).trim()
+      // Per the SSE spec: strip only a single leading space after the colon
+      // (never trim — payload whitespace is significant, issue #392) and
+      // rejoin consecutive data: lines with \n, matching native EventSource.
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""))
     }
+    const data = dataLines.join("\n")
 
     if (id !== null) this.lastEventId = id
 
