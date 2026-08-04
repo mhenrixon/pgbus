@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Pgbus
-  VERSION = "0.13.4"
+  VERSION = "0.13.5"
 end
