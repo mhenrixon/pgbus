@@ -18,16 +18,16 @@ module DummyApp
 
     def queues_with_metrics
       [
-        { name: "pgbus_default", queue_length: 85, queue_visible_length: 62,
+        { name: "pgbus_default", queue_length: 85, queue_visible_length: 62, parked_length: 23,
           oldest_msg_age_sec: 300, oldest_claimable_age_sec: 240,
           newest_msg_age_sec: 2, total_messages: 12_450 },
-        { name: "pgbus_mailers", queue_length: 22, queue_visible_length: 18,
+        { name: "pgbus_mailers", queue_length: 22, queue_visible_length: 18, parked_length: 4,
           oldest_msg_age_sec: 45, oldest_claimable_age_sec: 30,
           newest_msg_age_sec: 1, total_messages: 8_320 },
-        { name: "pgbus_events", queue_length: 15, queue_visible_length: 13,
+        { name: "pgbus_events", queue_length: 15, queue_visible_length: 13, parked_length: 2,
           oldest_msg_age_sec: 120, oldest_claimable_age_sec: 100,
           newest_msg_age_sec: 5, total_messages: 45_000 },
-        { name: "pgbus_default_dlq", queue_length: 3, queue_visible_length: 3,
+        { name: "pgbus_default_dlq", queue_length: 3, queue_visible_length: 3, parked_length: 0,
           oldest_msg_age_sec: 7200, oldest_claimable_age_sec: 7200,
           newest_msg_age_sec: 3600, total_messages: 47 }
       ]

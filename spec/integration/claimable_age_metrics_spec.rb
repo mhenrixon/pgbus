@@ -28,8 +28,10 @@ RSpec.describe "Claimable age metrics (integration)", :integration do
       expect(age).to be_an(Integer)
       expect(age).to be >= 0
 
+      # The age is wall-clock-relative and only grows between the two calls;
+      # an exact match would flake when connecting to a contended server.
       all = client.oldest_claimable_ages
-      expect(all.fetch("pgbus_int_claimable_test")).to be_within(1).of(age)
+      expect(all.fetch(client.config.queue_name("claimable_test"))).to be >= age
     end
 
     it "excludes an in-flight message whose visibility timeout was pushed forward" do

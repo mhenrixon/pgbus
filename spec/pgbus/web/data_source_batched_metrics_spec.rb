@@ -115,6 +115,7 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(captured_sql).to include("min(vt)")
       expect(captured_sql).to include("oldest_claimable_age_sec")
       expect(result.first[:oldest_claimable_age_sec]).to eq(42)
+      expect(result.first[:parked_length]).to eq(2)
     end
 
     it "reports nil claimable age for a queue holding only vt-parked messages" do
@@ -124,8 +125,9 @@ RSpec.describe Pgbus::Web::DataSource do
 
       allow(conn).to receive(:quote) { |v| "'#{v}'" }
 
-      # The issue #389 incident: one retry-parked message (future vt) — the raw
-      # age grows at wall-clock rate while nothing is eligible for pickup.
+      # The issue #389 incident: one vt-parked message — an ActiveJob retry
+      # re-enqueued with wait:, so read_ct is 0 and vt is hours in the future.
+      # The raw age grows at wall-clock rate while nothing is eligible for pickup.
       allow(conn).to receive(:select_all)
         .with(anything, "Pgbus Batched Queue Metrics")
         .and_return(double(to_a: [{ "queue_name" => "pgbus_default", "queue_length" => "1",

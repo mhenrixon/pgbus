@@ -13,7 +13,7 @@
       <p class="text-sm text-gray-500 mt-1">
         <%= t("pgbus.queues.show.depth") %> <span class="font-mono"><%= @queue[:queue_length] %></span> |
         <%= t("pgbus.queues.show.visible") %> <span class="font-mono"><%= @queue[:queue_visible_length] %></span> |
-        <%= t("pgbus.queues.show.parked") %> <span class="font-mono"><%= @queue[:queue_length] - @queue[:queue_visible_length] %></span> |
+        <%= t("pgbus.queues.show.parked") %> <span class="font-mono"><%= @queue[:parked_length] %></span> |
         <%= t("pgbus.queues.show.oldest_claimable") %> <span class="font-mono"><%= @queue[:oldest_claimable_age_sec] || "—" %></span> |
         <%= t("pgbus.queues.show.total") %> <span class="font-mono"><%= pgbus_number(@queue[:total_messages]) %></span>
       </p>

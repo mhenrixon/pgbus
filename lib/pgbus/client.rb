@@ -553,14 +553,20 @@ module Pgbus
     #
     # With a queue name: the age for that (prefixed) queue, or nil.
     # Without: a hash of every physical queue in pgmq.meta to its age.
+    #
+    # synchronized: on the shared-Proc path with_raw_connection yields the same
+    # AR raw connection every @pgmq operation runs on — an unserialized query
+    # here could interleave with a concurrent PGMQ call mid-protocol.
     def oldest_claimable_ages(queue_name = nil)
-      with_raw_connection do |conn|
-        if queue_name
-          claimable_age_for(conn, config.queue_name(queue_name))
-        else
-          names = conn.exec("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
-                      .map { |row| row["queue_name"] }
-          names.to_h { |name| [name, claimable_age_for(conn, name)] }
+      synchronized do
+        with_raw_connection do |conn|
+          if queue_name
+            claimable_age_for(conn, config.queue_name(queue_name))
+          else
+            names = conn.exec("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+                        .map { |row| row["queue_name"] }
+            names.to_h { |name| [name, claimable_age_for(conn, name)] }
+          end
         end
       end
     end
