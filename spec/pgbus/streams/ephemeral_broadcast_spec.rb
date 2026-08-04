@@ -34,11 +34,11 @@ RSpec.describe Pgbus::Streams::Stream do
       expect(client).not_to have_received(:send_stream_message)
     end
 
-    it "sends a PG NOTIFY with the payload" do
+    it "sends a PG NOTIFY with the pre-serialized payload" do
       stream.broadcast("<turbo-stream>X</turbo-stream>")
       expect(client).to have_received(:notify_stream).with(
         "chat",
-        { "html" => "<turbo-stream>X</turbo-stream>" }
+        JSON.generate({ "html" => "<turbo-stream>X</turbo-stream>" })
       )
     end
 
@@ -46,7 +46,7 @@ RSpec.describe Pgbus::Streams::Stream do
       stream.broadcast("<turbo-stream>X</turbo-stream>", visible_to: :admin_only)
       expect(client).to have_received(:notify_stream).with(
         "chat",
-        { "html" => "<turbo-stream>X</turbo-stream>", "visible_to" => "admin_only" }
+        JSON.generate({ "html" => "<turbo-stream>X</turbo-stream>", "visible_to" => "admin_only" })
       )
     end
 

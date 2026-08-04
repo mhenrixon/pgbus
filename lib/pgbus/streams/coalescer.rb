@@ -73,6 +73,12 @@ module Pgbus
         return unless entry
 
         @flush.call(stream_name: stream_name, target: target, payload: entry.payload, opts: entry.opts)
+      rescue StandardError => e
+        # The flush runs on the scheduler's thread — a raise here reaches no
+        # caller, so a swallowed error is invisible to APM by construction
+        # (issue #391: an oversized ephemeral frame died here without a
+        # trace). Route through ErrorReporter so configured reporters see it.
+        ErrorReporter.report(e, { component: "streams.coalescer", stream: stream_name, target: target })
       end
 
       # Default scheduler backed by Concurrent::ScheduledTask. Kept as a

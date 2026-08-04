@@ -112,4 +112,40 @@ RSpec.describe Pgbus::Streams::Coalescer do
     scheduler.run_all
     expect(flushed.map { |f| f[:target] }).to eq(["cursor"])
   end
+
+  # Issue #391: the flush runs on the scheduler's thread — a raise there
+  # never reaches any caller, so a swallowed error is invisible to APM by
+  # construction. Errors must route through ErrorReporter (same reasoning
+  # as the StreamApp report-don't-log fix in #352).
+  describe "flush errors" do
+    let(:boom) { StandardError.new("payload string too long") }
+    let(:flush) { ->(**) { raise boom } }
+
+    it "routes a raising flush through ErrorReporter with stream/target context" do
+      allow(Pgbus::ErrorReporter).to receive(:report)
+
+      submit(stream: "chat", target: "cursor", payload: "a")
+      scheduler.run_all
+
+      expect(Pgbus::ErrorReporter).to have_received(:report).with(
+        boom, hash_including(stream: "chat", target: "cursor")
+      )
+    end
+
+    it "does not re-raise out of the flush" do
+      allow(Pgbus::ErrorReporter).to receive(:report)
+      submit(payload: "a")
+      expect { scheduler.run_all }.not_to raise_error
+    end
+
+    it "keeps the key usable for the next window after a failed flush" do
+      allow(Pgbus::ErrorReporter).to receive(:report)
+      submit(payload: "a")
+      scheduler.run_all
+
+      # A new submit after the failed flush schedules a fresh window.
+      submit(payload: "b")
+      expect(scheduler.scheduled.size).to eq(1)
+    end
+  end
 end

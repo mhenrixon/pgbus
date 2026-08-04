@@ -15,6 +15,18 @@ module Pgbus
     # this specifically can rescue Pgbus::Streams::StreamNameTooLong.
     class StreamNameTooLong < ArgumentError; end
 
+    # Raised when an ephemeral broadcast's JSON payload exceeds PostgreSQL's
+    # NOTIFY payload budget (< 8000 bytes). Ephemeral frames ride the NOTIFY
+    # itself, so the cap is a hard PostgreSQL limit — durable mode (payload
+    # stored in PGMQ, NOTIFY as a bare wake) has no such cap.
+    #
+    # Stream#broadcast never raises this: an oversized ephemeral frame
+    # auto-degrades to a durable publish (issue #391). The error exists for
+    # direct Client#notify_stream callers, where the previous failure mode
+    # was a misleading PGMQ::Errors::ConnectionError ("payload string too
+    # long") that pointed diagnosis at the connection instead of the payload.
+    class PayloadTooLarge < Pgbus::Error; end
+
     # The default SSE `event:` name for a broadcast frame. Turbo's
     # StreamObserver consumes frames the client re-dispatches as the
     # `message` DOM event; the client maps this SSE event name to
@@ -261,9 +273,45 @@ module Pgbus
 
       private
 
+      # Ephemeral frames ride the NOTIFY payload itself, which PostgreSQL
+      # caps below 8000 bytes. A frame over the cap auto-degrades to a
+      # durable publish (issue #391): payload stored in PGMQ, the queue's
+      # insert trigger fires the NOTIFY as a bare wake on the same channel
+      # the subscriber already LISTENs on — delivery semantics preserved,
+      # cap irrelevant. The JSON is generated once here and passed
+      # pre-serialized to notify_stream so the size check costs no extra
+      # allocation on the hot path.
       def broadcast_ephemeral(wrapped)
-        @client.notify_stream(@name, wrapped)
+        json = JSON.generate(wrapped)
+        return durable_fallback(wrapped, json.bytesize) if json.bytesize > Client::NotifyStream::NOTIFY_PAYLOAD_LIMIT_BYTES
+
+        @client.notify_stream(@name, json)
         nil
+      end
+
+      # The durable degrade path for an oversized ephemeral frame. Stays
+      # fire-and-forget like the ephemeral path it replaces: no after_commit
+      # deferral (pg_notify runs on the PGMQ pool connection, outside the
+      # request's AR transaction, so the ephemeral path never deferred
+      # either). Returns the msg_id like any durable publish.
+      def durable_fallback(wrapped, bytes)
+        Pgbus.logger.warn do
+          "[Pgbus::Streams] ephemeral broadcast on #{@name.inspect} is #{bytes} bytes " \
+            "(NOTIFY cap is #{Client::NotifyStream::NOTIFY_PAYLOAD_LIMIT_BYTES}); " \
+            "publishing durably instead. Consider durable mode for this stream " \
+            "(streams_durable_patterns or durable: true) to skip this check."
+        end
+        ensure_queue!
+        instrument_payload = {
+          stream: @name,
+          visible_to: wrapped["visible_to"],
+          deferred: false,
+          bytes: wrapped["html"].bytesize,
+          ephemeral_fallback: true
+        }
+        Instrumentation.instrument("pgbus.stream.broadcast", instrument_payload) do
+          @client.send_stream_message(@name, wrapped)
+        end
       end
 
       # Submits a frame to the process-wide coalescer instead of
