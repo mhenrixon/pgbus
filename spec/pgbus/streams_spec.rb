@@ -210,6 +210,23 @@ RSpec.describe Pgbus::Streams do
         # No run_callbacks! → simulates rollback.
         expect(coalescer).not_to have_received(:submit)
       end
+
+      # Pins the ephemeral half of the gating contract (issue #391 Q&A):
+      # transaction gating is decided at SUBMIT time by the requested mode.
+      # An ephemeral coalesced frame is fire-and-forget and submits
+      # immediately even inside an open transaction — so the oversized-frame
+      # durable fallback (which happens later, at flush, on the coalescer
+      # thread where no request transaction is visible) inherits exactly the
+      # ephemeral contract the caller chose, never a surprise deferral.
+      it "submits an ephemeral coalesced frame immediately, even inside the transaction" do
+        ephemeral = described_class.new("chat", client: client, durable: false)
+        ephemeral.broadcast("x", coalesce: 50, target: "t")
+
+        expect(coalescer).to have_received(:submit).with(
+          hash_including(target: "t", opts: hash_including(durable: false))
+        )
+        expect(transaction.callbacks).to be_empty
+      end
     end
 
     describe "#broadcast_render" do

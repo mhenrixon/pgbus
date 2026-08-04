@@ -14,15 +14,24 @@ module Pgbus
     # no orphan tables.
     #
     # The payload is JSON-serialized into the NOTIFY's optional payload
-    # parameter (max 8000 bytes in Postgres). Broadcasts exceeding this
-    # limit will raise a PG::ProgramLimitExceeded error — callers needing
-    # large payloads should use durable mode (which inserts into PGMQ).
+    # parameter. Postgres caps NOTIFY payloads at < 8000 bytes; oversized
+    # payloads raise a typed Pgbus::Streams::PayloadTooLarge here, at the
+    # call site, instead of surfacing as a misleading
+    # PGMQ::Errors::ConnectionError ("payload string too long") from deep
+    # inside the driver (issue #391). Callers needing large payloads should
+    # use durable mode (which inserts into PGMQ).
     module NotifyStream
+      # PostgreSQL rejects NOTIFY payloads of 8000 bytes or more
+      # ("payload string too long"), so 7999 is the largest deliverable
+      # payload.
+      NOTIFY_PAYLOAD_LIMIT_BYTES = 7999
+
       def notify_stream(stream_name, payload)
         full_name = config.queue_name(stream_name)
         sanitized = QueueNameValidator.sanitize!(full_name)
         channel = "pgmq.q_#{sanitized}.INSERT"
         json = payload.is_a?(String) ? payload : JSON.generate(payload)
+        validate_notify_payload_size!(stream_name, json)
 
         Instrumentation.instrument("pgbus.stream.notify", stream: stream_name, bytes: json.bytesize) do
           with_stale_connection_retry do
@@ -33,6 +42,19 @@ module Pgbus
             end
           end
         end
+      end
+
+      private
+
+      def validate_notify_payload_size!(stream_name, json)
+        return if json.bytesize <= NOTIFY_PAYLOAD_LIMIT_BYTES
+
+        raise Pgbus::Streams::PayloadTooLarge,
+              "Ephemeral broadcast on stream #{stream_name.inspect} is #{json.bytesize} bytes; " \
+              "PostgreSQL caps NOTIFY payloads at #{NOTIFY_PAYLOAD_LIMIT_BYTES} bytes. " \
+              "Use durable mode for large payloads (payload stored in PGMQ, NOTIFY as wake) — " \
+              "e.g. broadcast(..., durable: true), a streams_durable_patterns match, or " \
+              "streams_default_broadcast_mode = :durable."
       end
     end
   end

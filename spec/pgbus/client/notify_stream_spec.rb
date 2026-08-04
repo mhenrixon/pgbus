@@ -69,6 +69,50 @@ RSpec.describe Pgbus::Client::NotifyStream do
       )
     end
 
+    context "when the payload exceeds the PG NOTIFY budget" do
+      let(:oversized) { { "html" => "<div>#{"x" * 9000}</div>" } }
+
+      it "raises a typed Pgbus::Streams::PayloadTooLarge at the call site" do
+        expect do
+          client.notify_stream("chat", oversized)
+        end.to raise_error(Pgbus::Streams::PayloadTooLarge, /\d+ bytes.*7999/m)
+      end
+
+      it "names the stream and suggests durable mode in the message" do
+        expect do
+          client.notify_stream("chat", oversized)
+        end.to raise_error(Pgbus::Streams::PayloadTooLarge, /chat.*durable/m)
+      end
+
+      it "does not attempt the NOTIFY" do
+        begin
+          client.notify_stream("chat", oversized)
+        rescue Pgbus::Streams::PayloadTooLarge
+          nil
+        end
+        expect(raw_conn).not_to have_received(:exec_params)
+      end
+
+      it "is a Pgbus::Error so blanket pgbus rescues keep working" do
+        expect(Pgbus::Streams::PayloadTooLarge.ancestors).to include(Pgbus::Error)
+      end
+
+      it "measures bytes, not characters (multibyte payloads)" do
+        # 4500 two-byte chars = 4500 chars but 9000 bytes of HTML.
+        multibyte = { "html" => "é" * 4500 }
+        expect do
+          client.notify_stream("chat", multibyte)
+        end.to raise_error(Pgbus::Streams::PayloadTooLarge)
+      end
+
+      it "accepts a payload exactly at the budget" do
+        # {"html":""} wrapper is 11 bytes; fill to exactly 7999.
+        at_limit = { "html" => "x" * (7999 - 11) }
+        expect { client.notify_stream("chat", at_limit) }.not_to raise_error
+        expect(raw_conn).to have_received(:exec_params)
+      end
+    end
+
     context "with stale pgmq connection recovery" do
       before do
         real_pgmq_connection_error
