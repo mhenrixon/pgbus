@@ -28,6 +28,9 @@ module Pgbus
     PGMQ_META_CHECK_SQL = "SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1"
     private_constant :PGMQ_META_CHECK_SQL
 
+    PGMQ_INSTALL_SAVEPOINT = "pgbus_pgmq_install"
+    private_constant :PGMQ_INSTALL_SAVEPOINT
+
     # Install-race losers see the winner's DDL as one of these. Matched by
     # class NAME so the check works whether or not the pg gem's generated
     # error classes are loaded in this process (mirrors the defined?(PG::…)
@@ -985,30 +988,71 @@ module Pgbus
             "Ensure the pgbus database exists and migrations have been run."
     end
 
-    # Check-and-install inside one transaction holding a fixed advisory lock:
-    # pg_advisory_xact_lock serializes installers across processes and releases
-    # itself at COMMIT/ROLLBACK — safe through transaction-pooling poolers,
-    # where a session-level lock could be released on a different server
-    # connection than the one that acquired it (issue #397).
+    # Check-and-install under a fixed advisory lock: pg_advisory_xact_lock
+    # serializes installers across processes and releases itself when its
+    # transaction ends — safe through transaction-pooling poolers, where a
+    # session-level lock could be released on a different server connection
+    # than the one that acquired it (issue #397).
+    #
+    # The transactional framing must respect who owns the transaction. A
+    # Proc-supplied shared connection (the Rails-lambda path) can arrive
+    # mid-transaction — e.g. perform_later inside an application
+    # `transaction do` block. BEGIN there is a warning-level no-op, and the
+    # matching COMMIT/ROLLBACK would then commit or destroy the CALLER's
+    # transaction (#398 review). So: own the transaction only when the
+    # connection is idle; ride the caller's transaction via a savepoint
+    # otherwise.
     def install_pgmq_schema_serialized(conn)
+      if inside_caller_transaction?(conn)
+        install_pgmq_schema_in_savepoint(conn)
+      else
+        install_pgmq_schema_in_own_transaction(conn)
+      end
+    end
+
+    # respond_to? guard: a Proc can hand back any connection-shaped object;
+    # only a real PG::Connection reports transaction_status (and its presence
+    # guarantees the PG constants below are loaded).
+    def inside_caller_transaction?(conn)
+      conn.respond_to?(:transaction_status) && conn.transaction_status != PG::PQTRANS_IDLE
+    end
+
+    def install_pgmq_schema_in_own_transaction(conn)
       conn.exec("BEGIN")
       conn.exec("SELECT pg_advisory_xact_lock(#{PGMQ_INSTALL_LOCK_KEY})")
       install_pgmq_schema(conn) if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
       conn.exec("COMMIT")
     rescue StandardError => e
+      recover_from_install_failure(conn, e, "ROLLBACK")
+    end
+
+    # The advisory lock joins the CALLER's transaction here, so it is held
+    # until that transaction ends — longer than the install needs, but xact
+    # locks cannot be released early by design, and over-holding only delays
+    # a concurrent installer, never corrupts it.
+    def install_pgmq_schema_in_savepoint(conn)
+      conn.exec("SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+      conn.exec("SELECT pg_advisory_xact_lock(#{PGMQ_INSTALL_LOCK_KEY})")
+      install_pgmq_schema(conn) if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+      conn.exec("RELEASE SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+    rescue StandardError => e
+      recover_from_install_failure(conn, e, "ROLLBACK TO SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+    end
+
+    def recover_from_install_failure(conn, error, rollback_sql)
       begin
-        conn.exec("ROLLBACK")
+        conn.exec(rollback_sql)
       rescue StandardError
-        # A connection broken enough to refuse ROLLBACK also fails the
+        # A connection broken enough to refuse the rollback also fails the
         # re-check below, which surfaces the state honestly; re-raising the
-        # ROLLBACK error here would mask the original install failure.
+        # rollback error here would mask the original install failure.
       end
-      raise e unless duplicate_install_error?(e)
+      raise error unless duplicate_install_error?(error)
 
       # A process without the advisory lock (older pgbus, or the extension
       # path) won the install race — re-check instead of failing on its
       # success.
-      raise e if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+      raise error if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
     end
 
     def duplicate_install_error?(error)
