@@ -302,6 +302,42 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#ensure_queue when queue DDL rides a caller's transaction (#399 review)" do
+    subject(:client) do
+      allow(config).to receive(:connection_options).and_return(-> { raw_conn })
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      c = described_class.new(config, schema_ensured: true)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    let(:raw_conn) { double("raw_conn") }
+
+    before { require "pg" }
+
+    it "creates the queue but does not cache it — the DDL is only durable once the caller commits" do
+      allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_INTRANS)
+
+      client.ensure_queue("jobs")
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").twice
+    end
+
+    it "resumes caching once the shared connection is idle again" do
+      allow(raw_conn).to receive(:transaction_status).and_return(
+        PG::PQTRANS_INTRANS, PG::PQTRANS_IDLE, PG::PQTRANS_IDLE
+      )
+
+      client.ensure_queue("jobs") # inside caller txn — created, not cached
+      client.ensure_queue("jobs") # idle — created and cached
+      client.ensure_queue("jobs") # cache hit
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").twice
+    end
+  end
+
   describe "#ensure_queue" do
     it "tunes autovacuum when creating a queue" do
       client.ensure_queue("jobs")

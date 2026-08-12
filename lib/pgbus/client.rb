@@ -323,12 +323,13 @@ module Pgbus
       dlq_name = config.dead_letter_queue_name(name)
       return if @queues_created[dlq_name]
 
-      @queues_created.compute_if_absent(dlq_name) do
-        synchronized do
-          @pgmq.create(dlq_name)
-          tune_autovacuum(dlq_name)
+      if queue_ddl_rides_caller_transaction?
+        create_dead_letter_queue_physically(dlq_name)
+      else
+        @queues_created.compute_if_absent(dlq_name) do
+          create_dead_letter_queue_physically(dlq_name)
+          true
         end
-        true
       end
     end
 
@@ -1145,15 +1146,44 @@ module Pgbus
     def ensure_single_queue(full_name)
       return if @queues_created[full_name]
 
-      @queues_created.compute_if_absent(full_name) do
-        synchronized do
-          @pgmq.create(full_name)
-          tune_autovacuum(full_name)
-          enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
-          create_fifo_index_if_needed(full_name)
+      if queue_ddl_rides_caller_transaction?
+        create_queue_physically(full_name)
+      else
+        @queues_created.compute_if_absent(full_name) do
+          create_queue_physically(full_name)
+          true
         end
-        true
       end
+    end
+
+    def create_queue_physically(full_name)
+      synchronized do
+        @pgmq.create(full_name)
+        tune_autovacuum(full_name)
+        enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
+        create_fifo_index_if_needed(full_name)
+      end
+    end
+
+    def create_dead_letter_queue_physically(dlq_name)
+      synchronized do
+        @pgmq.create(dlq_name)
+        tune_autovacuum(dlq_name)
+      end
+    end
+
+    # Queue DDL on the shared Proc-supplied connection joins any transaction
+    # the caller has open, so a @queues_created cache write there outlives a
+    # caller rollback — later ensures would skip recreation and message
+    # operations would fail (#399 review; same durability rule as
+    # @schema_ensured). Create the queue (idempotent CREATE IF NOT EXISTS)
+    # but let the next ensure re-check. Dedicated String/Hash paths run DDL
+    # on pgmq-ruby's own pool connections, never inside an application
+    # transaction, so they always cache.
+    def queue_ddl_rides_caller_transaction?
+      return false unless @shared_connection
+
+      with_raw_connection { |conn| inside_caller_transaction?(conn) }
     end
 
     def enable_notify_if_needed(full_name, throttle_ms)
