@@ -135,6 +135,87 @@ RSpec.describe Pgbus::Client do
       expect(raw_conn).to have_received(:exec).with("COMMIT").ordered
     end
 
+    context "when the connection is already inside a caller's transaction (#398 review P1)" do
+      before do
+        require "pg"
+        allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_INTRANS)
+        allow(raw_conn).to receive(:exec).with(/SAVEPOINT/)
+      end
+
+      it "frames check+install in a savepoint and never issues BEGIN/COMMIT" do
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
+
+        client.ensure_queue("jobs")
+
+        expect(raw_conn).to have_received(:exec).with("SAVEPOINT pgbus_pgmq_install").ordered
+        expect(raw_conn).to have_received(:exec)
+          .with("SELECT pg_advisory_xact_lock(#{Pgbus::Client::PGMQ_INSTALL_LOCK_KEY})").ordered
+        expect(raw_conn).to have_received(:exec).with(Pgbus::PgmqSchema.install_sql).ordered
+        expect(raw_conn).to have_received(:exec).with("RELEASE SAVEPOINT pgbus_pgmq_install").ordered
+        expect(raw_conn).not_to have_received(:exec).with("BEGIN")
+        expect(raw_conn).not_to have_received(:exec).with("COMMIT")
+      end
+
+      it "does not cache schema_ensured — the install is only durable once the caller commits" do
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
+
+        client.ensure_queue("jobs")
+        client.ensure_queue("events")
+
+        expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).twice
+      end
+
+      it "rolls back to the savepoint — never the whole transaction — on a duplicate install" do
+        check = double("check_result")
+        allow(check).to receive(:ntuples).and_return(0, 1)
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(check)
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_raise(
+          PG::UniqueViolation.new("ERROR: duplicate key value")
+        )
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+
+        expect(raw_conn).to have_received(:exec).with("ROLLBACK TO SAVEPOINT pgbus_pgmq_install")
+        expect(raw_conn).not_to have_received(:exec).with("ROLLBACK")
+        expect(raw_conn).not_to have_received(:exec).with("COMMIT")
+      end
+    end
+
+    it "holds the connection mutex while installing on a shared Proc connection" do
+      require "pg"
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      allow(config).to receive(:connection_options).and_return(-> { raw_conn })
+      shared_client = described_class.new(config, schema_ensured: false)
+      allow(shared_client).to receive(:tune_autovacuum)
+      allow(shared_client).to receive(:notify_trigger_current?).and_return(false)
+      allow(shared_client).to receive(:with_raw_connection).and_yield(raw_conn)
+      owned_during_check = nil
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/) do
+        owned_during_check = shared_client.instance_variable_get(:@pgmq_mutex).owned?
+        double(ntuples: 1)
+      end
+
+      shared_client.ensure_queue("jobs")
+
+      expect(owned_during_check).to be(true)
+    end
+
+    it "owns the transaction when the connection reports an idle status" do
+      require "pg"
+      allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_IDLE)
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 1))
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).to have_received(:exec).with("BEGIN")
+      expect(raw_conn).to have_received(:exec).with("COMMIT")
+    end
+
     context "when another process wins the install race (#397)" do
       before { require "pg" }
 
@@ -199,6 +280,18 @@ RSpec.describe Pgbus::Client do
       c
     end
 
+    # Bounded deterministic wait: true once the thread is blocked or
+    # terminated, false if it never settles (#398/#399 review — a fixed sleep
+    # can false-pass, and silent fall-through re-creates a fixed sleep).
+    def settled?(thread)
+      5_000.times do
+        return true if [false, nil, "sleep"].include?(thread.status)
+
+        sleep 0.001
+      end
+      false
+    end
+
     it "serializes installs process-wide across client instances (#397)" do
       install_started = Queue.new
       release_install = Queue.new
@@ -212,13 +305,67 @@ RSpec.describe Pgbus::Client do
       thread_a = Thread.new { client_a.ensure_queue("jobs") }
       install_started.pop
       thread_b = Thread.new { client_b.ensure_queue("jobs") }
-      sleep 0.05 # window in which an unserialized B would (wrongly) hit its connection
+      # Deterministic (no fixed sleep, #398 review P3): with A parked inside its
+      # install, B is the only runnable thread — wait until it either blocks
+      # (serialized: parked on the install mutex) or terminates (unserialized:
+      # it ran its whole path). At that settled point, zero execs on B's
+      # connection is exactly the serialization property; an unserialized B has
+      # terminated WITH execs recorded and fails the assertion every time.
+      expect(settled?(thread_b)).to be(true), "thread B never settled (blocked or terminated) within the wait budget"
       expect(conn_b).not_to have_received(:exec)
 
       release_install << true
       [thread_a, thread_b].each { |t| t.join(5) }
       expect(conn_b).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).once
       expect(conn_b).not_to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
+    end
+  end
+
+  describe "#ensure_queue when queue DDL rides a caller's transaction (#399 review)" do
+    subject(:client) do
+      allow(config).to receive(:connection_options).and_return(-> { raw_conn })
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      c = described_class.new(config, schema_ensured: true)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      c
+    end
+
+    let(:raw_conn) { double("raw_conn") }
+
+    before { require "pg" }
+
+    it "probes the shared connection only while holding the connection mutex" do
+      owned_during_probe = nil
+      allow(raw_conn).to receive(:transaction_status) do
+        owned_during_probe = client.instance_variable_get(:@pgmq_mutex).owned?
+        PG::PQTRANS_IDLE
+      end
+
+      client.ensure_queue("jobs")
+
+      expect(owned_during_probe).to be(true)
+    end
+
+    it "creates the queue but does not cache it — the DDL is only durable once the caller commits" do
+      allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_INTRANS)
+
+      client.ensure_queue("jobs")
+      client.ensure_queue("jobs")
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").twice
+    end
+
+    it "resumes caching once the shared connection is idle again" do
+      allow(raw_conn).to receive(:transaction_status).and_return(
+        PG::PQTRANS_INTRANS, PG::PQTRANS_IDLE, PG::PQTRANS_IDLE
+      )
+
+      client.ensure_queue("jobs") # inside caller txn — created, not cached
+      client.ensure_queue("jobs") # idle — created and cached
+      client.ensure_queue("jobs") # cache hit
+
+      expect(mock_pgmq).to have_received(:create).with("pgbus_test_jobs").twice
     end
   end
 

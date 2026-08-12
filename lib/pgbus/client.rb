@@ -28,6 +28,9 @@ module Pgbus
     PGMQ_META_CHECK_SQL = "SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1"
     private_constant :PGMQ_META_CHECK_SQL
 
+    PGMQ_INSTALL_SAVEPOINT = "pgbus_pgmq_install"
+    private_constant :PGMQ_INSTALL_SAVEPOINT
+
     # Install-race losers see the winner's DDL as one of these. Matched by
     # class NAME so the check works whether or not the pg gem's generated
     # error classes are loaded in this process (mirrors the defined?(PG::…)
@@ -320,12 +323,13 @@ module Pgbus
       dlq_name = config.dead_letter_queue_name(name)
       return if @queues_created[dlq_name]
 
-      @queues_created.compute_if_absent(dlq_name) do
-        synchronized do
-          @pgmq.create(dlq_name)
-          tune_autovacuum(dlq_name)
+      if queue_ddl_rides_caller_transaction?
+        create_dead_letter_queue_physically(dlq_name)
+      else
+        @queues_created.compute_if_absent(dlq_name) do
+          create_dead_letter_queue_physically(dlq_name)
+          true
         end
-        true
       end
     end
 
@@ -976,8 +980,29 @@ module Pgbus
       self.class.pgmq_install_mutex.synchronize do
         return if @schema_ensured
 
-        with_raw_connection { |raw_conn| install_pgmq_schema_serialized(raw_conn) }
-        @schema_ensured = true
+        # Cache only a durable result: true only when this call owned the
+        # COMMIT. A savepoint-path ensure rides the CALLER's transaction — if
+        # that later rolls back the schema is gone (and even a schema found
+        # already-present there may be the caller's own uncommitted work), so
+        # a cached true would skip every future check (#399 review).
+        #
+        # synchronized (the per-instance connection mutex) nests INSIDE the
+        # class-level install mutex — that lock order is safe because no path
+        # acquires them the other way round — so the shared Proc connection is
+        # never touched while another thread of this instance is mid-operation
+        # on it (single-owner invariant; #399 review).
+        durable = synchronized do
+          with_raw_connection do |raw_conn|
+            if inside_caller_transaction?(raw_conn)
+              install_pgmq_schema_in_savepoint(raw_conn)
+              false
+            else
+              install_pgmq_schema_in_own_transaction(raw_conn)
+              true
+            end
+          end
+        end
+        @schema_ensured = true if durable
       end
     rescue StandardError => e
       raise Pgbus::SchemaNotReady,
@@ -985,30 +1010,64 @@ module Pgbus
             "Ensure the pgbus database exists and migrations have been run."
     end
 
-    # Check-and-install inside one transaction holding a fixed advisory lock:
-    # pg_advisory_xact_lock serializes installers across processes and releases
-    # itself at COMMIT/ROLLBACK — safe through transaction-pooling poolers,
-    # where a session-level lock could be released on a different server
-    # connection than the one that acquired it (issue #397).
-    def install_pgmq_schema_serialized(conn)
+    # Check-and-install under a fixed advisory lock: pg_advisory_xact_lock
+    # serializes installers across processes and releases itself when its
+    # transaction ends — safe through transaction-pooling poolers, where a
+    # session-level lock could be released on a different server connection
+    # than the one that acquired it (issue #397).
+    #
+    # The transactional framing must respect who owns the transaction. A
+    # Proc-supplied shared connection (the Rails-lambda path) can arrive
+    # mid-transaction — e.g. perform_later inside an application
+    # `transaction do` block. BEGIN there is a warning-level no-op, and the
+    # matching COMMIT/ROLLBACK would then commit or destroy the CALLER's
+    # transaction (#398 review). So: own the transaction only when the
+    # connection is idle; ride the caller's transaction via a savepoint
+    # otherwise.
+    #
+    # respond_to? guard: a Proc can hand back any connection-shaped object;
+    # only a real PG::Connection reports transaction_status (and its presence
+    # guarantees the PG constants below are loaded).
+    def inside_caller_transaction?(conn)
+      conn.respond_to?(:transaction_status) && conn.transaction_status != PG::PQTRANS_IDLE
+    end
+
+    def install_pgmq_schema_in_own_transaction(conn)
       conn.exec("BEGIN")
       conn.exec("SELECT pg_advisory_xact_lock(#{PGMQ_INSTALL_LOCK_KEY})")
       install_pgmq_schema(conn) if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
       conn.exec("COMMIT")
     rescue StandardError => e
+      recover_from_install_failure(conn, e, "ROLLBACK")
+    end
+
+    # The advisory lock joins the CALLER's transaction here, so it is held
+    # until that transaction ends — longer than the install needs, but xact
+    # locks cannot be released early by design, and over-holding only delays
+    # a concurrent installer, never corrupts it.
+    def install_pgmq_schema_in_savepoint(conn)
+      conn.exec("SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+      conn.exec("SELECT pg_advisory_xact_lock(#{PGMQ_INSTALL_LOCK_KEY})")
+      install_pgmq_schema(conn) if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+      conn.exec("RELEASE SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+    rescue StandardError => e
+      recover_from_install_failure(conn, e, "ROLLBACK TO SAVEPOINT #{PGMQ_INSTALL_SAVEPOINT}")
+    end
+
+    def recover_from_install_failure(conn, error, rollback_sql)
       begin
-        conn.exec("ROLLBACK")
+        conn.exec(rollback_sql)
       rescue StandardError
-        # A connection broken enough to refuse ROLLBACK also fails the
+        # A connection broken enough to refuse the rollback also fails the
         # re-check below, which surfaces the state honestly; re-raising the
-        # ROLLBACK error here would mask the original install failure.
+        # rollback error here would mask the original install failure.
       end
-      raise e unless duplicate_install_error?(e)
+      raise error unless duplicate_install_error?(error)
 
       # A process without the advisory lock (older pgbus, or the extension
       # path) won the install race — re-check instead of failing on its
       # success.
-      raise e if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+      raise error if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
     end
 
     def duplicate_install_error?(error)
@@ -1095,14 +1154,52 @@ module Pgbus
     def ensure_single_queue(full_name)
       return if @queues_created[full_name]
 
-      @queues_created.compute_if_absent(full_name) do
-        synchronized do
-          @pgmq.create(full_name)
-          tune_autovacuum(full_name)
-          enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
-          create_fifo_index_if_needed(full_name)
+      if queue_ddl_rides_caller_transaction?
+        create_queue_physically(full_name)
+      else
+        @queues_created.compute_if_absent(full_name) do
+          create_queue_physically(full_name)
+          true
         end
-        true
+      end
+    end
+
+    def create_queue_physically(full_name)
+      synchronized do
+        create_queue_table(full_name)
+        enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
+        create_fifo_index_if_needed(full_name)
+      end
+    end
+
+    def create_dead_letter_queue_physically(dlq_name)
+      synchronized { create_queue_table(dlq_name) }
+    end
+
+    # Runs inside synchronized — callers own the connection mutex.
+    def create_queue_table(name)
+      @pgmq.create(name)
+      tune_autovacuum(name)
+    end
+
+    # Queue DDL on the shared Proc-supplied connection joins any transaction
+    # the caller has open, so a @queues_created cache write there outlives a
+    # caller rollback — later ensures would skip recreation and message
+    # operations would fail (#399 review; same durability rule as
+    # @schema_ensured). Create the queue (idempotent CREATE IF NOT EXISTS)
+    # but let the next ensure re-check. Dedicated String/Hash paths run DDL
+    # on pgmq-ruby's own pool connections, never inside an application
+    # transaction, so they always cache.
+    #
+    # The probe itself must hold the connection mutex: even the local
+    # transaction_status read honors the single-owner invariant on the
+    # shared PG::Connection (#399 review). Sequential with — never nested
+    # inside — the create's own synchronized block.
+    def queue_ddl_rides_caller_transaction?
+      return false unless @shared_connection
+
+      synchronized do
+        with_raw_connection { |conn| inside_caller_transaction?(conn) }
       end
     end
 
