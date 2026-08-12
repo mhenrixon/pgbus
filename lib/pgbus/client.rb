@@ -985,13 +985,21 @@ module Pgbus
         # that later rolls back the schema is gone (and even a schema found
         # already-present there may be the caller's own uncommitted work), so
         # a cached true would skip every future check (#399 review).
-        durable = with_raw_connection do |raw_conn|
-          if inside_caller_transaction?(raw_conn)
-            install_pgmq_schema_in_savepoint(raw_conn)
-            false
-          else
-            install_pgmq_schema_in_own_transaction(raw_conn)
-            true
+        #
+        # synchronized (the per-instance connection mutex) nests INSIDE the
+        # class-level install mutex — that lock order is safe because no path
+        # acquires them the other way round — so the shared Proc connection is
+        # never touched while another thread of this instance is mid-operation
+        # on it (single-owner invariant; #399 review).
+        durable = synchronized do
+          with_raw_connection do |raw_conn|
+            if inside_caller_transaction?(raw_conn)
+              install_pgmq_schema_in_savepoint(raw_conn)
+              false
+            else
+              install_pgmq_schema_in_own_transaction(raw_conn)
+              true
+            end
           end
         end
         @schema_ensured = true if durable
@@ -1158,18 +1166,20 @@ module Pgbus
 
     def create_queue_physically(full_name)
       synchronized do
-        @pgmq.create(full_name)
-        tune_autovacuum(full_name)
+        create_queue_table(full_name)
         enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
         create_fifo_index_if_needed(full_name)
       end
     end
 
     def create_dead_letter_queue_physically(dlq_name)
-      synchronized do
-        @pgmq.create(dlq_name)
-        tune_autovacuum(dlq_name)
-      end
+      synchronized { create_queue_table(dlq_name) }
+    end
+
+    # Runs inside synchronized — callers own the connection mutex.
+    def create_queue_table(name)
+      @pgmq.create(name)
+      tune_autovacuum(name)
     end
 
     # Queue DDL on the shared Proc-supplied connection joins any transaction
@@ -1180,10 +1190,17 @@ module Pgbus
     # but let the next ensure re-check. Dedicated String/Hash paths run DDL
     # on pgmq-ruby's own pool connections, never inside an application
     # transaction, so they always cache.
+    #
+    # The probe itself must hold the connection mutex: even the local
+    # transaction_status read honors the single-owner invariant on the
+    # shared PG::Connection (#399 review). Sequential with — never nested
+    # inside — the create's own synchronized block.
     def queue_ddl_rides_caller_transaction?
       return false unless @shared_connection
 
-      with_raw_connection { |conn| inside_caller_transaction?(conn) }
+      synchronized do
+        with_raw_connection { |conn| inside_caller_transaction?(conn) }
+      end
     end
 
     def enable_notify_if_needed(full_name, throttle_ms)

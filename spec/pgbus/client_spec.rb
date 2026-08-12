@@ -186,6 +186,25 @@ RSpec.describe Pgbus::Client do
       end
     end
 
+    it "holds the connection mutex while installing on a shared Proc connection" do
+      require "pg"
+      allow(PGMQ::Client).to receive(:new).and_return(mock_pgmq)
+      allow(config).to receive(:connection_options).and_return(-> { raw_conn })
+      shared_client = described_class.new(config, schema_ensured: false)
+      allow(shared_client).to receive(:tune_autovacuum)
+      allow(shared_client).to receive(:notify_trigger_current?).and_return(false)
+      allow(shared_client).to receive(:with_raw_connection).and_yield(raw_conn)
+      owned_during_check = nil
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/) do
+        owned_during_check = shared_client.instance_variable_get(:@pgmq_mutex).owned?
+        double(ntuples: 1)
+      end
+
+      shared_client.ensure_queue("jobs")
+
+      expect(owned_during_check).to be(true)
+    end
+
     it "owns the transaction when the connection reports an idle status" do
       require "pg"
       allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_IDLE)
@@ -315,6 +334,18 @@ RSpec.describe Pgbus::Client do
     let(:raw_conn) { double("raw_conn") }
 
     before { require "pg" }
+
+    it "probes the shared connection only while holding the connection mutex" do
+      owned_during_probe = nil
+      allow(raw_conn).to receive(:transaction_status) do
+        owned_during_probe = client.instance_variable_get(:@pgmq_mutex).owned?
+        PG::PQTRANS_IDLE
+      end
+
+      client.ensure_queue("jobs")
+
+      expect(owned_during_probe).to be(true)
+    end
 
     it "creates the queue but does not cache it — the DDL is only durable once the caller commits" do
       allow(raw_conn).to receive(:transaction_status).and_return(PG::PQTRANS_INTRANS)
