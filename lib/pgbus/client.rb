@@ -979,8 +979,21 @@ module Pgbus
       self.class.pgmq_install_mutex.synchronize do
         return if @schema_ensured
 
-        with_raw_connection { |raw_conn| install_pgmq_schema_serialized(raw_conn) }
-        @schema_ensured = true
+        # Cache only a durable result: true only when this call owned the
+        # COMMIT. A savepoint-path ensure rides the CALLER's transaction — if
+        # that later rolls back the schema is gone (and even a schema found
+        # already-present there may be the caller's own uncommitted work), so
+        # a cached true would skip every future check (#399 review).
+        durable = with_raw_connection do |raw_conn|
+          if inside_caller_transaction?(raw_conn)
+            install_pgmq_schema_in_savepoint(raw_conn)
+            false
+          else
+            install_pgmq_schema_in_own_transaction(raw_conn)
+            true
+          end
+        end
+        @schema_ensured = true if durable
       end
     rescue StandardError => e
       raise Pgbus::SchemaNotReady,
@@ -1002,14 +1015,7 @@ module Pgbus
     # transaction (#398 review). So: own the transaction only when the
     # connection is idle; ride the caller's transaction via a savepoint
     # otherwise.
-    def install_pgmq_schema_serialized(conn)
-      if inside_caller_transaction?(conn)
-        install_pgmq_schema_in_savepoint(conn)
-      else
-        install_pgmq_schema_in_own_transaction(conn)
-      end
-    end
-
+    #
     # respond_to? guard: a Proc can hand back any connection-shaped object;
     # only a real PG::Connection reports transaction_status (and its presence
     # guarantees the PG constants below are loaded).

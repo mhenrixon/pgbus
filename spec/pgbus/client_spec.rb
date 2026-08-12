@@ -158,6 +158,17 @@ RSpec.describe Pgbus::Client do
         expect(raw_conn).not_to have_received(:exec).with("COMMIT")
       end
 
+      it "does not cache schema_ensured — the install is only durable once the caller commits" do
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
+
+        client.ensure_queue("jobs")
+        client.ensure_queue("events")
+
+        expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).twice
+      end
+
       it "rolls back to the savepoint — never the whole transaction — on a duplicate install" do
         check = double("check_result")
         allow(check).to receive(:ntuples).and_return(0, 1)
@@ -250,6 +261,18 @@ RSpec.describe Pgbus::Client do
       c
     end
 
+    # Bounded deterministic wait: true once the thread is blocked or
+    # terminated, false if it never settles (#398/#399 review — a fixed sleep
+    # can false-pass, and silent fall-through re-creates a fixed sleep).
+    def settled?(thread)
+      5_000.times do
+        return true if [false, nil, "sleep"].include?(thread.status)
+
+        sleep 0.001
+      end
+      false
+    end
+
     it "serializes installs process-wide across client instances (#397)" do
       install_started = Queue.new
       release_install = Queue.new
@@ -269,11 +292,7 @@ RSpec.describe Pgbus::Client do
       # it ran its whole path). At that settled point, zero execs on B's
       # connection is exactly the serialization property; an unserialized B has
       # terminated WITH execs recorded and fails the assertion every time.
-      5_000.times do
-        break if [false, nil, "sleep"].include?(thread_b.status)
-
-        sleep 0.001
-      end
+      expect(settled?(thread_b)).to be(true), "thread B never settled (blocked or terminated) within the wait budget"
       expect(conn_b).not_to have_received(:exec)
 
       release_install << true
