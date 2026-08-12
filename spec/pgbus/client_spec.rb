@@ -51,6 +51,13 @@ RSpec.describe Pgbus::Client do
 
     before do
       allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
+      # Transaction + advisory-lock framing around check+install (issue #397).
+      # Allowed here so every example in this describe tolerates the framing;
+      # the framing-specific examples assert on these explicitly.
+      allow(raw_conn).to receive(:exec).with("BEGIN")
+      allow(raw_conn).to receive(:exec).with(/pg_advisory_xact_lock/)
+      allow(raw_conn).to receive(:exec).with("COMMIT")
+      allow(raw_conn).to receive(:exec).with("ROLLBACK")
     end
 
     it "installs via embedded SQL when pgmq.meta missing and no extension (auto mode)" do
@@ -111,6 +118,107 @@ RSpec.describe Pgbus::Client do
       client.ensure_queue("events")
 
       expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).once
+    end
+
+    it "wraps check+install in a transaction holding the install advisory lock (#397)" do
+      allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+      allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_return(nil)
+
+      client.ensure_queue("jobs")
+
+      expect(raw_conn).to have_received(:exec).with("BEGIN").ordered
+      expect(raw_conn).to have_received(:exec)
+        .with("SELECT pg_advisory_xact_lock(#{Pgbus::Client::PGMQ_INSTALL_LOCK_KEY})").ordered
+      expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).ordered
+      expect(raw_conn).to have_received(:exec).with(Pgbus::PgmqSchema.install_sql).ordered
+      expect(raw_conn).to have_received(:exec).with("COMMIT").ordered
+    end
+
+    context "when another process wins the install race (#397)" do
+      before { require "pg" }
+
+      it "treats a duplicate-object install failure as installed by the winner" do
+        check = double("check_result")
+        allow(check).to receive(:ntuples).and_return(0, 1)
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(check)
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_raise(
+          PG::UniqueViolation.new('ERROR: duplicate key value violates unique constraint "pg_namespace_nspname_index"')
+        )
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+
+        expect(raw_conn).to have_received(:exec).with("ROLLBACK")
+        expect(raw_conn).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).twice
+      end
+
+      it "still wraps as SchemaNotReady when the re-check finds no schema" do
+        check = double("check_result")
+        allow(check).to receive(:ntuples).and_return(0, 0)
+        allow(raw_conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(check)
+        allow(raw_conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql).and_raise(
+          PG::UniqueViolation.new("ERROR: duplicate key value")
+        )
+
+        expect { client.ensure_queue("jobs") }.to raise_error(
+          Pgbus::SchemaNotReady, /PGMQ schema installation failed/
+        )
+      end
+    end
+
+    # Helpers for the process-wide serialization example: connection doubles
+    # pre-stubbed with the transaction/advisory-lock framing.
+    def framed_conn(name)
+      conn = double(name)
+      allow(conn).to receive(:exec).with("BEGIN")
+      allow(conn).to receive(:exec).with(/pg_advisory_xact_lock/)
+      allow(conn).to receive(:exec).with("COMMIT")
+      conn
+    end
+
+    # Blocks inside the install until `release` is signalled, reporting entry
+    # on `started` — lets the example hold client A mid-install deterministically.
+    def install_blocking_conn(started, release)
+      conn = framed_conn("conn_a")
+      allow(conn).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 0))
+      allow(conn).to receive(:exec).with(/pg_available_extensions/).and_return(double(ntuples: 0))
+      allow(conn).to receive(:exec).with(Pgbus::PgmqSchema.install_sql) do
+        started << true
+        release.pop
+      end
+      conn
+    end
+
+    def unensured_client(conn)
+      c = described_class.new(config, schema_ensured: false)
+      allow(c).to receive(:tune_autovacuum)
+      allow(c).to receive(:notify_trigger_current?).and_return(false)
+      allow(c).to receive(:with_raw_connection).and_yield(conn)
+      c
+    end
+
+    it "serializes installs process-wide across client instances (#397)" do
+      install_started = Queue.new
+      release_install = Queue.new
+      conn_a = install_blocking_conn(install_started, release_install)
+      conn_b = framed_conn("conn_b")
+      allow(conn_b).to receive(:exec).with(/pg_tables.*pgmq.*meta/).and_return(double(ntuples: 1))
+      client_a = client
+      allow(client_a).to receive(:with_raw_connection).and_yield(conn_a)
+      client_b = unensured_client(conn_b)
+
+      thread_a = Thread.new { client_a.ensure_queue("jobs") }
+      install_started.pop
+      thread_b = Thread.new { client_b.ensure_queue("jobs") }
+      sleep 0.05 # window in which an unserialized B would (wrongly) hit its connection
+      expect(conn_b).not_to have_received(:exec)
+
+      release_install << true
+      [thread_a, thread_b].each { |t| t.join(5) }
+      expect(conn_b).to have_received(:exec).with(/pg_tables.*pgmq.*meta/).once
+      expect(conn_b).not_to have_received(:exec).with(Pgbus::PgmqSchema.install_sql)
     end
   end
 

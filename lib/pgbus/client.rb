@@ -20,6 +20,39 @@ module Pgbus
     PGMQ_REQUIRE_MUTEX = Mutex.new
     private_constant :PGMQ_REQUIRE_MUTEX
 
+    # Fixed advisory-lock key serializing pgmq schema installation across
+    # processes (issue #397). "pgmqinst" in ASCII hex — arbitrary but stable;
+    # it only has to be identical in every process that can install.
+    PGMQ_INSTALL_LOCK_KEY = 0x70676D71_696E7374
+
+    PGMQ_META_CHECK_SQL = "SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1"
+    private_constant :PGMQ_META_CHECK_SQL
+
+    # Install-race losers see the winner's DDL as one of these. Matched by
+    # class NAME so the check works whether or not the pg gem's generated
+    # error classes are loaded in this process (mirrors the defined?(PG::…)
+    # guards used elsewhere in this file).
+    DUPLICATE_INSTALL_ERROR_CLASSES = %w[
+      PG::UniqueViolation
+      PG::DuplicateSchema
+      PG::DuplicateTable
+      PG::DuplicateObject
+      PG::DuplicateFunction
+    ].freeze
+    private_constant :DUPLICATE_INSTALL_ERROR_CLASSES
+
+    # Process-wide, not per-instance: on the shared-AR Proc path two Client
+    # instances share one underlying libpq connection while each holding their
+    # own @pgmq_mutex, so a per-instance guard cannot serialize bootstrap DDL —
+    # concurrent install traffic desyncs the protocol ("message type 0x…
+    # arrived from server while idle") and wedges a thread on a socket read
+    # (issue #397, forensics in getzazu/app#3413).
+    @pgmq_install_mutex = Mutex.new
+
+    class << self
+      attr_reader :pgmq_install_mutex
+    end
+
     # Throttle window for PGMQ's enable_notify_insert trigger. Postgres
     # NOTIFYs are coalesced into one wake-up per window, so a value of 250ms
     # means: at most 4 broadcasts/sec per queue, regardless of insert rate.
@@ -245,10 +278,7 @@ module Pgbus
     # present, no tracking row) apart from "PGMQ not installed at all".
     def pgmq_installed?
       with_raw_connection do |conn|
-        result = conn.exec(
-          "SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1"
-        )
-        result.ntuples.positive?
+        conn.exec(PGMQ_META_CHECK_SQL).ntuples.positive?
       end
     end
 
@@ -943,19 +973,46 @@ module Pgbus
     def ensure_pgmq_schema
       return if @schema_ensured
 
-      synchronized do
+      self.class.pgmq_install_mutex.synchronize do
         return if @schema_ensured
 
-        with_raw_connection do |raw_conn|
-          exists = raw_conn.exec("SELECT 1 FROM pg_tables WHERE schemaname = 'pgmq' AND tablename = 'meta' LIMIT 1")
-          install_pgmq_schema(raw_conn) if exists.ntuples.zero?
-        end
+        with_raw_connection { |raw_conn| install_pgmq_schema_serialized(raw_conn) }
         @schema_ensured = true
       end
     rescue StandardError => e
       raise Pgbus::SchemaNotReady,
             "PGMQ schema installation failed (#{e.class}: #{e.message}). " \
             "Ensure the pgbus database exists and migrations have been run."
+    end
+
+    # Check-and-install inside one transaction holding a fixed advisory lock:
+    # pg_advisory_xact_lock serializes installers across processes and releases
+    # itself at COMMIT/ROLLBACK — safe through transaction-pooling poolers,
+    # where a session-level lock could be released on a different server
+    # connection than the one that acquired it (issue #397).
+    def install_pgmq_schema_serialized(conn)
+      conn.exec("BEGIN")
+      conn.exec("SELECT pg_advisory_xact_lock(#{PGMQ_INSTALL_LOCK_KEY})")
+      install_pgmq_schema(conn) if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+      conn.exec("COMMIT")
+    rescue StandardError => e
+      begin
+        conn.exec("ROLLBACK")
+      rescue StandardError
+        # A connection broken enough to refuse ROLLBACK also fails the
+        # re-check below, which surfaces the state honestly; re-raising the
+        # ROLLBACK error here would mask the original install failure.
+      end
+      raise e unless duplicate_install_error?(e)
+
+      # A process without the advisory lock (older pgbus, or the extension
+      # path) won the install race — re-check instead of failing on its
+      # success.
+      raise e if conn.exec(PGMQ_META_CHECK_SQL).ntuples.zero?
+    end
+
+    def duplicate_install_error?(error)
+      DUPLICATE_INSTALL_ERROR_CLASSES.include?(error.class.name)
     end
 
     def install_pgmq_schema(conn)
