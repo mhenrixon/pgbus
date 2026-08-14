@@ -1,0 +1,22 @@
+spec/integration/stream_queue_registry_spec.rb
+  s_6d74701deff3fb::t_4400adad191a6a 22-27
+app/models/pgbus/stream_queue.rb
+  s_6d74701deff3fb::t_ff73149a0c259f 28-32
+  s_6d74701deff3fb::t_bb3885a1aadd96 153-154,156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "cc3a2c368d54975587643fc81af66dc040e72a80",
+  "prompts": {},
+  "sessions": {
+    "s_6d74701deff3fb": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d008cd35-4fc3-423b-a3ba-9731749f105a",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
