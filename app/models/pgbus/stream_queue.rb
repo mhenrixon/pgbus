@@ -25,6 +25,11 @@ module Pgbus
   class StreamQueue < BusRecord
     self.table_name = "pgbus_stream_queues"
 
+    # Serializes the WARN-once latch in log_record_failure: record! runs on
+    # the coalescer flush thread as well as callers' threads, and an
+    # unsynchronized check-and-set could WARN more than once per process.
+    @record_failure_mutex = Mutex.new
+
     class << self
       # Inserts the physical queue name. Idempotent and cheap to call on
       # every broadcast; the caller (`ensure_stream_queue`) also memoizes
@@ -145,12 +150,10 @@ module Pgbus
       # process-lifetime malfunction in per-broadcast DEBUG spam.
       def log_record_failure(queue_name, error)
         message = "[Pgbus] Failed to record stream queue #{queue_name}: #{error.class}: #{error.message}"
-        if @record_failure_warned
-          Pgbus.logger.debug { message }
-        else
-          @record_failure_warned = true
-          Pgbus.logger.warn { message }
+        first = @record_failure_mutex.synchronize do
+          @record_failure_warned ? false : (@record_failure_warned = true)
         end
+        first ? Pgbus.logger.warn { message } : Pgbus.logger.debug { message }
       end
 
       def load_names

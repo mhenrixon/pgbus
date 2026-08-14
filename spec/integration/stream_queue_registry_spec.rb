@@ -19,6 +19,12 @@ RSpec.describe "StreamQueue registry (integration)", :integration do
 
   describe ".record! with a poisoned pool schema cache (issue #401 regression)" do
     it "still registers the queue after data_source_exists? latched a false negative" do
+      # Warm the table_exists? memo first. The guard is a live query
+      # (data_source_sql, not the pool schema cache) so it stays true under
+      # the poison below — asserting that here keeps the example targeting
+      # the index-resolution path explicitly rather than by side effect.
+      expect(Pgbus::StreamQueue.table_exists?).to be(true)
+
       pool = Pgbus::StreamQueue.connection_pool
       cache = pool.schema_reflection.send(:cache, pool)
       cache.instance_variable_get(:@data_sources)["pgbus_stream_queues"] = false
