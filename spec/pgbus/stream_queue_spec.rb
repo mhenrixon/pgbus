@@ -6,17 +6,34 @@ RSpec.describe Pgbus::StreamQueue do
   before { described_class.reset_cache! }
 
   describe ".record!" do
+    let(:connection) { instance_double(ActiveRecord::ConnectionAdapters::AbstractAdapter) }
+
     before do
-      allow(described_class).to receive_messages(upsert: nil, table_exists?: true)
+      described_class.instance_variable_set(:@record_failure_warned, false)
+      allow(described_class).to receive_messages(connection: connection, table_exists?: true)
+      allow(connection).to receive(:quote_table_name) { |name| %("#{name}") }
+      allow(connection).to receive(:quote) { |value| "'#{value}'" }
+      allow(connection).to receive(:execute)
     end
 
-    it "upserts the physical queue name (idempotent)" do
+    it "inserts the physical queue name with ON CONFLICT DO NOTHING (idempotent)" do
       described_class.record!("pgbus_chat_42")
 
-      expect(described_class).to have_received(:upsert).with(
-        { queue_name: "pgbus_chat_42" },
-        unique_by: :queue_name
+      expect(connection).to have_received(:execute).with(
+        %(INSERT INTO "pgbus_stream_queues" (queue_name) ) +
+        %(VALUES ('pgbus_chat_42') ON CONFLICT (queue_name) DO NOTHING)
       )
+    end
+
+    it "does not resolve the unique index through Rails upsert machinery (issue #401)" do
+      # upsert(unique_by:) resolves the index via the pool schema cache, which
+      # latches a wrong negative data_source_exists? probe for the process
+      # lifetime. The gem owns the index — nothing to resolve.
+      allow(described_class).to receive(:upsert)
+
+      described_class.record!("pgbus_chat_42")
+
+      expect(described_class).not_to have_received(:upsert)
     end
 
     it "skips when the table does not exist (unmigrated install)" do
@@ -24,23 +41,55 @@ RSpec.describe Pgbus::StreamQueue do
 
       described_class.record!("pgbus_chat_42")
 
-      expect(described_class).not_to have_received(:upsert)
+      expect(connection).not_to have_received(:execute)
     end
 
     it "swallows errors so a registry blip cannot kill a broadcast" do
-      allow(described_class).to receive(:upsert).and_raise(StandardError, "db down")
+      allow(connection).to receive(:execute).and_raise(ActiveRecord::StatementInvalid, "db down")
 
       expect { described_class.record!("pgbus_chat_42") }.not_to raise_error
     end
 
-    it "returns true on a successful upsert and false on failure or missing table" do
+    it "returns true on a successful insert and false on failure or missing table" do
       expect(described_class.record!("pgbus_chat_42")).to be(true)
 
-      allow(described_class).to receive(:upsert).and_raise(StandardError, "db down")
+      allow(connection).to receive(:execute).and_raise(ActiveRecord::StatementInvalid, "db down")
       expect(described_class.record!("pgbus_chat_42")).to be(false)
 
       allow(described_class).to receive(:table_exists?).and_return(false)
       expect(described_class.record!("pgbus_chat_42")).to be(false)
+    end
+
+    context "when logging failures" do
+      let(:logger) { instance_double(Logger, warn: nil, debug: nil) }
+
+      before { allow(Pgbus).to receive(:logger).and_return(logger) }
+
+      it "logs a transient database error at DEBUG, never WARN" do
+        allow(connection).to receive(:execute).and_raise(ActiveRecord::StatementInvalid, "db down")
+
+        3.times { described_class.record!("pgbus_chat_42") }
+
+        expect(logger).to have_received(:debug).exactly(3).times
+        expect(logger).not_to have_received(:warn)
+      end
+
+      it "logs a non-database failure (bug signal) at WARN once per process, DEBUG thereafter" do
+        allow(connection).to receive(:execute)
+          .and_raise(ArgumentError, "No unique index found for queue_name")
+
+        3.times { described_class.record!("pgbus_chat_42") }
+        described_class.record!("pgbus_other_stream")
+
+        expect(logger).to have_received(:warn).once
+        expect(logger).to have_received(:debug).exactly(3).times
+      end
+
+      it "returns false on a non-database failure" do
+        allow(connection).to receive(:execute).and_raise(ArgumentError, "boom")
+
+        expect(described_class.record!("pgbus_chat_42")).to be(false)
+      end
     end
 
     it "adds the name to an already-warm cache without a re-query" do
@@ -186,7 +235,7 @@ RSpec.describe Pgbus::StreamQueue do
 
   describe ".backfill! (issue #366)" do
     before do
-      allow(described_class).to receive_messages(table_exists?: true, upsert: nil)
+      allow(described_class).to receive_messages(table_exists?: true)
     end
 
     it "registers fingerprint-matched queues that are missing from the registry" do

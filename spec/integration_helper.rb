@@ -107,6 +107,22 @@ def bootstrap_integration_tables(conn)
     SQL
   end
 
+  # Stream queue registry — mirrors lib/generators/pgbus/templates/
+  # add_stream_queues.rb.erb. StreamQueue.record! does INSERT ... ON CONFLICT
+  # (queue_name) DO NOTHING, so the unique index is load-bearing for the
+  # registry regression spec (issue #401).
+  unless conn.table_exists?("pgbus_stream_queues")
+    conn.execute(<<~SQL)
+      CREATE TABLE pgbus_stream_queues (
+        id BIGSERIAL PRIMARY KEY,
+        queue_name VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pgbus_stream_queues_queue_name
+        ON pgbus_stream_queues (queue_name);
+    SQL
+  end
+
   # Batch tracking — mirrors the pgbus_batches DDL in
   # lib/generators/pgbus/templates/migration.rb.erb. BatchEntry.increment_counter!
   # locks the row and fires callbacks when completed + discarded == total.
@@ -232,7 +248,7 @@ def cleanup_tables
     pgbus_semaphores pgbus_blocked_executions pgbus_uniqueness_keys
     pgbus_processes pgbus_recurring_executions pgbus_failed_events
     pgbus_presence_members pgbus_outbox_entries pgbus_processed_events
-    pgbus_batches
+    pgbus_batches pgbus_stream_queues
   ]
   tables.each do |table|
     conn.execute("DELETE FROM #{table}")

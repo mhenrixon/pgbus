@@ -25,17 +25,34 @@ module Pgbus
   class StreamQueue < BusRecord
     self.table_name = "pgbus_stream_queues"
 
+    # Serializes the WARN-once latch in log_record_failure: record! runs on
+    # the coalescer flush thread as well as callers' threads, and an
+    # unsynchronized check-and-set could WARN more than once per process.
+    @record_failure_mutex = Mutex.new
+
     class << self
-      # Upserts the physical queue name. Idempotent and cheap to call on
+      # Inserts the physical queue name. Idempotent and cheap to call on
       # every broadcast; the caller (`ensure_stream_queue`) also memoizes
       # per-process, so the DB write happens once per stream per process.
       # Errors are swallowed — a registry hiccup must never abort a broadcast.
       # Returns true on a successful write, false when the table is absent or
-      # the upsert failed (so callers like `backfill!` can report accurately).
+      # the insert failed (so callers like `backfill!` can report accurately).
+      #
+      # Deliberately raw SQL rather than `upsert(unique_by:)` (issue #401):
+      # Rails resolves `unique_by:` through the pool's schema cache, which
+      # caches a negative `data_source_exists?` probe permanently — one wrong
+      # first probe (while the table genuinely exists and the live
+      # `table_exists?` guard above passes) poisons every subsequent record!
+      # in the process with "No unique index found". The unique index is owned
+      # by this gem's own migration, so there is nothing to resolve.
       def record!(queue_name)
         return false unless table_exists?
 
-        upsert({ queue_name: queue_name }, unique_by: :queue_name)
+        conn = connection
+        conn.execute(
+          "INSERT INTO #{conn.quote_table_name(table_name)} (queue_name) " \
+          "VALUES (#{conn.quote(queue_name)}) ON CONFLICT (queue_name) DO NOTHING"
+        )
         # Keep the in-process cache consistent with the write so a subsequent
         # stream? check reflects this registration without a re-query. Only
         # update an ALREADY-LOADED cache — if @all_names is still nil (this
@@ -43,11 +60,14 @@ module Pgbus
         # fabricate a one-entry set and silently hide every other
         # already-registered stream until the next reset_cache!. Leaving it
         # nil lets the next all_names call do a real load, which already
-        # includes this row since the upsert above has committed.
+        # includes this row since the insert above has committed.
         @all_names&.add(queue_name)
         true
-      rescue StandardError => e
+      rescue ActiveRecord::ActiveRecordError => e
         Pgbus.logger.debug { "[Pgbus] Failed to record stream queue #{queue_name}: #{e.message}" }
+        false
+      rescue StandardError => e
+        log_record_failure(queue_name, e)
         false
       end
 
@@ -123,6 +143,18 @@ module Pgbus
       end
 
       private
+
+      # A non-ActiveRecord error out of a plain INSERT is a bug signal (the
+      # old path's ArgumentError from index resolution was one), not a DB
+      # hiccup — surface it at WARN once per process instead of drowning a
+      # process-lifetime malfunction in per-broadcast DEBUG spam.
+      def log_record_failure(queue_name, error)
+        message = "[Pgbus] Failed to record stream queue #{queue_name}: #{error.class}: #{error.message}"
+        first = @record_failure_mutex.synchronize do
+          @record_failure_warned ? false : (@record_failure_warned = true)
+        end
+        first ? Pgbus.logger.warn { message } : Pgbus.logger.debug { message }
+      end
 
       def load_names
         return Set.new unless table_exists?
