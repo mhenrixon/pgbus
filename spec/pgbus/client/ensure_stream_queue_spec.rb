@@ -121,6 +121,25 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
       expect(received_sql).not_to include(";")
     end
 
+    # Deploy-time thundering herd (issue #403): two processes with cold memos
+    # ensure the same lazy stream queue concurrently; the loser's CREATE
+    # CONSTRAINT TRIGGER inside pgmq.enable_notify_insert fails with
+    # PG::DuplicateObject once the winner commits. The trigger provably
+    # exists, so the broadcast must proceed instead of dropping.
+    context "when a concurrent ensure won the NOTIFY trigger race" do
+      it "treats the duplicate-trigger error as success" do
+        real_pgmq_connection_error
+        allow(client).to receive(:notify_trigger_current?).and_return(false, true)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(
+          PGMQ::Errors::ConnectionError,
+          'Database connection error: ERROR:  trigger "trigger_notify_queue_insert_listeners" ' \
+          'for relation "q_pgbus_test_chat" already exists'
+        )
+
+        expect { client.ensure_stream_queue("chat") }.not_to raise_error
+      end
+    end
+
     # Stale process-local memo after another process drops the physical queue
     # (orphan stream sweep, dashboard drop, manual drop_queue). Without recovery
     # enable_notify_insert raises "Queue does not exist" even though ensure
