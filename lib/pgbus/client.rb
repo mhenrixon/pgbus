@@ -1196,8 +1196,9 @@ module Pgbus
     # committed the WHOLE queue — tables, indexes, and the pgmq.meta row
     # — so re-check meta and return (the winner also ran autovacuum
     # tuning). The retry covers the can't-confirm case (e.g. a leftover
-    # physical table without a meta row); its failure propagates,
-    # carrying the original duplicate as its cause.
+    # physical table without a meta row); its failure propagates as the
+    # retry's own error, with the original duplicate preserved deeper in
+    # the cause chain (raised while $! held it, so Ruby chains it).
     def create_queue_table(name)
       @pgmq.create(name)
       tune_autovacuum(name)
