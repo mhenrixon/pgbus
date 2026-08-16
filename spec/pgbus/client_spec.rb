@@ -512,6 +512,99 @@ RSpec.describe Pgbus::Client do
       end
     end
 
+    describe "duplicate relation race on queue creation (issue #404)" do
+      # CREATE TABLE IF NOT EXISTS is not race-safe: two backends creating a
+      # not-yet-existing queue both pass the existence check, and the loser
+      # raises unique_violation on pg_class_relname_nsp_index — wrapped by
+      # pgmq-ruby as ConnectionError with the PG error as cause.
+      let(:duplicate_cause_class) { stub_const("PG::UniqueViolation", Class.new(StandardError)) }
+      let(:duplicate_error) do
+        real_pgmq_connection_error
+        begin
+          raise duplicate_cause_class, "catalog race"
+        rescue duplicate_cause_class
+          begin
+            raise PGMQ::Errors::ConnectionError,
+                  'Database connection error: ERROR:  duplicate key value violates unique constraint "pg_class_relname_nsp_index"'
+          rescue PGMQ::Errors::ConnectionError => e
+            e
+          end
+        end
+      end
+
+      before { allow(client).to receive(:queue_registered?).and_return(true) }
+
+      it "treats the loser's duplicate as success when the winner's queue is registered" do
+        allow(mock_pgmq).to receive(:create).and_raise(duplicate_error)
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:create).once
+      end
+
+      it "skips autovacuum tuning on the recheck-success path — the winner already tuned" do
+        allow(mock_pgmq).to receive(:create).and_raise(duplicate_error)
+
+        client.ensure_queue("jobs")
+
+        expect(client).not_to have_received(:tune_autovacuum)
+      end
+
+      it "retries pgmq.create once when the recheck cannot confirm the queue" do
+        allow(client).to receive(:queue_registered?).and_return(false)
+        attempts = 0
+        allow(mock_pgmq).to receive(:create) do
+          attempts += 1
+          raise duplicate_error if attempts == 1
+        end
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:create).twice
+        expect(client).to have_received(:tune_autovacuum).with("pgbus_test_jobs")
+      end
+
+      it "propagates when the retry also fails, carrying the original duplicate as cause" do
+        allow(client).to receive(:queue_registered?).and_return(false)
+        allow(mock_pgmq).to receive(:create).and_raise(duplicate_error)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError)
+        expect(mock_pgmq).to have_received(:create).twice
+      end
+
+      it "recognizes an unwrapped duplicate error class directly" do
+        stub_const("PG::DuplicateTable", Class.new(StandardError))
+        allow(mock_pgmq).to receive(:create).and_raise(PG::DuplicateTable, "relation already exists")
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+      end
+
+      it "propagates non-duplicate errors without rechecking" do
+        real_pgmq_connection_error
+        refused = PGMQ::Errors::ConnectionError.new("Database connection error: connection refused")
+        allow(mock_pgmq).to receive(:create).and_raise(refused)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /connection refused/)
+        expect(client).not_to have_received(:queue_registered?)
+      end
+
+      context "with group_mode FIFO index creation" do
+        before { config.group_mode = :fifo }
+
+        it "treats the loser's duplicate index as success" do
+          allow(mock_pgmq).to receive(:create_fifo_index).and_raise(duplicate_error)
+
+          expect { client.ensure_queue("jobs") }.not_to raise_error
+        end
+
+        it "propagates non-duplicate FIFO index errors" do
+          real_pgmq_connection_error
+          refused = PGMQ::Errors::ConnectionError.new("Database connection error: connection refused")
+          allow(mock_pgmq).to receive(:create_fifo_index).and_raise(refused)
+
+          expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /connection refused/)
+        end
+      end
+    end
+
     it "is idempotent — only creates the queue once" do
       client.ensure_queue("jobs")
       client.ensure_queue("jobs")

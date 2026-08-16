@@ -46,10 +46,19 @@ module Pgbus
           ON pgmq.a_#{sanitized} (msg_id)
         SQL
 
-        synchronized do
-          with_raw_connection do |conn|
-            conn.exec(sql)
+        begin
+          synchronized do
+            with_raw_connection do |conn|
+              conn.exec(sql)
+            end
           end
+        rescue StandardError => e
+          # CREATE INDEX IF NOT EXISTS shares pgmq.create's catalog race
+          # (issue #404): two first-broadcasts both pass the existence
+          # check and the loser gets a raw unique_violation on pg_class.
+          # The duplicate proves the index exists — carry on to register
+          # and memoize.
+          raise unless duplicate_relation_error?(e)
         end
 
         # Record the physical queue name so maintenance (stream-archive prune,
