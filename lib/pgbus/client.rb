@@ -1276,7 +1276,7 @@ module Pgbus
           JOIN pg_namespace n ON c.relnamespace = n.oid
           WHERE n.nspname = 'pgmq'
             AND c.relname = pgmq.format_table_name($1, 'q')
-            AND t.tgname = 'trigger_notify_queue_insert_listeners'
+            AND t.tgname = '#{NOTIFY_TRIGGER_NAME}'
             AND EXISTS (
               SELECT 1 FROM pgmq.notify_insert_throttle
               WHERE queue_name = $1

@@ -475,6 +475,22 @@ RSpec.describe Pgbus::Client do
         expect { client.ensure_queue("jobs") }.not_to raise_error
       end
 
+      it "propagates a localized duplicate message when the PG::DuplicateObject cause was dropped" do
+        # Residual gap, pinned as intentional: with the cause gone AND the
+        # message localized, nothing proves this is a duplicate — an
+        # unrecognizable error must propagate, never be swallowed. The
+        # English-text fallback is defense-in-depth, not a promise; the real
+        # pgmq-ruby path always sets the cause (raise inside rescue PG::Error).
+        real_pgmq_connection_error
+        localized = PGMQ::Errors::ConnectionError.new(
+          'Database connection error: FEHLER: Trigger "trigger_notify_queue_insert_listeners" existiert bereits'
+        )
+        allow(client).to receive(:notify_trigger_current?).and_return(false)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(localized)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /existiert bereits/)
+      end
+
       it "propagates duplicate errors about other objects" do
         real_pgmq_connection_error
         other = PGMQ::Errors::ConnectionError.new(

@@ -137,6 +137,8 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
         )
 
         expect { client.ensure_stream_queue("chat") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:enable_notify_insert)
+          .with("pgbus_test_chat", throttle_interval_ms: 0).once
       end
     end
 
