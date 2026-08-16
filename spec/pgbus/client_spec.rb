@@ -413,6 +413,105 @@ RSpec.describe Pgbus::Client do
       expect(mock_pgmq).to have_received(:enable_notify_insert).with("pgbus_test_jobs", throttle_interval_ms: Pgbus::Client::NOTIFY_THROTTLE_MS)
     end
 
+    describe "duplicate NOTIFY trigger race (issue #403)" do
+      # Two processes with cold memos both pass the notify_trigger_current?
+      # check-then-act window; the loser's CREATE CONSTRAINT TRIGGER fails
+      # with PG::DuplicateObject, wrapped by pgmq-ruby as ConnectionError.
+      let(:duplicate_error) do
+        real_pgmq_connection_error
+        PGMQ::Errors::ConnectionError.new(
+          'Database connection error: ERROR:  trigger "trigger_notify_queue_insert_listeners" ' \
+          'for relation "q_pgbus_test_jobs" already exists'
+        )
+      end
+
+      before { config.listen_notify = true }
+
+      it "treats the loser's duplicate-trigger error as success when the winner installed the same throttle" do
+        allow(client).to receive(:notify_trigger_current?).and_return(false, true)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(duplicate_error)
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:enable_notify_insert).once
+      end
+
+      it "retries enable_notify_insert once when the winner installed a different throttle" do
+        allow(client).to receive(:notify_trigger_current?).and_return(false, false)
+        attempts = 0
+        allow(mock_pgmq).to receive(:enable_notify_insert) do
+          attempts += 1
+          raise duplicate_error if attempts == 1
+        end
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+        expect(mock_pgmq).to have_received(:enable_notify_insert).twice
+      end
+
+      it "propagates a duplicate error when the retry also loses the race" do
+        allow(client).to receive(:notify_trigger_current?).and_return(false, false)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(duplicate_error)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError)
+        expect(mock_pgmq).to have_received(:enable_notify_insert).twice
+      end
+
+      it "recognizes the duplicate via the PG::DuplicateObject cause when the message is localized" do
+        real_pgmq_connection_error
+        stub_const("PG::DuplicateObject", Class.new(StandardError))
+        localized = begin
+          raise PG::DuplicateObject, "localized message"
+        rescue PG::DuplicateObject
+          begin
+            raise PGMQ::Errors::ConnectionError,
+                  'Database connection error: FEHLER: Trigger "trigger_notify_queue_insert_listeners" existiert bereits'
+          rescue PGMQ::Errors::ConnectionError => e
+            e
+          end
+        end
+
+        allow(client).to receive(:notify_trigger_current?).and_return(false, true)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(localized)
+
+        expect { client.ensure_queue("jobs") }.not_to raise_error
+      end
+
+      it "propagates a localized duplicate message when the PG::DuplicateObject cause was dropped" do
+        # Residual gap, pinned as intentional: with the cause gone AND the
+        # message localized, nothing proves this is a duplicate — an
+        # unrecognizable error must propagate, never be swallowed. The
+        # English-text fallback is defense-in-depth, not a promise; the real
+        # pgmq-ruby path always sets the cause (raise inside rescue PG::Error).
+        real_pgmq_connection_error
+        localized = PGMQ::Errors::ConnectionError.new(
+          'Database connection error: FEHLER: Trigger "trigger_notify_queue_insert_listeners" existiert bereits'
+        )
+        allow(client).to receive(:notify_trigger_current?).and_return(false)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(localized)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /existiert bereits/)
+      end
+
+      it "propagates duplicate errors about other objects" do
+        real_pgmq_connection_error
+        other = PGMQ::Errors::ConnectionError.new(
+          'Database connection error: ERROR:  constraint "something_else" already exists'
+        )
+        allow(client).to receive(:notify_trigger_current?).and_return(false)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(other)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /something_else/)
+      end
+
+      it "propagates genuine connection errors unchanged" do
+        real_pgmq_connection_error
+        refused = PGMQ::Errors::ConnectionError.new("Database connection error: connection refused")
+        allow(client).to receive(:notify_trigger_current?).and_return(false)
+        allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(refused)
+
+        expect { client.ensure_queue("jobs") }.to raise_error(PGMQ::Errors::ConnectionError, /connection refused/)
+      end
+    end
+
     it "is idempotent — only creates the queue once" do
       client.ensure_queue("jobs")
       client.ensure_queue("jobs")

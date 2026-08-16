@@ -64,6 +64,12 @@ module Pgbus
     # re-running the trigger DDL on every queue.
     NOTIFY_THROTTLE_MS = 250
 
+    # PGMQ's per-queue NOTIFY trigger name, as created by
+    # pgmq.enable_notify_insert — used to recognize the duplicate-trigger
+    # race loser (issue #403).
+    NOTIFY_TRIGGER_NAME = "trigger_notify_queue_insert_listeners"
+    private_constant :NOTIFY_TRIGGER_NAME
+
     # Load the pgmq-ruby gem, defining the PGMQ module before requiring it so
     # Zeitwerk's eager_load (called inside pgmq.rb) can resolve the constant.
     # Without the pre-definition, Ruby 4.0 + Zeitwerk 2.7.5 raises NameError
@@ -1203,11 +1209,43 @@ module Pgbus
       end
     end
 
+    # notify_trigger_current? is a plain SELECT and `synchronized` is a
+    # process-local mutex, so this check-then-act races across processes:
+    # after a deploy every process's @queues_created memo is cold, and two
+    # web processes handling the first broadcast for the same lazy stream
+    # queue both see "trigger not current" and both run PGMQ's
+    # DROP + CREATE CONSTRAINT TRIGGER cycle. The loser's CREATE blocks on
+    # the winner's table lock and fails with PG::DuplicateObject once the
+    # winner commits (issue #403). The duplicate proves the trigger exists,
+    # so treat it as success — same shape as the #397 duplicate-object
+    # rescue on schema install. Re-check the throttle first: racing ensures
+    # pass the same value, but a job-queue ensure (250ms) can race the
+    # stream override (0ms), so a mismatch means the winner installed a
+    # different interval — retry once to converge; a second loss propagates.
     def enable_notify_if_needed(full_name, throttle_ms)
       return unless config.listen_notify
       return if notify_trigger_current?(full_name, throttle_ms)
 
       @pgmq.enable_notify_insert(full_name, throttle_interval_ms: throttle_ms)
+    rescue PGMQ::Errors::ConnectionError => e
+      raise unless duplicate_notify_trigger_error?(e)
+      return if notify_trigger_current?(full_name, throttle_ms)
+
+      @pgmq.enable_notify_insert(full_name, throttle_interval_ms: throttle_ms)
+    end
+
+    # Matched on the trigger name (an identifier — survives server-side
+    # message localization) plus either the PG::DuplicateObject cause set by
+    # pgmq-ruby's `raise … ConnectionError` inside `rescue PG::Error` (the
+    # defined? guard mirrors the other PG::… checks in this file: a cause
+    # can only be a PG::DuplicateObject when the class is loaded) or the
+    # English "already exists" text when a wrapper dropped the cause.
+    def duplicate_notify_trigger_error?(error)
+      message = error.message.to_s
+      return false unless message.include?(NOTIFY_TRIGGER_NAME)
+
+      (defined?(PG::DuplicateObject) && error.cause.is_a?(PG::DuplicateObject)) ||
+        message.include?("already exists")
     end
 
     def create_fifo_index_if_needed(full_name)
@@ -1238,7 +1276,7 @@ module Pgbus
           JOIN pg_namespace n ON c.relnamespace = n.oid
           WHERE n.nspname = 'pgmq'
             AND c.relname = pgmq.format_table_name($1, 'q')
-            AND t.tgname = 'trigger_notify_queue_insert_listeners'
+            AND t.tgname = '#{NOTIFY_TRIGGER_NAME}'
             AND EXISTS (
               SELECT 1 FROM pgmq.notify_insert_throttle
               WHERE queue_name = $1
