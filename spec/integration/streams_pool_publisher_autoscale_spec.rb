@@ -60,51 +60,58 @@ RSpec.describe "Streams pool publisher autoscale", :integration do
       Thread.new do
         client.send(:with_streams_connection) do |_conn|
           held.count_down
-          release.pop
+          release.pop # nil on Queue#close — the cleanup wake-up
         end
       end
     end
-    expect(held.wait(5)).to be(true) # both holds established before the storm
 
-    # Saturate the remaining connection with a churn of concurrent publishers.
-    # Each send_stream_message fires the throttled trigger after producing.
     stop = Concurrent::AtomicBoolean.new(false)
     errors = Concurrent::Array.new
-    publishers = Array.new(8) do
-      Thread.new do
-        until stop.true?
-          begin
-            client.send_stream_message(stream_name, { "html" => "<x/>" })
-          rescue StandardError => e
-            errors << e
+    publishers = []
+    peak = 3
+    begin
+      expect(held.wait(5)).to be(true) # both holds established before the storm
+
+      # Saturate the remaining connection with a churn of concurrent publishers.
+      # Each send_stream_message fires the throttled trigger after producing.
+      publishers = Array.new(8) do
+        Thread.new do
+          until stop.true?
+            begin
+              client.send_stream_message(stream_name, { "html" => "<x/>" })
+            rescue StandardError => e
+              errors << e
+            end
           end
         end
       end
+
+      # Bounded growth window instead of a blind sample count: at the 0.05s
+      # autoscale interval this deadline covers ~300 check windows, and the loop
+      # breaks the moment growth lands (ResizablePool#swap publishes the new pool
+      # ref BEFORE draining the old one, so stats reflect it immediately).
+      deadline = monotonic_now + 15
+      while monotonic_now < deadline
+        # streams_pool_stats returns {} on a transient read hiccup (it rescues
+        # internally), and this loop runs concurrently with the swap storm — so
+        # size can be nil. Skip those samples rather than raise NoMethodError.
+        size = client.streams_pool_stats[:size]
+        peak = size if size && size > peak
+        break if peak > 3
+
+        sleep 0.05
+      end
+    ensure
+      # Always unwind, even when an expectation above raises — otherwise the
+      # holders block on release.pop forever, pinning pool checkouts while the
+      # after-hook closes the pool under them. Holders wake FIRST: they pin the
+      # old pool's in-flight counter, and the post-grow drain (bounded at
+      # streams_pool_timeout + 1) waits on it.
+      stop.make_true
+      release.close
+      holders.each { |t| t.join(5) }
+      publishers.each { |t| t.join(5) }
     end
-
-    # Bounded growth window instead of a blind sample count: at the 0.05s
-    # autoscale interval this deadline covers ~300 check windows, and the loop
-    # breaks the moment growth lands (ResizablePool#swap publishes the new pool
-    # ref BEFORE draining the old one, so stats reflect it immediately).
-    peak = 3
-    deadline = monotonic_now + 15
-    while monotonic_now < deadline
-      # streams_pool_stats returns {} on a transient read hiccup (it rescues
-      # internally), and this loop runs concurrently with the swap storm — so
-      # size can be nil. Skip those samples rather than raise NoMethodError.
-      size = client.streams_pool_stats[:size]
-      peak = size if size && size > peak
-      break if peak > 3
-
-      sleep 0.05
-    end
-
-    # Release the holders FIRST: they pin the old pool's in-flight counter, and
-    # the post-grow drain (bounded at streams_pool_timeout + 1) waits on it.
-    stop.make_true
-    2.times { release << :go }
-    holders.each { |t| t.join(5) }
-    publishers.each { |t| t.join(5) }
 
     expect(errors).to be_empty
     expect(peak).to be > 3           # the publish path grew the pool into headroom
