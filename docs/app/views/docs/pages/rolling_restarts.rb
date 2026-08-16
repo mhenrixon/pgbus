@@ -183,7 +183,7 @@ class Views::Docs::Pages::RollingRestarts < DocsUI::Page
         Keep jobs shorter than `drain_timeout`, or raise it (together with the
         orchestrator's stop timeout) for queues that can't be. For `idempotent!`
         event handlers there is a separate crash-window caveat tracked in
-        [pgbus#385](https://github.com/mhenrixon/pgbus/issues/385).
+        [pgbus#385](https://github.com/zoolutions/pgbus/issues/385).
       MD
     end
   end

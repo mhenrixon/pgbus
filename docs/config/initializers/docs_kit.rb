@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+# docs-kit synced: v1.0.8
+
 # docs-kit configuration — everything that makes this site look like "pgbus"
 # rather than any other docs site. The shared chrome (Shell/Sidebar/ThemeSwitcher/
 # Code/Page) comes from the gem; only this config differs per site. The `themes`
@@ -34,7 +36,7 @@ Rails.application.config.to_prepare do
     # A link to the source repo in the topbar, rendered with the shipped GitHub
     # brand mark.
     c.topbar_links = [
-      { href: "https://github.com/mhenrixon/pgbus", label: "GitHub", icon: :github }
+      { href: "https://github.com/zoolutions/pgbus", label: "GitHub", icon: :github }
     ]
 
     # SEO + social sharing. docs-kit emits the full <head> (description, Open

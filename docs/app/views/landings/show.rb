@@ -67,7 +67,7 @@ module Views
           div(class: "flex flex-wrap gap-3") do
             a(href: doc_path("installation"), class: "btn btn-primary") { "Get started" }
             a(href: doc_path("architecture"), class: "btn btn-ghost") { "How it works" }
-            a(href: "https://github.com/mhenrixon/pgbus",
+            a(href: "https://github.com/zoolutions/pgbus",
               class: "btn btn-ghost", target: "_blank", rel: "noopener") { "GitHub ↗" }
           end
         end

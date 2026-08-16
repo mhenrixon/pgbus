@@ -159,7 +159,7 @@ class Views::Docs::Pages::Streams < DocsUI::Page
         [Transactional broadcasts](#transactional-broadcasts) above; `visible_to:`
         restricts delivery to connections whose authorize-hook context passes a
         filter registered via `Pgbus::Streams.filters.register` (see the
-        [README's audience filtering section](https://github.com/mhenrixon/pgbus#server-side-audience-filtering)
+        [README's audience filtering section](https://github.com/zoolutions/pgbus#server-side-audience-filtering)
         for the full registry API). The rest — `exclude:`, `event:`,
         `coalesce:` — are documented below.
       MD
