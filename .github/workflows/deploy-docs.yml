@@ -2,7 +2,7 @@ name: Deploy docs
 
 # Deploys the docs site (docs/) to the oss-infrastructure server via Kamal when a
 # release is published, or on demand. The build + deploy logic is shared across
-# all docs-kit sites — see mhenrixon/docs-kit/.github/workflows/deploy.yml.
+# all docs-kit sites — see zoolutions/docs-kit/.github/workflows/deploy.yml.
 #
 # `image`/`service` are the REPO name (pgbus) so the pushed ghcr package
 # auto-links to this repo and GITHUB_TOKEN can push + pull it (no PAT). They must
@@ -26,8 +26,8 @@ permissions:
 
 jobs:
   deploy:
-    uses: mhenrixon/docs-kit/.github/workflows/deploy.yml@main
+    uses: zoolutions/docs-kit/.github/workflows/deploy.yml@main
     with:
-      image: mhenrixon/pgbus
+      image: zoolutions/pgbus
       service: pgbus
     secrets: inherit

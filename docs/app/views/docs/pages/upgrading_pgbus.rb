@@ -205,9 +205,9 @@ class Views::Docs::Pages::UpgradingPgbus < DocsUI::Page
         plain "Everything below is "
         strong { "implemented and lands in 1.0.0" }
         plain " — the unified error hierarchy (issue "
-        a(href: "https://github.com/mhenrixon/pgbus/issues/282", class: "link") { "#282" }
+        a(href: "https://github.com/zoolutions/pgbus/issues/282", class: "link") { "#282" }
         plain ") and the config renames, dead-surface removals, and new shortcuts (issue "
-        a(href: "https://github.com/mhenrixon/pgbus/issues/283", class: "link") { "#283" }
+        a(href: "https://github.com/zoolutions/pgbus/issues/283", class: "link") { "#283" }
         plain "). It describes real behavior on the unreleased 1.0 line; only the release itself hasn't happened yet."
       end
       md <<~'MD'

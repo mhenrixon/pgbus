@@ -5,7 +5,7 @@ source "https://rubygems.org"
 # from RubyGems now that the gem is published there — the old GitHub ref (needed
 # when docs-kit wasn't on rubygems and the Docker build context couldn't see a
 # sibling checkout) is obsolete.
-gem "docs-kit", "~> 1.0.3", require: "docs_kit"
+gem "docs-kit", "~> 1.0.8", require: "docs_kit"
 gem "daisyui", require: "daisy_ui"
 gem "phlex-rails"
 gem "rails_icons", "~> 1.1"
