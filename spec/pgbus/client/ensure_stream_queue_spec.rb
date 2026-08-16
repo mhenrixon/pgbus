@@ -121,6 +121,33 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
       expect(received_sql).not_to include(";")
     end
 
+    # Same herd, third DDL step (issue #404): the archive msg_id index is a
+    # raw CREATE INDEX IF NOT EXISTS, so two first-broadcasts race the
+    # catalog insert and the loser gets a raw PG::UniqueViolation.
+    context "when a concurrent ensure won the archive-index race" do
+      it "treats the duplicate as success and still registers the stream" do
+        stub_const("PG::UniqueViolation", Class.new(StandardError))
+        allow(raw_conn).to receive(:exec).and_raise(
+          PG::UniqueViolation,
+          'ERROR:  duplicate key value violates unique constraint "pg_class_relname_nsp_index"'
+        )
+
+        expect { client.ensure_stream_queue("chat") }.not_to raise_error
+        expect(Pgbus::StreamQueue).to have_received(:record!).with("pgbus_test_chat")
+        expect(client.instance_variable_get(:@stream_indexes_created)["chat"]).to be(true)
+      end
+
+      it "propagates non-duplicate index errors" do
+        stub_const("PG::InsufficientPrivilege", Class.new(StandardError))
+        allow(raw_conn).to receive(:exec).and_raise(
+          PG::InsufficientPrivilege, "permission denied for schema pgmq"
+        )
+
+        expect { client.ensure_stream_queue("chat") }.to raise_error(PG::InsufficientPrivilege)
+        expect(client.instance_variable_get(:@stream_indexes_created)["chat"]).to be_nil
+      end
+    end
+
     # Deploy-time thundering herd (issue #403): two processes with cold memos
     # ensure the same lazy stream queue concurrently; the loser's CREATE
     # CONSTRAINT TRIGGER inside pgmq.enable_notify_insert fails with

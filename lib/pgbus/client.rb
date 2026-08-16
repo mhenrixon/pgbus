@@ -1183,7 +1183,28 @@ module Pgbus
     end
 
     # Runs inside synchronized — callers own the connection mutex.
+    #
+    # CREATE TABLE IF NOT EXISTS is not race-safe: two backends creating a
+    # not-yet-existing queue both pass the existence check (READ COMMITTED
+    # — neither sees the other's uncommitted catalog rows), both insert
+    # into pg_class, and the loser raises unique_violation on
+    # pg_class_relname_nsp_index instead of the friendly duplicate_table
+    # (issue #404 — the sibling of the #403 trigger race, one DDL step
+    # earlier; `synchronized` is process-local, so nothing serializes
+    # this across processes). pgmq.create is a single statement and
+    # therefore atomic: by the time the loser unblocks, the winner has
+    # committed the WHOLE queue — tables, indexes, and the pgmq.meta row
+    # — so re-check meta and return (the winner also ran autovacuum
+    # tuning). The retry covers the can't-confirm case (e.g. a leftover
+    # physical table without a meta row); its failure propagates,
+    # carrying the original duplicate as its cause.
     def create_queue_table(name)
+      @pgmq.create(name)
+      tune_autovacuum(name)
+    rescue StandardError => e
+      raise unless duplicate_relation_error?(e)
+      return if queue_registered?(name)
+
       @pgmq.create(name)
       tune_autovacuum(name)
     end
@@ -1252,6 +1273,34 @@ module Pgbus
       return unless config.group_mode
 
       @pgmq.create_fifo_index(full_name)
+    rescue StandardError => e
+      # CREATE INDEX IF NOT EXISTS has the same catalog race as
+      # pgmq.create (issue #404): the loser's duplicate proves a
+      # concurrent ensure created the index.
+      raise unless duplicate_relation_error?(e)
+    end
+
+    # A relation-creation race loser's error: one of the duplicate DDL
+    # classes directly (raw conn.exec paths), or wrapped — pgmq-ruby
+    # raises ConnectionError inside `rescue PG::Error`, so Ruby sets the
+    # duplicate as its cause automatically.
+    def duplicate_relation_error?(error)
+      duplicate_install_error?(error) || duplicate_install_error?(error.cause)
+    end
+
+    # Whether pgmq.meta records the queue — the authoritative "create
+    # committed" signal (pgmq.create writes it atomically with the
+    # tables). The pooled checkout is a sequential sibling of the failed
+    # create's (already returned when the exception unwound), so there is
+    # no nested checkout — same reasoning as notify_trigger_current?.
+    def queue_registered?(full_name)
+      @pgmq.with_connection do |conn|
+        conn.exec_params("SELECT 1 FROM pgmq.meta WHERE queue_name = $1 LIMIT 1", [full_name]).ntuples.positive?
+      end
+    rescue StandardError
+      # Can't confirm (aborted caller transaction, schema not ready) —
+      # fall through to the retry, which surfaces the state honestly.
+      false
     end
 
     # Check whether the NOTIFY trigger already exists on this queue with the
