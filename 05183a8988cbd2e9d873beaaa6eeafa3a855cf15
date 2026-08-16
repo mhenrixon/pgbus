@@ -1,0 +1,19 @@
+spec/integration/streams_pool_publisher_autoscale_spec.rb
+  s_5ecbe6e364754c::t_cf69af7e2a8227 63,70-84,89-100,102-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "05183a8988cbd2e9d873beaaa6eeafa3a855cf15",
+  "prompts": {},
+  "sessions": {
+    "s_5ecbe6e364754c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b0ed5b1f-ae82-408f-a651-f96a15fb8f8e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
