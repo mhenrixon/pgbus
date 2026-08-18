@@ -1,0 +1,23 @@
+spec/pgbus/database_tasks_guard_spec.rb
+  s_86b2a699258318::t_516e60bbdf9a84 6-11,16,22-23,27-28,35,40,45
+spec/pgbus/autovacuum_rake_spec.rb
+  s_86b2a699258318::t_916fd42a7e7c45 59-73
+lib/tasks/pgbus_autovacuum.rake
+  s_86b2a699258318::t_97a34f9451310b 34-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "36408759a96383b701c58e7db620e5c113d9fda7",
+  "prompts": {},
+  "sessions": {
+    "s_86b2a699258318": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "784303c6-b0ee-4eed-bf24-2f2eadaf294d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
