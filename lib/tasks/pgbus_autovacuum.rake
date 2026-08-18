@@ -5,26 +5,37 @@ namespace :pgbus do
   task tune_autovacuum: :environment do
     require "pgbus/autovacuum_tuning"
 
-    conn = Pgbus.configuration.connects_to ? Pgbus::BusRecord.connection : ActiveRecord::Base.connection
+    apply_tuning = lambda do |conn|
+      # Only run if pgmq schema exists (tables may not be created yet during
+      # initial setup — the install migration handles tuning itself).
+      pgmq_exists = conn.select_value(
+        "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'"
+      )
 
-    # Only run if pgmq schema exists (tables may not be created yet during
-    # initial setup — the install migration handles tuning itself).
-    pgmq_exists = conn.select_value(
-      "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'pgmq'"
-    )
+      unless pgmq_exists
+        puts "[pgbus] PGMQ schema not found — skipping autovacuum tuning."
+        next
+      end
 
-    unless pgmq_exists
-      puts "[pgbus] PGMQ schema not found — skipping autovacuum tuning."
-      next
+      puts "[pgbus] Applying autovacuum tuning to PGMQ queue/archive tables..."
+      conn.execute(Pgbus::AutovacuumTuning.sql_for_all_queues)
+
+      puts "[pgbus] Applying autovacuum tuning to high-churn pgbus tables..."
+      conn.execute(Pgbus::AutovacuumTuning.sql_for_high_churn_tables)
+
+      puts "[pgbus] Autovacuum tuning complete."
     end
 
-    puts "[pgbus] Applying autovacuum tuning to PGMQ queue/archive tables..."
-    conn.execute(Pgbus::AutovacuumTuning.sql_for_all_queues)
-
-    puts "[pgbus] Applying autovacuum tuning to high-churn pgbus tables..."
-    conn.execute(Pgbus::AutovacuumTuning.sql_for_high_churn_tables)
-
-    puts "[pgbus] Autovacuum tuning complete."
+    if Pgbus.configuration.connects_to
+      # Scoped checkout + disconnect: this task is enhanced onto
+      # db:schema:load, so a permanent `.connection` lease on the dedicated
+      # pgbus database would leave an idle session that blocks a later
+      # DROP DATABASE in the same rake process (issue #409).
+      Pgbus::BusRecord.connection_pool.with_connection { |conn| apply_tuning.call(conn) }
+      Pgbus::BusRecord.connection_pool.disconnect!
+    else
+      apply_tuning.call(ActiveRecord::Base.connection)
+    end
   end
 end
 

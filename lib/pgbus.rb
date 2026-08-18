@@ -10,6 +10,13 @@ module Pgbus
   # this to be configurable.
   DEAD_LETTER_SUFFIX = "_dlq"
 
+  # Rake task-name prefixes during which pgbus must NOT open a database
+  # connection: schema management (an idle session on a dedicated pgbus
+  # database blocks that same process's DROP DATABASE during db:test:purge —
+  # issue #409) and asset precompile (where a database may legitimately not
+  # exist). Consulted by Pgbus.database_task?.
+  DATABASE_TASK_PREFIXES = %w[db: db_test: assets: webpacker: yarn:].freeze
+
   # Error-hierarchy policy (the 1.0 contract, issue #282):
   #
   #   * OPERATIONAL errors — a pgbus subsystem failed to do its job at runtime
@@ -147,6 +154,30 @@ module Pgbus
 
     def configuration
       @configuration ||= Configuration.new
+    end
+
+    # True when the current process is running a rake task (db:*, assets:*, …
+    # — see DATABASE_TASK_PREFIXES) during which pgbus must not touch the
+    # database: the database may not exist yet, and an idle connection on a
+    # dedicated pgbus database blocks that same process's DROP DATABASE
+    # during db:test:purge (issue #409). Use it to guard boot-time database
+    # touches in an initializer:
+    #
+    #   Rails.application.config.after_initialize do
+    #     Pgbus::StreamQueue.table_exists? unless Pgbus.database_task?
+    #   end
+    #
+    # False outside a Rake run, and false (never raise into boot) when
+    # detection itself fails.
+    def database_task?
+      return false unless defined?(::Rake) && ::Rake.respond_to?(:application)
+
+      ::Rake.application.top_level_tasks.any? do |task|
+        DATABASE_TASK_PREFIXES.any? { |prefix| task.to_s.start_with?(prefix) }
+      end
+    rescue StandardError => e
+      logger.debug { "[Pgbus] database_task? detection failed, assuming non-schema: #{e.class}: #{e.message}" }
+      false
     end
 
     def configure

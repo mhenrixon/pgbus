@@ -61,6 +61,12 @@ module Pgbus
     initializer "pgbus.db" do
       ActiveSupport.on_load(:active_record) do
         Pgbus::BusRecord.connects_to(**Pgbus.configuration.connects_to) if Pgbus.configuration.connects_to
+
+        # Disconnect the gem's own pools before any database purge/drop, so an
+        # idle boot-time BusRecord session on a dedicated pgbus database can
+        # never block that same process's DROP DATABASE (issue #409). No-op
+        # when pgbus runs in the primary database (no BusRecord-owned pool).
+        ActiveRecord::Tasks::DatabaseTasks.singleton_class.prepend(Pgbus::DatabaseTasksGuard)
       end
     end
 
