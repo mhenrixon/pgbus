@@ -205,6 +205,16 @@ RSpec.describe Pgbus::Engine do
 
       expect(Pgbus::BusRecord).not_to have_received(:connects_to)
     end
+
+    it "prepends the purge/drop guard onto ActiveRecord::Tasks::DatabaseTasks" do
+      Pgbus.configuration.connects_to = nil
+
+      block.call
+      ActiveSupport.run_load_hooks(:active_record, ActiveRecord::Base)
+
+      expect(ActiveRecord::Tasks::DatabaseTasks.singleton_class.ancestors)
+        .to include(Pgbus::DatabaseTasksGuard)
+    end
   end
 
   describe "pgbus.integrations.appsignal initializer" do

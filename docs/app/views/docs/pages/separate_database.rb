@@ -13,6 +13,7 @@ class Views::Docs::Pages::SeparateDatabase < DocsUI::Page
     configure
     migrations
     database_yml
+    purge_guard
   end
 
   private
@@ -81,6 +82,32 @@ class Views::Docs::Pages::SeparateDatabase < DocsUI::Page
             database: myapp_pgbus_production
             migrations_paths: db/pgbus_migrate
       YAML
+    end
+  end
+
+  def purge_guard
+    DocsUI::Section("Boot-time connections and db:test:purge") do
+      md <<~'MD'
+        Any code that touches a pgbus model during Rails boot leaves an idle
+        session on the dedicated database for the life of the process. Rails'
+        `db:test:purge` / `db:drop` only disconnect the connection they open
+        themselves, so that idle session would block the process's own
+        `DROP DATABASE` (or kill it via `statement_timeout`). pgbus guards this
+        automatically: every purge/drop first disconnects pgbus's own
+        connection pools, so `db:test:prepare` can never wedge on a pgbus
+        session.
+
+        For your own boot-time database touches (warm-ups, probes in an
+        initializer), skip them in the rake contexts where a database may not
+        exist yet with `Pgbus.database_task?`:
+      MD
+      DocsUI::Code(<<~'RUBY', filename: "config/initializers/pgbus_warmup.rb")
+        Rails.application.config.after_initialize do
+          next if Pgbus.database_task? # db:*, assets:* rake tasks
+
+          # ... touch the pgbus database ...
+        end
+      RUBY
     end
   end
 end

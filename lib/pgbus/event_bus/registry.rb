@@ -104,23 +104,11 @@ module Pgbus
 
       private
 
-      # Rake task-name prefixes during which pgbus must NOT open a PGMQ
-      # connection: creating/dropping/migrating/loading the schema (a live
-      # connection blocks DROP DATABASE) and asset precompile (no DB expected).
-      SCHEMA_TASK_PREFIXES = %w[db: db_test: assets: webpacker: yarn:].freeze
-      private_constant :SCHEMA_TASK_PREFIXES
-
       # True when running inside a rake schema/asset task, where setup_all!(safe:)
-      # should skip rather than open a connection. Detected from the invoked rake
-      # task names; false outside a Rake run.
+      # should skip rather than open a connection. Delegates to the shared,
+      # public detector (issue #409) so there is a single implementation.
       def schema_task_context?
-        return false unless defined?(::Rake) && ::Rake.respond_to?(:application)
-
-        tasks = ::Rake.application.top_level_tasks
-        tasks.any? { |t| SCHEMA_TASK_PREFIXES.any? { |prefix| t.to_s.start_with?(prefix) } }
-      rescue StandardError => e
-        Pgbus.logger.debug { "[Pgbus] schema_task_context? detection failed, assuming non-schema: #{e.class}: #{e.message}" }
-        false
+        Pgbus.database_task?
       end
 
       def matches?(pattern, routing_key)
