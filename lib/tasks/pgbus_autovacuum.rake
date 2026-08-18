@@ -31,8 +31,13 @@ namespace :pgbus do
       # db:schema:load, so a permanent `.connection` lease on the dedicated
       # pgbus database would leave an idle session that blocks a later
       # DROP DATABASE in the same rake process (issue #409).
-      Pgbus::BusRecord.connection_pool.with_connection { |conn| apply_tuning.call(conn) }
-      Pgbus::BusRecord.connection_pool.disconnect!
+      begin
+        Pgbus::BusRecord.connection_pool.with_connection { |conn| apply_tuning.call(conn) }
+      ensure
+        # Disconnect even when tuning raises — the session must not outlive
+        # the task either way.
+        Pgbus::BusRecord.connection_pool.disconnect!
+      end
     else
       apply_tuning.call(ActiveRecord::Base.connection)
     end

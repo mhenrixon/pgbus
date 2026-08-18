@@ -56,6 +56,21 @@ RSpec.describe "pgbus:tune_autovacuum rake task" do # rubocop:disable RSpec/Desc
       expect(conn).to have_received(:execute).twice
     end
 
+    it "disconnects the pool even when tuning raises" do
+      allow(conn).to receive(:select_value).and_raise(RuntimeError, "boom")
+
+      expect { Rake::Task["pgbus:tune_autovacuum"].invoke }.to raise_error(RuntimeError, "boom")
+      expect(pool).to have_received(:disconnect!)
+    end
+
+    it "leaves the primary ActiveRecord::Base connection untouched" do
+      allow(ActiveRecord::Base).to receive(:connection)
+
+      invoke
+
+      expect(ActiveRecord::Base).not_to have_received(:connection)
+    end
+
     it "still disconnects when the pgmq schema is absent" do
       allow(conn).to receive(:select_value).and_return(nil)
 
