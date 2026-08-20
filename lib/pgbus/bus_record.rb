@@ -24,8 +24,22 @@ module Pgbus
     # the next checkout after a disconnect reconnects transparently.
     def self.disconnect_all_pools!
       connection_handler.connection_pool_list(:all).each do |pool|
-        pool.disconnect! if pool.connection_class == self
+        pool.disconnect! if owns_pool?(pool)
       end
     end
+
+    # Rails 8.0 replaced ConnectionPool#connection_class with
+    # #connection_descriptor — a ConnectionDescriptor whose #name is the
+    # owning class name (issue #411). Pools `connects_to` creates register
+    # under the class name, so the name comparison is equivalent to the
+    # class-identity check on 7.x. A nil descriptor (null pool) never matches.
+    def self.owns_pool?(pool)
+      if pool.respond_to?(:connection_descriptor)
+        pool.connection_descriptor&.name == name
+      else
+        pool.connection_class == self
+      end
+    end
+    private_class_method :owns_pool?
   end
 end
