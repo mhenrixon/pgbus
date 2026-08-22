@@ -965,7 +965,9 @@ RSpec.describe Pgbus::Configuration do
     it "accepts nil as a valid sentinel for 'feature disabled'" do
       # archive_retention, idempotency_ttl, recurring_execution_retention all
       # use nil to skip the corresponding maintenance task in the dispatcher.
-      duration_settings.each do |setting|
+      # batch_sweep_interval is required (> 0) — the dispatcher always runs it.
+      nullable = duration_settings - %i[batch_sweep_interval]
+      nullable.each do |setting|
         expect { config.public_send("#{setting}=", nil) }.not_to raise_error
         expect(config.public_send(setting)).to be_nil
       end

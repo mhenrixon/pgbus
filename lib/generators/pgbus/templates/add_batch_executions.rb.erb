@@ -12,6 +12,9 @@ class AddPgbusBatchExecutions < ActiveRecord::Migration<%= migration_version %>
       unique: true, name: "idx_pgbus_batch_executions_job_id"
     add_index :pgbus_batch_executions, :batch_id,
       name: "idx_pgbus_batch_executions_batch_id"
+    add_index :pgbus_batch_executions, :created_at,
+      where: "msg_id IS NULL",
+      name: "idx_pgbus_batch_executions_orphans"
     add_foreign_key :pgbus_batch_executions, :pgbus_batches,
       column: :batch_id, primary_key: :batch_id, on_delete: :cascade
 
@@ -19,14 +22,23 @@ class AddPgbusBatchExecutions < ActiveRecord::Migration<%= migration_version %>
       rename_column :pgbus_batches, :on_discard_class, :on_failure_class
     end
 
+    # Drain/restart pgbus workers after this migration: a process that still
+    # writes discarded_jobs will error once the column is gone.
     if column_exists?(:pgbus_batches, :discarded_jobs)
-      execute "UPDATE pgbus_batches SET failed_jobs = failed_jobs + discarded_jobs"
-      remove_column :pgbus_batches, :discarded_jobs
+      if column_exists?(:pgbus_batches, :failed_jobs)
+        execute "UPDATE pgbus_batches SET failed_jobs = failed_jobs + discarded_jobs"
+        remove_column :pgbus_batches, :discarded_jobs
+      else
+        rename_column :pgbus_batches, :discarded_jobs, :failed_jobs
+      end
     end
   end
 
   def down
-    add_column :pgbus_batches, :discarded_jobs, :integer, null: false, default: 0 unless column_exists?(:pgbus_batches, :discarded_jobs)
+    unless column_exists?(:pgbus_batches, :discarded_jobs)
+      add_column :pgbus_batches, :discarded_jobs, :integer, null: false, default: 0
+      execute "UPDATE pgbus_batches SET discarded_jobs = failed_jobs" if column_exists?(:pgbus_batches, :failed_jobs)
+    end
     if column_exists?(:pgbus_batches, :on_failure_class) && !column_exists?(:pgbus_batches, :on_discard_class)
       rename_column :pgbus_batches, :on_failure_class, :on_discard_class
     end

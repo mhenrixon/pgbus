@@ -169,6 +169,10 @@ def bootstrap_integration_tables(conn)
       );
       CREATE UNIQUE INDEX idx_pgbus_batch_executions_job_id ON pgbus_batch_executions (job_id);
       CREATE INDEX idx_pgbus_batch_executions_batch_id ON pgbus_batch_executions (batch_id);
+      CREATE INDEX idx_pgbus_batch_executions_orphans ON pgbus_batch_executions (created_at) WHERE msg_id IS NULL;
+      ALTER TABLE pgbus_batch_executions
+        ADD CONSTRAINT fk_pgbus_batch_executions_batch
+        FOREIGN KEY (batch_id) REFERENCES pgbus_batches (batch_id) ON DELETE CASCADE;
     SQL
   end
 rescue StandardError => e

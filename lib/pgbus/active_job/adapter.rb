@@ -71,24 +71,29 @@ module Pgbus
           if result == :acquired
             msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
             active_job.provider_job_id = msg_id
-            Batch.backfill_execution(payload_hash, msg_id, queue)
+            Batch.backfill_execution(payload_hash, msg_id, physical_queue(queue, priority))
           else
             handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: priority)
           end
         else
           msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
           active_job.provider_job_id = msg_id
-          Batch.backfill_execution(payload_hash, msg_id, queue)
+          Batch.backfill_execution(payload_hash, msg_id, physical_queue(queue, priority))
         end
 
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
-        rollback_acquired_uniqueness_lock
-        # Only untrack when nothing was sent — a post-send failure still has a
-        # live message whose executor will delete the execution row.
-        uncount_batch_job(payload_hash) if msg_id.nil?
+        # A live message still owns the uniqueness lock and the execution row.
+        if msg_id.nil?
+          rollback_acquired_uniqueness_lock
+          uncount_batch_job(payload_hash)
+        end
         raise e
+      end
+
+      def physical_queue(queue, priority)
+        Pgbus.client.target_queue(queue, priority)
       end
 
       def concurrency_config(active_job)
@@ -199,6 +204,8 @@ module Pgbus
         return if jobs.empty?
 
         payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j)) }
+        physical = Pgbus.configuration.queue_name(queue)
+        msg_ids = nil
         msg_ids = Pgbus.client.send_batch(queue, payloads)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
@@ -206,9 +213,11 @@ module Pgbus
         end
 
         jobs.zip(msg_ids).each { |job, id| job.provider_job_id = id }
-        payloads.zip(msg_ids).each { |payload, id| Batch.backfill_execution(payload, id, queue) }
+        payloads.zip(msg_ids).each { |payload, id| Batch.backfill_execution(payload, id, physical) }
       rescue Pgbus::EnqueueError
-        payloads.each { |payload| Batch.untrack_enqueue(payload) }
+        Array(payloads).each_with_index do |payload, index|
+          Batch.untrack_enqueue(payload) if msg_ids.nil? || msg_ids[index].nil?
+        end
         raise
       rescue Pgbus::SchemaNotReady => e
         Pgbus.logger.error { "[Pgbus] #{e.message}" }

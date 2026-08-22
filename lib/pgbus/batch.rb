@@ -54,8 +54,16 @@ module Pgbus
 
     # Record a discarded/dead-lettered job. Returns the batch row after update.
     def self.job_discarded(batch_id, job_id: nil)
-      if executions_migrated? && job_id
-        resolve_execution(batch_id, job_id, "failed_jobs")
+      if executions_migrated?
+        if job_id
+          resolve_execution(batch_id, job_id, "failed_jobs")
+        else
+          # Pre-migration callers pass only batch_id. Increment the renamed
+          # counter and re-check finish so a leftover signal cannot write
+          # the dropped discarded_jobs column.
+          update_counter(batch_id, "failed_jobs")
+          finish_if_needed(try_finish!(batch_id))
+        end
       else
         update_counter(batch_id, "discarded_jobs")
       end
@@ -72,13 +80,15 @@ module Pgbus
     end
 
     def self.executions_migrated?
-      return @executions_migrated unless @executions_migrated.nil?
+      return true if @executions_migrated
 
-      @executions_migrated = begin
+      result = begin
         BatchExecution.table_exists?
       rescue StandardError
         false
       end
+      @executions_migrated = true if result
+      result
     end
 
     def self.reset_executions_migrated_cache!
@@ -140,8 +150,10 @@ module Pgbus
       private
 
       def resolve_execution(batch_id, job_id, column)
-        deleted = BatchExecution.where(job_id: job_id).delete_all
-        BatchEntry.increment_counter!(batch_id, column) if deleted.positive?
+        BatchEntry.transaction do
+          deleted = BatchExecution.where(job_id: job_id).delete_all
+          BatchEntry.increment_counter!(batch_id, column) if deleted.positive?
+        end
         finish_if_needed(try_finish!(batch_id))
       end
 

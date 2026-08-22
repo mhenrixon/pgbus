@@ -216,7 +216,15 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
 
       it "does not queue it when the table and renamed columns are present" do
+        stub_columns("pgbus_batches", %w[id batch_id on_failure_class failed_jobs completed_jobs total_jobs status])
+
         expect(detector.missing_migrations).not_to include(:add_batch_executions)
+      end
+
+      it "queues add_batch_executions when the table exists but pre-rename columns remain" do
+        stub_columns("pgbus_batches", %w[id batch_id on_discard_class discarded_jobs failed_jobs status])
+
+        expect(detector.missing_migrations).to include(:add_batch_executions)
       end
     end
 

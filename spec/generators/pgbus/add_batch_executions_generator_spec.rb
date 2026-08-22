@@ -33,7 +33,8 @@ RSpec.describe Pgbus::Generators::AddBatchExecutionsGenerator do
         expect(content).to include("create_table :pgbus_batch_executions")
         expect(content).to include("t.string :job_id, null: false")
         expect(content).to include("rename_column :pgbus_batches, :on_discard_class, :on_failure_class")
-        expect(content).to include("remove_column :pgbus_batches, :discarded_jobs")
+        expect(content).to include("idx_pgbus_batch_executions_orphans")
+        expect(content).to include("discarded_jobs")
       end
     end
   end

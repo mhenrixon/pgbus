@@ -131,6 +131,9 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
       unique: true, name: "idx_pgbus_batch_executions_job_id"
     add_index :pgbus_batch_executions, :batch_id,
       name: "idx_pgbus_batch_executions_batch_id"
+    add_index :pgbus_batch_executions, :created_at,
+      where: "msg_id IS NULL",
+      name: "idx_pgbus_batch_executions_orphans"
     add_foreign_key :pgbus_batch_executions, :pgbus_batches,
       column: :batch_id, primary_key: :batch_id, on_delete: :cascade
 

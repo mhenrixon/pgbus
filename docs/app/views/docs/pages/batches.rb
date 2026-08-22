@@ -42,9 +42,9 @@ class Views::Docs::Pages::Batches < DocsUI::Page
       DocsUI::Table(
         [ "Callback", "Fired when" ],
         [
-          [ [ :code, "on_finish" ], "All jobs completed (success or failure)." ],
-          [ [ :code, "on_success" ], "All jobs completed successfully (zero failed)." ],
-          [ [ :code, "on_failure" ], "At least one job was dead-lettered. (`on_discard:` is a deprecated alias until 1.0.)" ]
+          [ [ :code, "on_finish" ], "The batch finished (no outstanding execution rows remain), including after a dispatcher sweep repair." ],
+          [ [ :code, "on_success" ], "The batch finished with zero failed jobs." ],
+          [ [ :code, "on_failure" ], "The batch finished with at least one dead-lettered job. (`on_discard:` is a deprecated alias until 1.0.)" ]
         ]
       )
       md <<~'MD'

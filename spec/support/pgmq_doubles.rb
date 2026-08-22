@@ -52,6 +52,7 @@ module PgmqDoubles
         ensure_dead_letter_queue: nil,
         send_message: 1,
         send_batch: [1, 2],
+        target_queue: "pgbus_test_default",
         read_message: nil,
         read_batch: [],
         read_multi: [],

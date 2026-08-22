@@ -32,7 +32,7 @@
       <dd class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400 font-mono"><%= @batch[:completed_jobs] %></dd>
     </div>
     <div>
-      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.discarded") %></dt>
+      <dt class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase"><%= t("pgbus.batches.show.failed") %></dt>
       <dd class="mt-1 text-2xl font-semibold <%= @batch[:failed_jobs].to_i > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white' %> font-mono"><%= @batch[:failed_jobs] %></dd>
     </div>
     <div>
@@ -76,7 +76,7 @@
     <% end %>
     <% if @batch[:on_failure_class] || @batch[:on_discard_class] %>
       <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
-        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.on_discard") %></dt>
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400"><%= t("pgbus.batches.show.on_failure") %></dt>
         <dd class="mt-1 text-sm font-mono text-gray-900 dark:text-white sm:col-span-2 sm:mt-0"><%= @batch[:on_failure_class] || @batch[:on_discard_class] %></dd>
       </div>
     <% end %>

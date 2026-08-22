@@ -19,10 +19,10 @@ fr:
         completed: Terminées
         created_at: Créé le
         details: Détails
-        discarded: Rejetées
+        failed: Échoués
         finished_at: Terminé le
         not_found: Lot non trouvé
-        on_discard: Au rejet
+        on_failure: Au rejet
         on_finish: À la fin
         on_success: Au succès
         progress: Progression

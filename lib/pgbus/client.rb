@@ -339,6 +339,10 @@ module Pgbus
       end
     end
 
+    def target_queue(queue_name, priority = nil)
+      @queue_strategy.target_queue(queue_name, priority)
+    end
+
     def send_message(queue_name, payload, headers: nil, delay: 0, priority: nil)
       target = @queue_strategy.target_queue(queue_name, priority)
       Instrumentation.instrument("pgbus.client.send_message", queue: target) do
@@ -686,6 +690,34 @@ module Pgbus
       message_exists?(queue_name, msg_id: msg_id)
     end
 
+    # Look up a queue row by ActiveJob job_id in the JSON payload. Used by the
+    # batch sweep: move_to_dead_letter produces a new DLQ msg_id, so the
+    # source msg_id is not a DLQ identity.
+    def message_with_job_id?(queue_name, job_id:)
+      full_name = resolve_full_queue_name(queue_name)
+      sanitized = QueueNameValidator.sanitize!(full_name)
+
+      synchronized do
+        with_raw_connection do |conn|
+          job_id_present?(conn, sanitized, job_id)
+        end
+      end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      nil
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      nil
+    end
+
+    # DLQ companion of a logical or already-physical queue name. Does not
+    # re-prefix a name that resolve_full_queue_name already expanded.
+    def dead_letter_physical_name(queue_name)
+      "#{resolve_full_queue_name(queue_name)}#{Pgbus::DEAD_LETTER_SUFFIX}"
+    end
+
     # Same tri-state as message_exists?: true / false / nil (unknown).
     def message_archived?(queue_name, msg_id:)
       full_name = resolve_full_queue_name(queue_name)
@@ -978,6 +1010,15 @@ module Pgbus
         "SELECT 1 FROM pgmq.q_#{sanitized} " \
         "WHERE message::jsonb ->> 'pgbus_uniqueness_key' = $1 LIMIT 1",
         [uniqueness_key]
+      )
+      result.ntuples.positive?
+    end
+
+    def job_id_present?(conn, sanitized, job_id)
+      result = conn.exec_params(
+        "SELECT 1 FROM pgmq.q_#{sanitized} " \
+        "WHERE message::jsonb ->> 'job_id' = $1 LIMIT 1",
+        [job_id]
       )
       result.ntuples.positive?
     end

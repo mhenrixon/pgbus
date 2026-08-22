@@ -36,13 +36,16 @@ RSpec.describe Pgbus::BatchExecution do
 
   describe ".insert_for!" do
     it "inserts a row keyed by job_id before send" do
-      allow(described_class).to receive(:insert_all).and_return(true)
+      conn = double("connection")
+      allow(described_class).to receive_messages(connection: conn, table_name: "pgbus_batch_executions")
+      allow(conn).to receive(:exec_query)
 
       described_class.insert_for!(batch_id: batch_id, job_id: job_id)
 
-      expect(described_class).to have_received(:insert_all).with(
-        [hash_including(batch_id: batch_id, job_id: job_id)],
-        unique_by: :job_id
+      expect(conn).to have_received(:exec_query).with(
+        a_string_matching(/ON CONFLICT \(job_id\) DO NOTHING/),
+        "BatchExecution Insert",
+        [batch_id, job_id, anything]
       )
     end
   end
@@ -100,6 +103,10 @@ RSpec.describe Pgbus::BatchExecution do
   end
 
   describe "Pgbus::Batch.job_completed with execution rows" do
+    before do
+      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+    end
+
     it "deletes the execution row, increments completed_jobs, and tries to finish" do
       relation = double("relation", delete_all: 1)
       allow(described_class).to receive(:where).with(job_id: job_id).and_return(relation)
@@ -130,6 +137,10 @@ RSpec.describe Pgbus::BatchExecution do
   end
 
   describe "Pgbus::Batch.job_discarded with execution rows" do
+    before do
+      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+    end
+
     it "deletes the row and increments failed_jobs (not discarded_jobs)" do
       relation = double("relation", delete_all: 1)
       allow(described_class).to receive(:where).with(job_id: job_id).and_return(relation)
@@ -163,13 +174,20 @@ RSpec.describe Pgbus::BatchExecution do
       expect(result[:just_finished]).to be true
     end
 
-    it "rolls back when a fresh exists? check finds rows (READ COMMITTED hazard)" do
+    it "does not report finished when a fresh exists? check finds rows (READ COMMITTED hazard)" do
       executions = double("executions", exists?: true)
-      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+      allow(Pgbus::BatchEntry).to receive(:transaction) do |&block|
+        block.call
+      rescue ActiveRecord::Rollback
+        nil
+      end
       allow(Pgbus::BatchEntry).to receive(:finish_if_empty!).with(batch_id).and_return(1)
       allow(described_class).to receive(:where).with(batch_id: batch_id).and_return(executions)
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: batch_id).and_return(record)
 
-      expect { Pgbus::Batch.try_finish!(batch_id) }.to raise_error(ActiveRecord::Rollback)
+      result = Pgbus::Batch.try_finish!(batch_id)
+
+      expect(result[:just_finished]).to be false
     end
 
     it "is a no-op when the CAS update matches zero rows" do
