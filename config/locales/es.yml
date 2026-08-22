@@ -22,7 +22,7 @@ es:
         failed: Fallados
         finished_at: Finalizado el
         not_found: Lote no encontrado
-        on_failure: Al descartar
+        on_failure: Al fallar
         on_finish: Al finalizar
         on_success: Al tener éxito
         progress: Progreso

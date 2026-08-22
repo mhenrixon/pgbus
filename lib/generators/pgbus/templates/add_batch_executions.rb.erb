@@ -37,7 +37,10 @@ class AddPgbusBatchExecutions < ActiveRecord::Migration<%= migration_version %>
   def down
     unless column_exists?(:pgbus_batches, :discarded_jobs)
       add_column :pgbus_batches, :discarded_jobs, :integer, null: false, default: 0
-      execute "UPDATE pgbus_batches SET discarded_jobs = failed_jobs" if column_exists?(:pgbus_batches, :failed_jobs)
+      if column_exists?(:pgbus_batches, :failed_jobs)
+        execute "UPDATE pgbus_batches SET discarded_jobs = failed_jobs"
+        execute "UPDATE pgbus_batches SET failed_jobs = 0"
+      end
     end
     if column_exists?(:pgbus_batches, :on_failure_class) && !column_exists?(:pgbus_batches, :on_discard_class)
       rename_column :pgbus_batches, :on_failure_class, :on_discard_class

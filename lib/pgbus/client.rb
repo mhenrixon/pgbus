@@ -715,7 +715,11 @@ module Pgbus
     # DLQ companion of a logical or already-physical queue name. Does not
     # re-prefix a name that resolve_full_queue_name already expanded.
     def dead_letter_physical_name(queue_name)
-      "#{resolve_full_queue_name(queue_name)}#{Pgbus::DEAD_LETTER_SUFFIX}"
+      full = resolve_full_queue_name(queue_name)
+      # Priority sub-queues share the logical queue's DLQ (`pgbus_default_dlq`),
+      # not a per-priority `…_pN_dlq`. Strip `_pN` before appending the suffix.
+      base = full.sub(/_p\d+\z/, "")
+      "#{base}#{Pgbus::DEAD_LETTER_SUFFIX}"
     end
 
     # Same tri-state as message_exists?: true / false / nil (unknown).

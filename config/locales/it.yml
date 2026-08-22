@@ -22,7 +22,7 @@ it:
         failed: Falliti
         finished_at: Terminato il
         not_found: Lotto non trovato
-        on_failure: Allo scarto
+        on_failure: Al fallimento
         on_finish: Al termine
         on_success: Al successo
         progress: Progresso

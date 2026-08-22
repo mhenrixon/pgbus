@@ -37,7 +37,13 @@ module Pgbus
             msg_id = client.send_message(released[:queue_name], released[:payload], delay: actual_delay)
           end
 
-          Batch.backfill_execution(released[:payload], msg_id, client.target_queue(released[:queue_name])) if released && msg_id
+          if released && msg_id
+            begin
+              Batch.backfill_execution(released[:payload], msg_id, client.target_queue(released[:queue_name]))
+            rescue StandardError => e
+              Pgbus.logger.warn { "[Pgbus] Batch execution backfill failed after promote: #{e.message}" }
+            end
+          end
 
           !!released
         rescue StandardError => e

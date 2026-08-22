@@ -169,10 +169,21 @@ def bootstrap_integration_tables(conn)
       );
       CREATE UNIQUE INDEX idx_pgbus_batch_executions_job_id ON pgbus_batch_executions (job_id);
       CREATE INDEX idx_pgbus_batch_executions_batch_id ON pgbus_batch_executions (batch_id);
-      CREATE INDEX idx_pgbus_batch_executions_orphans ON pgbus_batch_executions (created_at) WHERE msg_id IS NULL;
-      ALTER TABLE pgbus_batch_executions
-        ADD CONSTRAINT fk_pgbus_batch_executions_batch
-        FOREIGN KEY (batch_id) REFERENCES pgbus_batches (batch_id) ON DELETE CASCADE;
+    SQL
+  end
+
+  if conn.table_exists?("pgbus_batch_executions")
+    conn.execute(<<~SQL)
+      CREATE INDEX IF NOT EXISTS idx_pgbus_batch_executions_orphans
+        ON pgbus_batch_executions (created_at) WHERE msg_id IS NULL;
+    SQL
+    conn.execute(<<~SQL)
+      DO $$ BEGIN
+        ALTER TABLE pgbus_batch_executions
+          ADD CONSTRAINT fk_pgbus_batch_executions_batch
+          FOREIGN KEY (batch_id) REFERENCES pgbus_batches (batch_id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
     SQL
   end
 rescue StandardError => e

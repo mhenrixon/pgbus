@@ -46,13 +46,16 @@ module PgmqDoubles
   def build_mock_client(pgmq: nil)
     pgmq ||= build_mock_pgmq
     double("Pgbus::Client", pgmq: pgmq).tap do |client|
+      allow(client).to receive(:target_queue) { |name, *_|
+        n = name.to_s
+        n.start_with?("pgbus_test_") ? n : "pgbus_test_#{n}"
+      }
       allow(client).to receive_messages(
         ensure_queue: nil,
         ensure_all_queues: nil,
         ensure_dead_letter_queue: nil,
         send_message: 1,
         send_batch: [1, 2],
-        target_queue: "pgbus_test_default",
         read_message: nil,
         read_batch: [],
         read_multi: [],

@@ -22,7 +22,7 @@ sv:
         failed: Misslyckades
         finished_at: Avslutad den
         not_found: Grupp hittades inte
-        on_failure: Vid kassering
+        on_failure: Vid misslyckande
         on_finish: Vid avslut
         on_success: Vid framgång
         progress: Framsteg

@@ -35,8 +35,11 @@ module Pgbus
     # Join-free NOT EXISTS so the subquery stays in this UPDATE's WHERE.
     # Returns the number of rows updated (0 or 1).
     def self.finish_if_empty!(batch_id)
+      # Counters must already be terminal so a pre-migration in-flight batch
+      # (zero execution rows, incomplete counters) is not closed empty.
       where(batch_id: batch_id, status: "processing")
         .without_executions
+        .where("completed_jobs + failed_jobs = total_jobs AND total_jobs > 0")
         .update_all(status: "finished", finished_at: Time.current)
     end
 

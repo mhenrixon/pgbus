@@ -45,8 +45,8 @@ module Pgbus
 
     # Record a completed job. Returns the batch row after update.
     def self.job_completed(batch_id, job_id: nil)
-      if executions_migrated? && job_id
-        resolve_execution(batch_id, job_id, "completed_jobs")
+      if executions_migrated?
+        job_id ? resolve_execution(batch_id, job_id, "completed_jobs") : signal_without_row(batch_id, "completed_jobs")
       else
         update_counter(batch_id, "completed_jobs")
       end
@@ -55,15 +55,7 @@ module Pgbus
     # Record a discarded/dead-lettered job. Returns the batch row after update.
     def self.job_discarded(batch_id, job_id: nil)
       if executions_migrated?
-        if job_id
-          resolve_execution(batch_id, job_id, "failed_jobs")
-        else
-          # Pre-migration callers pass only batch_id. Increment the renamed
-          # counter and re-check finish so a leftover signal cannot write
-          # the dropped discarded_jobs column.
-          update_counter(batch_id, "failed_jobs")
-          finish_if_needed(try_finish!(batch_id))
-        end
+        job_id ? resolve_execution(batch_id, job_id, "failed_jobs") : signal_without_row(batch_id, "failed_jobs")
       else
         update_counter(batch_id, "discarded_jobs")
       end
@@ -152,8 +144,28 @@ module Pgbus
       def resolve_execution(batch_id, job_id, column)
         BatchEntry.transaction do
           deleted = BatchExecution.where(job_id: job_id).delete_all
-          BatchEntry.increment_counter!(batch_id, column) if deleted.positive?
+          BatchEntry.increment_counter!(batch_id, column) if deleted.positive? || legacy_untracked_batch?(batch_id)
         end
+        finish_if_needed(try_finish!(batch_id))
+      end
+
+      # A migrated batch with no execution rows at all is a pre-migration
+      # in-flight group. Increment counters (the executor no longer hits the
+      # discarded_jobs column) and let finish_if_empty! wait until they match.
+      def legacy_untracked_batch?(batch_id)
+        return false if BatchExecution.where(batch_id: batch_id).exists?
+
+        record = BatchEntry.find_by(batch_id: batch_id)
+        record && !counters_match_total?(record)
+      end
+
+      def counters_match_total?(record)
+        failures = record.respond_to?(:discarded_jobs) ? record.discarded_jobs.to_i : record.failed_jobs.to_i
+        record.total_jobs.positive? && (record.completed_jobs + failures) == record.total_jobs
+      end
+
+      def signal_without_row(batch_id, column)
+        update_counter(batch_id, column)
         finish_if_needed(try_finish!(batch_id))
       end
 

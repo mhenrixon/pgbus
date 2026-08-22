@@ -84,10 +84,14 @@ module Pgbus
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
-        # A live message still owns the uniqueness lock and the execution row.
         if msg_id.nil?
           rollback_acquired_uniqueness_lock
           uncount_batch_job(payload_hash)
+        else
+          # Message is live: drop the thread-local so a later discard on this
+          # thread cannot release that job's uniqueness lock, but do not
+          # DELETE the pgbus_uniqueness_keys row.
+          Thread.current[:pgbus_acquired_uniqueness_key] = nil
         end
         raise e
       end

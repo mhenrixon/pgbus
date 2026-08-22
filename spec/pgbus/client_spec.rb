@@ -631,6 +631,17 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#dead_letter_physical_name" do
+    it "appends _dlq to the prefixed logical queue" do
+      expect(client.dead_letter_physical_name("default")).to eq("pgbus_test_default_dlq")
+    end
+
+    it "strips a priority suffix so _pN sub-queues share the logical DLQ" do
+      expect(client.dead_letter_physical_name("pgbus_test_default_p0")).to eq("pgbus_test_default_dlq")
+      expect(client.dead_letter_physical_name("default_p2")).to eq("pgbus_test_default_dlq")
+    end
+  end
+
   describe "#ensure_dead_letter_queue" do
     it "tunes autovacuum when creating a DLQ" do
       client.ensure_dead_letter_queue("jobs")

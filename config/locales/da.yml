@@ -22,7 +22,7 @@ da:
         failed: Mislykkedes
         finished_at: Afsluttet den
         not_found: Batch ikke fundet
-        on_failure: Ved kassering
+        on_failure: Ved fejl
         on_finish: Ved afslutning
         on_success: Ved succes
         progress: Fremgang

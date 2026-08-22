@@ -22,7 +22,7 @@ de:
         failed: Fehlgeschlagen
         finished_at: Beendet am
         not_found: Stapel nicht gefunden
-        on_failure: Bei Verwerfung
+        on_failure: Im Fehlerfall
         on_finish: Bei Beendigung
         on_success: Bei Erfolg
         progress: Fortschritt

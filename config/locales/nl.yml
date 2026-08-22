@@ -22,7 +22,7 @@ nl:
         failed: Mislukt
         finished_at: Voltooid op
         not_found: Groep niet gevonden
-        on_failure: Bij verwerping
+        on_failure: Bij mislukking
         on_finish: Bij voltooiing
         on_success: Bij succes
         progress: Voortgang

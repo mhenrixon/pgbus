@@ -22,7 +22,7 @@ fi:
         failed: Epäonnistuneet
         finished_at: Valmistunut
         not_found: Erää ei löytynyt
-        on_failure: Hylkäyksessä
+        on_failure: Epäonnistumisessa
         on_finish: Valmistumisessa
         on_success: Onnistumisessa
         progress: Edistyminen
