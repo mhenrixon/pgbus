@@ -46,7 +46,7 @@ RSpec.describe Pgbus::Outbox::Poller do
         result = poller.poll_and_publish
 
         expect(mock_client).to have_received(:send_batch).with(
-          "default", [{ "data" => "one" }, { "data" => "two" }], headers: nil, delay: 0
+          "default", [{ "data" => "one" }, { "data" => "two" }], headers: nil, delay: 0, priority: 1
         )
         expect(first_entry).to have_received(:update!).with(published_at: a_kind_of(Time))
         expect(second_entry).to have_received(:update!).with(published_at: a_kind_of(Time))
@@ -82,8 +82,8 @@ RSpec.describe Pgbus::Outbox::Poller do
 
       poller.poll_and_publish
 
-      expect(mock_client).to have_received(:send_batch).with("default", ["a"], headers: nil, delay: 0)
-      expect(mock_client).to have_received(:send_batch).with("urgent", ["b"], headers: nil, delay: 0)
+      expect(mock_client).to have_received(:send_batch).with("default", ["a"], headers: nil, delay: 0, priority: 1)
+      expect(mock_client).to have_received(:send_batch).with("urgent", ["b"], headers: nil, delay: 0, priority: 0)
     end
 
     it "falls back to individual sends when batch fails" do
@@ -102,9 +102,9 @@ RSpec.describe Pgbus::Outbox::Poller do
 
       result = poller.poll_and_publish
 
-      # Fallback intentionally omits priority to match send_batch routing
+      # Fallback carries the same priority as the batch path
       expect(mock_client).to have_received(:send_message).with(
-        "default", { "data" => "test" }, headers: nil, delay: 0
+        "default", { "data" => "test" }, headers: nil, delay: 0, priority: 1
       )
       expect(result).to eq(1)
     end

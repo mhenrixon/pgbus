@@ -48,9 +48,12 @@ module Pgbus
           end
         end
 
-        bulk.group_by { |j| j.queue_name || Pgbus.configuration.default_queue }.each do |queue, jobs|
+        # Group by priority too: send_batch routes through the queue strategy,
+        # so a mixed-priority bulk send needs one produce_batch per level.
+        bulk.group_by { |j| [j.queue_name || Pgbus.configuration.default_queue, j.try(:priority)] }
+            .each do |(queue, priority), jobs|
           immediate, scheduled = jobs.partition { |j| !scheduled_in_future?(j) }
-          enqueue_immediate(queue, immediate)
+          enqueue_immediate(queue, immediate, priority: priority)
           scheduled.each { |j| enqueue_at(j, j.scheduled_at.to_f) }
         end
 
@@ -217,13 +220,13 @@ module Pgbus
         tagged
       end
 
-      def enqueue_immediate(queue, jobs)
+      def enqueue_immediate(queue, jobs, priority: nil)
         return if jobs.empty?
 
         payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j)) }
-        physical = Pgbus.configuration.queue_name(queue)
+        physical = physical_queue(queue, priority)
         msg_ids = nil
-        msg_ids = Pgbus.client.send_batch(queue, payloads)
+        msg_ids = Pgbus.client.send_batch(queue, payloads, priority: priority)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
           raise Pgbus::EnqueueError, "Pgbus batch enqueue failed: expected #{jobs.size} ids, got #{msg_ids&.size || 0}"

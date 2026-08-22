@@ -36,10 +36,13 @@ module Pgbus
     # Returns the number of rows updated (0 or 1).
     def self.finish_if_empty!(batch_id)
       # Counters must already be terminal so a pre-migration in-flight batch
-      # (zero execution rows, incomplete counters) is not closed empty.
+      # (zero execution rows, total_jobs = N, counters short of N) is not
+      # closed empty. total_jobs = 0 with zero counters IS terminal: that is a
+      # batch whose enqueue block crashed before it enqueued anything, and
+      # nothing else will ever close it.
       where(batch_id: batch_id, status: "processing")
         .without_executions
-        .where("completed_jobs + failed_jobs = total_jobs AND total_jobs > 0")
+        .where("completed_jobs + failed_jobs = total_jobs")
         .update_all(status: "finished", finished_at: Time.current)
     end
 

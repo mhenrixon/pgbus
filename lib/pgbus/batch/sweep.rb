@@ -104,9 +104,10 @@ module Pgbus
           finished = 0
           BatchEntry.processing.without_executions.find_each(batch_size: batch_size) do |record|
             # Legacy in-flight batches (migrated with an empty executions table)
-            # have zero rows but unfinished counters — leave them on the
-            # counter path. The true stall is counters already terminal and
-            # the finish UPDATE rolled back after callback enqueue.
+            # have zero rows but counters short of total_jobs — leave them on
+            # the counter path. The true stalls are counters already terminal
+            # (finish UPDATE rolled back after callback enqueue) and
+            # total_jobs = 0 (enqueue block crashed before enqueuing a job).
             next unless counters_terminal?(record)
 
             result = Batch.try_finish!(record.batch_id)
@@ -118,8 +119,7 @@ module Pgbus
 
         def counters_terminal?(record)
           failures = record.discarded_jobs.to_i
-          record.total_jobs.positive? &&
-            (record.completed_jobs + failures) == record.total_jobs
+          (record.completed_jobs + failures) == record.total_jobs
         end
       end
     end

@@ -385,13 +385,17 @@ module Pgbus
       msg_id
     end
 
-    def send_batch(queue_name, payloads, headers: nil, delay: 0)
-      full_name = config.queue_name(queue_name)
+    # Bulk enqueue. Routes through the queue strategy exactly like
+    # #send_message: under priority routing the bare `pgbus_<queue>` table is
+    # never created (only `_p0.._pN` are), so targeting it raised
+    # PG::UndefinedTable and no worker would have read it either.
+    def send_batch(queue_name, payloads, headers: nil, delay: 0, priority: nil)
+      target = @queue_strategy.target_queue(queue_name, priority)
       serialized, serialized_headers = serialize_batch(payloads, headers)
-      Instrumentation.instrument("pgbus.client.send_batch", queue: full_name, size: payloads.size) do
+      Instrumentation.instrument("pgbus.client.send_batch", queue: target, size: payloads.size) do
         with_stale_connection_retry do
           ensure_queue(queue_name)
-          synchronized { @pgmq.produce_batch(full_name, serialized, headers: serialized_headers, delay: delay) }
+          synchronized { @pgmq.produce_batch(target, serialized, headers: serialized_headers, delay: delay) }
         end
       end
     end

@@ -102,12 +102,12 @@ module Pgbus
         return 0 if entries.empty?
 
         succeeded = 0
-        entries.group_by { |e| [e.queue_name, e.priority, e.delay || 0] }.each do |(queue, _priority, delay), group|
+        entries.group_by { |e| [e.queue_name, e.priority, e.delay || 0] }.each do |(queue, priority, delay), group|
           payloads = group.map(&:payload)
           headers = group.map(&:headers)
           headers = nil if headers.all?(&:blank?)
 
-          Pgbus.client.send_batch(queue, payloads, headers: headers, delay: delay)
+          Pgbus.client.send_batch(queue, payloads, headers: headers, delay: delay, priority: priority)
           now = Time.current
           group.each { |e| e.update!(published_at: now) }
           succeeded += group.size
@@ -119,16 +119,15 @@ module Pgbus
         succeeded
       end
 
-      # Fallback for individual publishing when a batch fails.
-      # Intentionally omits priority to match send_batch routing behavior
-      # (base queue only), ensuring consistent queue placement regardless
-      # of whether the batch or fallback path is used.
+      # Fallback for individual publishing when a batch fails. Passes the same
+      # priority as the batch path so queue placement is identical either way.
       def publish_single_queue(entry)
         Pgbus.client.send_message(
           entry.queue_name,
           entry.payload,
           headers: entry.headers,
-          delay: entry.delay || 0
+          delay: entry.delay || 0,
+          priority: entry.priority
         )
         entry.update!(published_at: Time.current)
         true
