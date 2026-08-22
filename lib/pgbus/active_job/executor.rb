@@ -90,8 +90,9 @@ module Pgbus
           Pgbus.logger.debug { "[Pgbus::Executor] perform_returned #{tag} job_class=#{job_class}" }
           archive_from(queue_name, msg_id, source_queue: source_queue)
           Pgbus.logger.debug { "[Pgbus::Executor] archived #{tag} job_class=#{job_class}" }
-          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: msg_id)
           job_succeeded = true
+          release_uniqueness_lock(uniqueness_key)
+          FailedEventRecorder.clear!(queue_name: queue_name, msg_id: msg_id)
         end
 
         instrument("pgbus.job_completed", queue: queue_name, job_class: job_class)
@@ -129,14 +130,24 @@ module Pgbus
         # job_succeeded is set AFTER archive_message, so if archive fails the
         # semaphore slot stays held until VT expires and the job is retried.
         if job_succeeded
+          # Idempotent backstop — also released immediately after archive so a
+          # kill between job_completed instrumentation and this ensure cannot
+          # leak the lock (issue #418). DELETE is safe twice.
+          release_uniqueness_lock(uniqueness_key)
           signal_concurrency(payload)
           signal_batch_completed(payload)
-          # Release uniqueness lock on successful completion (both strategies)
-          Uniqueness.release_lock(uniqueness_key) if uniqueness_key
         end
       end
 
       private
+
+      def release_uniqueness_lock(key)
+        return unless key
+
+        Uniqueness.release_lock(key)
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Uniqueness release failed: #{e.message}" }
+      end
 
       def execute_job(job)
         if defined?(Rails) && Rails.respond_to?(:application) && Rails.application

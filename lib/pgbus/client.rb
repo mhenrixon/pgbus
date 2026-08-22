@@ -687,26 +687,57 @@ module Pgbus
       has_uniqueness_key = !uniqueness_key.nil?
       raise ArgumentError, "pass exactly one of msg_id or uniqueness_key" unless has_msg_id ^ has_uniqueness_key
 
-      full_name = resolve_full_queue_name(queue_name)
-      sanitized = QueueNameValidator.sanitize!(full_name)
+      tables = lookup_physical_queue_names(queue_name).map { |name| QueueNameValidator.sanitize!(name) }
+      determined = false
 
       synchronized do
         with_raw_connection do |conn|
-          if has_msg_id
-            msg_id_present?(conn, sanitized, msg_id.to_i)
-          else
-            uniqueness_key_present?(conn, sanitized, uniqueness_key)
+          tables.each do |sanitized|
+            present = probe_queue_presence(
+              conn, sanitized,
+              msg_id: has_msg_id ? msg_id.to_i : nil,
+              uniqueness_key: has_uniqueness_key ? uniqueness_key : nil
+            )
+            return true if present == true
+
+            determined = true unless present == :missing
           end
         end
       end
-    rescue ActiveRecord::StatementInvalid => e
-      raise unless undefined_table_error?(e)
 
-      nil
-    rescue StandardError => e
-      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+      determined ? false : nil # rubocop:disable Style/ReturnNilInPredicateMethodDefinition -- tri-state: nil means unknown
+    end
 
-      nil
+    # Which uniqueness keys currently appear in any live PGMQ queue payload.
+    # Used by the dispatcher reaper for unbound locks (pending / msg_id=0)
+    # so it never probes the synthetic `pending` queue (issue #418).
+    #
+    # Per-queue UndefinedTable is skipped (table dropped between listing and
+    # select). Failure to list pgmq.meta — or any non-undefined error — raises;
+    # callers must treat that as "unknown" and keep the lock.
+    def uniqueness_keys_present(lock_keys)
+      keys = Array(lock_keys).compact.map(&:to_s).uniq
+      return Set.new if keys.empty?
+
+      found = Set.new
+      synchronized do
+        with_raw_connection do |conn|
+          names = conn.exec("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+                      .map { |row| row["queue_name"] }
+          names.each do |name|
+            break if found.size == keys.size
+
+            sanitized = begin
+              QueueNameValidator.sanitize!(name)
+            rescue ArgumentError
+              next
+            end
+
+            scan_uniqueness_keys(conn, sanitized, keys, found)
+          end
+        end
+      end
+      found
     end
 
     def purge_archive(queue_name, older_than:, batch_size: 1000)
@@ -931,6 +962,45 @@ module Pgbus
       name = queue_name.to_s
       prefix = "#{config.queue_prefix}_"
       name.start_with?(prefix) ? name : config.queue_name(name)
+    end
+
+    # Logical names expand through QueueFactory so a priority queue's _pN
+    # tables are included; already-prefixed physical names stay as-is.
+    def lookup_physical_queue_names(queue_name)
+      name = queue_name.to_s
+      prefix = "#{config.queue_prefix}_"
+      name.start_with?(prefix) ? [name] : @queue_strategy.physical_queue_names(name)
+    end
+
+    def probe_queue_presence(conn, sanitized, msg_id:, uniqueness_key:)
+      if msg_id
+        msg_id_present?(conn, sanitized, msg_id)
+      else
+        uniqueness_key_present?(conn, sanitized, uniqueness_key)
+      end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      :missing
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      :missing
+    end
+
+    def scan_uniqueness_keys(conn, sanitized, keys, found)
+      placeholders = keys.each_index.map { |i| "$#{i + 1}" }.join(", ")
+      result = conn.exec_params(
+        "SELECT DISTINCT message::jsonb ->> 'pgbus_uniqueness_key' AS k " \
+        "FROM pgmq.q_#{sanitized} " \
+        "WHERE message::jsonb ->> 'pgbus_uniqueness_key' IN (#{placeholders})",
+        keys
+      )
+      result.each { |row| found.add(row["k"]) if row["k"] }
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
     end
 
     def msg_id_present?(conn, sanitized, msg_id)

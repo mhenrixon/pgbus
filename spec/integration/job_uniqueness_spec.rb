@@ -35,6 +35,22 @@ RSpec.describe "Job uniqueness (integration)", :integration do
     end
   end
 
+  describe "UniquenessKey bind!" do
+    it "updates queue_name and msg_id without changing lock_key or created_at" do
+      Pgbus::UniquenessKey.acquire!("unique-order-42", queue_name: "pending", msg_id: 0)
+      row = Pgbus::UniquenessKey.find("unique-order-42")
+      original_created_at = row.created_at
+
+      Pgbus::UniquenessKey.bind!("unique-order-42", queue_name: "critical", msg_id: 99)
+
+      row.reload
+      expect(row.lock_key).to eq("unique-order-42")
+      expect(row.queue_name).to eq("critical")
+      expect(row.msg_id).to eq(99)
+      expect(row.created_at).to eq(original_created_at)
+    end
+  end
+
   describe "concurrent lock acquisition" do
     it "only one thread wins the lock" do
       results = Concurrent::Array.new

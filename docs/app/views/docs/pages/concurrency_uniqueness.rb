@@ -37,10 +37,11 @@ class Views::Docs::Pages::ConcurrencyUniqueness < DocsUI::Page
         end
       RUBY
       DocsUI::Callout(:note) do
-        plain "Crash recovery checks the PGMQ queue, not a timer: the dispatcher's reaper "
-        plain "periodically looks for locks whose referenced message no longer exists in the "
-        plain "queue and releases them. A lock backed by a message still in the queue is never "
-        plain "touched, however old it looks."
+        plain "After enqueue the lock is bound to the logical queue and PGMQ msg_id. Crash recovery "
+        plain "checks the PGMQ queue, not a timer: the dispatcher's reaper releases a lock only when "
+        plain "its message is gone. Placeholder rows (pending / msg_id=0) are scanned across live "
+        plain "queues — a missing synthetic pending table is never treated as proof the job is gone. "
+        plain "A lock backed by a message still in any queue is never touched, however old it looks."
       end
     end
   end

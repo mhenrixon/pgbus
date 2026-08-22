@@ -12,7 +12,7 @@ module Pgbus
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash)
+        return active_job if uniqueness_rejected?(active_job, payload_hash, queue: queue)
 
         enqueue_with_concurrency(active_job, queue, payload_hash)
       end
@@ -25,7 +25,7 @@ module Pgbus
         payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash)
+        return active_job if uniqueness_rejected?(active_job, payload_hash, queue: queue)
 
         enqueue_with_concurrency(active_job, queue, payload_hash, delay: delay)
       end
@@ -57,6 +57,7 @@ module Pgbus
         concurrency = concurrency_config(active_job)
         priority = active_job.try(:priority)
 
+        msg_id = nil
         if key && concurrency
           result = Concurrency::Semaphore.acquire(key, concurrency[:limit], concurrency[:duration])
 
@@ -71,6 +72,7 @@ module Pgbus
           active_job.provider_job_id = msg_id
         end
 
+        bind_acquired_uniqueness_lock(queue, msg_id) if msg_id
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
@@ -108,7 +110,7 @@ module Pgbus
         end
       end
 
-      def uniqueness_rejected?(active_job, payload_hash)
+      def uniqueness_rejected?(active_job, payload_hash, queue:)
         uniqueness_key = Uniqueness.extract_key(payload_hash)
         return false unless uniqueness_key
 
@@ -123,7 +125,7 @@ module Pgbus
         # See issue #333.
         return false if active_job.executions.to_i.positive?
 
-        result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job)
+        result = Uniqueness.acquire_enqueue_lock(uniqueness_key, active_job, queue_name: queue)
 
         # :no_lock means no enqueue-time lock needed (e.g. :while_executing strategy)
         return false if result == :no_lock
@@ -145,6 +147,15 @@ module Pgbus
         else
           true
         end
+      end
+
+      def bind_acquired_uniqueness_lock(queue, msg_id)
+        key = Thread.current[:pgbus_acquired_uniqueness_key]
+        return unless key
+
+        Uniqueness.bind_lock(key, queue_name: queue, msg_id: msg_id)
+      rescue StandardError => e
+        Pgbus.logger.warn { "[Pgbus] Uniqueness bind failed: #{e.message}" }
       end
 
       def inject_batch_metadata(payload_hash)

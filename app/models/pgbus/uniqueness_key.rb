@@ -16,6 +16,15 @@ module Pgbus
       ).rows.any?
     end
 
+    # Bind a pre-produce lock to the real queue and PGMQ msg_id after send.
+    # Does not touch created_at — the reaper's age floor is from acquire time.
+    def self.bind!(lock_key, queue_name:, msg_id:)
+      connection.exec_update(
+        "UPDATE #{table_name} SET queue_name = $2, msg_id = $3 WHERE lock_key = $1",
+        "UniquenessKey Bind", [lock_key, queue_name, msg_id]
+      )
+    end
+
     # Release a uniqueness lock after job completion or DLQ.
     def self.release!(lock_key)
       connection.exec_delete(
