@@ -42,6 +42,13 @@ module Pgbus
       connection.exec_update(sql, "UniquenessKey Bind", binds)
     end
 
+    # Drop the bind ownership stamp without touching the lock row. Used when
+    # this thread acquired the key but will not bind (concurrency :block, or
+    # enqueue returning after a failed send already rolled the lock back).
+    def self.clear_bind_stamp!(lock_key)
+      Thread.current[:pgbus_uniqueness_created_at]&.delete(lock_key)
+    end
+
     # Release a uniqueness lock after job completion or DLQ.
     def self.release!(lock_key)
       Thread.current[:pgbus_uniqueness_created_at]&.delete(lock_key)

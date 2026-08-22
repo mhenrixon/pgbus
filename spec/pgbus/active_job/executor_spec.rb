@@ -570,7 +570,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
 
           expect(result).to eq(:success)
           expect(mock_client).to have_received(:archive_message)
-          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").twice
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").once
         end
       end
 

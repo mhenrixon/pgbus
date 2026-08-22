@@ -80,6 +80,8 @@ module Pgbus
         end
 
         bind_acquired_uniqueness_lock(queue, msg_id) if msg_id
+        uniqueness_key = Thread.current[:pgbus_acquired_uniqueness_key]
+        UniquenessKey.clear_bind_stamp!(uniqueness_key) if uniqueness_key
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
