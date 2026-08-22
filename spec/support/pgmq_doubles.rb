@@ -46,10 +46,17 @@ module PgmqDoubles
   def build_mock_client(pgmq: nil)
     pgmq ||= build_mock_pgmq
     double("Pgbus::Client", pgmq: pgmq).tap do |client|
-      allow(client).to receive(:target_queue) { |name, *_|
+      allow(client).to receive(:target_queue) do |name, priority = nil, *_|
         n = name.to_s
-        n.start_with?("pgbus_test_") ? n : "pgbus_test_#{n}"
-      }
+        full = n.start_with?("pgbus_test_") ? n : "pgbus_test_#{n}"
+        next full if full.match?(/_p\d+\z/)
+
+        levels = Pgbus.configuration.priority_levels
+        next full unless levels && levels > 1
+
+        level = (priority.nil? ? Pgbus.configuration.default_priority : priority).to_i.clamp(0, levels - 1)
+        "#{full}_p#{level}"
+      end
       allow(client).to receive_messages(
         ensure_queue: nil,
         ensure_all_queues: nil,

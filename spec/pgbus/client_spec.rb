@@ -636,9 +636,23 @@ RSpec.describe Pgbus::Client do
       expect(client.dead_letter_physical_name("default")).to eq("pgbus_test_default_dlq")
     end
 
-    it "strips a priority suffix so _pN sub-queues share the logical DLQ" do
-      expect(client.dead_letter_physical_name("pgbus_test_default_p0")).to eq("pgbus_test_default_dlq")
-      expect(client.dead_letter_physical_name("default_p2")).to eq("pgbus_test_default_dlq")
+    it "does not strip a logical name that merely ends in _pN when priority is off" do
+      expect(client.dead_letter_physical_name("orders_p0")).to eq("pgbus_test_orders_p0_dlq")
+    end
+
+    context "when priority levels are configured" do
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.queue_prefix = "pgbus_test"
+          c.priority_levels = 3
+        end
+      end
+
+      it "strips a priority suffix so _pN sub-queues share the logical DLQ" do
+        expect(client.dead_letter_physical_name("pgbus_test_default_p0")).to eq("pgbus_test_default_dlq")
+        expect(client.dead_letter_physical_name("default_p2")).to eq("pgbus_test_default_dlq")
+      end
     end
   end
 

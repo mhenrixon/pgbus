@@ -717,8 +717,9 @@ module Pgbus
     def dead_letter_physical_name(queue_name)
       full = resolve_full_queue_name(queue_name)
       # Priority sub-queues share the logical queue's DLQ (`pgbus_default_dlq`),
-      # not a per-priority `…_pN_dlq`. Strip `_pN` before appending the suffix.
-      base = full.sub(/_p\d+\z/, "")
+      # not a per-priority `…_pN_dlq`. Only strip when the strategy actually
+      # creates `_pN` tables — a logical queue named `orders_p0` must keep it.
+      base = @queue_strategy.priority? ? full.sub(/_p\d+\z/, "") : full
       "#{base}#{Pgbus::DEAD_LETTER_SUFFIX}"
     end
 
