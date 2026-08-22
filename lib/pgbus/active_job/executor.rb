@@ -296,7 +296,7 @@ module Pgbus
         batch_id = payload[Batch::METADATA_KEY]
         return unless batch_id
 
-        Batch.job_completed(batch_id)
+        Batch.job_completed(batch_id, job_id: payload["job_id"])
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch completion signal failed: #{e.message}" }
       end
@@ -305,7 +305,7 @@ module Pgbus
         batch_id = payload[Batch::METADATA_KEY]
         return unless batch_id
 
-        Batch.job_discarded(batch_id)
+        Batch.job_discarded(batch_id, job_id: payload["job_id"])
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Batch discard signal failed: #{e.message}" }
       end

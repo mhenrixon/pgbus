@@ -46,6 +46,19 @@ module PgmqDoubles
   def build_mock_client(pgmq: nil)
     pgmq ||= build_mock_pgmq
     double("Pgbus::Client", pgmq: pgmq).tap do |client|
+      allow(client).to receive(:target_queue) do |name, priority = nil, *_|
+        n = name.to_s
+        prefix = "#{Pgbus.configuration.queue_prefix}_"
+        already_physical = n.start_with?(prefix)
+        full = already_physical ? n : "#{prefix}#{n}"
+        next full if already_physical && full.match?(/_p\d+\z/)
+
+        levels = Pgbus.configuration.priority_levels
+        next full unless levels && levels > 1
+
+        level = (priority.nil? ? Pgbus.configuration.default_priority : priority).to_i.clamp(0, levels - 1)
+        "#{full}_p#{level}"
+      end
       allow(client).to receive_messages(
         ensure_queue: nil,
         ensure_all_queues: nil,

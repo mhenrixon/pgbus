@@ -253,6 +253,29 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       expect(job).to have_received(:provider_job_id=).with(42)
     end
 
+    it "clears the uniqueness thread-local after send without releasing the live lock" do
+      allow(job).to receive(:executions).and_return(0)
+      allow(Pgbus::Uniqueness).to receive(:acquire_enqueue_lock).and_return(:acquired)
+      allow(Pgbus::Uniqueness).to receive(:release_lock)
+      allow(Pgbus::Batch).to receive(:backfill_execution).and_raise(StandardError, "backfill boom")
+
+      expect { adapter.enqueue(job) }.to raise_error(StandardError, "backfill boom")
+      expect(Pgbus::Uniqueness).to have_received(:bind_lock)
+      expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+      expect(Thread.current[:pgbus_acquired_uniqueness_key]).to be_nil
+    end
+
+    it "releases the uniqueness lock when send_message raises before a message exists" do
+      allow(job).to receive(:executions).and_return(0)
+      allow(Pgbus::Uniqueness).to receive(:acquire_enqueue_lock).and_return(:acquired)
+      allow(Pgbus::Uniqueness).to receive(:release_lock)
+      allow(mock_client).to receive(:send_message).and_raise(StandardError, "pg down")
+
+      expect { adapter.enqueue(job) }.to raise_error(StandardError, "pg down")
+      expect(Pgbus::Uniqueness).to have_received(:release_lock).with("UniqJob-42")
+      expect(Thread.current[:pgbus_acquired_uniqueness_key]).to be_nil
+    end
+
     context "when inside a batch context" do
       around do |example|
         Thread.current[:pgbus_batch_id] = "batch-1"
