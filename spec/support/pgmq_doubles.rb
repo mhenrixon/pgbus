@@ -48,8 +48,10 @@ module PgmqDoubles
     double("Pgbus::Client", pgmq: pgmq).tap do |client|
       allow(client).to receive(:target_queue) do |name, priority = nil, *_|
         n = name.to_s
-        full = n.start_with?("pgbus_test_") ? n : "pgbus_test_#{n}"
-        next full if full.match?(/_p\d+\z/)
+        prefix = "#{Pgbus.configuration.queue_prefix}_"
+        already_physical = n.start_with?(prefix)
+        full = already_physical ? n : "#{prefix}#{n}"
+        next full if already_physical && full.match?(/_p\d+\z/)
 
         levels = Pgbus.configuration.priority_levels
         next full unless levels && levels > 1
