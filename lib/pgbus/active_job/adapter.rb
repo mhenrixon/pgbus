@@ -12,7 +12,10 @@ module Pgbus
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash, queue: queue)
+        if uniqueness_rejected?(active_job, payload_hash, queue: queue)
+          uncount_batch_job(payload_hash)
+          return active_job
+        end
 
         enqueue_with_concurrency(active_job, queue, payload_hash)
       end
@@ -25,15 +28,19 @@ module Pgbus
         payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash, queue: queue)
+        if uniqueness_rejected?(active_job, payload_hash, queue: queue)
+          uncount_batch_job(payload_hash)
+          return active_job
+        end
 
         enqueue_with_concurrency(active_job, queue, payload_hash, delay: delay)
       end
 
       def enqueue_all(active_jobs)
-        # Jobs with uniqueness must go through individual enqueue to acquire locks
-        unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
-        unique.each do |j|
+        # Jobs with uniqueness or concurrency must go through individual enqueue
+        # to acquire locks/semaphores — the bulk path cannot (issue #413)
+        individual, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) || concurrency_config(j) }
+        individual.each do |j|
           if scheduled_in_future?(j)
             enqueue_at(j, j.scheduled_at.to_f)
           else
@@ -76,16 +83,7 @@ module Pgbus
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
-        # Roll back the uniqueness lock if enqueue failed
-        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
-        if rollback_key
-          begin
-            Uniqueness.release_lock(rollback_key)
-          rescue StandardError => rollback_error
-            Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{rollback_error.message}" }
-          end
-          Thread.current[:pgbus_acquired_uniqueness_key] = nil
-        end
+        rollback_acquired_uniqueness_lock
         raise e
       end
 
@@ -105,9 +103,30 @@ module Pgbus
           )
         when :discard
           Pgbus.logger.info { "[Pgbus] Discarding job #{active_job.class.name}: concurrency limit for #{key}" }
+          # The job will never run: roll back an :until_executed uniqueness lock
+          # acquired earlier in this enqueue (no executor will release it), and
+          # uncount it from its batch so completion is not waited on forever.
+          rollback_acquired_uniqueness_lock
+          uncount_batch_job(payload_hash)
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
         end
+      end
+
+      # Releases an :until_executed lock this enqueue acquired, if any.
+      # Used when the job is dropped before a message is sent (concurrency
+      # :discard, or send_message raising) — otherwise the lock is orphaned
+      # because no executor will ever release it.
+      def rollback_acquired_uniqueness_lock
+        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
+        return unless rollback_key
+
+        begin
+          Uniqueness.release_lock(rollback_key)
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{e.message}" }
+        end
+        Thread.current[:pgbus_acquired_uniqueness_key] = nil
       end
 
       def uniqueness_rejected?(active_job, payload_hash, queue:)
@@ -158,6 +177,18 @@ module Pgbus
         Pgbus.logger.warn { "[Pgbus] Uniqueness bind failed: #{e.message}" }
       end
 
+      # Reverses inject_batch_metadata for a job discarded at enqueue time
+      # (uniqueness duplicate or concurrency :discard conflict): the message is
+      # never sent, so it can never signal completion. Only applies while the
+      # tagging batch's block is still active on this thread.
+      def uncount_batch_job(payload_hash)
+        return unless payload_hash[Batch::METADATA_KEY] &&
+                      payload_hash[Batch::METADATA_KEY] == Thread.current[:pgbus_batch_id]
+
+        count = Thread.current[:pgbus_batch_job_count]
+        Thread.current[:pgbus_batch_job_count] = count - 1 if count&.positive?
+      end
+
       def inject_batch_metadata(payload_hash)
         batch_id = Thread.current[:pgbus_batch_id]
         return payload_hash unless batch_id
@@ -169,7 +200,7 @@ module Pgbus
       def enqueue_immediate(queue, jobs)
         return if jobs.empty?
 
-        payloads = jobs.map { |j| Serializer.serialize_job_hash(j) }
+        payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j)) }
         msg_ids = Pgbus.client.send_batch(queue, payloads)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size
