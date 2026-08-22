@@ -33,7 +33,8 @@ module Pgbus
             raise ActiveRecord::Rollback unless released
 
             actual_delay = resolve_delay(released[:payload], delay)
-            client.send_message(released[:queue_name], released[:payload], delay: actual_delay)
+            msg_id = client.send_message(released[:queue_name], released[:payload], delay: actual_delay)
+            Batch.backfill_execution(released[:payload], msg_id, released[:queue_name])
           end
 
           !!released

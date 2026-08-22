@@ -682,6 +682,30 @@ module Pgbus
     #   false — the message definitely does not exist
     #   nil   — could not determine (e.g. queue table missing or unknown error).
     #           Callers MUST treat nil as "exists" for safety.
+    def message_in_queue?(queue_name, msg_id:)
+      message_exists?(queue_name, msg_id: msg_id)
+    end
+
+    # Same tri-state as message_exists?: true / false / nil (unknown).
+    def message_archived?(queue_name, msg_id:)
+      full_name = resolve_full_queue_name(queue_name)
+      sanitized = QueueNameValidator.sanitize!(full_name)
+
+      synchronized do
+        with_raw_connection do |conn|
+          msg_id_archived?(conn, sanitized, msg_id.to_i)
+        end
+      end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      nil
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      nil
+    end
+
     def message_exists?(queue_name, msg_id: nil, uniqueness_key: nil)
       has_msg_id = !msg_id.nil?
       has_uniqueness_key = !uniqueness_key.nil?
@@ -936,6 +960,14 @@ module Pgbus
     def msg_id_present?(conn, sanitized, msg_id)
       result = conn.exec_params(
         "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
+        [msg_id]
+      )
+      result.ntuples.positive?
+    end
+
+    def msg_id_archived?(conn, sanitized, msg_id)
+      result = conn.exec_params(
+        "SELECT 1 FROM pgmq.a_#{sanitized} WHERE msg_id = $1 LIMIT 1",
         [msg_id]
       )
       result.ntuples.positive?

@@ -63,6 +63,7 @@ module Pgbus
         key = Concurrency.extract_key(payload_hash)
         concurrency = concurrency_config(active_job)
         priority = active_job.try(:priority)
+        msg_id = nil
 
         if key && concurrency
           result = Concurrency::Semaphore.acquire(key, concurrency[:limit], concurrency[:duration])
@@ -70,18 +71,23 @@ module Pgbus
           if result == :acquired
             msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
             active_job.provider_job_id = msg_id
+            Batch.backfill_execution(payload_hash, msg_id, queue)
           else
             handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: priority)
           end
         else
           msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
           active_job.provider_job_id = msg_id
+          Batch.backfill_execution(payload_hash, msg_id, queue)
         end
 
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
         rollback_acquired_uniqueness_lock
+        # Only untrack when nothing was sent — a post-send failure still has a
+        # live message whose executor will delete the execution row.
+        uncount_batch_job(payload_hash) if msg_id.nil?
         raise e
       end
 
@@ -176,6 +182,7 @@ module Pgbus
 
         count = Thread.current[:pgbus_batch_job_count]
         Thread.current[:pgbus_batch_job_count] = count - 1 if count&.positive?
+        Batch.untrack_enqueue(payload_hash)
       end
 
       def inject_batch_metadata(payload_hash)
@@ -183,7 +190,9 @@ module Pgbus
         return payload_hash unless batch_id
 
         Thread.current[:pgbus_batch_job_count] = (Thread.current[:pgbus_batch_job_count] || 0) + 1
-        payload_hash.merge(Batch::METADATA_KEY => batch_id)
+        tagged = payload_hash.merge(Batch::METADATA_KEY => batch_id)
+        Batch.track_enqueue(tagged)
+        tagged
       end
 
       def enqueue_immediate(queue, jobs)
@@ -197,6 +206,10 @@ module Pgbus
         end
 
         jobs.zip(msg_ids).each { |job, id| job.provider_job_id = id }
+        payloads.zip(msg_ids).each { |payload, id| Batch.backfill_execution(payload, id, queue) }
+      rescue Pgbus::EnqueueError
+        payloads.each { |payload| Batch.untrack_enqueue(payload) }
+        raise
       rescue Pgbus::SchemaNotReady => e
         Pgbus.logger.error { "[Pgbus] #{e.message}" }
         raise
