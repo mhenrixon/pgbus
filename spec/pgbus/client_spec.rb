@@ -1383,13 +1383,16 @@ RSpec.describe Pgbus::Client do
     before { allow(client).to receive(:with_raw_connection).and_yield(conn) }
 
     it "raises ArgumentError when neither msg_id nor uniqueness_key is given" do
-      expect { client.message_exists?("default") }.to raise_error(ArgumentError, /exactly one/)
+      expect { client.message_exists?("default") }.to raise_error(ArgumentError, /msg_id, uniqueness_key, or both/)
     end
 
-    it "raises ArgumentError when both msg_id and uniqueness_key are given" do
-      expect do
-        client.message_exists?("default", msg_id: 1, uniqueness_key: "MyJob")
-      end.to raise_error(ArgumentError, /exactly one/)
+    it "filters msg_id lookup by uniqueness_key when both are given" do
+      allow(conn).to receive(:exec_params).with(
+        a_string_matching(/msg_id = \$1.*pgbus_uniqueness_key/m),
+        [1, "MyJob"]
+      ).and_return(double("result", ntuples: 1))
+
+      expect(client.message_exists?("default", msg_id: 1, uniqueness_key: "MyJob")).to be(true)
     end
 
     it "accepts a symbol queue name" do

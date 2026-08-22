@@ -26,7 +26,11 @@ RSpec.describe "Dispatcher uniqueness key reaper (integration)", :integration do
   describe "#reap_orphaned_uniqueness_keys" do
     context "when the message is still in the queue" do
       it "does NOT reap the lock even when older than visibility_timeout * 2" do
-        msg_id = Pgbus.client.send_message(queue_name, { "job_class" => "TestJob" })
+        msg_id = Pgbus.client.send_message(
+          queue_name,
+          { "job_class" => "TestJob",
+            Pgbus::Uniqueness::METADATA_KEY => "TestJob:still-running" }
+        )
         Pgbus::UniquenessKey.acquire!("TestJob:still-running", queue_name: queue_name, msg_id: msg_id)
 
         # Backdate the lock to simulate a long-running/failing job

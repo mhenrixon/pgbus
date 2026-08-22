@@ -964,7 +964,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "uses msg_id lookup for bound locks and reaps when the message is gone" do
       bound = lock(lock_key: "Orphan:gone", queue_name: "default", msg_id: 99)
       allow(Pgbus::UniquenessKey).to receive(:all).and_return([bound])
-      allow(mock_client).to receive(:message_exists?).with("default", msg_id: 99).and_return(false)
+      allow(mock_client).to receive(:message_exists?)
+        .with("default", msg_id: 99, uniqueness_key: "Orphan:gone").and_return(false)
       allow(delete_scope).to receive(:delete_all).and_return(1)
 
       reaped = dispatcher.send(:reap_orphaned_uniqueness_keys)
@@ -977,7 +978,8 @@ RSpec.describe Pgbus::Process::Dispatcher do
     it "keeps a bound lock when message_exists? returns nil (unknown)" do
       bound = lock(lock_key: "Maybe", queue_name: "default", msg_id: 99)
       allow(Pgbus::UniquenessKey).to receive(:all).and_return([bound])
-      allow(mock_client).to receive(:message_exists?).with("default", msg_id: 99).and_return(nil)
+      allow(mock_client).to receive(:message_exists?)
+        .with("default", msg_id: 99, uniqueness_key: "Maybe").and_return(nil)
 
       expect(dispatcher.send(:reap_orphaned_uniqueness_keys)).to eq(0)
       expect(Pgbus::UniquenessKey).not_to have_received(:where)

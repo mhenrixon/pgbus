@@ -685,7 +685,7 @@ module Pgbus
     def message_exists?(queue_name, msg_id: nil, uniqueness_key: nil)
       has_msg_id = !msg_id.nil?
       has_uniqueness_key = !uniqueness_key.nil?
-      raise ArgumentError, "pass exactly one of msg_id or uniqueness_key" unless has_msg_id ^ has_uniqueness_key
+      raise ArgumentError, "pass msg_id, uniqueness_key, or both" unless has_msg_id || has_uniqueness_key
 
       tables = lookup_physical_queue_names(queue_name).map { |name| QueueNameValidator.sanitize!(name) }
       determined = false
@@ -974,7 +974,7 @@ module Pgbus
 
     def probe_queue_presence(conn, sanitized, msg_id:, uniqueness_key:)
       if msg_id
-        msg_id_present?(conn, sanitized, msg_id)
+        msg_id_present?(conn, sanitized, msg_id, uniqueness_key: uniqueness_key)
       else
         uniqueness_key_present?(conn, sanitized, uniqueness_key)
       end
@@ -1003,11 +1003,19 @@ module Pgbus
       raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
     end
 
-    def msg_id_present?(conn, sanitized, msg_id)
-      result = conn.exec_params(
-        "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
-        [msg_id]
-      )
+    def msg_id_present?(conn, sanitized, msg_id, uniqueness_key: nil)
+      result = if uniqueness_key
+                 conn.exec_params(
+                   "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 " \
+                   "AND message::jsonb ->> 'pgbus_uniqueness_key' = $2 LIMIT 1",
+                   [msg_id, uniqueness_key]
+                 )
+               else
+                 conn.exec_params(
+                   "SELECT 1 FROM pgmq.q_#{sanitized} WHERE msg_id = $1 LIMIT 1",
+                   [msg_id]
+                 )
+               end
       result.ntuples.positive?
     end
 

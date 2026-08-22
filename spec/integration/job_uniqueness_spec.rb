@@ -49,6 +49,20 @@ RSpec.describe "Job uniqueness (integration)", :integration do
       expect(row.msg_id).to eq(99)
       expect(row.created_at).to eq(original_created_at)
     end
+
+    it "does not retarget a successor row acquired after this enqueue released" do
+      Pgbus::UniquenessKey.acquire!("unique-order-42", queue_name: "pending", msg_id: 0)
+      first_created = Thread.current[:pgbus_uniqueness_created_at]["unique-order-42"]
+      Pgbus::UniquenessKey.release!("unique-order-42")
+
+      Pgbus::UniquenessKey.acquire!("unique-order-42", queue_name: "default", msg_id: 0)
+      Thread.current[:pgbus_uniqueness_created_at]["unique-order-42"] = first_created
+      Pgbus::UniquenessKey.bind!("unique-order-42", queue_name: "critical", msg_id: 99)
+
+      row = Pgbus::UniquenessKey.find("unique-order-42")
+      expect(row.queue_name).to eq("default")
+      expect(row.msg_id).to eq(0)
+    end
   end
 
   describe "concurrent lock acquisition" do

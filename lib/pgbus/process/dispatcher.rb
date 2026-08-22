@@ -481,7 +481,11 @@ module Pgbus
       # determine the answer (queue table missing, etc.); we treat that as
       # "still here" — the reaper must NEVER delete a lock when in doubt.
       def message_gone?(key)
-        result = Pgbus.client.message_exists?(key.queue_name, msg_id: key.msg_id.to_i)
+        result = Pgbus.client.message_exists?(
+          key.queue_name,
+          msg_id: key.msg_id.to_i,
+          uniqueness_key: key.lock_key
+        )
         result == false
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Reap check failed for #{key.lock_key}: #{e.message}" }

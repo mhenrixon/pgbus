@@ -67,6 +67,7 @@ module Pgbus
 
         Pgbus.logger.debug { "[Pgbus::Executor] deserialized #{tag} job_class=#{job_class}" }
         job_succeeded = false
+        uniqueness_released = false
 
         msg_id = message.msg_id.to_i
         instrument_payload = {
@@ -91,7 +92,7 @@ module Pgbus
           archive_from(queue_name, msg_id, source_queue: source_queue)
           Pgbus.logger.debug { "[Pgbus::Executor] archived #{tag} job_class=#{job_class}" }
           job_succeeded = true
-          release_uniqueness_lock(uniqueness_key)
+          uniqueness_released = release_uniqueness_lock(uniqueness_key)
           FailedEventRecorder.clear!(queue_name: queue_name, msg_id: msg_id)
         end
 
@@ -130,10 +131,10 @@ module Pgbus
         # job_succeeded is set AFTER archive_message, so if archive fails the
         # semaphore slot stays held until VT expires and the job is retried.
         if job_succeeded
-          # Idempotent backstop — also released immediately after archive so a
-          # kill between job_completed instrumentation and this ensure cannot
-          # leak the lock (issue #418). DELETE is safe twice.
-          release_uniqueness_lock(uniqueness_key)
+          # Backstop only when the post-archive release failed. A second DELETE
+          # after a successful release can drop a successor enqueue that
+          # acquired the same key in the window before ensure ran.
+          release_uniqueness_lock(uniqueness_key) unless uniqueness_released
           signal_concurrency(payload)
           signal_batch_completed(payload)
         end
@@ -142,11 +143,13 @@ module Pgbus
       private
 
       def release_uniqueness_lock(key)
-        return unless key
+        return true unless key
 
         Uniqueness.release_lock(key)
+        true
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Uniqueness release failed: #{e.message}" }
+        false
       end
 
       def execute_job(job)

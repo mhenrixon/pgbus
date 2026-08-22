@@ -514,8 +514,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
         it "releases the lock after a successful run" do
           executor.execute(message, queue_name)
 
-          # Once immediately after archive, once in the ensure backstop.
-          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").twice
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").once
         end
 
         it "does not release the lock if archive_from fails (retry path)" do
@@ -571,6 +570,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
 
           expect(result).to eq(:success)
           expect(mock_client).to have_received(:archive_message)
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").twice
         end
       end
 
@@ -586,7 +586,7 @@ RSpec.describe Pgbus::ActiveJob::Executor do
             "TestJob:user-42", uniqueness_payload
           )
           expect(job_double).to have_received(:perform_now)
-          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").twice
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").once
         end
 
         it "returns :skipped without performing if another worker already holds the lock" do
