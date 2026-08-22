@@ -31,9 +31,10 @@ module Pgbus
       end
 
       def enqueue_all(active_jobs)
-        # Jobs with uniqueness must go through individual enqueue to acquire locks
-        unique, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) }
-        unique.each do |j|
+        # Jobs with uniqueness or concurrency must go through individual enqueue
+        # to acquire locks/semaphores — the bulk path cannot (issue #413)
+        individual, bulk = active_jobs.partition { |j| Uniqueness.uniqueness_config(j) || concurrency_config(j) }
+        individual.each do |j|
           if scheduled_in_future?(j)
             enqueue_at(j, j.scheduled_at.to_f)
           else
@@ -158,7 +159,7 @@ module Pgbus
       def enqueue_immediate(queue, jobs)
         return if jobs.empty?
 
-        payloads = jobs.map { |j| Serializer.serialize_job_hash(j) }
+        payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j)) }
         msg_ids = Pgbus.client.send_batch(queue, payloads)
 
         unless msg_ids.is_a?(Array) && msg_ids.size == jobs.size

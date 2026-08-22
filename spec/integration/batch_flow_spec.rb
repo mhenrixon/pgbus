@@ -129,6 +129,33 @@ RSpec.describe "Batch flow (integration)", :integration do
     end
   end
 
+  describe "bulk enqueue via perform_all_later (issue #413)" do
+    it "counts bulk-enqueued jobs into the batch and tags their payloads" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job)
+      batch.enqueue do
+        ActiveJob.perform_all_later([worker_job.new, worker_job.new])
+      end
+
+      record = Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)
+      expect(record.total_jobs).to eq(2)
+      expect(record.status).to eq("processing")
+
+      # Every bulk payload on the work queue carries the batch id.
+      batch_ids = []
+      while (message = client.read_message(work_queue, vt: 30))
+        batch_ids << JSON.parse(message.message)[Pgbus::Batch::METADATA_KEY]
+        client.delete_message(work_queue, message.msg_id.to_i)
+      end
+      expect(batch_ids).to eq([batch.batch_id, batch.batch_id])
+
+      # The batch finishes only after BOTH bulk jobs complete.
+      Pgbus::Batch.job_completed(batch.batch_id)
+      expect(next_callback_job_class).to be_nil
+      Pgbus::Batch.job_completed(batch.batch_id)
+      expect(next_callback_job_class).to eq("BatchFlowSpec::OnFinishJob")
+    end
+  end
+
   describe "on_discard path" do
     it "fires on_discard instead of on_success when a job is discarded" do
       batch = enqueue_batch(on_success: on_success_job, on_discard: on_discard_job)
