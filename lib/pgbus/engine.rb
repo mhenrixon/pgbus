@@ -74,6 +74,7 @@ module Pgbus
       ActiveSupport.on_load(:active_job) do
         include Pgbus::Concurrency
         include Pgbus::Uniqueness
+        include Pgbus::ActiveJob::BatchId
       end
     end
 

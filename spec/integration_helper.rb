@@ -155,6 +155,10 @@ def bootstrap_integration_tables(conn)
       conn.execute("UPDATE pgbus_batches SET failed_jobs = failed_jobs + discarded_jobs")
       conn.execute("ALTER TABLE pgbus_batches DROP COLUMN discarded_jobs")
     end
+    # Configured callback instances (issue #415).
+    %w[on_finish_job on_success_job on_failure_job].each do |column|
+      conn.execute("ALTER TABLE pgbus_batches ADD COLUMN IF NOT EXISTS #{column} JSONB")
+    end
   end
 
   unless conn.table_exists?("pgbus_batch_executions")

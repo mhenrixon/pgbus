@@ -105,6 +105,9 @@ class CreatePgbusTables < ActiveRecord::Migration<%= migration_version %>
       t.string :on_finish_class
       t.string :on_success_class
       t.string :on_failure_class
+      t.jsonb :on_finish_job
+      t.jsonb :on_success_job
+      t.jsonb :on_failure_job
       t.jsonb :properties, default: {}
       t.integer :total_jobs, null: false, default: 0
       t.integer :completed_jobs, null: false, default: 0

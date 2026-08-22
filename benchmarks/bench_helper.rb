@@ -31,6 +31,10 @@ module BenchStubs
       client.instance_variable_set(:@queue_strategy, Pgbus::QueueFactory.for(Pgbus.configuration))
       client.instance_variable_set(:@schema_ensured, true)
       client.instance_variable_set(:@shared_connection, false)
+      # read_batch routes through guarded_read; without this the read section
+      # of client_bench aborts on `undefined method 'run_guarded' for nil`.
+      client.instance_variable_set(:@connection_health, Pgbus::Client::ConnectionHealth.new)
+      client.instance_variable_set(:@libpq_read_bounds_effective, true)
     end
   end
 
