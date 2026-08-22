@@ -32,14 +32,63 @@ module Pgbus
       @description = description
       @properties = properties
       @job_count = 0
+      @started = false
     end
 
-    # Enqueue a group of jobs as a batch.
-    # Jobs enqueued inside the block are tracked as part of this batch.
+    # Enqueue a group of jobs as a batch. Jobs enqueued inside the block join
+    # this batch.
+    #
+    # Re-callable while the batch is unfinished (open batches): the second and
+    # later calls add to the existing group instead of creating a new record.
+    # A job running inside the batch reaches its own handle through
+    # +ActiveJob::Base#batch+ and can add siblings the same way.
+    #
+    # Raises Pgbus::Batch::AlreadyFinished once the batch has finished.
     def enqueue(&)
+      return reopen(&) if @started
+
       create_record
+      @started = true
       count_jobs(&)
       update_total
+      self
+    end
+
+    # --- readers on a live batch ---------------------------------------
+
+    def status = record&.status
+
+    def total_jobs = record&.total_jobs.to_i
+
+    def completed_jobs = record&.completed_jobs.to_i
+
+    def failed_jobs = record ? self.class.send(:failure_count, record) : 0
+
+    # Jobs still outstanding. Execution rows are the authority; unmigrated
+    # installs fall back to counter arithmetic.
+    def pending_jobs
+      return [total_jobs - completed_jobs - failed_jobs, 0].max unless self.class.executions_migrated?
+
+      BatchExecution.where(batch_id: batch_id).count
+    end
+
+    def progress_percentage
+      total = total_jobs
+      return 100 unless total.positive?
+
+      ((completed_jobs + failed_jobs) * 100) / total
+    end
+
+    def finished? = status == "finished"
+
+    # Cached row behind the delegated readers. Re-read with #reload.
+    def record
+      @record = BatchEntry.find_by(batch_id: batch_id) unless defined?(@record)
+      @record
+    end
+
+    def reload
+      remove_instance_variable(:@record) if defined?(@record)
       self
     end
 
@@ -61,10 +110,25 @@ module Pgbus
       end
     end
 
-    # Find a batch record by ID. Returns a hash or nil.
+    # Find a batch by id. Returns a rehydrated Pgbus::Batch handle, or nil.
+    #
+    # BREAKING (pre-1.0): this used to return the raw attributes Hash. Read
+    # the same values off the handle (#status, #total_jobs, #properties, …),
+    # or query Pgbus::BatchEntry directly for a row.
     def self.find(batch_id)
-      BatchEntry.find_by(batch_id: batch_id)&.attributes
+      record = BatchEntry.find_by(batch_id: batch_id)
+      return nil unless record
+
+      rehydrate(record)
     end
+
+    # Build a handle around an existing row without creating a new batch.
+    def self.rehydrate(record)
+      batch = allocate
+      batch.send(:initialize_from_record, record)
+      batch
+    end
+    private_class_method :rehydrate
 
     # Delete finished batches older than the given threshold.
     def self.cleanup(older_than:)
@@ -85,6 +149,22 @@ module Pgbus
 
     def self.reset_executions_migrated_cache!
       @executions_migrated = nil
+      @callback_jobs_migrated = nil
+    end
+
+    # True once the on_finish_job / on_success_job / on_failure_job jsonb
+    # columns exist (issue #415). Until then, configured callback instances
+    # have nowhere to live and only bare classes are stored.
+    def self.callback_jobs_migrated?
+      return true if @callback_jobs_migrated
+
+      result = begin
+        BatchEntry.column_names.include?("on_finish_job")
+      rescue StandardError
+        false
+      end
+      @callback_jobs_migrated = true if result
+      result
     end
 
     def self.track_enqueue(payload)
@@ -213,10 +293,46 @@ module Pgbus
         end
         all_succeeded = failure_count(record).to_i.zero?
 
-        enqueue_callback(record.on_finish_class, properties) if record.on_finish_class
-        enqueue_callback(record.on_success_class, properties) if record.on_success_class && all_succeeded
+        fire_callback(record, :on_finish, properties)
+        fire_callback(record, :on_success, properties) if all_succeeded
+        fire_failure_callback(record, properties) unless all_succeeded
+      end
+
+      # A configured instance (jsonb column) wins over the legacy class-name
+      # column so an app that sets both gets the richer form.
+      def fire_callback(record, slot, properties)
+        job_data = callback_job_data(record, "#{slot}_job")
+        return enqueue_callback_instance(job_data, record.batch_id) if job_data
+
+        class_name = record.public_send("#{slot}_class")
+        enqueue_callback(class_name, properties) if class_name
+      end
+
+      def fire_failure_callback(record, properties)
+        job_data = callback_job_data(record, "on_failure_job")
+        return enqueue_callback_instance(job_data, record.batch_id) if job_data
+
         failure_class = failure_callback_class(record)
-        enqueue_callback(failure_class, properties) if failure_class && !all_succeeded
+        enqueue_callback(failure_class, properties) if failure_class
+      end
+
+      def callback_job_data(record, column)
+        return nil unless record.respond_to?(column)
+
+        data = record.public_send(column)
+        data.presence
+      end
+
+      # Callbacks are never members of the batch they report on: batch_id is
+      # cleared and callback_batch_id points at the finished batch, so
+      # ActiveJob::Base#batch inside the callback reads that batch.
+      def enqueue_callback_instance(job_data, batch_id)
+        job = ::ActiveJob::Base.deserialize(job_data)
+        job.batch_id = nil if job.respond_to?(:batch_id=)
+        job.callback_batch_id = batch_id if job.respond_to?(:callback_batch_id=)
+        job.enqueue
+      rescue StandardError => e
+        Pgbus.logger.error { "[Pgbus] Batch callback job could not be enqueued: #{e.class}: #{e.message}" }
       end
 
       def failure_callback_class(record)
@@ -239,21 +355,72 @@ module Pgbus
 
     private
 
+    def initialize_from_record(record)
+      @record = record
+      @batch_id = record.batch_id
+      @description = record.description
+      @properties = parse_properties(record.properties)
+      @on_finish = nil
+      @on_success = nil
+      @on_failure = nil
+      @job_count = 0
+      @started = true
+    end
+
+    # Add to an already-created batch. The block's jobs get their execution
+    # rows as they are enqueued (so the single-winner finish still sees
+    # outstanding work), then total_jobs is bumped by the block's count.
+    # check_finished! afterwards covers the case where every added job
+    # already reached a terminal state while the block was still open.
+    def reopen(&)
+      raise AlreadyFinished, "Can't add jobs into an already finished batch" if finished?
+
+      count_jobs(&)
+      return self if @job_count.zero?
+
+      BatchEntry.increment_total_jobs!(batch_id, @job_count)
+      reload
+      self.class.send(:finish_if_needed, BatchEntry.check_finished!(batch_id))
+      self
+    end
+
     def create_record
       attrs = {
         batch_id: batch_id,
         description: description,
-        on_finish_class: on_finish&.name,
-        on_success_class: on_success&.name,
+        on_finish_class: callback_class_name(on_finish),
+        on_success_class: callback_class_name(on_success),
         properties: JSON.generate(properties),
         status: "pending"
       }
       if self.class.executions_migrated?
-        attrs[:on_failure_class] = on_failure&.name
+        attrs[:on_failure_class] = callback_class_name(on_failure)
       else
-        attrs[:on_discard_class] = on_failure&.name
+        attrs[:on_discard_class] = callback_class_name(on_failure)
       end
-      BatchEntry.create!(attrs)
+      attrs.merge!(callback_job_attributes) if self.class.callback_jobs_migrated?
+      @record = BatchEntry.create!(attrs)
+    end
+
+    # A callback given as a bare class keeps the legacy *_class column; a
+    # configured ActiveJob instance is serialized now (so .set options resolve
+    # at creation, matching solid_queue) into the *_job jsonb column.
+    def callback_class_name(callback)
+      callback.is_a?(Class) ? callback.name : nil
+    end
+
+    def callback_job_attributes
+      {
+        on_finish_job: serialize_callback(on_finish),
+        on_success_job: serialize_callback(on_success),
+        on_failure_job: serialize_callback(on_failure)
+      }
+    end
+
+    def serialize_callback(callback)
+      return nil if callback.nil? || callback.is_a?(Class)
+
+      callback.serialize
     end
 
     def count_jobs(&)
@@ -282,6 +449,7 @@ module Pgbus
         fire_empty_batch_callbacks
       else
         BatchEntry.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
+        reload
         # Jobs can reach their terminal state while the enqueue block is still
         # open — those completion signals saw total_jobs == 0 and could not
         # finish the batch. Re-check now that the real total is visible.
@@ -295,8 +463,8 @@ module Pgbus
       return unless record
 
       properties = parse_properties(record.properties)
-      self.class.send(:enqueue_callback, record.on_finish_class, properties) if record.on_finish_class
-      self.class.send(:enqueue_callback, record.on_success_class, properties) if record.on_success_class
+      self.class.send(:fire_callback, record, :on_finish, properties)
+      self.class.send(:fire_callback, record, :on_success, properties)
     end
 
     def parse_properties(props)

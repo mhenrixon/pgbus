@@ -79,6 +79,7 @@ module Pgbus
         add_failed_events_index: "pgbus:add_failed_events_index",
         add_processed_event_completion: "pgbus:add_processed_event_completion",
         add_batch_executions: "pgbus:add_batch_executions",
+        add_batch_callback_jobs: "pgbus:add_batch_callback_jobs",
         tune_autovacuum: "pgbus:tune_autovacuum",
         tune_fillfactor: "pgbus:tune_fillfactor"
       }.freeze
@@ -99,6 +100,7 @@ module Pgbus
         add_failed_events_index: "unique index on pgbus_failed_events (queue_name, msg_id)",
         add_processed_event_completion: "completed_at on pgbus_processed_events (two-phase idempotency claim)",
         add_batch_executions: "batch execution-row tracking (self-healing completion, on_failure rename)",
+        add_batch_callback_jobs: "batch callback-job columns (configured ActiveJob instances as batch callbacks)",
         tune_autovacuum: "autovacuum tuning for PGMQ queue and archive tables",
         tune_fillfactor: "fillfactor=70 on PGMQ queue tables (reduces page density during update churn)"
       }.freeze
@@ -126,6 +128,7 @@ module Pgbus
           *failed_events_index_migrations,
           *processed_event_completion_migrations,
           *batch_executions_migrations,
+          *batch_callback_jobs_migrations,
           *autovacuum_migrations,
           *fillfactor_migrations
         ]
@@ -239,6 +242,15 @@ module Pgbus
         return [] if migrated
 
         [:add_batch_executions]
+      end
+
+      # Configured callback instances (on_finish: MyJob.new.set(...)) need
+      # somewhere to store the serialized job — issue #415.
+      def batch_callback_jobs_migrations
+        return [] unless table_exists?("pgbus_batches")
+        return [] if column_names("pgbus_batches").include?("on_finish_job")
+
+        [:add_batch_callback_jobs]
       end
 
       # Autovacuum tuning: check if any PGMQ queue table already has

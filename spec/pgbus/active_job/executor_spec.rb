@@ -30,6 +30,23 @@ RSpec.describe Pgbus::ActiveJob::Executor do
   end
 
   describe "#execute" do
+    context "when the job belongs to a batch (issue #415)" do
+      let(:batched_payload) { job_payload.merge(Pgbus::Batch::METADATA_KEY => "b-1") }
+      let(:message) { build_message_double(msg_id: 5, message: JSON.generate(batched_payload), read_ct: 1) }
+
+      before do
+        allow(ActiveJob::Base).to receive(:deserialize).with(batched_payload).and_return(job_double)
+        allow(job_double).to receive(:batch_id=)
+        allow(Pgbus::Batch).to receive(:job_completed)
+      end
+
+      it "hands the job its batch_id before perform so `batch` works inside it" do
+        executor.execute(message, queue_name)
+
+        expect(job_double).to have_received(:batch_id=).with("b-1")
+      end
+    end
+
     context "when job succeeds" do
       let(:message) { build_message_double(msg_id: 5, message: message_json, read_ct: 1) }
 

@@ -85,6 +85,10 @@ module Pgbus
           # (issue #368). Pass this executor's config so an injected allowlist
           # is not silently ignored in favour of Pgbus.configuration.
           job = Serializer.deserialize_job_data(payload, configuration: config)
+          # Batch membership rides the pgbus metadata key, not the serialized
+          # job data, so hand it to the job before perform — that is what makes
+          # `batch` (and `batch.enqueue` for open batches) work inside a job.
+          assign_batch_id(job, payload)
           Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
           execute_job(job)
           Pgbus.logger.debug { "[Pgbus::Executor] perform_returned #{tag} job_class=#{job_class}" }
@@ -139,6 +143,13 @@ module Pgbus
       end
 
       private
+
+      def assign_batch_id(job, payload)
+        batch_id = payload[Batch::METADATA_KEY]
+        return unless batch_id && job.respond_to?(:batch_id=)
+
+        job.batch_id = batch_id
+      end
 
       def release_uniqueness_lock(key)
         return unless key

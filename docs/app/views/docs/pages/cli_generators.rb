@@ -175,6 +175,7 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
           [ [ :code, "pgbus:add_queue_states" ], "The queue pause/resume + circuit-breaker state table." ],
           [ [ :code, "pgbus:add_uniqueness_keys" ], "The job-uniqueness lock table." ],
           [ [ :code, "pgbus:add_batch_executions" ], "Batch execution-row tracking (self-healing completion). Included in fresh pgbus:install." ],
+          [ [ :code, "pgbus:add_batch_callback_jobs" ], "Batch callback-job columns (configured ActiveJob instances as callbacks). Included in fresh pgbus:install." ],
           [ [ :code, "pgbus:add_job_stats" ], "The job-stats table for the Insights dashboard." ],
           [ [ :code, "pgbus:add_stream_stats" ], "The stream-stats table (opt-in metrics)." ]
         ]
@@ -188,6 +189,8 @@ class Views::Docs::Pages::CliGenerators < DocsUI::Page
         code { "add_job_stats_queue_index" }
         plain ", "
         code { "add_batch_executions" }
+        plain ", "
+        code { "add_batch_callback_jobs" }
         plain ", and "
         code { "migrate_job_locks" }
         plain ". The "

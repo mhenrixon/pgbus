@@ -95,7 +95,7 @@ RSpec.describe Pgbus::Engine do
     # The dummy app does not require active_job/railtie, so the on_load(:active_job)
     # hook has not fired against ActiveJob::Base at boot. Load ActiveJob here and
     # run the hooks to prove the initializer includes both concerns.
-    it "includes Concurrency and Uniqueness on ActiveJob::Base" do
+    it "includes Concurrency, Uniqueness and BatchId on ActiveJob::Base" do
       require "active_job"
 
       # Ensure the engine's on_load block is registered, then flush the hooks.
@@ -104,6 +104,7 @@ RSpec.describe Pgbus::Engine do
 
       expect(ActiveJob::Base.include?(Pgbus::Concurrency)).to be(true)
       expect(ActiveJob::Base.include?(Pgbus::Uniqueness)).to be(true)
+      expect(ActiveJob::Base.include?(Pgbus::ActiveJob::BatchId)).to be(true)
     end
   end
 

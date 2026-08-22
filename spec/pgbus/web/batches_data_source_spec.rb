@@ -82,6 +82,21 @@ RSpec.describe Pgbus::Web::DataSource do
       expect(result[:progress_pct]).to eq(52)
     end
 
+    it "shows the job_class of a callback configured as an ActiveJob instance (issue #415)" do
+      record = double("BatchEntry", batch_id: "bbb", description: nil, status: "finished",
+                                    total_jobs: 1, completed_jobs: 1, failed_jobs: 0,
+                                    on_finish_class: nil, on_success_class: nil, on_failure_class: nil,
+                                    on_finish_job: { "job_class" => "ReportJob", "queue_name" => "critical" },
+                                    on_success_job: nil, on_failure_job: nil,
+                                    properties: "{}", created_at: Time.current, finished_at: Time.current)
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "bbb").and_return(record)
+
+      result = data_source.batch_detail("bbb")
+
+      expect(result[:on_finish_class]).to eq("ReportJob")
+      expect(result[:on_success_class]).to be_nil
+    end
+
     it "returns nil when batch not found" do
       allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "missing").and_return(nil)
 

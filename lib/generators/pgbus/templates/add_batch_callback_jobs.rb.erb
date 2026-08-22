@@ -1,0 +1,13 @@
+class AddPgbusBatchCallbackJobs < ActiveRecord::Migration<%= migration_version %>
+  def up
+    add_column :pgbus_batches, :on_finish_job, :jsonb unless column_exists?(:pgbus_batches, :on_finish_job)
+    add_column :pgbus_batches, :on_success_job, :jsonb unless column_exists?(:pgbus_batches, :on_success_job)
+    add_column :pgbus_batches, :on_failure_job, :jsonb unless column_exists?(:pgbus_batches, :on_failure_job)
+  end
+
+  def down
+    remove_column :pgbus_batches, :on_finish_job if column_exists?(:pgbus_batches, :on_finish_job)
+    remove_column :pgbus_batches, :on_success_job if column_exists?(:pgbus_batches, :on_success_job)
+    remove_column :pgbus_batches, :on_failure_job if column_exists?(:pgbus_batches, :on_failure_job)
+  end
+end

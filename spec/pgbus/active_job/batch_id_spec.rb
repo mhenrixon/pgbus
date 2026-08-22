@@ -1,0 +1,73 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+require "active_job"
+
+RSpec.describe Pgbus::ActiveJob::BatchId do
+  let(:job_class) do
+    Class.new(ActiveJob::Base) do
+      include Pgbus::ActiveJob::BatchId
+
+      def self.name = "BatchIdSpec::Job"
+      def perform(*); end
+    end
+  end
+
+  before { stub_const("BatchIdSpec::Job", job_class) }
+
+  describe "serialization" do
+    it "omits both keys for an unbatched job so payloads stay lean" do
+      data = job_class.new.serialize
+
+      expect(data).not_to have_key("batch_id")
+      expect(data).not_to have_key("callback_batch_id")
+    end
+
+    it "round-trips batch_id" do
+      job = job_class.new
+      job.batch_id = "b-1"
+
+      restored = ActiveJob::Base.deserialize(job.serialize)
+
+      expect(restored.batch_id).to eq("b-1")
+    end
+
+    it "round-trips callback_batch_id" do
+      job = job_class.new
+      job.callback_batch_id = "b-2"
+
+      restored = ActiveJob::Base.deserialize(job.serialize)
+
+      expect(restored.callback_batch_id).to eq("b-2")
+      expect(restored.batch_id).to be_nil
+    end
+  end
+
+  describe "#batch" do
+    it "is nil when the job belongs to no batch" do
+      expect(job_class.new.batch).to be_nil
+      expect(Pgbus::Batch).not_to receive(:find) # rubocop:disable RSpec/MessageSpies
+    end
+
+    it "looks the batch up once and memoizes it" do
+      handle = instance_double(Pgbus::Batch)
+      allow(Pgbus::Batch).to receive(:find).with("b-1").and_return(handle)
+      job = job_class.new
+      job.batch_id = "b-1"
+
+      expect(job.batch).to be(handle)
+      expect(job.batch).to be(handle)
+      expect(Pgbus::Batch).to have_received(:find).once
+    end
+
+    it "prefers callback_batch_id so a callback job reads the batch it reports on" do
+      handle = instance_double(Pgbus::Batch)
+      allow(Pgbus::Batch).to receive(:find).with("cb-1").and_return(handle)
+      job = job_class.new
+      job.batch_id = "b-1"
+      job.callback_batch_id = "cb-1"
+
+      expect(job.batch).to be(handle)
+    end
+  end
+end

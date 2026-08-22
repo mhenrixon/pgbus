@@ -228,6 +228,27 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
       end
     end
 
+    context "with batch callback-job detection (issue #415)" do
+      it "queues add_batch_callback_jobs when the jsonb columns are missing" do
+        stub_columns("pgbus_batches", %w[id batch_id on_failure_class failed_jobs completed_jobs total_jobs status])
+
+        expect(detector.missing_migrations).to include(:add_batch_callback_jobs)
+      end
+
+      it "does not queue it once on_finish_job exists" do
+        stub_columns("pgbus_batches",
+                     %w[id batch_id on_failure_class on_finish_job on_success_job on_failure_job status])
+
+        expect(detector.missing_migrations).not_to include(:add_batch_callback_jobs)
+      end
+
+      it "does not queue it when pgbus_batches itself is missing" do
+        remove_table("pgbus_batches")
+
+        expect(detector.missing_migrations).not_to include(:add_batch_callback_jobs)
+      end
+    end
+
     context "with outbox detection" do
       it "queues add_outbox when pgbus_outbox_entries is missing" do
         expect(detector.missing_migrations).to include(:add_outbox)
@@ -419,6 +440,7 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
           :add_outbox,
           :add_processed_event_completion,
           :add_batch_executions,
+          :add_batch_callback_jobs,
           :tune_autovacuum,
           :tune_fillfactor
         )
@@ -449,8 +471,8 @@ RSpec.describe Pgbus::Generators::MigrationDetector do
         uniqueness_keys add_job_stats add_job_stats_latency
         add_job_stats_queue_index add_stream_stats add_presence
         add_queue_states add_outbox add_recurring add_failed_events_index
-        add_processed_event_completion add_batch_executions add_stream_queues
-        tune_autovacuum tune_fillfactor
+        add_processed_event_completion add_batch_executions add_batch_callback_jobs
+        add_stream_queues tune_autovacuum tune_fillfactor
       ]
 
       keys.each do |key|

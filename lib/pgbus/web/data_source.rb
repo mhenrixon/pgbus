@@ -682,12 +682,13 @@ module Pgbus
         return nil unless record
 
         pending = pending_jobs_by_batch([batch_id])
+        failure_callback = callback_display_name(record, :on_failure) || failure_callback_class(record)
         format_batch(record, pending_jobs: pending[batch_id]).merge(
           properties: record.properties,
-          on_finish_class: record.on_finish_class,
-          on_success_class: record.on_success_class,
-          on_failure_class: failure_callback_class(record),
-          on_discard_class: failure_callback_class(record)
+          on_finish_class: callback_display_name(record, :on_finish) || record.on_finish_class,
+          on_success_class: callback_display_name(record, :on_success) || record.on_success_class,
+          on_failure_class: failure_callback,
+          on_discard_class: failure_callback
         )
       rescue StandardError => e
         Pgbus.logger.debug { "[Pgbus::Web] Error fetching batch #{batch_id}: #{e.message}" }
@@ -1379,6 +1380,15 @@ module Pgbus
 
       def failure_job_count(record)
         record.respond_to?(:discarded_jobs) ? record.discarded_jobs.to_i : record.failed_jobs.to_i
+      end
+
+      # A callback configured as an ActiveJob instance lives in the *_job jsonb
+      # column, not the legacy *_class string — show its job_class either way.
+      def callback_display_name(record, slot)
+        column = "#{slot}_job"
+        return nil unless record.respond_to?(column)
+
+        record.public_send(column).presence&.dig("job_class")
       end
 
       def failure_callback_class(record)

@@ -174,17 +174,90 @@ RSpec.describe Pgbus::Batch do
   end
 
   describe ".find" do
-    it "returns the batch record attributes" do
-      record = double("BatchEntry", attributes: { "batch_id" => "abc", "status" => "processing" })
-      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "abc").and_return(record)
+    # BREAKING (pre-1.0): used to return the raw attributes Hash.
+    let(:record) do
+      double(
+        "BatchEntry",
+        batch_id: "abc", description: "nightly", status: "processing",
+        properties: '{"tenant":"acme"}', total_jobs: 4, completed_jobs: 1,
+        failed_jobs: 1, finished_at: nil,
+        on_finish_class: nil, on_success_class: nil, on_failure_class: nil
+      )
+    end
 
-      expect(described_class.find("abc")).to eq({ "batch_id" => "abc", "status" => "processing" })
+    before do
+      allow(record).to receive(:has_attribute?).with(:failed_jobs).and_return(true)
+      allow(record).to receive(:has_attribute?).with(:discarded_jobs).and_return(false)
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "abc").and_return(record)
+      allow(described_class).to receive(:executions_migrated?).and_return(true)
+    end
+
+    it "returns a rehydrated Batch handle" do
+      expect(described_class.find("abc")).to be_a(described_class)
+    end
+
+    it "exposes the stored description and parsed properties" do
+      batch = described_class.find("abc")
+
+      expect(batch.description).to eq("nightly")
+      expect(batch.properties).to eq({ "tenant" => "acme" })
+    end
+
+    it "delegates the counters and status to the row" do
+      batch = described_class.find("abc")
+
+      expect(batch.status).to eq("processing")
+      expect(batch.total_jobs).to eq(4)
+      expect(batch.completed_jobs).to eq(1)
+      expect(batch.failed_jobs).to eq(1)
+      expect(batch.progress_percentage).to eq(50)
+      expect(batch).not_to be_finished
     end
 
     it "returns nil when not found" do
       allow(Pgbus::BatchEntry).to receive(:find_by).and_return(nil)
 
       expect(described_class.find("missing")).to be_nil
+    end
+  end
+
+  describe "configured callback instances" do
+    let(:callback_job_class) do
+      Class.new(ActiveJob::Base) do
+        include Pgbus::ActiveJob::BatchId
+
+        def self.name = "BatchSpec::CallbackJob"
+        def perform(*); end
+      end
+    end
+
+    before do
+      stub_const("BatchSpec::CallbackJob", callback_job_class)
+      allow(described_class).to receive(:callback_jobs_migrated?).and_return(true)
+    end
+
+    it "serializes a configured instance at batch-creation time" do
+      callback = callback_job_class.new.set(queue: :critical)
+      batch = described_class.new(on_finish: callback)
+
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      expect(Pgbus::BatchEntry).to have_received(:create!).with(
+        hash_including(
+          on_finish_class: nil,
+          on_finish_job: hash_including("job_class" => "BatchSpec::CallbackJob", "queue_name" => "critical")
+        )
+      )
+    end
+
+    it "keeps storing a bare class in the legacy column" do
+      batch = described_class.new(on_success: callback_job_class)
+
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      expect(Pgbus::BatchEntry).to have_received(:create!).with(
+        hash_including(on_success_class: "BatchSpec::CallbackJob", on_success_job: nil)
+      )
     end
   end
 
