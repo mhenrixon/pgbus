@@ -32,6 +32,18 @@ RSpec.describe Pgbus::Batch::Sweep do
       expect(Pgbus::Batch).not_to have_received(:try_finish!)
     end
 
+    it "finishes a batch whose enqueue block crashed before enqueuing anything" do
+      record = double("BatchEntry", batch_id: "crashed", total_jobs: 0, completed_jobs: 0, discarded_jobs: 0)
+      relation = double("relation")
+      allow(Pgbus::BatchEntry).to receive_message_chain(:processing, :without_executions).and_return(relation) # rubocop:disable RSpec/MessageChain
+      allow(relation).to receive(:find_each).and_yield(record)
+      allow(Pgbus::Batch).to receive(:try_finish!).and_return({ just_finished: true, record: nil })
+
+      described_class.send(:finish_stalled_processing, batch_size: 50)
+
+      expect(Pgbus::Batch).to have_received(:try_finish!).with("crashed")
+    end
+
     it "tries to finish when counters already match total_jobs" do
       record = double("BatchEntry", batch_id: "stalled", total_jobs: 2, completed_jobs: 2, discarded_jobs: 0)
       relation = double("relation")

@@ -207,6 +207,31 @@ RSpec.describe "Batch flow (integration)", :integration do
     end
   end
 
+  describe "crashed enqueue-block sweep (issue #414)" do
+    it "finishes a batch whose block raised before any job was enqueued" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job)
+      expect { batch.enqueue { raise "boom" } }.to raise_error("boom")
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("pending")
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("finished")
+      expect(next_callback_job_class).to eq("BatchFlowSpec::OnFinishJob")
+    end
+
+    it "leaves a pre-migration in-flight batch (no rows, unfinished counters) alone" do
+      batch_id = SecureRandom.uuid
+      Pgbus::BatchEntry.create!(
+        batch_id: batch_id, status: "processing", total_jobs: 3,
+        completed_jobs: 1, failed_jobs: 0, properties: "{}"
+      )
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch_id).status).to eq("processing")
+    end
+  end
+
   describe "stalled-execution sweep (issue #414)" do
     it "finishes a batch whose last message is gone but the execution row remains" do
       batch = enqueue_batch(on_finish: on_finish_job)

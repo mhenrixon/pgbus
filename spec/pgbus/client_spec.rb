@@ -752,6 +752,31 @@ RSpec.describe Pgbus::Client do
         delay: 0
       )
     end
+
+    context "when priority routing is enabled" do
+      before { config.priority_levels = 3 }
+      after { config.priority_levels = nil }
+
+      # The bare pgbus_<queue> table is never created under priority routing
+      # (only _p0.._pN are), so targeting it made send_batch raise
+      # PG::UndefinedTable and no worker would have read it anyway.
+      it "routes to the requested priority sub-queue" do
+        client.send_batch("default", [{ "a" => 1 }], priority: 2)
+
+        expect(mock_pgmq).to have_received(:produce_batch).with(
+          "pgbus_test_default_p2", ['{"a":1}'], headers: nil, delay: 0
+        )
+      end
+
+      it "falls back to default_priority when none is given" do
+        config.default_priority = 1
+        client.send_batch("default", [{ "a" => 1 }])
+
+        expect(mock_pgmq).to have_received(:produce_batch).with(
+          "pgbus_test_default_p1", ['{"a":1}'], headers: nil, delay: 0
+        )
+      end
+    end
   end
 
   describe "#read_message" do

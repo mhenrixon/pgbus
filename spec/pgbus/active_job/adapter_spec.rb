@@ -384,10 +384,21 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       result = adapter.enqueue_all([job, job2])
 
-      expect(mock_client).to have_received(:send_batch).with("default", [serialized_hash, second_serialized_hash])
+      expect(mock_client).to have_received(:send_batch).with("default", [serialized_hash, second_serialized_hash], priority: nil)
       expect(job).to have_received(:provider_job_id=).with(1)
       expect(job2).to have_received(:provider_job_id=).with(2)
       expect(result).to eq(2)
+    end
+
+    it "sends one batch per priority level so priority routing is preserved" do
+      allow(job).to receive(:try).with(:priority).and_return(0)
+      allow(job2).to receive(:try).with(:priority).and_return(2)
+      allow(mock_client).to receive(:send_batch).and_return([1])
+
+      adapter.enqueue_all([job, job2])
+
+      expect(mock_client).to have_received(:send_batch).with("default", [serialized_hash], priority: 0)
+      expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash], priority: 2)
     end
 
     it "schedules future jobs individually via enqueue_at" do
@@ -402,7 +413,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       adapter.enqueue_all([job, job2])
 
       expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: a_value > 0, priority: nil)
-      expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash])
+      expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash], priority: nil)
     end
 
     context "when batch response size mismatches" do
@@ -435,7 +446,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
           [
             serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id),
             second_serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id)
-          ]
+          ],
+          priority: nil
         )
         expect(Thread.current[:pgbus_batch_job_count]).to eq(2)
       end
@@ -455,7 +467,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         expect(Pgbus::Concurrency::Semaphore).to have_received(:acquire).with("TestJob-42", 1, 900)
         expect(mock_client).to have_received(:send_message).with("default", concurrency_payload, delay: 0, priority: nil)
-        expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash])
+        expect(mock_client).to have_received(:send_batch).with("default", [second_serialized_hash], priority: nil)
       end
 
       it "handles conflicts instead of silently bypassing the limit" do
