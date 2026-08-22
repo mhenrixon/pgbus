@@ -89,6 +89,11 @@ module Pgbus
         fire_empty_batch_callbacks
       else
         BatchEntry.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
+        # Jobs can reach their terminal state while the enqueue block is still
+        # open — those completion signals saw total_jobs == 0 and could not
+        # finish the batch. Re-check now that the real total is visible.
+        result = BatchEntry.check_finished!(batch_id)
+        self.class.send(:fire_callbacks, result[:record]) if result&.fetch(:just_finished)
       end
     end
 
