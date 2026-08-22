@@ -156,6 +156,26 @@ RSpec.describe "Batch flow (integration)", :integration do
     end
   end
 
+  describe "completions racing the total publish (PR #417 review)" do
+    it "finishes a batch whose jobs all complete before total_jobs is published" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job)
+      batch.enqueue do
+        worker_job.perform_later
+        worker_job.perform_later
+        # Simulate fast workers: both jobs reach their terminal state while the
+        # enqueue block is still open, i.e. while total_jobs is still 0. Their
+        # completion signals cannot finish the batch (1 != 0, 2 != 0), so the
+        # total publish must run the completion check itself.
+        Pgbus::Batch.job_completed(batch.batch_id)
+        Pgbus::Batch.job_completed(batch.batch_id)
+      end
+
+      finished = Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)
+      expect(finished.status).to eq("finished")
+      expect(next_callback_job_class).to eq("BatchFlowSpec::OnFinishJob")
+    end
+  end
+
   describe "on_discard path" do
     it "fires on_discard instead of on_success when a job is discarded" do
       batch = enqueue_batch(on_success: on_success_job, on_discard: on_discard_job)

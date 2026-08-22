@@ -12,7 +12,10 @@ module Pgbus
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash)
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash)
+        if uniqueness_rejected?(active_job, payload_hash)
+          uncount_batch_job(payload_hash)
+          return active_job
+        end
 
         enqueue_with_concurrency(active_job, queue, payload_hash)
       end
@@ -25,7 +28,10 @@ module Pgbus
         payload_hash = inject_batch_metadata(payload_hash)
         delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
-        return active_job if uniqueness_rejected?(active_job, payload_hash)
+        if uniqueness_rejected?(active_job, payload_hash)
+          uncount_batch_job(payload_hash)
+          return active_job
+        end
 
         enqueue_with_concurrency(active_job, queue, payload_hash, delay: delay)
       end
@@ -104,6 +110,9 @@ module Pgbus
           )
         when :discard
           Pgbus.logger.info { "[Pgbus] Discarding job #{active_job.class.name}: concurrency limit for #{key}" }
+          # The job will never run, so it must not stay counted in its batch —
+          # a counted-but-never-signaled job leaves the batch processing forever.
+          uncount_batch_job(payload_hash)
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
         end
@@ -146,6 +155,18 @@ module Pgbus
         else
           true
         end
+      end
+
+      # Reverses inject_batch_metadata for a job discarded at enqueue time
+      # (uniqueness duplicate or concurrency :discard conflict): the message is
+      # never sent, so it can never signal completion. Only applies while the
+      # tagging batch's block is still active on this thread.
+      def uncount_batch_job(payload_hash)
+        return unless payload_hash[Batch::METADATA_KEY] &&
+                      payload_hash[Batch::METADATA_KEY] == Thread.current[:pgbus_batch_id]
+
+        count = Thread.current[:pgbus_batch_job_count]
+        Thread.current[:pgbus_batch_job_count] = count - 1 if count&.positive?
       end
 
       def inject_batch_metadata(payload_hash)

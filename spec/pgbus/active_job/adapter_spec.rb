@@ -10,6 +10,19 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
   let(:job) { build_job_double(job_class: "TestJob", queue_name: "default", job_id: job_id) }
   let(:serialized_hash) { { "job_class" => "TestJob", "job_id" => job_id, "queue_name" => "default", "arguments" => [] } }
 
+  # Shared concurrency fixtures — used by both the #enqueue and #enqueue_all
+  # concurrency contexts so the two stay in sync.
+  let(:concurrency_config) do
+    { limit: 1, duration: 900, on_conflict: :block, key: ->(*) { "TestJob-42" } }
+  end
+  let(:concurrency_job_class) do
+    double("JobClass", pgbus_concurrency: concurrency_config, name: "TestJob").tap do |klass|
+      allow(klass).to receive(:respond_to?).and_return(false)
+      allow(klass).to receive(:respond_to?).with(:pgbus_concurrency).and_return(true)
+    end
+  end
+  let(:concurrency_payload) { serialized_hash.merge("pgbus_concurrency_key" => "TestJob-42") }
+
   before do
     allow(Pgbus).to receive(:client).and_return(mock_client)
     allow(Pgbus::Serializer).to receive(:serialize_job_hash).and_return(serialized_hash)
@@ -69,18 +82,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
   end
 
   describe "#enqueue with concurrency" do
-    let(:concurrency_config) do
-      { limit: 1, duration: 900, on_conflict: :block, key: ->(*) { "TestJob-42" } }
-    end
-    let(:job_class_double) do
-      double("JobClass", pgbus_concurrency: concurrency_config, name: "TestJob").tap do |klass|
-        allow(klass).to receive(:respond_to?).and_return(false)
-        allow(klass).to receive(:respond_to?).with(:pgbus_concurrency).and_return(true)
-      end
-    end
-    let(:concurrency_payload) do
-      serialized_hash.merge("pgbus_concurrency_key" => "TestJob-42")
-    end
+    let(:job_class_double) { concurrency_job_class }
 
     before do
       allow(Pgbus::Concurrency).to receive_messages(inject_metadata: concurrency_payload, extract_key: "TestJob-42")
@@ -134,6 +136,38 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       expect { adapter.enqueue(job) }.to raise_error(Pgbus::ConcurrencyLimitExceeded, /TestJob-42/)
     end
+
+    context "when inside a batch context" do
+      around do |example|
+        Thread.current[:pgbus_batch_id] = "batch-1"
+        Thread.current[:pgbus_batch_job_count] = 0
+        example.run
+      ensure
+        Thread.current[:pgbus_batch_id] = nil
+        Thread.current[:pgbus_batch_job_count] = nil
+      end
+
+      it "does not count a job discarded at the concurrency limit — it will never signal completion" do
+        allow(job_class_double).to receive(:pgbus_concurrency).and_return(
+          concurrency_config.merge(on_conflict: :discard)
+        )
+        allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
+
+        adapter.enqueue(job)
+
+        expect(Thread.current[:pgbus_batch_job_count]).to eq(0)
+      end
+
+      it "keeps a blocked job counted — it runs once the semaphore frees and signals then" do
+        allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:insert)
+        allow(job).to receive(:try).with(:priority).and_return(0)
+
+        adapter.enqueue(job)
+
+        expect(Thread.current[:pgbus_batch_job_count]).to eq(1)
+      end
+    end
   end
 
   describe "#enqueue with :until_executed uniqueness and retry_on (issue #333)" do
@@ -172,6 +206,28 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       expect(mock_client).to have_received(:send_message)
       expect(Pgbus::Uniqueness).not_to have_received(:acquire_enqueue_lock)
+    end
+
+    context "when inside a batch context" do
+      around do |example|
+        Thread.current[:pgbus_batch_id] = "batch-1"
+        Thread.current[:pgbus_batch_job_count] = 0
+        example.run
+      ensure
+        Thread.current[:pgbus_batch_id] = nil
+        Thread.current[:pgbus_batch_job_count] = nil
+      end
+
+      it "does not count a duplicate discarded at enqueue time into the batch" do
+        allow(job).to receive(:executions).and_return(0)
+        allow(Pgbus::Uniqueness).to receive_messages(acquire_enqueue_lock: :locked,
+                                                     uniqueness_config: uniqueness_config.merge(on_conflict: :discard))
+
+        adapter.enqueue(job)
+
+        expect(mock_client).not_to have_received(:send_message)
+        expect(Thread.current[:pgbus_batch_job_count]).to eq(0)
+      end
     end
   end
 
@@ -252,23 +308,12 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
 
     context "with concurrency-limited jobs (issue #413)" do
-      let(:concurrency_config) do
-        { limit: 1, duration: 900, on_conflict: :block, key: ->(*) { "TestJob-42" } }
-      end
-      let(:job_class_double) do
-        double("JobClass", pgbus_concurrency: concurrency_config, name: "TestJob").tap do |klass|
-          allow(klass).to receive(:respond_to?).and_return(false)
-          allow(klass).to receive(:respond_to?).with(:pgbus_concurrency).and_return(true)
-        end
-      end
-      let(:concurrency_payload) { serialized_hash.merge("pgbus_concurrency_key" => "TestJob-42") }
-
       before do
         allow(Pgbus::Concurrency).to receive_messages(inject_metadata: concurrency_payload, extract_key: "TestJob-42")
-        allow(job).to receive(:class).and_return(job_class_double)
+        allow(job).to receive(:class).and_return(concurrency_job_class)
       end
 
-      it "routes them through the individual enqueue path, never send_batch" do
+      it "routes the concurrency job through the individual enqueue path while plain jobs stay on the bulk path" do
         allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:acquired)
         allow(mock_client).to receive_messages(send_message: 10, send_batch: [20])
 
