@@ -231,6 +231,72 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
   end
 
+  describe "#enqueue with uniqueness and concurrency" do
+    let(:uniqueness_config) do
+      { strategy: :until_executed, key: ->(*) { "UniqJob-42" }, explicit_key: true, on_conflict: :reject }
+    end
+    let(:job_class_double) do
+      double("JobClass",
+             pgbus_concurrency: concurrency_config.merge(on_conflict: :discard),
+             pgbus_uniqueness: uniqueness_config,
+             name: "TestJob").tap do |klass|
+        allow(klass).to receive(:respond_to?).and_return(false)
+        allow(klass).to receive(:respond_to?).with(:pgbus_concurrency).and_return(true)
+        allow(klass).to receive(:respond_to?).with(:pgbus_uniqueness).and_return(true)
+      end
+    end
+    let(:combined_payload) do
+      serialized_hash.merge(
+        "pgbus_concurrency_key" => "TestJob-42",
+        "pgbus_uniqueness_key" => "UniqJob-42"
+      )
+    end
+
+    before do
+      allow(job).to receive_messages(class: job_class_double, executions: 0)
+      allow(Pgbus::Concurrency).to receive_messages(inject_metadata: combined_payload, extract_key: "TestJob-42")
+      allow(Pgbus::Uniqueness).to receive_messages(
+        inject_metadata: combined_payload,
+        extract_key: "UniqJob-42",
+        uniqueness_config: uniqueness_config,
+        acquire_enqueue_lock: :acquired
+      )
+      allow(Pgbus::Uniqueness).to receive(:release_lock)
+      allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
+    end
+
+    after { Thread.current[:pgbus_acquired_uniqueness_key] = nil }
+
+    it "releases the :until_executed lock when a concurrency :discard conflict drops the job" do
+      adapter.enqueue(job)
+
+      expect(mock_client).not_to have_received(:send_message)
+      expect(Pgbus::Uniqueness).to have_received(:release_lock).with("UniqJob-42")
+    end
+
+    it "does not release the lock when the job is blocked — the stored payload runs later" do
+      allow(job_class_double).to receive(:pgbus_concurrency).and_return(concurrency_config)
+      allow(Pgbus::Concurrency::BlockedExecution).to receive(:insert)
+      allow(job).to receive(:try).with(:priority).and_return(0)
+
+      adapter.enqueue(job)
+
+      expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+    end
+
+    it "does not release a uniqueness lock it did not acquire (duplicate discarded)" do
+      allow(Pgbus::Uniqueness).to receive_messages(
+        acquire_enqueue_lock: :locked,
+        uniqueness_config: uniqueness_config.merge(on_conflict: :discard)
+      )
+
+      adapter.enqueue(job)
+
+      expect(mock_client).not_to have_received(:send_message)
+      expect(Pgbus::Uniqueness).not_to have_received(:release_lock)
+    end
+  end
+
   describe "#enqueue_all" do
     let(:second_job_id) { SecureRandom.uuid }
     let(:job2) { build_job_double(job_class: "OtherJob", queue_name: "default", job_id: second_job_id) }

@@ -81,16 +81,7 @@ module Pgbus
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
         active_job
       rescue StandardError => e
-        # Roll back the uniqueness lock if enqueue failed
-        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
-        if rollback_key
-          begin
-            Uniqueness.release_lock(rollback_key)
-          rescue StandardError => rollback_error
-            Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{rollback_error.message}" }
-          end
-          Thread.current[:pgbus_acquired_uniqueness_key] = nil
-        end
+        rollback_acquired_uniqueness_lock
         raise e
       end
 
@@ -110,12 +101,30 @@ module Pgbus
           )
         when :discard
           Pgbus.logger.info { "[Pgbus] Discarding job #{active_job.class.name}: concurrency limit for #{key}" }
-          # The job will never run, so it must not stay counted in its batch —
-          # a counted-but-never-signaled job leaves the batch processing forever.
+          # The job will never run: roll back an :until_executed uniqueness lock
+          # acquired earlier in this enqueue (no executor will release it), and
+          # uncount it from its batch so completion is not waited on forever.
+          rollback_acquired_uniqueness_lock
           uncount_batch_job(payload_hash)
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
         end
+      end
+
+      # Releases an :until_executed lock this enqueue acquired, if any.
+      # Used when the job is dropped before a message is sent (concurrency
+      # :discard, or send_message raising) — otherwise the lock is orphaned
+      # because no executor will ever release it.
+      def rollback_acquired_uniqueness_lock
+        rollback_key = Thread.current[:pgbus_acquired_uniqueness_key]
+        return unless rollback_key
+
+        begin
+          Uniqueness.release_lock(rollback_key)
+        rescue StandardError => e
+          Pgbus.logger.warn { "[Pgbus] Lock rollback failed: #{e.message}" }
+        end
+        Thread.current[:pgbus_acquired_uniqueness_key] = nil
       end
 
       def uniqueness_rejected?(active_job, payload_hash)
