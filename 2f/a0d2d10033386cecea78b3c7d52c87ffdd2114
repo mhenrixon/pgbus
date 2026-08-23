@@ -1,0 +1,21 @@
+lib/pgbus/web/job_context.rb
+  s_b379727b4542f4::t_05bb7c0d371490 44-45,48
+spec/pgbus/web/job_context_spec.rb
+  s_b379727b4542f4::t_05bb7c0d371490 38,48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2fa0d2d10033386cecea78b3c7d52c87ffdd2114",
+  "prompts": {},
+  "sessions": {
+    "s_b379727b4542f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a798ab3f-b54b-44ab-8a6f-0223a2dbc59b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
