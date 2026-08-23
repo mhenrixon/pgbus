@@ -1,0 +1,86 @@
+docs/app/views/docs/pages/event_bus.rb
+  s_69c413620baa86::t_1369ceb78dc209 16,136-171
+spec/pgbus/outbox_spec.rb
+  s_69c413620baa86::t_264fe4afe6ca15 4
+  s_69c413620baa86::t_71aa14ee2fa17f 109
+  s_69c413620baa86::t_04558026076634 63-71
+  s_69c413620baa86::t_20de0b559546c0 110-126
+config/locales/da.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+config/locales/es.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+config/locales/ja.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+lib/pgbus/event_bus/publisher.rb
+  s_69c413620baa86::t_f51928c656f02a 13,21-22,29,61-72
+lib/pgbus/event.rb
+  s_69c413620baa86::t_f51928c656f02a 7-11,13,19
+config/locales/nl.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+spec/pgbus/event_bus/handler_spec.rb
+  s_69c413620baa86::t_20de0b559546c0 60-112,114-115,117-125
+  s_69c413620baa86::t_71aa14ee2fa17f 113,116
+  s_69c413620baa86::t_264fe4afe6ca15 4
+spec/pgbus/event_spec.rb
+  s_69c413620baa86::t_71aa14ee2fa17f 39
+  s_69c413620baa86::t_20de0b559546c0 40-49
+config/locales/nb.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+config/locales/sv.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+lib/pgbus/testing.rb
+  s_69c413620baa86::t_f51928c656f02a 57-58
+config/locales/pt.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+spec/integration/event_current_attributes_spec.rb
+  s_69c413620baa86::t_6d75f5a2b3d772 1-27,29-119
+  s_69c413620baa86::t_7f9a128a893881 28
+spec/requests/pgbus/events_controller_spec.rb
+  s_69c413620baa86::t_c4a6c2f0d160d6 13-44
+lib/pgbus/event_bus/handler.rb
+  s_69c413620baa86::t_f51928c656f02a 46-49,94-99,103-104
+app/views/pgbus/events/_pending_table.html.erb
+  s_69c413620baa86::t_29327cdb81e016 105-125
+config/locales/en.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+spec/pgbus/testing/publisher_hook_spec.rb
+  s_69c413620baa86::t_264fe4afe6ca15 4
+  s_69c413620baa86::t_20de0b559546c0 90-125,127-152
+  s_69c413620baa86::t_98462306e9aa25 126
+config/locales/it.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+config/locales/fr.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+CHANGELOG.md
+  s_69c413620baa86::t_1369ceb78dc209 7-8
+docs/app/models/config_reference.rb
+  s_69c413620baa86::t_1369ceb78dc209 31
+config/locales/fi.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+lib/pgbus/outbox.rb
+  s_69c413620baa86::t_04558026076634 21-26
+  s_69c413620baa86::t_f51928c656f02a 28
+README.md
+  s_69c413620baa86::t_1369ceb78dc209 675-676
+config/locales/de.yml
+  s_69c413620baa86::t_29327cdb81e016 198
+spec/pgbus/event_bus/publisher_spec.rb
+  s_69c413620baa86::t_20de0b559546c0 127-172
+  s_69c413620baa86::t_264fe4afe6ca15 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "39078f69f7fddacfa51ada49b1ee622ff4285d59",
+  "prompts": {},
+  "sessions": {
+    "s_69c413620baa86": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b35826e-9b76-437f-b009-7dcfcf90e3d0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
