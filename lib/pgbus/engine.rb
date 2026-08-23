@@ -75,6 +75,7 @@ module Pgbus
         include Pgbus::Concurrency
         include Pgbus::Uniqueness
         include Pgbus::ActiveJob::BatchId
+        include Pgbus::ActiveJob::CurrentAttributes
       end
     end
 

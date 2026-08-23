@@ -131,6 +131,7 @@ es:
         total_label: mensajes en la cola de mensajes fallidos
       show:
         back: Volver a DLQ
+        context: Contexto
         discard: Descartar
         discard_confirm: "¿Descartar permanentemente?"
         headers: Encabezados
@@ -372,6 +373,7 @@ es:
       show:
         back: Volver a Trabajos
         backtrace: Rastreo de pila
+        context: Contexto
         discard: Descartar
         discard_confirm: "¿Descartar este trabajo permanentemente?"
         error_message: Mensaje de error

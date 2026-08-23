@@ -131,6 +131,7 @@ pt:
         total_label: mensagens na fila de mensagens mortas
       show:
         back: Voltar para DLQ
+        context: Contexto
         discard: Descartar
         discard_confirm: Descartar permanentemente?
         headers: Cabeçalhos
@@ -372,6 +373,7 @@ pt:
       show:
         back: Voltar para Trabalhos
         backtrace: Rastreamento de Pilha
+        context: Contexto
         discard: Descartar
         discard_confirm: Descartar este trabalho permanentemente?
         error_message: Mensagem de Erro

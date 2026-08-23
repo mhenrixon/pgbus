@@ -20,6 +20,37 @@ RSpec.describe "Pgbus::JobsController", type: :request do
     end
   end
 
+  describe "GET /pgbus/jobs/:id (issue #430 context card)" do
+    let(:base_event) do
+      { "id" => 7, "queue_name" => "default", "failed_at" => "2026-08-23 10:00", "error_class" => "RuntimeError",
+        "error_message" => "boom", "retry_count" => 1, "backtrace" => nil, "msg_id" => 99 }
+    end
+
+    it "renders a Context card from persisted Current attributes" do
+      payload = { "job_class" => "ReportJob", "arguments" => [],
+                  "pgbus_current" => { "Current" => { "tenant" => { "_aj_globalid" => "gid://app/Tenant/42" },
+                                                      "request_id" => "req-1", "_aj_symbol_keys" => %w[tenant request_id] } } }
+      @stub_data_source.failed_events_list = [base_event.merge("payload" => JSON.generate(payload))]
+
+      get "/pgbus/jobs/7"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include("Context")
+      expect(response.body).to include("Current")
+      expect(response.body).to include("gid://app/Tenant/42")
+      expect(response.body).to include("req-1")
+    end
+
+    it "renders no Context card when the payload has none" do
+      @stub_data_source.failed_events_list = [base_event.merge("payload" => JSON.generate("job_class" => "ReportJob"))]
+
+      get "/pgbus/jobs/7"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body).not_to include("data-testid=\"job-context\"")
+    end
+  end
+
   describe "POST /pgbus/jobs/:id/retry" do
     it "re-enqueues the failed job" do
       post "/pgbus/jobs/7/retry"

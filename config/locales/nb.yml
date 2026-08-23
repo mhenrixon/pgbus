@@ -131,6 +131,7 @@ nb:
         total_label: meldinger i dead letter-kø
       show:
         back: Tilbake til DLQ
+        context: Kontekst
         discard: Forkast
         discard_confirm: Forkaste permanent?
         headers: Overskrifter
@@ -372,6 +373,7 @@ nb:
       show:
         back: Tilbake til jobber
         backtrace: Tilbakekalling
+        context: Kontekst
         discard: Forkast
         discard_confirm: Slett denne jobben permanent?
         error_message: Feilmelding

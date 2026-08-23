@@ -12,6 +12,7 @@ class Views::Docs::Pages::ActiveJob < DocsUI::Page
     setup
     enqueueing
     lifecycle
+    current_attributes
     what_you_keep
   end
 
@@ -76,6 +77,63 @@ class Views::Docs::Pages::ActiveJob < DocsUI::Page
       md <<~'MD'
         The retry backoff and dead-letter details are on
         [Retries & dead letters](/docs/retries-dead-letters).
+      MD
+    end
+  end
+
+  def current_attributes
+    DocsUI::Section("Current attributes", description: "Request context travels with the job.") do
+      md <<~'MD'
+        `ActiveSupport::CurrentAttributes` (`Current.tenant`, `Current.user`,
+        `Current.request_id`) is reset around every job, so inside `perform` it is
+        empty — unless you ask pgbus to carry it. One switch:
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |config|
+          config.current_attributes = :auto                  # every ActiveSupport::CurrentAttributes subclass
+          # config.current_attributes = [Current, "Admin::Current"]          # or an explicit list
+          # config.current_attributes = { Current => { except: [:request] } } # or per-class only:/except:
+        end
+      RUBY
+      md <<~'MD'
+        At `perform_later` the assigned attributes of each persisted class are
+        serialized with `ActiveJob::Arguments` (a record becomes a GlobalID, a
+        Symbol stays a Symbol) into the job payload under `pgbus_current`. When the
+        job runs, pgbus wraps the **whole** `perform_now` in `Current.set(...)` —
+        so `before_perform`, `perform`, `rescue_from`, `retry_on` / `discard_on`
+        blocks and a job enqueued from inside `perform` all see the context, and
+        the previous values come back afterwards. Because it lives in the job
+        hash (not in pgbus metadata), it behaves the same under Rails' `:test` and
+        `:inline` adapters and a bare `job.perform_now`.
+      MD
+      DocsUI::Table(
+        [ "Path", "What the job sees" ],
+        [
+          [ [ :code, "retry_on" ], "The context captured at the original enqueue — a retry never picks up whatever Current happened to be during the failed attempt." ],
+          [ [ :code, "limits_concurrency on_conflict: :block" ], "Promotion re-sends the stored payload; context preserved." ],
+          [ "Dead-letter / dashboard retry", "Same payload, same context." ],
+          [ [ :code, "perform_all_later" ], "Every job tagged." ],
+          [ "Batch callbacks", "Captured from the job that finished the batch (they are enqueued from its executor)." ],
+          [ "Recurring tasks", "Nothing persisted — the scheduler has no request context." ]
+        ]
+      )
+      md <<~'MD'
+        **Safety.** GlobalIDs inside the context are gated by the same
+        `allowed_global_id_models` allowlist as job arguments. An attribute that
+        cannot be serialized (`Current.request` holding an `ActionDispatch::Request`,
+        say) raises `Pgbus::CurrentAttributesError` at `perform_later` naming the
+        class, the attribute and the `except:` fix — nothing is dropped silently.
+        Per job class: `self.pgbus_persist_current_attributes = false` (never persist)
+        or a list/hash in the config shapes (replace the list for this class).
+        Under `execution_mode: :async` remember `CurrentAttributes` is per isolation
+        unit — set `config.active_support.isolation_level = :fiber`
+        (see [Running workers](/docs/running-workers)).
+
+        The failed-job and dead-letter pages in the dashboard show the persisted
+        context in a **Context** card (through the same parameter filter as the
+        payload). Pairs naturally with
+        [fair share](/docs/routing-ordering): `config.fair_share = ->(job) { Current.tenant_id }`
+        now also sees the restored tenant on a retry re-enqueue.
       MD
     end
   end

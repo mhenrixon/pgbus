@@ -131,6 +131,7 @@ fr:
         total_label: messages dans la file de lettres mortes
       show:
         back: Retour à la DLQ
+        context: Contexte
         discard: Ignorer
         discard_confirm: Ignorer définitivement ?
         headers: En-têtes
@@ -372,6 +373,7 @@ fr:
       show:
         back: Retour aux travaux
         backtrace: Trace de la pile
+        context: Contexte
         discard: Ignorer
         discard_confirm: Supprimer ce travail définitivement ?
         error_message: Message d'erreur

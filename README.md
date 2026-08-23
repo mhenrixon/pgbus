@@ -659,6 +659,19 @@ end
 
 Weight 3 vs 1 yields a 3:1 split while both have work; a lone tenant still gets the whole worker. Composes with `priority_levels` (strict between levels, fair within) and `limits_concurrency`; mutually exclusive with `group_mode`. Workers build the supporting index `CONCURRENTLY` on queues they already serve. Details: [Routing & ordering](https://pgbus.zoolutions.llc/docs/routing-ordering).
 
+### Current attributes
+
+`ActiveSupport::CurrentAttributes` is reset around every job. Ask pgbus to carry it and `Current.tenant` / `Current.user` / `Current.request_id` are there inside `perform` — and inside `retry_on` / `discard_on` blocks, under the pgbus worker and Rails' `:test` / `:inline` adapters alike:
+
+```ruby
+Pgbus.configure do |config|
+  config.current_attributes = :auto   # or [Current, "Admin::Current"], or { Current => { except: [:request] } }
+  config.fair_share = ->(job) { Current.tenant&.id }   # pairs naturally with fair share
+end
+```
+
+Captured at enqueue via `ActiveJob::Arguments` (records become GlobalIDs, gated by `allowed_global_id_models`), preserved across retries, concurrency-blocked promotion, dead-letter retry and `perform_all_later`; an unserializable attribute raises at `perform_later` with the `except:` fix. The dashboard shows the context on failed-job and dead-letter pages. Details: [Active Job → Current attributes](https://pgbus.zoolutions.llc/docs/active-job).
+
 ### Consumer priority
 
 When multiple workers subscribe to the same queues, higher-priority workers process messages first. Lower-priority workers back off (3x polling interval) when a higher-priority worker is active.
@@ -2190,6 +2203,7 @@ Curated headline options for the README. The full operator reference (with types
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
 | `group_mode` | `nil` | Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise. |
 | `fair_share` | `nil` | Callable `->(job) { key \| [key, weight] \| nil }` evaluated at enqueue; workers interleave reads across keys (weighted, work-conserving). Mutually exclusive with `group_mode` |
+| `current_attributes` | `nil` | Persist `ActiveSupport::CurrentAttributes` across enqueue → perform: `:auto`, an Array of classes/names, or `{ Current => { except: [...] } }`. Restored around the whole `perform_now` |
 | `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |
 | `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |

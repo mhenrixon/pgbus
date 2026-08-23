@@ -49,6 +49,8 @@ module Pgbus
   # comes back with a msg_id count that doesn't match the number of jobs sent —
   # a data-integrity signal that some jobs may not have been persisted.
   class EnqueueError < Error; end
+  # A Current attribute could not be serialized for job persistence (issue #430).
+  class CurrentAttributesError < Error; end
 
   # Raised by the execution pools when work can't be accepted: the pool is
   # shutting down, or it's momentarily at capacity. Consumer-reachable during

@@ -1253,6 +1253,73 @@ RSpec.describe Pgbus::Configuration do
       end
     end
 
+    describe "current_attributes (issue #430)" do
+      it "is nil by default" do
+        expect(config.current_attributes).to be_nil
+      end
+
+      it "accepts :auto" do
+        config.current_attributes = :auto
+        expect(config.current_attributes).to eq(:auto)
+      end
+
+      it "normalizes an array of classes and strings to name specs" do
+        klass = Class.new(ActiveSupport::CurrentAttributes)
+        stub_const("SpecCurrent", klass)
+        config.current_attributes = [SpecCurrent, "Admin::Current"]
+        expect(config.current_attributes).to eq([
+                                                  { name: "SpecCurrent", only: nil, except: nil },
+                                                  { name: "Admin::Current", only: nil, except: nil }
+                                                ])
+      end
+
+      it "normalizes a hash with only:/except: filters (symbols or strings)" do
+        config.current_attributes = { "Current" => { except: [:request, "session"] }, "Admin::Current" => { only: [:admin_id] } }
+        expect(config.current_attributes).to eq([
+                                                  { name: "Current", only: nil, except: %i[request session] },
+                                                  { name: "Admin::Current", only: [:admin_id], except: nil }
+                                                ])
+      end
+
+      it "accepts an empty filter hash" do
+        config.current_attributes = { "Current" => {} }
+        expect(config.current_attributes).to eq([{ name: "Current", only: nil, except: nil }])
+      end
+
+      it "accepts nil to disable" do
+        config.current_attributes = :auto
+        config.current_attributes = nil
+        expect(config.current_attributes).to be_nil
+      end
+
+      it "rejects unknown symbols" do
+        expect { config.current_attributes = :all }.to raise_error(Pgbus::ConfigurationError, /current_attributes/)
+      end
+
+      it "rejects non-class/string entries" do
+        expect { config.current_attributes = [42] }.to raise_error(Pgbus::ConfigurationError, /current_attributes/)
+      end
+
+      it "rejects unknown filter keys" do
+        expect { config.current_attributes = { "Current" => { skip: [:x] } } }
+          .to raise_error(Pgbus::ConfigurationError, /only.*except/)
+      end
+
+      it "rejects non-array filter values" do
+        expect { config.current_attributes = { "Current" => { only: :x } } }
+          .to raise_error(Pgbus::ConfigurationError, /only/)
+      end
+
+      it "rejects both only: and except: on one class" do
+        expect { config.current_attributes = { "Current" => { only: [:a], except: [:b] } } }
+          .to raise_error(Pgbus::ConfigurationError, /only.*except/)
+      end
+
+      it "rejects other types" do
+        expect { config.current_attributes = "Current" }.to raise_error(Pgbus::ConfigurationError, /current_attributes/)
+      end
+    end
+
     it "accepts :options and :session for connection_guc_mode" do
       config.connection_guc_mode = :session
       expect { config.validate! }.not_to raise_error

@@ -78,6 +78,13 @@ module Pgbus
     # keys within each queue. Mutually exclusive with group_mode.
     attr_reader :fair_share
 
+    # Persist ActiveSupport::CurrentAttributes across enqueue → perform
+    # (issue #430). nil = off (default). :auto = every CurrentAttributes
+    # subclass; an Array of classes/names; or a Hash of class/name =>
+    # { only: [...] } / { except: [...] }. Normalized to :auto or an Array of
+    # { name:, only:, except: } specs (classes are resolved lazily by name).
+    attr_reader :current_attributes
+
     # Archive compaction. Only the user-facing retention window is configurable;
     # the loop interval and batch size are tuned via constants on
     # Pgbus::Process::Dispatcher.
@@ -277,6 +284,7 @@ module Pgbus
       @default_priority = 1
       @group_mode = nil
       @fair_share = nil
+      @current_attributes = nil
 
       @archive_retention = 7 * 24 * 3600 # 7 days
       @batch_retention = 7 * 24 * 3600 # 7 days
@@ -615,6 +623,10 @@ module Pgbus
       end
 
       @group_mode = coerced
+    end
+
+    def current_attributes=(value)
+      @current_attributes = Pgbus::CurrentAttributes.normalize(value)
     end
 
     def fair_share=(callable)

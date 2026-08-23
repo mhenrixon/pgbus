@@ -131,6 +131,7 @@ fi:
         total_label: viestiä dead letter -jonossa
       show:
         back: Takaisin DLQ:hon
+        context: Konteksti
         discard: Hylkää
         discard_confirm: Hylätään pysyvästi?
         headers: Otsikot
@@ -372,6 +373,7 @@ fi:
       show:
         back: Takaisin töihin
         backtrace: Takautumisketju
+        context: Konteksti
         discard: Hylkää
         discard_confirm: Hylkää tämä työ pysyvästi?
         error_message: Virheilmoitus

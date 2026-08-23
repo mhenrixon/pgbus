@@ -131,6 +131,7 @@ it:
         total_label: messaggi nella coda dei messaggi non recapitati
       show:
         back: Torna a DLQ
+        context: Contesto
         discard: Scarta
         discard_confirm: Scartare definitivamente?
         headers: Intestazioni
@@ -372,6 +373,7 @@ it:
       show:
         back: Torna ai Lavori
         backtrace: Traccia dello stack
+        context: Contesto
         discard: Scarta
         discard_confirm: Scartare definitivamente questo lavoro?
         error_message: Messaggio di errore
