@@ -10,7 +10,7 @@ module Pgbus
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
-        payload_hash = inject_batch_metadata(payload_hash)
+        payload_hash = inject_batch_metadata(payload_hash, active_job: active_job)
 
         if uniqueness_rejected?(active_job, payload_hash, queue: queue)
           uncount_batch_job(payload_hash)
@@ -25,7 +25,7 @@ module Pgbus
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
-        payload_hash = inject_batch_metadata(payload_hash)
+        payload_hash = inject_batch_metadata(payload_hash, active_job: active_job)
         delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
         if uniqueness_rejected?(active_job, payload_hash, queue: queue)
@@ -67,6 +67,7 @@ module Pgbus
         concurrency = concurrency_config(active_job)
         priority = active_job.try(:priority)
         msg_id = nil
+        blocked = false
 
         if key && concurrency
           result = Concurrency::Semaphore.acquire(key, concurrency[:limit], concurrency[:duration])
@@ -75,7 +76,7 @@ module Pgbus
             msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
             active_job.provider_job_id = msg_id
           else
-            handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: priority)
+            blocked = handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: priority)
           end
         else
           msg_id = Pgbus.client.send_message(queue, payload_hash, delay: delay, priority: priority)
@@ -86,6 +87,9 @@ module Pgbus
         # uniqueness row if execution-row bookkeeping raises.
         bind_acquired_uniqueness_lock(queue, msg_id) if msg_id
         Batch.backfill_execution(payload_hash, msg_id, physical_queue(queue, priority)) if msg_id
+        # A retry re-enqueue that is now live (sent, or parked as a blocked
+        # execution) must stop the original attempt from signalling completion.
+        Batch.note_retry_reenqueued(payload_hash["job_id"]) if (msg_id || blocked) && retry_retagged?(payload_hash)
         uniqueness_key = Thread.current[:pgbus_acquired_uniqueness_key]
         UniquenessKey.clear_bind_stamp!(uniqueness_key) if uniqueness_key
         Thread.current[:pgbus_acquired_uniqueness_key] = nil
@@ -111,7 +115,9 @@ module Pgbus
         active_job.class.respond_to?(:pgbus_concurrency) && active_job.class.pgbus_concurrency
       end
 
-      def handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: nil)
+      # Returns true when the job was parked as a blocked execution (it will
+      # run later), false when it was dropped.
+      def handle_conflict(concurrency, active_job, key, queue, payload_hash, priority: nil) # rubocop:disable Naming/PredicateMethod
         case concurrency[:on_conflict]
         when :block
           Concurrency::BlockedExecution.insert(
@@ -121,6 +127,7 @@ module Pgbus
             priority: priority || Pgbus.configuration.default_priority,
             duration: concurrency[:duration]
           )
+          return true
         when :discard
           Pgbus.logger.info { "[Pgbus] Discarding job #{active_job.class.name}: concurrency limit for #{key}" }
           # The job will never run: roll back an :until_executed uniqueness lock
@@ -131,6 +138,7 @@ module Pgbus
         when :raise
           raise ConcurrencyLimitExceeded, "Concurrency limit reached for key: #{key}"
         end
+        false
       end
 
       # Releases an :until_executed lock this enqueue acquired, if any.
@@ -202,21 +210,52 @@ module Pgbus
       # never sent, so it can never signal completion. Only applies while the
       # tagging batch's block is still active on this thread.
       def uncount_batch_job(payload_hash)
-        return unless payload_hash[Batch::METADATA_KEY] &&
-                      payload_hash[Batch::METADATA_KEY] == Thread.current[:pgbus_batch_id]
+        batch_id = payload_hash[Batch::METADATA_KEY]
+        return unless batch_id
 
-        Batch.untrack_enqueue(payload_hash)
+        if batch_id == Thread.current[:pgbus_batch_id]
+          Batch.untrack_enqueue(payload_hash)
+        elsif retry_retagged?(payload_hash)
+          # The retry never became live; the original attempt's row and its
+          # normal completion signal stand.
+          Batch.forget_retry_reenqueued(payload_hash["job_id"])
+        end
+      end
+
+      # Tagged for a batch while no Batch#enqueue block is active on this
+      # thread — only a retry_on re-enqueue gets there (issue #424).
+      def retry_retagged?(payload_hash)
+        payload_hash[Batch::METADATA_KEY] && Thread.current[:pgbus_batch_id].nil?
+      end
+
+      # A retry_on re-enqueue of a job that is already a batch member: same
+      # job_id (executions > 0), batch_id carried by the BatchId mixin. It
+      # rejoins its batch without being counted again. A first-attempt job
+      # that merely has a batch_id outside a block is NOT tagged — membership
+      # stays explicit; only the callback_batch_id never re-tags.
+      def retry_batch_id_for(active_job)
+        return nil unless active_job.respond_to?(:batch_id)
+        return nil unless active_job.executions.to_i.positive?
+
+        active_job.batch_id
       end
 
       # Tag the payload with the active batch and count it in (guarded
       # increment + execution row, before the send — Batch.track_enqueue). Pass
       # track: false to only tag, when the caller counts a bulk once.
-      def inject_batch_metadata(payload_hash, track: true)
+      def inject_batch_metadata(payload_hash, active_job: nil, track: true)
         batch_id = Thread.current[:pgbus_batch_id]
-        return payload_hash unless batch_id
+        if batch_id
+          tagged = payload_hash.merge(Batch::METADATA_KEY => batch_id)
+          Batch.track_enqueue(tagged) if track
+          return tagged
+        end
 
-        tagged = payload_hash.merge(Batch::METADATA_KEY => batch_id)
-        Batch.track_enqueue(tagged) if track
+        retry_batch_id = active_job && retry_batch_id_for(active_job)
+        return payload_hash unless retry_batch_id
+
+        tagged = payload_hash.merge(Batch::METADATA_KEY => retry_batch_id)
+        Batch.track_retry(tagged)
         tagged
       end
 

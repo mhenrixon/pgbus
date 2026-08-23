@@ -45,6 +45,30 @@ RSpec.describe Pgbus::ActiveJob::Executor do
 
         expect(job_double).to have_received(:batch_id=).with("b-1")
       end
+
+      # Issue #424: retry_on re-enqueues from inside perform_now and returns
+      # normally; the original message is archived but must NOT signal
+      # completion — the retry message carries the tag and signals instead.
+      it "skips the completion signal when the job re-enqueued itself for retry" do
+        allow(job_double).to receive(:perform_now) { Pgbus::Batch.note_retry_reenqueued(job_id) }
+        allow(Pgbus::Concurrency).to receive(:extract_key).and_return("k")
+        allow(Pgbus::Concurrency::BlockedExecution).to receive(:promote_next).and_return(false)
+        allow(Pgbus::Concurrency::Semaphore).to receive(:release)
+
+        result = executor.execute(message, queue_name)
+
+        expect(result).to eq(:success)
+        expect(mock_client).to have_received(:archive_message)
+        expect(Pgbus::Batch).not_to have_received(:job_completed)
+        expect(Pgbus::Concurrency::Semaphore).to have_received(:release).with("k")
+        expect(Pgbus::Batch.retry_reenqueued?(job_id)).to be(false)
+      end
+
+      it "still signals completion when the job did not re-enqueue" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::Batch).to have_received(:job_completed).with("b-1", job_id: job_id)
+      end
     end
 
     context "when job succeeds" do

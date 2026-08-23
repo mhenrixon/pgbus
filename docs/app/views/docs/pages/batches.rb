@@ -165,7 +165,10 @@ class Views::Docs::Pages::Batches < DocsUI::Page
         3. As each job is archived or dead-lettered, the executor deletes that
            execution row and bumps `completed_jobs` / `failed_jobs`.
            `total_jobs == outstanding rows + completed + failed` holds at every
-           commit point.
+           commit point. A job that re-enqueues itself with `retry_on` keeps
+           its single row across every attempt — the batch waits for the
+           terminal outcome, so `on_success` cannot fire while a retry is
+           pending and `on_failure` fires if the retries exhaust.
         4. The batch finishes when no execution rows remain and the counters
            add up (single-winner update). A dispatcher sweep repairs crash
            windows — a worker that dies between archive and row-delete, an

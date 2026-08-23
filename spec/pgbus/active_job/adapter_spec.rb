@@ -84,6 +84,59 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
   end
 
+  describe "#enqueue of a retry_on re-enqueue outside any batch block (issue #424)" do
+    before do
+      allow(Pgbus::Batch).to receive(:track_retry)
+      allow(Pgbus::Batch).to receive(:track_enqueue)
+      allow(Pgbus::Batch).to receive(:note_retry_reenqueued)
+      allow(mock_client).to receive(:send_message).and_return(9)
+    end
+
+    it "re-tags a retry into its batch without counting it and remembers it re-enqueued" do
+      allow(job).to receive_messages(batch_id: "b-1", executions: 1)
+
+      adapter.enqueue(job)
+
+      tagged = serialized_hash.merge(Pgbus::Batch::METADATA_KEY => "b-1")
+      expect(Pgbus::Batch).to have_received(:track_retry).with(tagged)
+      expect(Pgbus::Batch).not_to have_received(:track_enqueue)
+      expect(mock_client).to have_received(:send_message).with("default", tagged, delay: 0, priority: nil)
+      expect(Pgbus::Batch).to have_received(:note_retry_reenqueued).with(job_id)
+    end
+
+    it "leaves a first-attempt job with a batch_id alone — membership stays explicit" do
+      allow(job).to receive_messages(batch_id: "b-1", executions: 0)
+
+      adapter.enqueue(job)
+
+      expect(Pgbus::Batch).not_to have_received(:track_retry)
+      expect(mock_client).to have_received(:send_message).with("default", serialized_hash, delay: 0, priority: nil)
+    end
+
+    it "does not re-tag a job that only reports on a batch (callback_batch_id)" do
+      allow(job).to receive_messages(batch_id: nil, callback_batch_id: "b-1", executions: 1)
+
+      adapter.enqueue(job)
+
+      expect(Pgbus::Batch).not_to have_received(:track_retry)
+    end
+
+    it "does not remember a retry that was discarded at the concurrency limit" do
+      allow(job).to receive_messages(batch_id: "b-1", executions: 1)
+      allow(job).to receive(:class).and_return(concurrency_job_class)
+      allow(concurrency_job_class).to receive(:pgbus_concurrency).and_return(concurrency_config.merge(on_conflict: :discard))
+      allow(Pgbus::Concurrency).to receive_messages(inject_metadata: concurrency_payload, extract_key: "TestJob-42")
+      allow(Pgbus::Concurrency::Semaphore).to receive(:acquire).and_return(:blocked)
+      allow(Pgbus::Batch).to receive(:forget_retry_reenqueued)
+
+      adapter.enqueue(job)
+
+      expect(mock_client).not_to have_received(:send_message)
+      expect(Pgbus::Batch).not_to have_received(:note_retry_reenqueued)
+      expect(Pgbus::Batch).to have_received(:forget_retry_reenqueued).with(job_id)
+    end
+  end
+
   describe "#enqueue_at" do
     it "calculates delay and sends message with delay parameter" do
       future_time = Time.now.to_f + 60

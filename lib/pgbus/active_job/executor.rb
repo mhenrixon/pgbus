@@ -72,6 +72,7 @@ module Pgbus
 
         Pgbus.logger.debug { "[Pgbus::Executor] deserialized #{tag} job_class=#{job_class}" }
         job_succeeded = false
+        retried = false
 
         msg_id = message.msg_id.to_i
         instrument_payload = {
@@ -96,6 +97,10 @@ module Pgbus
           assign_batch_id(job, payload)
           Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
           execute_job(job)
+          # retry_on re-enqueues from inside perform_now and returns normally:
+          # this attempt is done (archive it) but the job is not — the retry
+          # message carries the batch tag and signals on its own outcome.
+          retried = Batch.retry_reenqueued?(payload["job_id"])
           Pgbus.logger.debug { "[Pgbus::Executor] perform_returned #{tag} job_class=#{job_class}" }
           archive_from(queue_name, msg_id, source_queue: source_queue)
           Pgbus.logger.debug { "[Pgbus::Executor] archived #{tag} job_class=#{job_class}" }
@@ -147,8 +152,9 @@ module Pgbus
           # key-only DELETE here can drop a successor that acquired the same
           # key if the first DELETE committed but the client raised afterward.
           signal_concurrency(payload)
-          signal_batch_completed(payload)
+          signal_batch_completed(payload) unless retried
         end
+        Batch.clear_retry_reenqueued
       end
 
       private
