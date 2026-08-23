@@ -137,6 +137,11 @@ class Views::Docs::Pages::FromSidekiq < DocsUI::Page
         - **Argument serialization** — Sidekiq passes raw JSON; ActiveJob uses
           GlobalID for Active Record objects. Passing ids (`user.id`) behaves the
           same; passing records (`user`) serializes via GlobalID automatically.
+        - **`Sidekiq::CurrentAttributes.persist("Current")`** — becomes
+          `config.current_attributes = :auto` (or an explicit list / per-class
+          `only:`/`except:`); see [Current attributes](/docs/active-job). The
+          context is restored around the whole `perform_now`, including
+          `retry_on` / `discard_on` blocks.
         - **`Sidekiq.redis { ... }`** — if you used Sidekiq's Redis for custom
           locks or caching, move to PostgreSQL advisory locks or another store.
         - **Queue priority** — Sidekiq uses queue weights; pgbus processes queues in
