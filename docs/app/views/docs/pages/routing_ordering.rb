@@ -107,6 +107,10 @@ class Views::Docs::Pages::RoutingOrdering < DocsUI::Page
         sorts by when it became visible again rather than by its original position —
         a deliberate trade so a tenant's whole backlog is never sorted per read.
         See `docs/performance.md` for the before/after numbers.
+
+        **Events too.** `config.event_fair_share = ->(event) { … }` applies the
+        same read to event-bus consumers — the key is resolved at publish time
+        and rides in the event envelope. See [Event bus](/docs/event-bus).
       MD
     end
   end

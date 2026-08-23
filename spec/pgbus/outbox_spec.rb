@@ -57,6 +57,8 @@ RSpec.describe Pgbus::Outbox do
       )
     end
 
+    after { Pgbus.configuration.event_fair_share = nil }
+
     it "creates an outbox entry with routing_key" do
       described_class.publish_event("orders.created", { "id" => 42 })
 
@@ -65,6 +67,34 @@ RSpec.describe Pgbus::Outbox do
         payload: { "event_id" => "uuid", "payload" => { "data" => 1 }, "published_at" => "2026-01-01" },
         headers: nil
       )
+    end
+
+    it "tags the stored envelope when config.event_fair_share is set (issue #427)" do
+      Pgbus.configuration.event_fair_share = ->(e) { [e.payload["tenant_id"], 2] }
+
+      described_class.publish_event("orders.created", { "tenant_id" => 7 })
+
+      expect(Pgbus::OutboxEntry).to have_received(:create!).with(
+        routing_key: "orders.created",
+        payload: { "event_id" => "uuid", "payload" => { "data" => 1 }, "published_at" => "2026-01-01",
+                   "pgbus_fair_key" => "7", "pgbus_fair_weight" => 2 },
+        headers: nil
+      )
+    end
+
+    it "hands the callable an Event with the routing_key (it is not in the stored envelope)" do
+      seen = nil
+      Pgbus.configuration.event_fair_share = lambda { |e|
+        seen = e
+        "t"
+      }
+
+      described_class.publish_event("orders.created", { "tenant_id" => 7 }, headers: { "h" => 1 })
+
+      expect(seen.routing_key).to eq("orders.created")
+      expect(seen.payload).to eq("tenant_id" => 7)
+      expect(seen.headers).to eq("h" => 1)
+      expect(seen.event_id).to eq("uuid")
     end
   end
 end

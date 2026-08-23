@@ -1253,6 +1253,40 @@ RSpec.describe Pgbus::Configuration do
       end
     end
 
+    describe "event_fair_share (issue #427)" do
+      it "is nil by default" do
+        expect(config.event_fair_share).to be_nil
+      end
+
+      it "accepts a lambda" do
+        callable = ->(event) { event.routing_key.to_s }
+        config.event_fair_share = callable
+        expect(config.event_fair_share).to eq(callable)
+      end
+
+      it "accepts any object responding to #call" do
+        resolver = Class.new { def call(_event) = "tenant" }.new
+        config.event_fair_share = resolver
+        expect(config.event_fair_share).to eq(resolver)
+      end
+
+      it "accepts nil to disable" do
+        config.event_fair_share = ->(_e) { "x" }
+        config.event_fair_share = nil
+        expect(config.event_fair_share).to be_nil
+      end
+
+      it "rejects a non-callable" do
+        expect { config.event_fair_share = "tenant" }.to raise_error(Pgbus::ConfigurationError, /event_fair_share/)
+      end
+
+      it "validate! accepts event_fair_share combined with group_mode (group_mode is worker-only)" do
+        config.event_fair_share = ->(_e) { "x" }
+        config.group_mode = :round_robin
+        expect { config.validate! }.not_to raise_error
+      end
+    end
+
     describe "current_attributes (issue #430)" do
       it "is nil by default" do
         expect(config.current_attributes).to be_nil

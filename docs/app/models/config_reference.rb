@@ -27,6 +27,7 @@ module ConfigReference
       { name: "default_priority", type: "Integer", default: "1", desc: "Priority for jobs without an explicit one." },
       { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise." },
       { name: "fair_share", type: "#call, nil", default: "nil", desc: "Callable receiving the ActiveJob at enqueue; returns a key, [key, weight], or nil. Workers then interleave reads across keys (weighted, work-conserving). Mutually exclusive with group_mode." },
+      { name: "event_fair_share", type: "#call, nil", default: "nil", desc: "Event-bus twin of fair_share: callable receiving the Pgbus::Event at publish (routing_key, payload, headers); returns a key, [key, weight], or nil. The key rides in the event envelope and consumers interleave reads across keys within each subscriber queue. Independent of fair_share." },
       { name: "current_attributes", type: "Symbol, Array, Hash, nil", default: "nil", desc: "Persist ActiveSupport::CurrentAttributes across enqueue → perform: :auto (every subclass), an Array of classes/names, or a Hash of class => { only: }/{ except: }. Restored around the whole perform_now." }
     ],
     "Workers" => [

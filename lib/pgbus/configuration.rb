@@ -78,6 +78,14 @@ module Pgbus
     # keys within each queue. Mutually exclusive with group_mode.
     attr_reader :fair_share
 
+    # Fair share for event-bus consumers (issue #427). nil = disabled. Any
+    # #call-able receiving the Pgbus::Event at publish time (routing_key,
+    # payload as passed to publish, headers) and returning nil, a key, or
+    # [key, weight] exactly like fair_share. The key rides in the event
+    # envelope and consumers read subscriber queues with
+    # Client#read_batch_fair. Independent of fair_share (jobs).
+    attr_reader :event_fair_share
+
     # Persist ActiveSupport::CurrentAttributes across enqueue → perform
     # (issue #430). nil = off (default). :auto = every CurrentAttributes
     # subclass; an Array of classes/names; or a Hash of class/name =>
@@ -284,6 +292,7 @@ module Pgbus
       @default_priority = 1
       @group_mode = nil
       @fair_share = nil
+      @event_fair_share = nil
       @current_attributes = nil
 
       @archive_retention = 7 * 24 * 3600 # 7 days
@@ -636,6 +645,15 @@ module Pgbus
       end
 
       @fair_share = callable
+    end
+
+    def event_fair_share=(callable)
+      unless callable.nil? || callable.respond_to?(:call)
+        raise Pgbus::ConfigurationError,
+              "event_fair_share must be nil or respond to #call (got #{callable.class})"
+      end
+
+      @event_fair_share = callable
     end
 
     VALID_CONNECTION_GUC_MODES = %i[options session].freeze

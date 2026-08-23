@@ -754,6 +754,99 @@ RSpec.describe Pgbus::Process::Consumer do
     end
   end
 
+  describe "fair share for consumers (issue #427)" do
+    let(:consumer) { described_class.new(topics: ["orders.#"], queue_names: %w[q_orders q_payments]) }
+    let(:orders_msgs) { [build_message_double(msg_id: 1), build_message_double(msg_id: 2)] }
+    let(:payments_msgs) { [build_message_double(msg_id: 3)] }
+
+    before do
+      Pgbus.configuration.event_fair_share = ->(_event) { "tenant" }
+      allow(mock_client).to receive(:ensure_fair_index)
+      allow(mock_client).to receive(:read_batch_fair) do |queue, **_kwargs|
+        case queue
+        when "q_orders" then orders_msgs
+        when "q_payments" then payments_msgs
+        else []
+        end
+      end
+    end
+
+    after { Pgbus.configuration.event_fair_share = nil }
+
+    it "fair-reads each active queue in list order with the remaining capacity" do
+      results = consumer.send(:fetch_messages, 5)
+
+      expect(mock_client).to have_received(:read_batch_fair).with("q_orders", qty: 5).ordered
+      expect(mock_client).to have_received(:read_batch_fair).with("q_payments", qty: 3).ordered
+      expect(mock_client).not_to have_received(:read_multi)
+      expect(mock_client).not_to have_received(:read_batch)
+      expect(results).to eq([["q_orders", orders_msgs[0]], ["q_orders", orders_msgs[1]], ["q_payments", payments_msgs[0]]])
+    end
+
+    it "stops reading once capacity is filled" do
+      consumer.send(:fetch_messages, 2)
+
+      expect(mock_client).to have_received(:read_batch_fair).with("q_orders", qty: 2)
+      expect(mock_client).not_to have_received(:read_batch_fair).with("q_payments", qty: anything)
+    end
+
+    it "uses the fair read on the single-queue path too" do
+      single = described_class.new(topics: ["orders.#"], queue_names: %w[q_orders])
+      single.send(:fetch_messages, 4)
+
+      expect(mock_client).to have_received(:read_batch_fair).with("q_orders", qty: 4)
+      expect(mock_client).not_to have_received(:read_batch)
+    end
+
+    it "skips queues paused by the circuit breaker" do
+      allow(consumer.circuit_breaker).to receive(:paused?) { |q| q == "q_orders" }
+
+      consumer.send(:fetch_messages, 5)
+
+      expect(mock_client).not_to have_received(:read_batch_fair).with("q_orders", qty: anything)
+      expect(mock_client).to have_received(:read_batch_fair).with("q_payments", qty: 5)
+    end
+
+    it "does not fair-read when only config.fair_share (jobs) is set" do
+      Pgbus.configuration.event_fair_share = nil
+      Pgbus.configuration.fair_share = ->(_job) { "tenant" }
+
+      consumer.send(:fetch_messages, 5)
+
+      expect(mock_client).not_to have_received(:read_batch_fair)
+      expect(mock_client).to have_received(:read_multi)
+    ensure
+      Pgbus.configuration.fair_share = nil
+    end
+
+    it "ensures the fair index for every subscriber queue it reads" do
+      consumer.send(:ensure_fair_indexes)
+
+      expect(mock_client).to have_received(:ensure_fair_index).with("q_orders")
+      expect(mock_client).to have_received(:ensure_fair_index).with("q_payments")
+    end
+
+    it "ensures nothing when event fair share is off" do
+      Pgbus.configuration.event_fair_share = nil
+
+      consumer.send(:ensure_fair_indexes)
+
+      expect(mock_client).not_to have_received(:ensure_fair_index)
+    end
+
+    it "ensures the indexes on run, after subscriptions are resolved" do
+      allow(registry).to receive(:queue_names_for_topics).with(["orders.#"]).and_return(%w[q_orders])
+      runner = described_class.new(topics: ["orders.#"])
+      allow(runner).to receive(:setup_signals)
+      allow(runner).to receive(:consume) { runner.graceful_shutdown }
+      allow(runner).to receive(:shutdown)
+
+      runner.run
+
+      expect(mock_client).to have_received(:ensure_fair_index).with("q_orders")
+    end
+  end
+
   # StatBuffer parity: the consumer records success / failure / DLQ outcomes
   # and flushes at drain entry, on recycle, and on stop, mirroring Worker.
   describe "stat buffer (issue #274)" do

@@ -13,6 +13,10 @@ module Pgbus
 
       def setup!
         Pgbus.client.ensure_queue(queue_name)
+        # Subscriber queues are created here, not by a worker, so this is their
+        # creation hook for the fair-share index (issue #427). Idempotent and
+        # memoized per process; instant on a fresh table, CONCURRENTLY otherwise.
+        Pgbus.client.ensure_fair_index(queue_name) if FairShare.event_enabled?
         Pgbus.client.bind_topic(pattern, queue_name)
       end
 
