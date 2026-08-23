@@ -19,6 +19,91 @@ RSpec.describe Pgbus::Batch::Sweep do
     expect(described_class::STALL_THRESHOLD).to eq(300)
   end
 
+  describe ".start_stalled_pending (issue #423)" do
+    let(:record) { double("BatchEntry", batch_id: "p1") }
+    let(:pending_scope) { double("pending_scope") }
+    let(:flip) { double("flip", update_all: 1) }
+
+    before do
+      allow(Pgbus::BatchEntry).to receive(:pending).and_return(pending_scope)
+      allow(pending_scope).to receive(:where).and_return(pending_scope)
+      allow(pending_scope).to receive(:find_each).and_yield(record)
+      allow(Pgbus::BatchEntry).to receive(:where).with(batch_id: "p1", status: "pending").and_return(flip)
+      allow(Pgbus::Batch).to receive(:try_finish!).and_return({ just_finished: false, record: nil })
+    end
+
+    it "flips pending to processing without recomputing total_jobs (the jobs counted themselves)" do
+      described_class.send(:start_stalled_pending, stalled_for: 300, batch_size: 50)
+
+      expect(flip).to have_received(:update_all).with(status: "processing")
+      expect(flip).not_to have_received(:update_all).with(hash_including(:total_jobs))
+      expect(Pgbus::Batch).to have_received(:try_finish!).with("p1")
+    end
+
+    it "only treats a batch as stalled when no execution row was inserted within the threshold" do
+      described_class.send(:start_stalled_pending, stalled_for: 300, batch_size: 50)
+
+      expect(pending_scope).to have_received(:where).with("created_at < ?", anything)
+      expect(pending_scope).to have_received(:where)
+        .with(a_string_matching(/NOT EXISTS.*pgbus_batch_executions.*created_at >= /m), anything)
+    end
+  end
+
+  describe ".sweep_orphan_rows (issue #423)" do
+    let(:client) { double("client") }
+    let(:row) { double("BatchExecution", id: 9, batch_id: "b1", job_id: "j1", queue_name: "default") }
+    let(:relation) { double("relation") }
+
+    before do
+      allow(Pgbus::BatchExecution).to receive(:where).with(msg_id: nil).and_return(relation)
+      allow(relation).to receive(:where).and_return(relation)
+      allow(relation).to receive(:find_each).and_yield(row)
+      allow(described_class).to receive(:blocked_job_ids).and_return(Set.new)
+      allow(client).to receive(:dead_letter_physical_name).with("default").and_return("pgbus_test_default_dlq")
+      allow(Pgbus::Batch).to receive_messages(job_discarded: nil, try_finish!: { just_finished: false, record: nil })
+      allow(Pgbus::BatchEntry).to receive(:decrement_total_jobs!)
+    end
+
+    it "keeps a row whose message is still on its queue" do
+      allow(client).to receive(:message_with_job_id?).with("default", job_id: "j1").and_return(true)
+
+      swept = described_class.send(:sweep_orphan_rows, stalled_for: 300, batch_size: 50, client: client)
+
+      expect(swept).to eq(0)
+      expect(Pgbus::BatchEntry).not_to have_received(:decrement_total_jobs!)
+    end
+
+    it "keeps a row when the queue probe is inconclusive" do
+      allow(client).to receive(:message_with_job_id?).with("default", job_id: "j1").and_return(nil)
+
+      described_class.send(:sweep_orphan_rows, stalled_for: 300, batch_size: 50, client: client)
+
+      expect(Pgbus::BatchEntry).not_to have_received(:decrement_total_jobs!)
+    end
+
+    it "resolves a row as failed when its message sits in the DLQ" do
+      allow(client).to receive(:message_with_job_id?).with("default", job_id: "j1").and_return(false)
+      allow(client).to receive(:message_with_job_id?).with("pgbus_test_default_dlq", job_id: "j1").and_return(true)
+
+      described_class.send(:sweep_orphan_rows, stalled_for: 300, batch_size: 50, client: client)
+
+      expect(Pgbus::Batch).to have_received(:job_discarded).with("b1", job_id: "j1")
+      expect(Pgbus::BatchEntry).not_to have_received(:decrement_total_jobs!)
+    end
+
+    it "un-counts a row only when the message exists nowhere" do
+      allow(client).to receive(:message_with_job_id?).and_return(false)
+      cas = double("cas", delete_all: 1)
+      allow(Pgbus::BatchExecution).to receive(:where).with(id: 9, msg_id: nil).and_return(cas)
+
+      swept = described_class.send(:sweep_orphan_rows, stalled_for: 300, batch_size: 50, client: client)
+
+      expect(swept).to eq(1)
+      expect(Pgbus::BatchEntry).to have_received(:decrement_total_jobs!).with("b1")
+      expect(Pgbus::Batch).to have_received(:try_finish!).with("b1")
+    end
+  end
+
   describe ".finish_stalled_processing" do
     it "skips a processing batch whose counters are not terminal" do
       record = double("BatchEntry", batch_id: "legacy", total_jobs: 3, completed_jobs: 0, discarded_jobs: 0)

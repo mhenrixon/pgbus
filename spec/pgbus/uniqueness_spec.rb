@@ -408,4 +408,27 @@ RSpec.describe Pgbus::Uniqueness do
       expect(described_class.resolve_key(PlainJob.new)).to be_nil
     end
   end
+
+  describe ".acquire_execution_lock (issue #423)" do
+    let(:payload) { { "pgbus_uniqueness_strategy" => "while_executing", "queue_name" => "default" } }
+
+    it "binds the lock to the executing message and asks to re-acquire its own previous attempt" do
+      described_class.acquire_execution_lock("k", payload, msg_id: 42, queue_name: "critical")
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with("k", queue_name: "critical", msg_id: 42, reacquire_same_message: true)
+    end
+
+    it "falls back to an unbound placeholder when no message is given" do
+      described_class.acquire_execution_lock("k", payload)
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with("k", queue_name: "default", msg_id: 0, reacquire_same_message: false)
+    end
+
+    it "is a no-op for strategies other than :while_executing" do
+      expect(described_class.acquire_execution_lock("k", { "pgbus_uniqueness_strategy" => "until_executed" }, msg_id: 1)).to be(true)
+      expect(Pgbus::UniquenessKey).not_to have_received(:acquire!)
+    end
+  end
 end

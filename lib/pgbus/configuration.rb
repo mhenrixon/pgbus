@@ -77,7 +77,9 @@ module Pgbus
 
     # Batch execution-row sweep + finished-batch cleanup. Retention nil disables
     # cleanup (same sentinel as archive_retention). Sweep interval is required.
-    attr_reader :batch_retention, :batch_sweep_interval
+    # Stall threshold: how long a pending batch may go without a new execution
+    # row (or an orphan row without a msg_id) before the sweep repairs it.
+    attr_reader :batch_retention, :batch_sweep_interval, :batch_stall_threshold
 
     # Transactional outbox
     attr_accessor :outbox_enabled, :outbox_poll_interval, :outbox_batch_size
@@ -270,6 +272,7 @@ module Pgbus
       @archive_retention = 7 * 24 * 3600 # 7 days
       @batch_retention = 7 * 24 * 3600 # 7 days
       @batch_sweep_interval = 300 # 5 minutes
+      @batch_stall_threshold = 300 # 5 minutes, solid_queue's stalled_for default
 
       @outbox_enabled = false
       @outbox_poll_interval = 1.0
@@ -825,7 +828,8 @@ module Pgbus
       # Interval knobs: positive Numeric, never nil (mirror polling_interval).
       { dispatch_interval: dispatch_interval, outbox_poll_interval: outbox_poll_interval,
         recurring_schedule_interval: recurring_schedule_interval,
-        batch_sweep_interval: batch_sweep_interval }.each do |name, value|
+        batch_sweep_interval: batch_sweep_interval,
+        batch_stall_threshold: batch_stall_threshold }.each do |name, value|
         raise Pgbus::ConfigurationError, "#{name} must be > 0" unless value.is_a?(Numeric) && value.positive?
       end
 
@@ -1183,6 +1187,10 @@ module Pgbus
 
     def batch_sweep_interval=(value)
       @batch_sweep_interval = coerce_duration!(value, :batch_sweep_interval)
+    end
+
+    def batch_stall_threshold=(value)
+      @batch_stall_threshold = coerce_duration!(value, :batch_stall_threshold)
     end
 
     def outbox_retention=(value)

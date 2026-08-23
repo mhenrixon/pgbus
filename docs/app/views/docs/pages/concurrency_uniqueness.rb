@@ -56,10 +56,16 @@ class Views::Docs::Pages::ConcurrencyUniqueness < DocsUI::Page
       DocsUI::Table(
         [ "Strategy", "Lock acquired", "Prevents" ],
         [
-          [ [ :code, ":until_executed" ], "At enqueue", "Duplicate enqueue AND execution" ],
-          [ [ :code, ":while_executing" ], "At execution start", "Duplicate execution only" ]
+          [ [ :code, ":until_executed" ], "At enqueue, held until success or dead-letter", "Duplicate enqueue AND execution" ],
+          [ [ :code, ":while_executing" ], "At execution start, released on completion or failure", "Duplicate execution only" ]
         ]
       )
+      md <<~'MD'
+        A `:while_executing` lock is bound to the message being executed: a
+        failed attempt releases it so the retry can run, and a row left behind
+        by a crashed attempt is re-acquired by the same message on its next
+        read rather than treated as a duplicate.
+      MD
       DocsUI::Table(
         [ "Conflict policy", "Behavior" ],
         [

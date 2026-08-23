@@ -9,6 +9,7 @@ RSpec.describe Pgbus::Batch do
       "BatchEntry",
       id: 1,
       attributes: { "batch_id" => "abc" },
+      status: "processing",
       on_finish_class: nil,
       on_success_class: nil,
       on_discard_class: nil,
@@ -18,7 +19,8 @@ RSpec.describe Pgbus::Batch do
 
   before do
     allow(Pgbus::BatchEntry).to receive_message_chain(:where, :update_all).and_return(1) # rubocop:disable RSpec/MessageChain
-    allow(Pgbus::BatchEntry).to receive_messages(create!: batch_entry_double, find_by: batch_entry_double)
+    allow(Pgbus::BatchEntry).to receive_messages(create!: batch_entry_double, find_by: batch_entry_double,
+                                                 check_finished!: { just_finished: false, record: nil })
   end
 
   describe "#initialize" do
@@ -68,11 +70,27 @@ RSpec.describe Pgbus::Batch do
       )
     end
 
-    it "updates total_jobs after counting" do
+    # Jobs count themselves into total_jobs as they are enqueued (issue #423),
+    # so the block's end only flips pending -> processing and re-checks.
+    it "flips the batch to processing without touching total_jobs, then re-checks finish" do
+      relation = double("relation", update_all: 1)
+      allow(Pgbus::BatchEntry).to receive(:where).with(batch_id: anything, status: "pending").and_return(relation)
       batch = described_class.new
+
       batch.enqueue {} # rubocop:disable Lint/EmptyBlock
 
-      expect(Pgbus::BatchEntry).to have_received(:where).with(batch_id: batch.batch_id)
+      expect(relation).to have_received(:update_all).with(status: "processing")
+      expect(Pgbus::BatchEntry).not_to have_received(:where).with(batch_id: batch.batch_id)
+      expect(Pgbus::BatchEntry).to have_received(:check_finished!).with(batch.batch_id)
+    end
+
+    it "does not bump total_jobs itself at the end of the block" do
+      allow(Pgbus::BatchEntry).to receive(:increment_total_jobs!)
+      batch = described_class.new
+
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      expect(Pgbus::BatchEntry).not_to have_received(:increment_total_jobs!)
     end
 
     it "sets thread-local batch_id during block execution" do
@@ -85,6 +103,94 @@ RSpec.describe Pgbus::Batch do
 
       expect(captured_batch_id).to eq(batch.batch_id)
       expect(Thread.current[:pgbus_batch_id]).to be_nil
+    end
+  end
+
+  describe "#enqueue on an already-started batch (reopen)" do
+    let(:finished_double) do
+      double("BatchEntry", status: "finished", total_jobs: 1, completed_jobs: 1, failed_jobs: 0,
+                           on_finish_class: nil, on_success_class: nil, properties: "{}")
+    end
+
+    it "re-reads the row before deciding the batch is still open" do
+      batch = described_class.new
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+      allow(Pgbus::BatchEntry).to receive(:find_by).and_return(finished_double)
+
+      expect { batch.enqueue {} }.to raise_error(Pgbus::Batch::AlreadyFinished) # rubocop:disable Lint/EmptyBlock
+    end
+
+    it "does not bump total_jobs at the end of a re-opened block either" do
+      allow(Pgbus::BatchEntry).to receive(:increment_total_jobs!)
+      batch = described_class.new
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      expect(Pgbus::BatchEntry).not_to have_received(:increment_total_jobs!)
+      expect(Pgbus::BatchEntry).to have_received(:check_finished!).with(batch.batch_id).twice
+    end
+  end
+
+  describe ".track_enqueue" do
+    let(:payload) { { "job_id" => "j-1", "queue_name" => "default", Pgbus::Batch::METADATA_KEY => "b-1" } }
+
+    before do
+      allow(described_class).to receive(:executions_migrated?).and_return(true)
+      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+      allow(Pgbus::BatchEntry).to receive(:increment_total_jobs!).and_return(true)
+      allow(Pgbus::BatchExecution).to receive(:insert_for!)
+    end
+
+    it "increments total_jobs before inserting the execution row, inside one transaction" do
+      described_class.track_enqueue(payload)
+
+      expect(Pgbus::BatchEntry).to have_received(:transaction).ordered
+      expect(Pgbus::BatchEntry).to have_received(:increment_total_jobs!).with("b-1", 1).ordered
+      expect(Pgbus::BatchExecution).to have_received(:insert_for!)
+        .with(batch_id: "b-1", job_id: "j-1", queue_name: "default").ordered
+    end
+
+    it "increments once by N for a bulk of payloads" do
+      second = payload.merge("job_id" => "j-2")
+
+      described_class.track_enqueue([payload, second])
+
+      expect(Pgbus::BatchEntry).to have_received(:increment_total_jobs!).with("b-1", 2).once
+      expect(Pgbus::BatchExecution).to have_received(:insert_for!).twice
+    end
+
+    it "inserts no row before the executions migration but still counts" do
+      allow(described_class).to receive(:executions_migrated?).and_return(false)
+
+      described_class.track_enqueue(payload)
+
+      expect(Pgbus::BatchEntry).to have_received(:increment_total_jobs!).with("b-1", 1)
+      expect(Pgbus::BatchExecution).not_to have_received(:insert_for!)
+    end
+
+    it "propagates AlreadyFinished without inserting a row" do
+      allow(Pgbus::BatchEntry).to receive(:increment_total_jobs!).and_raise(Pgbus::Batch::AlreadyFinished)
+
+      expect { described_class.track_enqueue(payload) }.to raise_error(Pgbus::Batch::AlreadyFinished)
+      expect(Pgbus::BatchExecution).not_to have_received(:insert_for!)
+    end
+  end
+
+  describe ".untrack_enqueue" do
+    let(:payload) { { "job_id" => "j-1", Pgbus::Batch::METADATA_KEY => "b-1" } }
+
+    it "decrements total_jobs and deletes the row in one transaction" do
+      allow(described_class).to receive(:executions_migrated?).and_return(true)
+      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+      allow(Pgbus::BatchEntry).to receive(:decrement_total_jobs!)
+      rows = double("rows", delete_all: 1)
+      allow(Pgbus::BatchExecution).to receive(:where).with(job_id: "j-1").and_return(rows)
+
+      described_class.untrack_enqueue(payload)
+
+      expect(Pgbus::BatchEntry).to have_received(:decrement_total_jobs!).with("b-1")
+      expect(rows).to have_received(:delete_all)
     end
   end
 
@@ -248,6 +354,21 @@ RSpec.describe Pgbus::Batch do
           on_finish_job: hash_including("job_class" => "BatchSpec::CallbackJob", "queue_name" => "critical")
         )
       )
+    end
+
+    it "degrades a configured instance to its class and warns when the jsonb columns are missing" do
+      allow(described_class).to receive(:callback_jobs_migrated?).and_return(false)
+      logger = instance_double(Logger, warn: nil, error: nil, info: nil, debug: nil)
+      allow(Pgbus).to receive(:logger).and_return(logger)
+      batch = described_class.new(on_finish: callback_job_class.new.set(queue: :critical))
+
+      batch.enqueue {} # rubocop:disable Lint/EmptyBlock
+
+      expect(Pgbus::BatchEntry).to have_received(:create!).with(
+        hash_including(on_finish_class: "BatchSpec::CallbackJob")
+      )
+      expect(Pgbus::BatchEntry).to have_received(:create!).with(hash_excluding(:on_finish_job))
+      expect(logger).to have_received(:warn)
     end
 
     it "keeps storing a bare class in the legacy column" do

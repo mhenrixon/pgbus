@@ -53,7 +53,23 @@ RSpec.describe Pgbus::Concurrency::BlockedExecution do
       promoted = described_class.promote_next("TestJob-42", client: mock_client)
 
       expect(promoted).to be true
-      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" }, delay: 0)
+      expect(mock_client).to have_received(:send_message).with("default", { "job_class" => "TestJob" }, delay: 0, priority: nil)
+    end
+
+    # Issue #423 (F7): the row stores the enqueuer's priority for ordering, but
+    # the promoted send dropped it — under priority routing the job landed on
+    # the default sub-queue.
+    it "sends the promoted job with the priority the blocked row carried" do
+      released = { queue_name: "default", payload: { "job_class" => "TestJob", "job_id" => "j1" }, priority: 0 }
+      allow(Pgbus::BlockedExecution).to receive(:release_next!).and_return(released)
+      allow(mock_client).to receive(:send_message).and_return(42)
+      allow(mock_client).to receive(:target_queue).with("default", 0).and_return("pgbus_test_default_p0")
+      allow(Pgbus::Batch).to receive(:backfill_execution)
+
+      described_class.promote_next("TestJob-42", client: mock_client)
+
+      expect(mock_client).to have_received(:send_message).with("default", released[:payload], delay: 0, priority: 0)
+      expect(Pgbus::Batch).to have_received(:backfill_execution).with(released[:payload], 42, "pgbus_test_default_p0")
     end
 
     it "returns false when no blocked executions exist" do

@@ -22,7 +22,7 @@ module Pgbus
             LIMIT 1
             FOR UPDATE SKIP LOCKED
           )
-          RETURNING queue_name, payload
+          RETURNING queue_name, payload, priority
         SQL
         "Pgbus Blocked Release",
         [concurrency_key, now]
@@ -34,7 +34,7 @@ module Pgbus
       payload = row["payload"]
       payload = JSON.parse(payload) if payload.is_a?(String)
 
-      { queue_name: row["queue_name"], payload: payload }
+      { queue_name: row["queue_name"], payload: payload, priority: row["priority"] }
     end
   end
 end

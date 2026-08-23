@@ -62,6 +62,7 @@ module ConfigReference
       { name: "archive_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep archived messages; nil disables cleanup." },
       { name: "batch_retention", type: "Duration, nil", default: "7.days", desc: "How long to keep finished batches; nil disables cleanup." },
       { name: "batch_sweep_interval", type: "Duration", default: "5.minutes", desc: "How often the dispatcher repairs stalled batches (execution-row sweep)." },
+      { name: "batch_stall_threshold", type: "Duration", default: "5.minutes", desc: "How long a pending batch may go without a new execution row, or an unsent row without a message, before the sweep repairs it." },
       { name: "idempotency_ttl", type: "Duration, nil", default: "7.days", desc: "How long processed-event records are kept for dedup." }
     ],
     "Outbox" => [

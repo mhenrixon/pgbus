@@ -25,6 +25,40 @@ RSpec.describe Pgbus::BatchEntry do
     end
   end
 
+  describe ".decrement_total_jobs!" do
+    it "subtracts one, floored at zero, only on an unfinished row" do
+      relation = double("relation", update_all: 1)
+      allow(described_class).to receive(:where)
+        .with(batch_id: "b1", status: %w[pending processing])
+        .and_return(relation)
+
+      described_class.decrement_total_jobs!("b1")
+
+      expect(relation).to have_received(:update_all).with(["total_jobs = GREATEST(total_jobs - 1, 0)"])
+    end
+  end
+
+  describe ".increment_counter! (legacy counter path)" do
+    # With per-job counting (issue #423) total_jobs grows while the block is
+    # still open, so completed == total can be momentarily true on a pending
+    # batch. Only a processing batch may auto-finish; check_finished! at the
+    # end of the block handles the pending case.
+    it "does not finish a pending batch even when the counters match" do
+      record = double("BatchEntry", status: "pending", completed_jobs: 1, discarded_jobs: 0, total_jobs: 1)
+      allow(record).to receive(:increment!)
+      allow(record).to receive(:update!)
+      lock = double("lock", find_by: record)
+      allow(described_class).to receive_messages(lock: lock)
+      allow(described_class).to receive(:transaction).and_yield
+      allow(Pgbus::Batch).to receive(:executions_migrated?).and_return(false)
+
+      result = described_class.increment_counter!("b1", "completed_jobs")
+
+      expect(record).not_to have_received(:update!)
+      expect(result[:just_finished]).to be(false)
+    end
+  end
+
   describe ".finish_if_empty!" do
     it "requires counters already terminal so a legacy empty table is not closed" do
       processing = double("processing")

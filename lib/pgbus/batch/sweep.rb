@@ -10,14 +10,14 @@ module Pgbus
       STALL_THRESHOLD = 300 # seconds; solid_queue default stalled_for: 5.minutes
 
       class << self
-        def run(stalled_for: STALL_THRESHOLD, batch_size: 500, client: Pgbus.client)
+        def run(stalled_for: Pgbus.configuration.batch_stall_threshold, batch_size: 500, client: Pgbus.client)
           return unless Batch.executions_migrated?
 
           payload = { stale_executions: 0, orphan_rows: 0, started_batches: 0, finished_batches: 0,
                       stalled_for: stalled_for }
           Instrumentation.instrument("pgbus.batch_sweep", payload) do |p|
             p[:stale_executions] = sweep_stale_executions(batch_size: batch_size, client: client, stalled_for: stalled_for)
-            p[:orphan_rows] = sweep_orphan_rows(stalled_for: stalled_for, batch_size: batch_size)
+            p[:orphan_rows] = sweep_orphan_rows(stalled_for: stalled_for, batch_size: batch_size, client: client)
             p[:started_batches] = start_stalled_pending(stalled_for: stalled_for, batch_size: batch_size)
             p[:finished_batches] = finish_stalled_processing(batch_size: batch_size)
           end
@@ -60,22 +60,50 @@ module Pgbus
           Batch.job_discarded(row.batch_id, job_id: row.job_id) if column == "failed_jobs"
         end
 
-        def sweep_orphan_rows(stalled_for:, batch_size:)
+        # Rows with no msg_id older than the threshold. A row only stays
+        # msg_id-less when the enqueue died between row insert and send — OR
+        # when the send landed and only the backfill failed, in which case the
+        # message is live and must not be un-counted (issue #423). Probe the
+        # queue (and DLQ) by job_id before deciding; nil (unknown) keeps the row.
+        def sweep_orphan_rows(stalled_for:, batch_size:, client:)
           swept = 0
           cutoff = Time.current - stalled_for
           blocked = blocked_job_ids
           BatchExecution.where(msg_id: nil).where("created_at < ?", cutoff).find_each(batch_size: batch_size) do |row|
             next if blocked.include?(row.job_id)
 
-            deleted = BatchExecution.where(id: row.id, msg_id: nil).delete_all
-            next unless deleted.positive?
-
-            BatchEntry.where(batch_id: row.batch_id, status: %w[pending processing])
-                      .update_all(["total_jobs = GREATEST(total_jobs - 1, 0)"])
-            Batch.send(:finish_if_needed, Batch.try_finish!(row.batch_id))
+            case classify_orphan(row, client)
+            when :live then next
+            when :failed
+              Batch.job_discarded(row.batch_id, job_id: row.job_id)
+            else
+              next unless uncount_orphan!(row)
+            end
             swept += 1
           end
           swept
+        end
+
+        def classify_orphan(row, client)
+          return :live if row.queue_name.nil?
+
+          in_queue = client.message_with_job_id?(row.queue_name, job_id: row.job_id)
+          return :live if in_queue != false
+
+          dlq = client.dead_letter_physical_name(row.queue_name)
+          return :failed if client.message_with_job_id?(dlq, job_id: row.job_id) == true
+
+          :orphan
+        end
+
+        # Returns true when this sweep removed the row (CAS on msg_id NULL).
+        def uncount_orphan!(row) # rubocop:disable Naming/PredicateMethod
+          deleted = BatchExecution.where(id: row.id, msg_id: nil).delete_all
+          return false unless deleted.positive?
+
+          BatchEntry.decrement_total_jobs!(row.batch_id)
+          Batch.send(:finish_if_needed, Batch.try_finish!(row.batch_id))
+          true
         end
 
         def blocked_job_ids
@@ -86,15 +114,23 @@ module Pgbus
           Set.new
         end
 
+        # A pending batch whose enqueue block never returned. Jobs counted
+        # themselves in as they were enqueued (issue #423), so total_jobs is
+        # already right — only the status moves. "Stalled" means no execution
+        # row was inserted within the threshold either: a long-running block
+        # that is still enqueuing is live, not stalled.
         def start_stalled_pending(stalled_for:, batch_size:)
           started = 0
           cutoff = Time.current - stalled_for
-          BatchEntry.pending.where("created_at < ?", cutoff).find_each(batch_size: batch_size) do |record|
-            total = BatchExecution.where(batch_id: record.batch_id).count
-            BatchEntry.where(batch_id: record.batch_id, status: "pending")
-                      .update_all(total_jobs: total, status: "processing")
-            result = Batch.try_finish!(record.batch_id)
-            Batch.send(:finish_if_needed, result)
+          BatchEntry.pending
+                    .where("created_at < ?", cutoff)
+                    .where(
+                      "NOT EXISTS (SELECT 1 FROM pgbus_batch_executions e " \
+                      "WHERE e.batch_id = pgbus_batches.batch_id AND e.created_at >= ?)", cutoff
+                    )
+                    .find_each(batch_size: batch_size) do |record|
+            BatchEntry.where(batch_id: record.batch_id, status: "pending").update_all(status: "processing")
+            Batch.send(:finish_if_needed, Batch.try_finish!(record.batch_id))
             started += 1
           end
           started

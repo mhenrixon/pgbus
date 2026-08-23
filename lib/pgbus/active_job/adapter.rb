@@ -205,25 +205,27 @@ module Pgbus
         return unless payload_hash[Batch::METADATA_KEY] &&
                       payload_hash[Batch::METADATA_KEY] == Thread.current[:pgbus_batch_id]
 
-        count = Thread.current[:pgbus_batch_job_count]
-        Thread.current[:pgbus_batch_job_count] = count - 1 if count&.positive?
         Batch.untrack_enqueue(payload_hash)
       end
 
-      def inject_batch_metadata(payload_hash)
+      # Tag the payload with the active batch and count it in (guarded
+      # increment + execution row, before the send — Batch.track_enqueue). Pass
+      # track: false to only tag, when the caller counts a bulk once.
+      def inject_batch_metadata(payload_hash, track: true)
         batch_id = Thread.current[:pgbus_batch_id]
         return payload_hash unless batch_id
 
-        Thread.current[:pgbus_batch_job_count] = (Thread.current[:pgbus_batch_job_count] || 0) + 1
         tagged = payload_hash.merge(Batch::METADATA_KEY => batch_id)
-        Batch.track_enqueue(tagged)
+        Batch.track_enqueue(tagged) if track
         tagged
       end
 
       def enqueue_immediate(queue, jobs, priority: nil)
         return if jobs.empty?
 
-        payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j)) }
+        payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j), track: false) }
+        # One guarded increment for the whole bulk, not one per job.
+        Batch.track_enqueue(payloads) if Thread.current[:pgbus_batch_id]
         physical = physical_queue(queue, priority)
         msg_ids = nil
         msg_ids = Pgbus.client.send_batch(queue, payloads, priority: priority)

@@ -57,6 +57,33 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     end
   end
 
+  describe "#enqueue inside a batch (issue #423)" do
+    around do |example|
+      Thread.current[:pgbus_batch_id] = "batch-1"
+      example.run
+    ensure
+      Thread.current[:pgbus_batch_id] = nil
+    end
+
+    it "counts the job into its batch before the message is sent" do
+      allow(Pgbus::Batch).to receive(:track_enqueue)
+      allow(mock_client).to receive(:send_message).and_return(7)
+
+      adapter.enqueue(job)
+
+      expect(Pgbus::Batch).to have_received(:track_enqueue)
+        .with(hash_including(Pgbus::Batch::METADATA_KEY => "batch-1", "job_id" => anything)).ordered
+      expect(mock_client).to have_received(:send_message).ordered
+    end
+
+    it "raises AlreadyFinished before sending when the batch has finished" do
+      allow(Pgbus::Batch).to receive(:track_enqueue).and_raise(Pgbus::Batch::AlreadyFinished)
+
+      expect { adapter.enqueue(job) }.to raise_error(Pgbus::Batch::AlreadyFinished)
+      expect(mock_client).not_to have_received(:send_message)
+    end
+  end
+
   describe "#enqueue_at" do
     it "calculates delay and sends message with delay parameter" do
       future_time = Time.now.to_f + 60
@@ -140,14 +167,17 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     context "when inside a batch context" do
       around do |example|
         Thread.current[:pgbus_batch_id] = "batch-1"
-        Thread.current[:pgbus_batch_job_count] = 0
         example.run
       ensure
         Thread.current[:pgbus_batch_id] = nil
-        Thread.current[:pgbus_batch_job_count] = nil
       end
 
-      it "does not count a job discarded at the concurrency limit — it will never signal completion" do
+      before do
+        allow(Pgbus::Batch).to receive(:track_enqueue)
+        allow(Pgbus::Batch).to receive(:untrack_enqueue)
+      end
+
+      it "uncounts a job discarded at the concurrency limit — it will never signal completion" do
         allow(job_class_double).to receive(:pgbus_concurrency).and_return(
           concurrency_config.merge(on_conflict: :discard)
         )
@@ -155,7 +185,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         adapter.enqueue(job)
 
-        expect(Thread.current[:pgbus_batch_job_count]).to eq(0)
+        expect(Pgbus::Batch).to have_received(:track_enqueue).with(hash_including(Pgbus::Batch::METADATA_KEY => "batch-1"))
+        expect(Pgbus::Batch).to have_received(:untrack_enqueue).with(hash_including(Pgbus::Batch::METADATA_KEY => "batch-1"))
       end
 
       it "keeps a blocked job counted — it runs once the semaphore frees and signals then" do
@@ -165,7 +196,8 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
         adapter.enqueue(job)
 
-        expect(Thread.current[:pgbus_batch_job_count]).to eq(1)
+        expect(Pgbus::Batch).to have_received(:track_enqueue).once
+        expect(Pgbus::Batch).not_to have_received(:untrack_enqueue)
       end
     end
   end
@@ -279,14 +311,17 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
     context "when inside a batch context" do
       around do |example|
         Thread.current[:pgbus_batch_id] = "batch-1"
-        Thread.current[:pgbus_batch_job_count] = 0
         example.run
       ensure
         Thread.current[:pgbus_batch_id] = nil
-        Thread.current[:pgbus_batch_job_count] = nil
       end
 
-      it "does not count a duplicate discarded at enqueue time into the batch" do
+      before do
+        allow(Pgbus::Batch).to receive(:track_enqueue)
+        allow(Pgbus::Batch).to receive(:untrack_enqueue)
+      end
+
+      it "uncounts a duplicate discarded at enqueue time from the batch" do
         allow(job).to receive(:executions).and_return(0)
         allow(Pgbus::Uniqueness).to receive_messages(acquire_enqueue_lock: :locked,
                                                      uniqueness_config: uniqueness_config.merge(on_conflict: :discard))
@@ -294,7 +329,7 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
         adapter.enqueue(job)
 
         expect(mock_client).not_to have_received(:send_message)
-        expect(Thread.current[:pgbus_batch_job_count]).to eq(0)
+        expect(Pgbus::Batch).to have_received(:untrack_enqueue).with(hash_including("job_id" => anything))
       end
     end
   end
@@ -429,27 +464,31 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
 
       around do |example|
         Thread.current[:pgbus_batch_id] = batch_id
-        Thread.current[:pgbus_batch_job_count] = 0
         example.run
       ensure
         Thread.current[:pgbus_batch_id] = nil
-        Thread.current[:pgbus_batch_job_count] = nil
       end
 
-      it "tags every bulk payload with the batch id and counts the jobs" do
+      before { allow(Pgbus::Batch).to receive(:track_enqueue) }
+
+      it "tags every bulk payload with the batch id and counts them once, before the send" do
         allow(mock_client).to receive(:send_batch).and_return([1, 2])
+        tagged = [
+          serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id),
+          second_serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id)
+        ]
 
         adapter.enqueue_all([job, job2])
 
-        expect(mock_client).to have_received(:send_batch).with(
-          "default",
-          [
-            serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id),
-            second_serialized_hash.merge(Pgbus::Batch::METADATA_KEY => batch_id)
-          ],
-          priority: nil
-        )
-        expect(Thread.current[:pgbus_batch_job_count]).to eq(2)
+        expect(Pgbus::Batch).to have_received(:track_enqueue).with(tagged).once.ordered
+        expect(mock_client).to have_received(:send_batch).with("default", tagged, priority: nil).ordered
+      end
+
+      it "raises AlreadyFinished before sending anything when the batch has finished" do
+        allow(Pgbus::Batch).to receive(:track_enqueue).and_raise(Pgbus::Batch::AlreadyFinished)
+
+        expect { adapter.enqueue_all([job, job2]) }.to raise_error(Pgbus::Batch::AlreadyFinished)
+        expect(mock_client).not_to have_received(:send_batch)
       end
     end
 

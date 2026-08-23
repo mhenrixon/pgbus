@@ -697,23 +697,27 @@ module Pgbus
     # Look up a queue row by ActiveJob job_id in the JSON payload. Used by the
     # batch sweep: move_to_dead_letter produces a new DLQ msg_id, so the
     # source msg_id is not a DLQ identity.
+    #
+    # Same tri-state as message_exists?: true / false / nil (unknown). A
+    # logical name expands to every physical table the strategy owns (the
+    # `_pN` sub-queues under priority routing); an already-prefixed physical
+    # name probes itself only.
     def message_with_job_id?(queue_name, job_id:)
-      full_name = resolve_full_queue_name(queue_name)
-      sanitized = QueueNameValidator.sanitize!(full_name)
+      tables = lookup_physical_queue_names(queue_name).map { |name| QueueNameValidator.sanitize!(name) }
+      determined = false
 
       synchronized do
         with_raw_connection do |conn|
-          job_id_present?(conn, sanitized, job_id)
+          tables.each do |sanitized|
+            present = probe_job_id_presence(conn, sanitized, job_id)
+            return true if present == true
+
+            determined = true unless present == :missing
+          end
         end
       end
-    rescue ActiveRecord::StatementInvalid => e
-      raise unless undefined_table_error?(e)
 
-      nil
-    rescue StandardError => e
-      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
-
-      nil
+      determined ? false : nil # rubocop:disable Style/ReturnNilInPredicateMethodDefinition -- tri-state: nil means unknown
     end
 
     # DLQ companion of a logical or already-physical queue name. Does not
@@ -1043,6 +1047,18 @@ module Pgbus
       else
         uniqueness_key_present?(conn, sanitized, uniqueness_key)
       end
+    rescue ActiveRecord::StatementInvalid => e
+      raise unless undefined_table_error?(e)
+
+      :missing
+    rescue StandardError => e
+      raise unless defined?(PG::UndefinedTable) && e.is_a?(PG::UndefinedTable)
+
+      :missing
+    end
+
+    def probe_job_id_presence(conn, sanitized, job_id)
+      job_id_present?(conn, sanitized, job_id)
     rescue ActiveRecord::StatementInvalid => e
       raise unless undefined_table_error?(e)
 

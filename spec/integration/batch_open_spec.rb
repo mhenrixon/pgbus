@@ -52,6 +52,11 @@ RSpec.describe "Open batches (integration)", :integration do
     Pgbus::Batch.job_completed(batch_id, job_id: row.job_id)
   end
 
+  def queue_depth(queue)
+    physical = Pgbus.configuration.queue_name(queue)
+    ActiveRecord::Base.connection.select_value("SELECT count(*) FROM pgmq.q_#{physical}").to_i
+  end
+
   def drain_callbacks
     classes = []
     while (message = client.read_message(callback_queue, vt: 30))
@@ -95,6 +100,57 @@ RSpec.describe "Open batches (integration)", :integration do
 
       expect { batch.enqueue { worker_job.perform_later } }
         .to raise_error(Pgbus::Batch::AlreadyFinished)
+    end
+
+    # The guard is per job, at perform_later, before the message is sent —
+    # even when the handle's own view of the batch is stale (issue #423).
+    it "raises at perform_later and sends nothing when the batch finished under a stale handle" do
+      batch = Pgbus::Batch.new
+      batch.enqueue { worker_job.perform_later }
+      stale = Pgbus::Batch.find(batch.batch_id)
+      complete_next(batch.batch_id)
+      depth_before = queue_depth(work_queue)
+
+      expect { stale.enqueue { worker_job.perform_later } }
+        .to raise_error(Pgbus::Batch::AlreadyFinished)
+
+      expect(queue_depth(work_queue)).to eq(depth_before)
+      expect(Pgbus::BatchExecution.where(batch_id: batch.batch_id).count).to eq(0)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).total_jobs).to eq(1)
+    end
+
+    it "keeps total_jobs consistent when a re-opened block raises mid-way" do
+      batch = Pgbus::Batch.new
+      batch.enqueue { worker_job.perform_later }
+
+      expect do
+        batch.enqueue do
+          worker_job.perform_later
+          raise "boom"
+        end
+      end.to raise_error("boom")
+
+      record = Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)
+      expect(record.total_jobs).to eq(2)
+      expect(Pgbus::BatchExecution.where(batch_id: batch.batch_id).count).to eq(2)
+
+      complete_next(batch.batch_id)
+      complete_next(batch.batch_id)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("finished")
+    end
+
+    it "counts a bulk perform_all_later with a single total_jobs update" do
+      batch = Pgbus::Batch.new
+      updates = 0
+      subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+        updates += 1 if payload[:sql].include?("total_jobs = total_jobs +")
+      end
+
+      batch.enqueue { ActiveJob.perform_all_later([worker_job.new, worker_job.new, worker_job.new]) }
+
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+      expect(updates).to eq(1)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).total_jobs).to eq(3)
     end
 
     it "keeps the batch open until the jobs added in the second block finish" do
