@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 
 RSpec.describe Pgbus::EventBus::Publisher do
   include PgmqDoubles
@@ -120,6 +121,52 @@ RSpec.describe Pgbus::EventBus::Publisher do
 
       expect { described_class.publish("orders.created", tenant_payload) }.to raise_error(RuntimeError, "no tenant")
       expect(mock_client).not_to have_received(:publish_to_topic)
+    end
+  end
+
+  describe ".publish with config.current_attributes (issue #431)" do
+    let(:current_class) { Class.new(ActiveSupport::CurrentAttributes) { attribute :tenant, :request_id } }
+
+    def published_envelope
+      envelope = nil
+      expect(mock_client).to have_received(:publish_to_topic) { |_rk, data, **_opts| envelope = data }
+      envelope
+    end
+
+    before do
+      stub_const("PubSpecCurrent", current_class)
+      Pgbus.configuration.current_attributes = ["PubSpecCurrent"]
+    end
+
+    after do
+      Pgbus.configuration.current_attributes = nil
+      ActiveSupport::CurrentAttributes.clear_all
+    end
+
+    it "captures the publisher's Current into the envelope under pgbus_current, leaving the payload untouched" do
+      PubSpecCurrent.tenant = "acme"
+      PubSpecCurrent.request_id = "req-1"
+
+      described_class.publish("orders.created", { "order_id" => 1 })
+
+      env = published_envelope
+      expect(env["pgbus_current"]).to include("PubSpecCurrent" => hash_including("tenant" => "acme", "request_id" => "req-1"))
+      expect(env["payload"]).to eq("order_id" => 1)
+    end
+
+    it "adds nothing when no attribute is assigned" do
+      described_class.publish("orders.created", { "order_id" => 1 })
+
+      expect(published_envelope).not_to have_key("pgbus_current")
+    end
+
+    it "adds nothing when current_attributes is off" do
+      Pgbus.configuration.current_attributes = nil
+      PubSpecCurrent.tenant = "acme"
+
+      described_class.publish("orders.created", { "order_id" => 1 })
+
+      expect(published_envelope).not_to have_key("pgbus_current")
     end
   end
 

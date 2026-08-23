@@ -195,6 +195,7 @@ en:
         title: Events
       pending_table:
         arguments: Payload
+        context: Context
         discard: Discard
         discard_confirm: Discard this event? It will be archived.
         edit_payload: Edit & Retry

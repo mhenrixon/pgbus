@@ -195,6 +195,7 @@ sv:
         title: Händelser
       pending_table:
         arguments: Payload
+        context: Kontext
         discard: Kassera
         discard_confirm: Kassera denna händelse? Den kommer att arkiveras.
         edit_payload: Redigera & Försök igen

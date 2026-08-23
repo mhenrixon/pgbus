@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 
 RSpec.describe Pgbus::Outbox do
   let(:outbox_entry_class) { stub_const("Pgbus::OutboxEntry", Class.new) }
@@ -59,6 +60,15 @@ RSpec.describe Pgbus::Outbox do
 
     after { Pgbus.configuration.event_fair_share = nil }
 
+    it "builds the envelope WITH the routing key so the consumer can dispatch the relayed event" do
+      allow(Pgbus::EventBus::Publisher).to receive(:build_event_data).and_call_original
+
+      described_class.publish_event("orders.created", { "id" => 42 })
+
+      expect(Pgbus::EventBus::Publisher).to have_received(:build_event_data)
+        .with({ "id" => 42 }, routing_key: "orders.created")
+    end
+
     it "creates an outbox entry with routing_key" do
       described_class.publish_event("orders.created", { "id" => 42 })
 
@@ -95,6 +105,24 @@ RSpec.describe Pgbus::Outbox do
       expect(seen.payload).to eq("tenant_id" => 7)
       expect(seen.headers).to eq("h" => 1)
       expect(seen.event_id).to eq("uuid")
+    end
+
+    it "captures Current into the stored envelope when config.current_attributes is set (issue #431)" do
+      stub_const("OutboxSpecCurrent", Class.new(ActiveSupport::CurrentAttributes) { attribute :tenant })
+      Pgbus.configuration.current_attributes = ["OutboxSpecCurrent"]
+      OutboxSpecCurrent.tenant = "acme"
+
+      described_class.publish_event("orders.created", { "tenant_id" => 7 })
+
+      expect(Pgbus::OutboxEntry).to have_received(:create!).with(
+        routing_key: "orders.created",
+        payload: hash_including("event_id" => "uuid",
+                                "pgbus_current" => { "OutboxSpecCurrent" => hash_including("tenant" => "acme") }),
+        headers: nil
+      )
+    ensure
+      Pgbus.configuration.current_attributes = nil
+      ActiveSupport::CurrentAttributes.clear_all
     end
   end
 end

@@ -195,6 +195,7 @@ da:
         title: Begivenheder
       pending_table:
         arguments: Payload
+        context: Kontekst
         discard: Forkast
         discard_confirm: Forkast denne begivenhed? Den vil blive arkiveret.
         edit_payload: Rediger & prøv igen

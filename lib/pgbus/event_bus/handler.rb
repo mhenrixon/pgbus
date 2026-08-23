@@ -43,7 +43,10 @@ module Pgbus
           msg_id: message.msg_id.to_i
         }
         Instrumentation.instrument("pgbus.event_processed", instrument_payload) do
-          handle(event)
+          # Publisher's Current attributes (issue #431) are set for the handler
+          # and reverted after (CurrentAttributes#set semantics); the Rails
+          # executor wrap above additionally resets at completion.
+          Pgbus::CurrentAttributes.restore(event.context) { handle(event) }
         end
         complete_claim!(event.event_id) if self.class.idempotent?
         :handled
@@ -88,10 +91,17 @@ module Pgbus
         payload = raw["payload"]
         payload = Serializer.locate_global_id(payload["_global_id"]) if payload.is_a?(Hash) && payload["_global_id"]
 
+        # Same allowlist boundary as Serializer.deserialize_job_data: every
+        # _aj_globalid in the persisted context is checked BEFORE anything is
+        # located, so a crafted envelope cannot load an arbitrary model.
+        context = raw[Pgbus::CurrentAttributes::METADATA_KEY]
+        Serializer.assert_job_global_ids_allowed!(context) if context
+
         Event.new(
           event_id: raw["event_id"],
           payload: payload,
-          published_at: raw["published_at"] ? Time.parse(raw["published_at"]) : nil
+          published_at: raw["published_at"] ? Time.parse(raw["published_at"]) : nil,
+          context: context
         )
       end
 

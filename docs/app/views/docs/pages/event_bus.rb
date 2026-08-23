@@ -13,6 +13,7 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
     subscribing
     routing
     fair_share
+    current_attributes
     idempotency
   end
 
@@ -128,6 +129,46 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
         - The fair index is built on each subscriber queue by `setup_all!` (at
           creation) and by the consumer at boot (`CONCURRENTLY`). Split rule,
           weights, cost model and index details: [Routing & ordering](/docs/routing-ordering).
+      MD
+    end
+  end
+
+  def current_attributes
+    DocsUI::Section("Current attributes", description: "Request context travels with the event.") do
+      md <<~'MD'
+        The same `config.current_attributes` switch that carries
+        `Current.tenant` / `Current.user` / `Current.request_id` into jobs
+        ([Active Job guide](/docs/active-job)) carries it into event handlers.
+        With it on, `Pgbus.publish` snapshots the assigned attributes of each
+        persisted class into the event envelope under `pgbus_current` — same
+        filters (`only:` / `except:`), same `ActiveJob::Arguments` serialization
+        — and the consumer restores them around `handle`:
+      MD
+      DocsUI::Code(<<~RUBY)
+        # In the request: Current.tenant = tenant; then…
+        Pgbus.publish("orders.created", { order_id: order.id })
+
+        # In the handler, on the consumer:
+        class OrderCreatedHandler < Pgbus::EventBus::Handler
+          def handle(event)
+            Current.tenant   # => the publisher's tenant
+            event.context    # the raw stored form, if you want it explicitly
+          end
+        end
+      RUBY
+      md <<~'MD'
+        - The context lives in the **envelope** (next to `event_id`), never in
+          `event.payload`, and is copied to every subscriber queue the topic
+          fans out to. Previous `Current` values come back after each `handle`.
+        - `Pgbus::Outbox.publish_event` captures at write time — inside your
+          transaction, where `Current` is set — and the relay carries it to the
+          bus unchanged.
+        - GlobalIDs inside the context are gated by `allowed_global_id_models`
+          before anything is loaded, exactly like job arguments.
+        - `Pgbus::Testing` round-trips it: fake-mode events expose `context`,
+          and `drain!` / inline dispatch restore it around handlers.
+        - The dashboard's pending-events rows show a **Context** card (through
+          the same parameter filter as the payload).
       MD
     end
   end

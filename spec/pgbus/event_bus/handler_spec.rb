@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 require "json"
 
 RSpec.describe Pgbus::EventBus::Handler do
@@ -53,6 +54,72 @@ RSpec.describe Pgbus::EventBus::Handler do
         handler.process(msg)
 
         expect(handler.received_event.published_at).to be_a(Time)
+      end
+    end
+
+    describe "Current attributes restore (issue #431)" do
+      let(:current_class) { Class.new(ActiveSupport::CurrentAttributes) { attribute :tenant, :request_id } }
+      let(:seen) { [] }
+      let(:handler_class) do
+        sink = seen
+        Class.new(described_class) do
+          attr_reader :received_event
+
+          define_method(:handle) do |event|
+            @received_event = event
+            sink << [HandlerSpecCurrent.tenant, HandlerSpecCurrent.request_id]
+          end
+        end
+      end
+      let(:context) { { "HandlerSpecCurrent" => { "tenant" => "acme", "request_id" => "req-1" } } }
+      let(:raw_message) do
+        { "event_id" => event_id, "payload" => raw_payload, "published_at" => published_at,
+          "pgbus_current" => context }.to_json
+      end
+
+      before { stub_const("HandlerSpecCurrent", current_class) }
+
+      after { ActiveSupport::CurrentAttributes.clear_all }
+
+      it "sets the persisted Current for the duration of handle and reverts afterwards" do
+        HandlerSpecCurrent.tenant = "before"
+
+        handler.process(message)
+
+        expect(seen).to eq([%w[acme req-1]])
+        expect(HandlerSpecCurrent.tenant).to eq("before")
+        expect(HandlerSpecCurrent.request_id).to be_nil
+      end
+
+      it "exposes the raw context on the event" do
+        handler.process(message)
+
+        expect(handler.received_event.context).to eq(context)
+      end
+
+      it "leaves Current alone for an envelope without pgbus_current" do
+        plain = build_message_double(msg_id: 3, message: { "event_id" => event_id, "payload" => raw_payload }.to_json)
+
+        handler.process(plain)
+
+        expect(seen).to eq([[nil, nil]])
+        expect(handler.received_event.context).to be_nil
+      end
+
+      it "rejects a GlobalID in the context that is not in allowed_global_id_models before handle runs" do
+        stub_const("Secret", Class.new)
+        stub_const("Order", Class.new)
+        Pgbus.configuration.allowed_global_id_models = [Order]
+        secret_context = { "HandlerSpecCurrent" => { "tenant" => { "_aj_globalid" => "gid://pgbus-test/Secret/1" } } }
+        tagged = build_message_double(
+          msg_id: 4,
+          message: { "event_id" => event_id, "payload" => raw_payload, "pgbus_current" => secret_context }.to_json
+        )
+
+        expect { handler.process(tagged) }.to raise_error(Pgbus::SerializationError, /not in allowed_global_id_models/)
+        expect(seen).to be_empty
+      ensure
+        Pgbus.configuration.allowed_global_id_models = nil
       end
     end
 

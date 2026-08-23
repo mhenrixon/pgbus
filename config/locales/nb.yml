@@ -195,6 +195,7 @@ nb:
         title: Hendelser
       pending_table:
         arguments: Nyttelast
+        context: Kontekst
         discard: Forkast
         discard_confirm: Forkast denne hendelsen? Den vil bli arkivert.
         edit_payload: Rediger & prøv på nytt
