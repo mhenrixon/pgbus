@@ -709,6 +709,114 @@ RSpec.describe Pgbus::Process::Worker do
         expect(mock_client).to have_received(:read_grouped).with("default", qty: 4)
       end
     end
+
+    context "with fair share enabled (issue #426)" do
+      let(:worker) { described_class.new(queues: %w[critical default], threads: 5) }
+      let(:critical_msgs) { [build_message_double(msg_id: 1), build_message_double(msg_id: 2)] }
+      let(:default_msgs) { [build_message_double(msg_id: 3)] }
+
+      before do
+        Pgbus.configuration.fair_share = ->(_job) { "tenant" }
+        allow(mock_client).to receive(:read_batch_fair) do |queue, **_kwargs|
+          case queue
+          when "critical" then critical_msgs
+          when "default" then default_msgs
+          else []
+          end
+        end
+      end
+
+      after { Pgbus.configuration.fair_share = nil }
+
+      it "fair-reads each queue in list order with the remaining capacity" do
+        results = worker.send(:fetch_messages, 5)
+
+        expect(mock_client).to have_received(:read_batch_fair).with("critical", qty: 5).ordered
+        expect(mock_client).to have_received(:read_batch_fair).with("default", qty: 3).ordered
+        expect(mock_client).not_to have_received(:read_multi)
+        expect(mock_client).not_to have_received(:read_batch)
+        expect(results).to eq([["critical", critical_msgs[0]], ["critical", critical_msgs[1]], ["default", default_msgs[0]]])
+      end
+
+      it "stops reading once capacity is filled" do
+        worker.send(:fetch_messages, 2)
+
+        expect(mock_client).to have_received(:read_batch_fair).with("critical", qty: 2)
+        expect(mock_client).not_to have_received(:read_batch_fair).with("default", qty: anything)
+      end
+
+      it "uses the fair read on the single-queue path too" do
+        single = described_class.new(queues: %w[default], threads: 5)
+        single.send(:fetch_messages, 5)
+
+        expect(mock_client).to have_received(:read_batch_fair).with("default", qty: 5)
+        expect(mock_client).not_to have_received(:read_batch)
+      end
+
+      it "still goes through fetch_prioritized when priority_levels is set" do
+        Pgbus.configuration.priority_levels = 2
+        allow(mock_client).to receive(:read_batch_prioritized).and_return([])
+
+        worker.send(:fetch_messages, 5)
+
+        expect(mock_client).to have_received(:read_batch_prioritized).with("critical", qty: 5)
+        expect(mock_client).not_to have_received(:read_batch_fair)
+      ensure
+        Pgbus.configuration.priority_levels = nil
+      end
+
+      it "skips queues paused by the circuit breaker" do
+        allow(circuit_breaker).to receive(:paused?).with("critical").and_return(true)
+
+        worker.send(:fetch_messages, 5)
+
+        expect(mock_client).not_to have_received(:read_batch_fair).with("critical", qty: anything)
+        expect(mock_client).to have_received(:read_batch_fair).with("default", qty: 5)
+      end
+    end
+  end
+
+  describe "fair share index + config guards (issue #426)" do
+    before { Pgbus.configuration.fair_share = ->(_job) { "tenant" } }
+
+    after do
+      Pgbus.configuration.fair_share = nil
+      Pgbus.configuration.group_mode = nil
+    end
+
+    it "raises when group_mode is also set" do
+      Pgbus.configuration.group_mode = :round_robin
+
+      expect do
+        described_class.new(queues: %w[default], threads: 5)
+      end.to raise_error(Pgbus::ConfigurationError, /fair_share.*group_mode/)
+    end
+
+    it "raises when a per-worker group_mode is passed" do
+      expect do
+        described_class.new(queues: %w[default], threads: 5, group_mode: :fifo)
+      end.to raise_error(Pgbus::ConfigurationError, /fair_share.*group_mode/)
+    end
+
+    it "ensures the fair index for every queue it serves" do
+      allow(mock_client).to receive(:ensure_fair_index)
+      worker = described_class.new(queues: %w[critical default], threads: 5)
+
+      worker.send(:ensure_fair_indexes)
+
+      expect(mock_client).to have_received(:ensure_fair_index).with("critical")
+      expect(mock_client).to have_received(:ensure_fair_index).with("default")
+    end
+
+    it "does nothing when fair share is off" do
+      Pgbus.configuration.fair_share = nil
+      allow(mock_client).to receive(:ensure_fair_index)
+      worker = described_class.new(queues: %w[default], threads: 5)
+
+      worker.send(:ensure_fair_indexes)
+
+      expect(mock_client).not_to have_received(:ensure_fair_index)
+    end
   end
 
   describe "prefetch flow control" do
@@ -895,6 +1003,19 @@ RSpec.describe Pgbus::Process::Worker do
       # Default: no registered event subscribers.
       registry = instance_double(Pgbus::EventBus::Registry, event_queue_names: Set.new)
       allow(Pgbus::EventBus::Registry).to receive(:instance).and_return(registry)
+    end
+
+    it "ensures the fair index for newly resolved queues when fair share is on (issue #426)" do
+      Pgbus.configuration.fair_share = ->(_job) { "tenant" }
+      allow(mock_client).to receive(:ensure_fair_index)
+      allow(conn).to receive(:select_values).and_return(["#{prefix}_default", "#{prefix}_events"])
+
+      worker.send(:refresh_wildcard_queues)
+
+      expect(mock_client).to have_received(:ensure_fair_index).with("default")
+      expect(mock_client).to have_received(:ensure_fair_index).with("events")
+    ensure
+      Pgbus.configuration.fair_share = nil
     end
 
     it "excludes registered stream queues (issue #309)" do

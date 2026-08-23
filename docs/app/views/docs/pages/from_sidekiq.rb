@@ -141,7 +141,9 @@ class Views::Docs::Pages::FromSidekiq < DocsUI::Page
           locks or caching, move to PostgreSQL advisory locks or another store.
         - **Queue priority** — Sidekiq uses queue weights; pgbus processes queues in
           the order listed, so put higher-priority queues first (or use
-          [priority queues](/docs/routing-ordering)).
+          [priority queues](/docs/routing-ordering)). For per-tenant weighting use
+          [`config.fair_share`](/docs/routing-ordering) — a weighted, work-conserving
+          interleave across tenants inside a queue, no per-tenant queues needed.
       MD
     end
   end

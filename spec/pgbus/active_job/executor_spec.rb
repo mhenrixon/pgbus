@@ -71,6 +71,24 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    context "when the payload carries fair-share metadata (issue #426)" do
+      let(:tagged_payload) { job_payload.merge("pgbus_fair_key" => "tenant-7", "pgbus_fair_weight" => 3) }
+      let(:message) { build_message_double(msg_id: 5, message: JSON.generate(tagged_payload), read_ct: 1) }
+
+      before do
+        allow(ActiveJob::Base).to receive(:deserialize).with(tagged_payload).and_return(job_double)
+      end
+
+      it "hands the payload to ActiveJob untouched and archives on success" do
+        result = executor.execute(message, queue_name)
+
+        expect(ActiveJob::Base).to have_received(:deserialize).with(tagged_payload)
+        expect(job_double).to have_received(:perform_now)
+        expect(mock_client).to have_received(:archive_message).with(queue_name, 5)
+        expect(result).to eq(:success)
+      end
+    end
+
     context "when job succeeds" do
       let(:message) { build_message_double(msg_id: 5, message: message_json, read_ct: 1) }
 

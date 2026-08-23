@@ -575,4 +575,58 @@ RSpec.describe Pgbus::ActiveJob::Adapter do
       end
     end
   end
+
+  describe "fair share metadata (issue #426)" do
+    let(:second_job_id) { SecureRandom.uuid }
+    let(:job2) { build_job_double(job_class: "OtherJob", queue_name: "default", job_id: second_job_id) }
+    let(:second_serialized_hash) do
+      { "job_class" => "OtherJob", "job_id" => second_job_id, "queue_name" => "default", "arguments" => [] }
+    end
+    let(:tagged) { serialized_hash.merge("pgbus_fair_key" => "tenant-7", "pgbus_fair_weight" => 3) }
+    let(:second_tagged) { second_serialized_hash.merge("pgbus_fair_key" => "tenant-7", "pgbus_fair_weight" => 3) }
+
+    before do
+      Pgbus.configuration.fair_share = ->(_job) { ["tenant-7", 3] }
+      allow(job).to receive(:scheduled_at).and_return(nil)
+      allow(job2).to receive(:scheduled_at).and_return(nil)
+      allow(Pgbus::Serializer).to receive(:serialize_job_hash).with(job).and_return(serialized_hash)
+      allow(Pgbus::Serializer).to receive(:serialize_job_hash).with(job2).and_return(second_serialized_hash)
+    end
+
+    after { Pgbus.configuration.fair_share = nil }
+
+    it "#enqueue sends the key and weight inside the payload" do
+      allow(mock_client).to receive(:send_message).and_return(1)
+
+      adapter.enqueue(job)
+
+      expect(mock_client).to have_received(:send_message).with("default", tagged, delay: 0, priority: nil)
+    end
+
+    it "#enqueue_at sends the key and weight inside the payload" do
+      allow(mock_client).to receive(:send_message).and_return(1)
+
+      adapter.enqueue_at(job, Time.now.to_f + 60)
+
+      expect(mock_client).to have_received(:send_message).with("default", tagged, delay: anything, priority: nil)
+    end
+
+    it "#enqueue_all tags every payload on the bulk path" do
+      allow(mock_client).to receive(:send_batch).and_return([1, 2])
+
+      adapter.enqueue_all([job, job2])
+
+      expect(mock_client).to have_received(:send_batch).with("default", [tagged, second_tagged], priority: nil)
+    end
+
+    it "leaves payloads untouched when the callable returns nil for a job" do
+      Pgbus.configuration.fair_share = ->(j) { j.equal?(job2) ? nil : "tenant-7" }
+      allow(mock_client).to receive(:send_batch).and_return([1, 2])
+
+      adapter.enqueue_all([job, job2])
+
+      expect(mock_client).to have_received(:send_batch)
+        .with("default", [serialized_hash.merge("pgbus_fair_key" => "tenant-7"), second_serialized_hash], priority: nil)
+    end
+  end
 end

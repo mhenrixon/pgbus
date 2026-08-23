@@ -1209,6 +1209,50 @@ RSpec.describe Pgbus::Configuration do
       expect(config.group_mode).to eq(:fifo)
     end
 
+    describe "fair_share (issue #426)" do
+      it "is nil by default" do
+        expect(config.fair_share).to be_nil
+      end
+
+      it "accepts a lambda" do
+        callable = ->(job) { job.class.name }
+        config.fair_share = callable
+        expect(config.fair_share).to eq(callable)
+      end
+
+      it "accepts any object responding to #call" do
+        resolver = Class.new { def call(_job) = "tenant" }.new
+        config.fair_share = resolver
+        expect(config.fair_share).to eq(resolver)
+      end
+
+      it "accepts nil to disable" do
+        config.fair_share = ->(_job) { "x" }
+        config.fair_share = nil
+        expect(config.fair_share).to be_nil
+      end
+
+      it "rejects a non-callable" do
+        expect { config.fair_share = "tenant" }.to raise_error(Pgbus::ConfigurationError, /fair_share/)
+      end
+
+      it "validate! rejects fair_share combined with group_mode" do
+        config.fair_share = ->(_job) { "x" }
+        config.group_mode = :round_robin
+        expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /fair_share.*group_mode/)
+      end
+
+      it "validate! accepts fair_share alone" do
+        config.fair_share = ->(_job) { "x" }
+        expect { config.validate! }.not_to raise_error
+      end
+
+      it "validate! accepts group_mode alone" do
+        config.group_mode = :fifo
+        expect { config.validate! }.not_to raise_error
+      end
+    end
+
     it "accepts :options and :session for connection_guc_mode" do
       config.connection_guc_mode = :session
       expect { config.validate! }.not_to raise_error

@@ -19,6 +19,7 @@ to guess.
 |------|--------------|-------|
 | `Client#send_message` / `#send_batch` | every job enqueue | `client_bench.rb` |
 | `Client#read_batch` | every worker poll cycle | `client_bench.rb` |
+| `Client#read_batch_fair` | every worker poll cycle when `config.fair_share` is set (issue #426) | `fair_read_bench.rb` |
 | `Executor#execute` | every job execution (deserialize + dispatch + archive) | `executor_bench.rb` |
 | JSON serialization | every enqueue/dequeue (payload encoding) | `serialization_bench.rb` |
 | Connection pool checkout | every PGMQ operation under concurrency | `connection_pool_bench.rb` |
@@ -63,6 +64,34 @@ rake bench:streams_hub      # streams master-hub hop cost + census (requires PGB
   isolates the per-wake `Client#read_after` cost against a real DB, comparing
   a fresh `PG.connect` per call (the pre-#315 `with_raw_connection` behavior) to
   the dedicated streams pool.
+
+### Fair share reads (issue #426)
+
+`Client#read_batch_fair` replaces `pgmq.read` on the worker when
+`config.fair_share` is set. It is a single statement: a recursive loose index
+scan enumerates the keys that currently have visible messages, a `LATERAL`
+takes each key's oldest `qty` visible messages, and the `qty` lowest
+`rank / weight` win (`FOR UPDATE SKIP LOCKED`, then `UPDATE … RETURNING`).
+Cost scales with the number of keys that have visible work, not with backlog
+depth — the `(key, vt, msg_id)` expression index lets keys whose messages are
+all invisible (in flight / delayed / in retry backoff) be skipped at the index
+level. Measured with `rake bench:fair_read` (local arm64, local Postgres, one
+connection, `qty: 10`, the claimed rows are reset after every read so the
+backlog is constant):
+
+| Backlog shape | `read_batch` (pgmq.read) | `read_batch_fair` | Δ |
+|---|---|---|---|
+| 100k visible / 1 key | 1 486 i/s (0.67 ms) | 950 i/s (1.05 ms) | 1.56× slower |
+| 100k visible / 200 keys | 1 401 i/s | 211 i/s (4.7 ms) | 6.6× slower |
+| 10k visible + 50k invisible / 50 keys | 1 378 i/s | 492 i/s (2.0 ms) | 2.8× slower |
+
+Method-level, not system-level: a worker reads at most once per poll tick when
+idle and back-to-back only while it has free capacity, so a 5 ms read with 200
+active tenants still supplies ~2 000 messages/s to one worker — far above what a
+5–20 thread pool executes. Enabling `fair_share` costs nothing on the enqueue
+path beyond one callable invocation; unkeyed installs (`fair_share` nil) never
+run this query. The bench prints `EXPLAIN (ANALYZE, BUFFERS)` per shape so the
+plan (Index Cond on `vt <= now()`, no Seq Scan) can be re-checked.
 
 ### Supervisor-owned shared LISTEN (issue #381)
 
