@@ -25,7 +25,8 @@ module ConfigReference
       { name: "default_queue", type: "String", default: '"default"', desc: "Queue for jobs without an explicit queue." },
       { name: "priority_levels", type: "Integer, nil", default: "nil", desc: "Number of priority sub-queues (2–10); nil disables." },
       { name: "default_priority", type: "Integer", default: "1", desc: "Priority for jobs without an explicit one." },
-      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise." }
+      { name: "group_mode", type: "Symbol, nil", default: "nil", desc: "Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise." },
+      { name: "fair_share", type: "#call, nil", default: "nil", desc: "Callable receiving the ActiveJob at enqueue; returns a key, [key, weight], or nil. Workers then interleave reads across keys (weighted, work-conserving). Mutually exclusive with group_mode." }
     ],
     "Workers" => [
       { name: "workers", type: "String / Array", default: "default: 5", desc: "Worker capsule definitions (string DSL or array)." },

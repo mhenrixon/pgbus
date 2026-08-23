@@ -646,6 +646,19 @@ end
 
 When `priority_levels` is `nil` (default), priority queues are disabled and all jobs go to a single queue per logical name.
 
+### Fair share across tenants
+
+One tenant enqueuing 100 000 jobs must not put every other tenant's work behind them. `config.fair_share` tags each job with a key (and optional weight) at enqueue, and the worker's read interleaves across keys inside each queue — a weighted, work-conserving round-robin. No per-tenant queues.
+
+```ruby
+Pgbus.configure do |config|
+  # key (String/Symbol/Integer), [key, weight], or nil to leave a job unkeyed
+  config.fair_share = ->(job) { [Current.tenant&.id, Current.tenant&.plan_weight || 1] }
+end
+```
+
+Weight 3 vs 1 yields a 3:1 split while both have work; a lone tenant still gets the whole worker. Composes with `priority_levels` (strict between levels, fair within) and `limits_concurrency`; mutually exclusive with `group_mode`. Workers build the supporting index `CONCURRENTLY` on queues they already serve. Details: [Routing & ordering](https://pgbus.zoolutions.llc/docs/routing-ordering).
+
 ### Consumer priority
 
 When multiple workers subscribe to the same queues, higher-priority workers process messages first. Lower-priority workers back off (3x polling interval) when a higher-priority worker is active.
@@ -2176,6 +2189,7 @@ Curated headline options for the README. The full operator reference (with types
 | `priority_levels` | `nil` | Number of priority sub-queues (nil = disabled, 2-10) |
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
 | `group_mode` | `nil` | Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise. |
+| `fair_share` | `nil` | Callable `->(job) { key \| [key, weight] \| nil }` evaluated at enqueue; workers interleave reads across keys (weighted, work-conserving). Mutually exclusive with `group_mode` |
 | `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |
 | `outbox_poll_interval` | `1.0` | Seconds between outbox poll cycles |
