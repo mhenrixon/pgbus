@@ -131,6 +131,7 @@ ja:
         total_label: デッドレターキュー内のメッセージ
       show:
         back: DLQに戻る
+        context: コンテキスト
         discard: 破棄
         discard_confirm: 完全に破棄しますか？
         headers: ヘッダー
@@ -372,6 +373,7 @@ ja:
       show:
         back: ジョブに戻る
         backtrace: バックトレース
+        context: コンテキスト
         discard: 破棄
         discard_confirm: このジョブを完全に破棄しますか？
         error_message: エラーメッセージ

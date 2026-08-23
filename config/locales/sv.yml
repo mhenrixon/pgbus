@@ -131,6 +131,7 @@ sv:
         total_label: meddelanden i dead letter-kö
       show:
         back: Tillbaka till DLQ
+        context: Kontext
         discard: Kassera
         discard_confirm: Kassera permanent?
         headers: Rubriker
@@ -372,6 +373,7 @@ sv:
       show:
         back: Tillbaka till jobb
         backtrace: Backtrace
+        context: Kontext
         discard: Kassera
         discard_confirm: Kassera detta jobb permanent?
         error_message: Felmeddelande

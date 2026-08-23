@@ -24,6 +24,21 @@ RSpec.describe "Pgbus::DeadLetterController", type: :request do
         expect(response).to have_http_status(:ok)
       end
     end
+
+    context "when the message carries persisted Current attributes (issue #430)" do
+      before do
+        message = JSON.generate("job_class" => "ReportJob",
+                                "pgbus_current" => { "Current" => { "tenant" => "acme", "_aj_symbol_keys" => ["tenant"] } })
+        @stub_data_source.dlq_messages_list = [{ msg_id: 12, message: message, queue_name: "pgbus_default_dlq" }]
+      end
+
+      it "renders a Context card" do
+        get "/pgbus/dlq/12"
+        expect(response).to have_http_status(:ok)
+        expect(response.body).to include("data-testid=\"job-context\"")
+        expect(response.body).to include("acme")
+      end
+    end
   end
 
   describe "POST /pgbus/dlq/:id/retry" do

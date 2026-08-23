@@ -131,6 +131,7 @@ en:
         total_label: messages in dead letter queue
       show:
         back: Back to DLQ
+        context: Context
         discard: Discard
         discard_confirm: Permanently discard?
         headers: Headers
@@ -372,6 +373,7 @@ en:
       show:
         back: Back to Jobs
         backtrace: Backtrace
+        context: Context
         discard: Discard
         discard_confirm: Discard this job permanently?
         error_message: Error Message

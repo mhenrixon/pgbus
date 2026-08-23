@@ -71,6 +71,26 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    context "when the payload carries persisted Current attributes (issue #430)" do
+      let(:context_payload) do
+        job_payload.merge("pgbus_current" => { "Current" => { "tenant" => "acme", "_aj_symbol_keys" => ["tenant"] } })
+      end
+      let(:message) { build_message_double(msg_id: 5, message: JSON.generate(context_payload), read_ct: 1) }
+
+      before do
+        allow(ActiveJob::Base).to receive(:deserialize).with(context_payload).and_return(job_double)
+      end
+
+      it "hands the whole payload (context included) to ActiveJob and runs the job — restore lives in perform_now" do
+        result = executor.execute(message, queue_name)
+
+        expect(ActiveJob::Base).to have_received(:deserialize).with(context_payload)
+        expect(job_double).to have_received(:perform_now)
+        expect(mock_client).to have_received(:archive_message).with(queue_name, 5)
+        expect(result).to eq(:success)
+      end
+    end
+
     context "when the payload carries fair-share metadata (issue #426)" do
       let(:tagged_payload) { job_payload.merge("pgbus_fair_key" => "tenant-7", "pgbus_fair_weight" => 3) }
       let(:message) { build_message_double(msg_id: 5, message: JSON.generate(tagged_payload), read_ct: 1) }

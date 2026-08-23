@@ -57,6 +57,18 @@ RSpec.describe Pgbus::Serializer do
       expect(described_class.deserialize_job_data(job_data)).to eq(fake_job)
     end
 
+    it "rejects a disallowed GlobalID inside persisted Current attributes (issue #430)" do
+      stub_const("Order", Class.new)
+      stub_const("Secret", Class.new)
+      Pgbus.configuration.allowed_global_id_models = [Order]
+      tagged = job_data.merge("pgbus_current" => { "Current" => { "tenant" => { "_aj_globalid" => "gid://pgbus-test/Secret/1" } } })
+
+      expect { described_class.deserialize_job_data(tagged) }
+        .to raise_error(Pgbus::SerializationError, /not in allowed_global_id_models/)
+    ensure
+      Pgbus.configuration.allowed_global_id_models = nil
+    end
+
     it "skips the allowlist walk when allowed_global_id_models is nil" do
       Pgbus.configuration.allowed_global_id_models = nil
       allow(described_class).to receive(:assert_allowed_global_id!).and_call_original

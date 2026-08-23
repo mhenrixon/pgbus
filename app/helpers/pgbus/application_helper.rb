@@ -143,6 +143,13 @@ module Pgbus
       tag.span(I18n.t("pgbus.helpers.batch_status.#{status}", default: status), class: css)
     end
 
+    # Persisted Current attributes for a job payload, as
+    # { "Current" => { "tenant" => "gid://…", ... } } or nil (issue #430).
+    # Goes through pgbus_parse_message so PayloadFilter redaction applies.
+    def pgbus_job_context(message)
+      Pgbus::Web::JobContext.from_payload(pgbus_parse_message(message))
+    end
+
     def pgbus_parse_message(message)
       return {} unless message
 

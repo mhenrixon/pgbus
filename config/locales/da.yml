@@ -131,6 +131,7 @@ da:
         total_label: beskeder i dead letter-kø
       show:
         back: Tilbage til DLQ
+        context: Kontekst
         discard: Kassér
         discard_confirm: Slet permanent?
         headers: Overskrifter
@@ -372,6 +373,7 @@ da:
       show:
         back: Tilbage til job
         backtrace: Stacktrace
+        context: Kontekst
         discard: Kassér
         discard_confirm: Slet dette job permanent?
         error_message: Fejlmeddelelse

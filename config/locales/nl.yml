@@ -131,6 +131,7 @@ nl:
         total_label: berichten in dead letter-wachtrij
       show:
         back: Terug naar DLQ
+        context: Context
         discard: Verwerpen
         discard_confirm: Permanent verwerpen?
         headers: Headers
@@ -372,6 +373,7 @@ nl:
       show:
         back: Terug naar Taken
         backtrace: Stacktrace
+        context: Context
         discard: Verwijderen
         discard_confirm: Deze taak permanent verwijderen?
         error_message: Foutmelding
