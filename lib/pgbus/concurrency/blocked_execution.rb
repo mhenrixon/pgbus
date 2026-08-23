@@ -34,12 +34,16 @@ module Pgbus
             raise ActiveRecord::Rollback unless released
 
             actual_delay = resolve_delay(released[:payload], delay)
-            msg_id = client.send_message(released[:queue_name], released[:payload], delay: actual_delay)
+            # Carry the enqueuer's priority through: under priority routing it
+            # picks the _pN sub-queue, not just the release order (issue #423).
+            msg_id = client.send_message(released[:queue_name], released[:payload],
+                                         delay: actual_delay, priority: released[:priority])
           end
 
           if released && msg_id
             begin
-              Batch.backfill_execution(released[:payload], msg_id, client.target_queue(released[:queue_name]))
+              Batch.backfill_execution(released[:payload], msg_id,
+                                       client.target_queue(released[:queue_name], released[:priority]))
             rescue StandardError => e
               Pgbus.logger.warn { "[Pgbus] Batch execution backfill failed after promote: #{e.message}" }
             end

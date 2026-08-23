@@ -31,7 +31,6 @@ module Pgbus
       @on_failure = on_failure || on_discard
       @description = description
       @properties = properties
-      @job_count = 0
       @started = false
     end
 
@@ -50,7 +49,7 @@ module Pgbus
       create_record
       @started = true
       count_jobs(&)
-      update_total
+      start_processing
       self
     end
 
@@ -147,9 +146,21 @@ module Pgbus
       result
     end
 
+    def self.warn_callback_jobs_unmigrated
+      return if @warned_callback_jobs_unmigrated
+
+      @warned_callback_jobs_unmigrated = true
+      Pgbus.logger.warn do
+        "[Pgbus] Batch callback configured as an ActiveJob instance, but pgbus_batches has no " \
+          "on_*_job columns yet — .set options (queue, wait, priority) are ignored until " \
+          "`rails generate pgbus:add_batch_callback_jobs` runs"
+      end
+    end
+
     def self.reset_executions_migrated_cache!
       @executions_migrated = nil
       @callback_jobs_migrated = nil
+      @warned_callback_jobs_unmigrated = nil
     end
 
     # True once the on_finish_job / on_success_job / on_failure_job jsonb
@@ -167,23 +178,44 @@ module Pgbus
       result
     end
 
-    def self.track_enqueue(payload)
-      return unless executions_migrated?
+    # Count tagged payloads into their batch and insert their execution rows,
+    # in ONE transaction, BEFORE any message is sent (issue #423). Every
+    # commit point keeps the invariant
+    #   total_jobs == outstanding rows + completed_jobs + failed_jobs
+    # which is what lets a finish never race an add: the guarded increment
+    # raises AlreadyFinished here — at perform_later, before send — when the
+    # batch has already finished. Pass an Array to count a bulk send once.
+    def self.track_enqueue(payloads)
+      payloads = payloads.is_a?(Hash) ? [payloads] : Array(payloads)
+      batch_id = payloads.first&.fetch(METADATA_KEY, nil)
+      return if payloads.empty? || batch_id.nil?
 
-      batch_id = payload[METADATA_KEY]
-      job_id = payload["job_id"]
-      return unless batch_id && job_id
+      migrated = executions_migrated?
+      BatchEntry.transaction do
+        BatchEntry.increment_total_jobs!(batch_id, payloads.size)
+        next unless migrated
 
-      BatchExecution.insert_for!(batch_id: batch_id, job_id: job_id)
+        payloads.each do |payload|
+          job_id = payload["job_id"]
+          next unless job_id
+
+          BatchExecution.insert_for!(batch_id: batch_id, job_id: job_id, queue_name: payload["queue_name"])
+        end
+      end
     end
 
+    # Reverse of track_enqueue for a job that will never run (discarded at
+    # enqueue time, or its send raised with no msg_id).
     def self.untrack_enqueue(payload)
-      return unless executions_migrated?
+      batch_id = payload[METADATA_KEY]
+      return unless batch_id
 
       job_id = payload["job_id"]
-      return unless job_id
-
-      BatchExecution.where(job_id: job_id).delete_all
+      migrated = executions_migrated?
+      BatchEntry.transaction do
+        BatchEntry.decrement_total_jobs!(batch_id)
+        BatchExecution.where(job_id: job_id).delete_all if migrated && job_id
+      end
     end
 
     def self.backfill_execution(payload, msg_id, queue_name)
@@ -214,7 +246,7 @@ module Pgbus
       result
     end
 
-    def self.sweep_stalled(stalled_for: Sweep::STALL_THRESHOLD, batch_size: 500, client: Pgbus.client)
+    def self.sweep_stalled(stalled_for: Pgbus.configuration.batch_stall_threshold, batch_size: 500, client: Pgbus.client)
       Sweep.run(stalled_for: stalled_for, batch_size: batch_size, client: client)
     end
 
@@ -363,22 +395,20 @@ module Pgbus
       @on_finish = nil
       @on_success = nil
       @on_failure = nil
-      @job_count = 0
       @started = true
     end
 
-    # Add to an already-created batch. The block's jobs get their execution
-    # rows as they are enqueued (so the single-winner finish still sees
-    # outstanding work), then total_jobs is bumped by the block's count.
-    # check_finished! afterwards covers the case where every added job
-    # already reached a terminal state while the block was still open.
+    # Add to an already-created batch. Each job counts itself in (guarded
+    # increment + execution row, see .track_enqueue) as it is enqueued, so an
+    # add into a finished batch raises at perform_later before anything is
+    # sent; the fresh-read check here is only an early exit for the common
+    # case. check_finished! afterwards covers a block whose jobs all reached a
+    # terminal state while it was still open.
     def reopen(&)
+      reload
       raise AlreadyFinished, "Can't add jobs into an already finished batch" if finished?
 
       count_jobs(&)
-      return self if @job_count.zero?
-
-      BatchEntry.increment_total_jobs!(batch_id, @job_count)
       reload
       self.class.send(:finish_if_needed, BatchEntry.check_finished!(batch_id))
       self
@@ -404,9 +434,16 @@ module Pgbus
 
     # A callback given as a bare class keeps the legacy *_class column; a
     # configured ActiveJob instance is serialized now (so .set options resolve
-    # at creation, matching solid_queue) into the *_job jsonb column.
+    # at creation, matching solid_queue) into the *_job jsonb column. Before
+    # the add_batch_callback_jobs migration there is nowhere to keep the
+    # instance, so it degrades to its class (the callback still fires, on its
+    # default queue) with a warning rather than being dropped.
     def callback_class_name(callback)
-      callback.is_a?(Class) ? callback.name : nil
+      return callback.name if callback.is_a?(Class)
+      return nil if callback.nil? || self.class.callback_jobs_migrated?
+
+      self.class.warn_callback_jobs_unmigrated
+      callback.class.name
     end
 
     def callback_job_attributes
@@ -425,46 +462,20 @@ module Pgbus
 
     def count_jobs(&)
       previous_batch_id = Thread.current[:pgbus_batch_id]
-      previous_count = Thread.current[:pgbus_batch_job_count]
-
       Thread.current[:pgbus_batch_id] = batch_id
-      Thread.current[:pgbus_batch_job_count] = 0
-
       yield
-
-      @job_count = Thread.current[:pgbus_batch_job_count] || 0
     ensure
       Thread.current[:pgbus_batch_id] = previous_batch_id
-      Thread.current[:pgbus_batch_job_count] = previous_count
     end
 
-    def update_total
-      if @job_count.zero?
-        # Finish empty batches immediately — no jobs to signal completion
-        BatchEntry.where(batch_id: batch_id).update_all(
-          total_jobs: 0,
-          status: "finished",
-          finished_at: Time.current
-        )
-        fire_empty_batch_callbacks
-      else
-        BatchEntry.where(batch_id: batch_id).update_all(total_jobs: @job_count, status: "processing")
-        reload
-        # Jobs can reach their terminal state while the enqueue block is still
-        # open — those completion signals saw total_jobs == 0 and could not
-        # finish the batch. Re-check now that the real total is visible.
-        result = BatchEntry.check_finished!(batch_id)
-        self.class.send(:finish_if_needed, result)
-      end
-    end
-
-    def fire_empty_batch_callbacks
-      record = BatchEntry.find_by(batch_id: batch_id)
-      return unless record
-
-      properties = parse_properties(record.properties)
-      self.class.send(:fire_callback, record, :on_finish, properties)
-      self.class.send(:fire_callback, record, :on_success, properties)
+    # End of the first block: the jobs already counted themselves in, so only
+    # the status moves (guarded — the stalled-batch sweep may have flipped it
+    # already). An empty block leaves total_jobs = 0, which try_finish!
+    # closes through the same single-winner path as any other batch.
+    def start_processing
+      BatchEntry.where(batch_id: batch_id, status: "pending").update_all(status: "processing")
+      reload
+      self.class.send(:finish_if_needed, BatchEntry.check_finished!(batch_id))
     end
 
     def parse_properties(props)

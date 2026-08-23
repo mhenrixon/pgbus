@@ -596,13 +596,25 @@ RSpec.describe Pgbus::ActiveJob::Executor do
           allow(Pgbus::Uniqueness).to receive_messages(extract_strategy: :while_executing, acquire_execution_lock: true)
         end
 
-        it "acquires the execution lock before perform_now and releases on success" do
+        it "acquires the execution lock bound to this message before perform_now and releases on success" do
           executor.execute(message, queue_name)
 
           expect(Pgbus::Uniqueness).to have_received(:acquire_execution_lock).with(
-            "TestJob:user-42", uniqueness_payload
+            "TestJob:user-42", uniqueness_payload, msg_id: message.msg_id.to_i, queue_name: queue_name
           )
           expect(job_double).to have_received(:perform_now)
+          expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").once
+        end
+
+        # Issue #423 (F5): a failed attempt is no longer executing. Holding the
+        # lock made the retry of the same message conflict with its own row and
+        # be skipped on every read until it dead-lettered.
+        it "releases the lock when perform_now raises so the retry can acquire it" do
+          allow(job_double).to receive(:perform_now).and_raise(StandardError, "boom")
+
+          result = executor.execute(message, queue_name)
+
+          expect(result).to eq(:failed)
           expect(Pgbus::Uniqueness).to have_received(:release_lock).with("TestJob:user-42").once
         end
 

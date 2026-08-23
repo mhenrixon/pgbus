@@ -31,6 +31,13 @@ module Pgbus
       true
     end
 
+    # Reverse of increment_total_jobs! for a job that will never run. Floored
+    # at zero; a finished row is left alone.
+    def self.decrement_total_jobs!(batch_id)
+      where(batch_id: batch_id, status: %w[pending processing])
+        .update_all(["total_jobs = GREATEST(total_jobs - 1, 0)"])
+    end
+
     # Single-winner finish: status is processing AND no execution rows remain.
     # Join-free NOT EXISTS so the subquery stays in this UPDATE's WHERE.
     # Returns the number of rows updated (0 or 1).
@@ -81,10 +88,15 @@ module Pgbus
 
         return { record: record, just_finished: false } if Batch.executions_migrated?
 
-        just_finished = record.completed_jobs + record.discarded_jobs == record.total_jobs
-        record.update!(status: "finished", finished_at: Time.current) if just_finished && record.status != "finished"
+        # total_jobs grows per job while the block is still open (issue #423),
+        # so completed == total can be momentarily true on a pending batch.
+        # Only a processing batch may auto-finish; check_finished! at the end
+        # of the block covers the pending case.
+        counters_match = record.completed_jobs + record.discarded_jobs == record.total_jobs
+        just_finished = counters_match && record.status == "processing"
+        record.update!(status: "finished", finished_at: Time.current) if just_finished
 
-        { record: record, just_finished: just_finished && record.status == "finished" }
+        { record: record, just_finished: just_finished }
       end
     end
   end

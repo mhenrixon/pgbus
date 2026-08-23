@@ -186,12 +186,18 @@ module Pgbus
 
       # Acquire the uniqueness lock at execution time (:while_executing only).
       # Returns true if acquired, false if another instance is running.
-      def acquire_execution_lock(key, payload)
+      #
+      # Bound to the message being executed so a row left behind by a crashed
+      # attempt of the SAME message is re-acquired on retry instead of locking
+      # that message out until it dead-letters (issue #423). Callers without a
+      # message (legacy signature) fall back to the unbound placeholder.
+      def acquire_execution_lock(key, payload, msg_id: 0, queue_name: nil)
         strategy = extract_strategy(payload)
         return true unless strategy == :while_executing
 
-        queue_name = payload["queue_name"] || "unknown"
-        UniquenessKey.acquire!(key, queue_name: queue_name, msg_id: 0)
+        queue_name ||= payload["queue_name"] || "unknown"
+        UniquenessKey.acquire!(key, queue_name: queue_name, msg_id: msg_id.to_i,
+                                    reacquire_same_message: msg_id.to_i.positive?)
       end
 
       # Release the uniqueness lock after execution completes.

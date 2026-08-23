@@ -232,6 +232,88 @@ RSpec.describe "Batch flow (integration)", :integration do
     end
   end
 
+  describe "stalled-pending sweep keeps the counters it already has (issue #423)" do
+    it "finishes a crashed pending batch whose early jobs already completed" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job)
+      expect do
+        batch.enqueue do
+          3.times { worker_job.perform_later }
+          # Two jobs finish while the block is still open, then the block dies.
+          2.times { complete_next(batch.batch_id) }
+          raise "crash mid-block"
+        end
+      end.to raise_error("crash mid-block")
+
+      record = Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)
+      expect(record.status).to eq("pending")
+      expect(record.completed_jobs).to eq(2)
+      Pgbus::BatchEntry.where(batch_id: batch.batch_id).update_all(created_at: 1.hour.ago)
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      record = Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)
+      expect(record.status).to eq("processing")
+      expect(record.total_jobs).to eq(3)
+
+      complete_next(batch.batch_id)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("finished")
+      expect(next_callback_job_class).to eq("BatchFlowSpec::OnFinishJob")
+    end
+
+    it "leaves a pending batch alone while its block is still actively enqueuing" do
+      batch = Pgbus::Batch.new
+      batch.enqueue do
+        worker_job.perform_later
+        Pgbus::BatchEntry.where(batch_id: batch.batch_id).update_all(created_at: 1.hour.ago)
+        # Row inserted just now => activity inside the threshold => not stalled.
+        Pgbus::Batch.sweep_stalled(stalled_for: 300)
+        expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("pending")
+      end
+    end
+  end
+
+  describe "orphan-row sweep probes the queue before un-counting (issue #423)" do
+    it "keeps a msg_id-less row whose message is live, and resolves it as failed once dead-lettered" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job, on_failure: on_discard_job)
+      batch.enqueue { worker_job.perform_later }
+      row = Pgbus::BatchExecution.find_by!(batch_id: batch.batch_id)
+      # Simulate a backfill that never landed: message is live, row has no msg_id.
+      msg_id = row.msg_id
+      row.update_columns(msg_id: nil, created_at: 1.hour.ago)
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      expect(Pgbus::BatchExecution.where(batch_id: batch.batch_id).count).to eq(1)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)).to have_attributes(status: "processing", total_jobs: 1)
+
+      message = client.read_message(work_queue, vt: 30)
+      expect(message.msg_id.to_i).to eq(msg_id)
+      client.move_to_dead_letter(work_queue, message)
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)).to have_attributes(status: "finished", failed_jobs: 1)
+      expect(drain_callback_job_classes).to contain_exactly("BatchFlowSpec::OnFinishJob", "BatchFlowSpec::OnDiscardJob")
+    end
+
+    it "still un-counts a row whose message exists nowhere" do
+      batch = Pgbus::Batch.new(on_finish: on_finish_job)
+      batch.enqueue do
+        worker_job.perform_later
+        worker_job.perform_later
+      end
+      row = Pgbus::BatchExecution.where(batch_id: batch.batch_id).order(:id).first
+      client.delete_message(work_queue, row.msg_id.to_i)
+      row.update_columns(msg_id: nil, created_at: 1.hour.ago)
+
+      Pgbus::Batch.sweep_stalled(stalled_for: 0)
+
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id)).to have_attributes(status: "processing", total_jobs: 1)
+      complete_next(batch.batch_id)
+      expect(Pgbus::BatchEntry.find_by(batch_id: batch.batch_id).status).to eq("finished")
+    end
+  end
+
   describe "stalled-execution sweep (issue #414)" do
     it "finishes a batch whose last message is gone but the execution row remains" do
       batch = enqueue_batch(on_finish: on_finish_job)

@@ -40,12 +40,12 @@ RSpec.describe Pgbus::BatchExecution do
       allow(described_class).to receive_messages(connection: conn, table_name: "pgbus_batch_executions")
       allow(conn).to receive(:exec_query)
 
-      described_class.insert_for!(batch_id: batch_id, job_id: job_id)
+      described_class.insert_for!(batch_id: batch_id, job_id: job_id, queue_name: "default")
 
       expect(conn).to have_received(:exec_query).with(
         a_string_matching(/ON CONFLICT \(job_id\) DO NOTHING/),
         "BatchExecution Insert",
-        [batch_id, job_id, anything]
+        [batch_id, job_id, "default", anything]
       )
     end
   end
@@ -63,18 +63,20 @@ RSpec.describe Pgbus::BatchExecution do
   end
 
   describe "Pgbus::Batch.track_enqueue / untrack_enqueue / backfill_execution" do
-    let(:payload) { { "job_id" => job_id, Pgbus::Batch::METADATA_KEY => batch_id } }
+    let(:payload) { { "job_id" => job_id, "queue_name" => "default", Pgbus::Batch::METADATA_KEY => batch_id } }
 
     before do
       allow(described_class).to receive(:insert_for!)
       allow(described_class).to receive(:backfill!)
       allow(described_class).to receive(:where).and_return(double(delete_all: 1))
+      allow(Pgbus::BatchEntry).to receive(:transaction).and_yield
+      allow(Pgbus::BatchEntry).to receive_messages(increment_total_jobs!: true, decrement_total_jobs!: 1)
     end
 
     it "inserts an execution row when tracking an enqueue" do
       Pgbus::Batch.track_enqueue(payload)
 
-      expect(described_class).to have_received(:insert_for!).with(batch_id: batch_id, job_id: job_id)
+      expect(described_class).to have_received(:insert_for!).with(batch_id: batch_id, job_id: job_id, queue_name: "default")
     end
 
     it "does not insert when the executions table is missing" do

@@ -72,7 +72,8 @@ class Views::Docs::Pages::Batches < DocsUI::Page
         with `description`, `properties`, `status`, `total_jobs`,
         `completed_jobs`, `failed_jobs`, `pending_jobs`, `progress_percentage`
         and `finished?`. Adding to a batch that has already finished raises
-        `Pgbus::Batch::AlreadyFinished`.
+        `Pgbus::Batch::AlreadyFinished` — at `perform_later`, before the job
+        is sent, even if the handle you hold is stale.
       MD
       DocsUI::Callout(:warn) do
         plain "Breaking change (pre-1.0): "
@@ -155,15 +156,24 @@ class Views::Docs::Pages::Batches < DocsUI::Page
       md <<~'MD'
         1. `Batch.new(...)` creates a row in `pgbus_batches` with
            `status: "pending"`.
-        2. `batch.enqueue { ... }` tags each enqueued job with the batch id and
-           inserts a `pgbus_batch_executions` row (identity is the ActiveJob
-           `job_id`) *before* the message is sent.
+        2. `batch.enqueue { ... }` tags each enqueued job with the batch id and,
+           in one transaction *before* the message is sent, increments
+           `total_jobs` and inserts a `pgbus_batch_executions` row (identity is
+           the ActiveJob `job_id`). The increment is guarded on an unfinished
+           batch — that guard is what raises `AlreadyFinished`. A
+           `perform_all_later` counts once for the whole bulk.
         3. As each job is archived or dead-lettered, the executor deletes that
-           execution row. Counters stay as dashboard data.
-        4. The batch finishes when no execution rows remain (single-winner
-           update). A dispatcher sweep repairs crash windows — a worker that
-           dies between archive and row-delete, an enqueue that dies between
-           insert and send, a `pending` batch whose block never returned.
+           execution row and bumps `completed_jobs` / `failed_jobs`.
+           `total_jobs == outstanding rows + completed + failed` holds at every
+           commit point.
+        4. The batch finishes when no execution rows remain and the counters
+           add up (single-winner update). A dispatcher sweep repairs crash
+           windows — a worker that dies between archive and row-delete, an
+           enqueue that dies between insert and send, a `pending` batch whose
+           block never returned. An unsent row is only un-counted once the
+           sweep has checked the queue and DLQ for its message; a batch is
+           only "stalled" after `config.batch_stall_threshold` (default
+           5 minutes) without a new execution row.
         5. The dispatcher cleans up finished batches older than
            `config.batch_retention` (default 7 days).
       MD

@@ -8,10 +8,22 @@ module Pgbus
     # Atomically try to acquire a uniqueness lock via INSERT ... ON CONFLICT.
     # PostgreSQL's unique index on lock_key guarantees at most one caller wins.
     # Returns true if acquired (row inserted), false if already locked.
-    def self.acquire!(lock_key, queue_name:, msg_id:) # rubocop:disable Naming/PredicateMethod
+    #
+    # reacquire_same_message: true (the :while_executing executor path) treats
+    # a conflict with a row that already points at THIS msg_id as acquired —
+    # it is this message's own previous attempt (PGMQ's visibility timeout
+    # guarantees nobody else holds the message), left behind by a crash. A
+    # conflict with a different msg_id is a genuine concurrent execution.
+    def self.acquire!(lock_key, queue_name:, msg_id:, reacquire_same_message: false) # rubocop:disable Naming/PredicateMethod
+      on_conflict = if reacquire_same_message && msg_id.to_i.positive?
+                      "DO UPDATE SET queue_name = EXCLUDED.queue_name " \
+                        "WHERE #{table_name}.msg_id = EXCLUDED.msg_id"
+                    else
+                      "DO NOTHING"
+                    end
       result = connection.exec_query(
         "INSERT INTO #{table_name} (lock_key, queue_name, msg_id) " \
-        "VALUES ($1, $2, $3) ON CONFLICT (lock_key) DO NOTHING RETURNING lock_key, created_at",
+        "VALUES ($1, $2, $3) ON CONFLICT (lock_key) #{on_conflict} RETURNING lock_key, created_at",
         "UniquenessKey Acquire", [lock_key, queue_name, msg_id]
       )
       row = result.rows.first

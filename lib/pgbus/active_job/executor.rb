@@ -56,9 +56,14 @@ module Pgbus
             # released on completion or DLQ.
             nil
           when :while_executing
-            # Acquire the lock now. If another worker is already executing
-            # this job, skip it — VT will expire and it'll be retried.
-            unless Uniqueness.acquire_execution_lock(uniqueness_key, payload)
+            # Acquire the lock now, bound to this message. If another worker is
+            # already executing this job, skip it — VT will expire and it'll be
+            # retried. A row left by a crashed attempt of THIS message is
+            # re-acquired, not treated as a duplicate.
+            acquired = Uniqueness.acquire_execution_lock(
+              uniqueness_key, payload, msg_id: message.msg_id.to_i, queue_name: queue_name
+            )
+            unless acquired
               Pgbus.logger.info { "[Pgbus] Skipping duplicate execution for #{job_class}" }
               return :skipped
             end
@@ -113,6 +118,10 @@ module Pgbus
         # silently lost control flow — no failed event row, no job_failed
         # notification, uniqueness lock held until VT expired. See issue #126.
         handle_failure(message, queue_name, e, payload: payload)
+        # A failed :while_executing attempt is no longer executing — release
+        # so the retry (same message, after VT) can acquire. :until_executed
+        # keeps its lock until success/DLQ by design (#126, #333).
+        release_uniqueness_lock(uniqueness_key) if uniqueness_strategy == :while_executing
         instrument(
           "pgbus.job_failed",
           queue: queue_name,

@@ -1187,6 +1187,67 @@ RSpec.describe Pgbus::Client do
     end
   end
 
+  describe "#message_with_job_id?" do
+    let(:raw_conn) { double("PG::Connection") }
+
+    before do
+      allow(client).to receive(:with_raw_connection).and_yield(raw_conn)
+      stub_const("PG::UndefinedTable", Class.new(StandardError)) unless defined?(PG::UndefinedTable)
+    end
+
+    it "probes the single physical table for a logical name under the standard strategy" do
+      allow(raw_conn).to receive(:exec_params).with(/pgmq\.q_pgbus_test_default /, ["j-1"]).and_return(double(ntuples: 1))
+
+      expect(client.message_with_job_id?("default", job_id: "j-1")).to be(true)
+    end
+
+    it "probes an already-physical name as itself" do
+      allow(raw_conn).to receive(:exec_params).with(/pgmq\.q_pgbus_test_default_dlq /, ["j-1"]).and_return(double(ntuples: 0))
+
+      expect(client.message_with_job_id?("pgbus_test_default_dlq", job_id: "j-1")).to be(false)
+    end
+
+    it "returns nil (unknown) when the table is missing" do
+      allow(raw_conn).to receive(:exec_params).and_raise(PG::UndefinedTable, "relation does not exist")
+
+      expect(client.message_with_job_id?("default", job_id: "j-1")).to be_nil
+    end
+
+    context "when priority routing is enabled (issue #423)" do
+      # The strategy is chosen at construction, so build the client with it.
+      let(:config) do
+        Pgbus::Configuration.new.tap do |c|
+          c.database_url = "postgres://localhost/pgbus_test"
+          c.queue_prefix = "pgbus_test"
+          c.priority_levels = 3
+        end
+      end
+
+      it "expands a logical name to every _pN sub-queue and returns true on the first hit" do
+        allow(raw_conn).to receive(:exec_params).with(/q_pgbus_test_default_p0 /, ["j-1"]).and_return(double(ntuples: 0))
+        allow(raw_conn).to receive(:exec_params).with(/q_pgbus_test_default_p1 /, ["j-1"]).and_return(double(ntuples: 1))
+
+        expect(client.message_with_job_id?("default", job_id: "j-1")).to be(true)
+        expect(raw_conn).not_to have_received(:exec_params).with(/q_pgbus_test_default_p2 /, anything)
+      end
+
+      it "returns false only when every sub-queue was probed and empty" do
+        allow(raw_conn).to receive(:exec_params).and_return(double(ntuples: 0))
+
+        expect(client.message_with_job_id?("default", job_id: "j-1")).to be(false)
+        expect(raw_conn).to have_received(:exec_params).exactly(3).times
+      end
+
+      it "returns nil when every sub-queue table is missing, false if at least one was determined" do
+        allow(raw_conn).to receive(:exec_params).and_raise(PG::UndefinedTable, "relation does not exist")
+        expect(client.message_with_job_id?("default", job_id: "j-1")).to be_nil
+
+        allow(raw_conn).to receive(:exec_params).with(/_p1 /, anything).and_return(double(ntuples: 0))
+        expect(client.message_with_job_id?("default", job_id: "j-1")).to be(false)
+      end
+    end
+  end
+
   describe "#pgmq_installed?" do
     let(:raw_conn) { double("PG::Connection") }
 
