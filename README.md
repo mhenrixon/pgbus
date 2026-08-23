@@ -659,6 +659,8 @@ end
 
 Weight 3 vs 1 yields a 3:1 split while both have work; a lone tenant still gets the whole worker. Composes with `priority_levels` (strict between levels, fair within) and `limits_concurrency`; mutually exclusive with `group_mode`. Workers build the supporting index `CONCURRENTLY` on queues they already serve. Details: [Routing & ordering](https://pgbus.zoolutions.llc/docs/routing-ordering).
 
+The event bus has the same knob: `config.event_fair_share = ->(event) { key | [key, weight] | nil }` receives the `Pgbus::Event` at publish (`Pgbus.publish`, `publish_later`, `Outbox.publish_event`), tags the event envelope — never your payload — and consumers interleave reads across keys inside each subscriber queue. Details: [Event bus](https://pgbus.zoolutions.llc/docs/event-bus).
+
 ### Current attributes
 
 `ActiveSupport::CurrentAttributes` is reset around every job. Ask pgbus to carry it and `Current.tenant` / `Current.user` / `Current.request_id` are there inside `perform` — and inside `retry_on` / `discard_on` blocks, under the pgbus worker and Rails' `:test` / `:inline` adapters alike:
@@ -2203,6 +2205,7 @@ Curated headline options for the README. The full operator reference (with types
 | `default_priority` | `1` | Default priority for jobs without explicit priority |
 | `group_mode` | `nil` | Grouped-read ordering mode for a queue. Experimental — exempt from the 1.0 stability promise. |
 | `fair_share` | `nil` | Callable `->(job) { key \| [key, weight] \| nil }` evaluated at enqueue; workers interleave reads across keys (weighted, work-conserving). Mutually exclusive with `group_mode` |
+| `event_fair_share` | `nil` | Event-bus twin of `fair_share`: callable `->(event) { key \| [key, weight] \| nil }` receiving the `Pgbus::Event` at publish; consumers interleave reads across keys within each subscriber queue. Independent of `fair_share` |
 | `current_attributes` | `nil` | Persist `ActiveSupport::CurrentAttributes` across enqueue → perform: `:auto`, an Array of classes/names, or `{ Current => { except: [...] } }`. Restored around the whole `perform_now` |
 | `archive_retention` | `7.days` | How long to keep archived messages. Accepts seconds, Duration, or `nil` to disable cleanup |
 | `outbox_enabled` | `false` | Enable transactional outbox poller process |

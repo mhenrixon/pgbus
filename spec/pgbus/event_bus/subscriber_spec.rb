@@ -85,5 +85,32 @@ RSpec.describe Pgbus::EventBus::Subscriber do
       expect(mock_client).to have_received(:ensure_queue).with("custom_payments")
       expect(mock_client).to have_received(:bind_topic).with("payments.#", "custom_payments")
     end
+
+    context "with config.event_fair_share set (issue #427)" do
+      before do
+        Pgbus.configuration.event_fair_share = ->(_e) { "t" }
+        allow(mock_client).to receive(:ensure_fair_index)
+      end
+
+      after { Pgbus.configuration.event_fair_share = nil }
+
+      it "ensures the fair index on the subscriber queue after creating it" do
+        subscriber = described_class.new(pattern: "orders.#", handler_class: handler_class, queue_name: "fair_q")
+
+        subscriber.setup!
+
+        expect(mock_client).to have_received(:ensure_queue).with("fair_q").ordered
+        expect(mock_client).to have_received(:ensure_fair_index).with("fair_q").ordered
+      end
+    end
+
+    it "does not touch the fair index when event fair share is off" do
+      allow(mock_client).to receive(:ensure_fair_index)
+      subscriber = described_class.new(pattern: "orders.#", handler_class: handler_class, queue_name: "plain_q")
+
+      subscriber.setup!
+
+      expect(mock_client).not_to have_received(:ensure_fair_index)
+    end
   end
 end

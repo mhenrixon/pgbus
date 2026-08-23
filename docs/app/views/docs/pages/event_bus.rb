@@ -12,6 +12,7 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
     publishing
     subscribing
     routing
+    fair_share
     idempotency
   end
 
@@ -90,6 +91,44 @@ class Views::Docs::Pages::EventBus < DocsUI::Page
         # Audit everything under the orders.* namespace, at any depth:
         Pgbus::EventBus::Registry.instance.subscribe("orders.#", OrderAuditHandler)
       RUBY
+    end
+  end
+
+  def fair_share
+    DocsUI::Section("Fair share across tenants", description: "One tenant's event burst must not starve everyone else's handlers.") do
+      md <<~'MD'
+        A subscriber queue is FIFO, so a bulk import emitting `orders.created`
+        100 000 times for one tenant puts every other tenant's events behind it —
+        in *every* handler subscribed to that topic. `config.event_fair_share`
+        is the event twin of `config.fair_share` (jobs): a callable tags each
+        event with a key (and an optional weight) at publish time, and the
+        consumer's read interleaves across keys inside each subscriber queue —
+        the same weighted, work-conserving round-robin workers use.
+      MD
+      DocsUI::Code(<<~RUBY, filename: "config/initializers/pgbus.rb")
+        Pgbus.configure do |config|
+          # Receives the Pgbus::Event (routing_key, payload as passed to publish, headers).
+          # Return a key (String/Symbol/Integer), [key, weight], or nil to leave the event unkeyed.
+          config.event_fair_share = ->(event) { Current.tenant&.id || event.payload["tenant_id"] }
+        end
+      RUBY
+      md <<~'MD'
+        - The key rides in the **event envelope** (`pgbus_fair_key` next to
+          `event_id` / `published_at`), never inside your payload — handlers see
+          `event.payload` unchanged, and the tag is copied to every subscriber
+          queue the topic fans out to.
+        - It is resolved where you publish — `Pgbus.publish`, `publish_later`,
+          and `Pgbus::Outbox.publish_event` — so `Current.*` context is available,
+          and the outbox relay carries it to the bus unchanged. A system writing
+          `pgbus_outbox_entries` directly can set `"pgbus_fair_key"` in the
+          envelope JSON itself.
+        - Independent of `fair_share`: enable either side, or both with the same resolver shape.
+        - Consumers keep strict list order *across* their subscriber queues and
+          are fair *within* each; the circuit breaker still skips a paused queue.
+        - The fair index is built on each subscriber queue by `setup_all!` (at
+          creation) and by the consumer at boot (`CONCURRENTLY`). Split rule,
+          weights, cost model and index details: [Routing & ordering](/docs/routing-ordering).
+      MD
     end
   end
 

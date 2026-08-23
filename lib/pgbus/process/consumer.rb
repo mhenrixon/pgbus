@@ -116,6 +116,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         setup_subscriptions
+        ensure_fair_indexes
         start_wake_source
         Pgbus.logger.info do
           "[Pgbus] Consumer started: topics=#{topics.join(",")} threads=#{threads} " \
@@ -188,7 +189,9 @@ module Pgbus
         active_queues = @queue_names.reject { |q| @circuit_breaker.paused?(q) }
         return [] if active_queues.empty?
 
-        if active_queues.size == 1
+        if fair_share_enabled?
+          fetch_fair(active_queues, qty)
+        elsif active_queues.size == 1
           queue = active_queues.first
           (Pgbus.client.read_batch(queue, qty: qty) || []).map { |m| [queue, m] }
         else
@@ -280,6 +283,40 @@ module Pgbus
           logical = m.queue_name&.delete_prefix(prefix) || active_queues.first
           [logical, m]
         end
+      end
+
+      # Fair share for consumers (issue #427): one weighted-interleave read per
+      # subscriber queue, in list order with the remaining capacity — strict
+      # order across queues, fair across tenants WITHIN each queue. Same loop
+      # shape as Worker#fetch_fair; the consumer has no priority levels or
+      # group mode, so this is the whole fair branch.
+      def fetch_fair(active_queues, qty)
+        remaining = qty
+        results = []
+
+        active_queues.each do |queue|
+          break if remaining <= 0
+
+          messages = Pgbus.client.read_batch_fair(queue, qty: remaining) || []
+          messages.each { |m| results << [queue, m] }
+          remaining -= messages.size
+        end
+
+        results
+      end
+
+      def fair_share_enabled?
+        FairShare.event_enabled?(config)
+      end
+
+      # Build the fair index on every subscriber queue this consumer reads
+      # (idempotent, memoized in the client, CONCURRENTLY so a populated queue
+      # is never write-locked). Subscriber queues created later get theirs from
+      # Subscriber#setup!.
+      def ensure_fair_indexes
+        return unless fair_share_enabled?
+
+        @queue_names.each { |q| Pgbus.client.ensure_fair_index(q) }
       end
 
       # Signal the loop to exit cleanly once a recycle limit is hit. The clean

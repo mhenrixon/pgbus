@@ -19,6 +19,7 @@ module Pgbus
     def publish_event(routing_key, payload, headers: nil)
       Instrumentation.instrument("pgbus.outbox.publish", routing_key: routing_key, kind: :event) do
         event_data = EventBus::Publisher.build_event_data(payload)
+        event_data = EventBus::Publisher.tag_fair_share(event_data, payload, routing_key: routing_key, headers: headers)
         OutboxEntry.create!(
           routing_key: routing_key,
           payload: event_data,
