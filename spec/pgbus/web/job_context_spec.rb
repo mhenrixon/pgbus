@@ -35,7 +35,7 @@ RSpec.describe Pgbus::Web::JobContext do
         "request_id" => "req-1",
         "locale" => "sv",
         "started_at" => "2026-08-23T10:00:00Z",
-        "flags" => "[1, \"gid://app/Flag/1\"]"
+        "flags" => "[1,\"gid://app/Flag/1\"]"
       )
       expect(context["Admin::Current"]).to eq("admin_id" => "7")
     end
@@ -45,7 +45,7 @@ RSpec.describe Pgbus::Web::JobContext do
 
       context = described_class.from_payload(payload)
 
-      expect(context["Current"]).to eq("token" => "[FILTERED]", "meta" => "{\"a\" => 1}")
+      expect(context["Current"]).to eq("token" => "[FILTERED]", "meta" => "{\"a\":1}")
     end
 
     it "accepts a JSON string payload" do

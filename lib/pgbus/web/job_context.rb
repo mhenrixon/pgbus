@@ -41,10 +41,11 @@ module Pgbus
       end
 
       # String form of a value for the card. Hashes/arrays that are ActiveJob
-      # encodings collapse to their payload; anything else inspects.
+      # encodings collapse to their payload; anything else renders as JSON
+      # (stable across Ruby versions — Hash#inspect changed in 3.4).
       def display(value)
         unwrapped = unwrap(value)
-        unwrapped.is_a?(String) ? unwrapped : unwrapped.inspect
+        unwrapped.is_a?(String) ? unwrapped : JSON.generate(unwrapped)
       end
 
       def unwrap(value)
