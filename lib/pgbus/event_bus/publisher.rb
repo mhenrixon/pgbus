@@ -10,6 +10,7 @@ module Pgbus
       def publish(routing_key, payload, headers: nil, delay: 0)
         event_data = build_event_data(payload, routing_key: routing_key)
         event_data = tag_fair_share(event_data, payload, routing_key: routing_key, headers: headers)
+        event_data = tag_current(event_data)
 
         if defined?(Pgbus::Testing) && !Pgbus::Testing.disabled?
           event = Pgbus::Event.new(
@@ -17,14 +18,15 @@ module Pgbus
             payload: event_data["payload"],
             published_at: event_data["published_at"] ? Time.parse(event_data["published_at"]) : nil,
             routing_key: routing_key,
-            headers: headers
+            headers: headers,
+            context: event_data[Pgbus::CurrentAttributes::METADATA_KEY]
           )
 
           Pgbus::Testing.store.push_event(event)
 
           if Pgbus::Testing.inline? && delay.to_i <= 0
             Pgbus::EventBus::Registry.instance.handlers_for(routing_key).each do |subscriber|
-              subscriber.handler_class.new.handle(event)
+              Pgbus::CurrentAttributes.restore(event.context) { subscriber.handler_class.new.handle(event) }
             end
           end
 
@@ -54,6 +56,20 @@ module Pgbus
           headers: headers
         )
         FairShare.inject_event_metadata(event, event_data)
+      end
+
+      # Current attributes publish → handler (issue #431): when
+      # config.current_attributes is set, snapshot the publisher's persisted
+      # Current classes (Pgbus::CurrentAttributes.capture — same filters,
+      # serialization and allowlist gating as jobs) into the envelope under
+      # the same +pgbus_current+ key jobs use. Shared with Outbox.publish_event
+      # so the capture happens where Current is set, not at relay time.
+      # Returns event_data itself when off or nothing is assigned.
+      def tag_current(event_data)
+        captured = Pgbus::CurrentAttributes.capture
+        return event_data unless captured
+
+        event_data.merge(Pgbus::CurrentAttributes::METADATA_KEY => captured)
       end
 
       def build_event_data(payload, routing_key: nil)

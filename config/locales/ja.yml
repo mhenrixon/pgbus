@@ -195,6 +195,7 @@ ja:
         title: イベント
       pending_table:
         arguments: ペイロード
+        context: コンテキスト
         discard: 破棄
         discard_confirm: このイベントを破棄しますか？アーカイブされます。
         edit_payload: 編集して再試行

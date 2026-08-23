@@ -672,6 +672,8 @@ Pgbus.configure do |config|
 end
 ```
 
+Events get the same hop: `Pgbus.publish` captures `Current` into the event envelope and the consumer restores it around every `handle` — including across the transactional outbox (captured at `Outbox.publish_event`, inside your transaction). Handlers can also read the raw form via `event.context`.
+
 Captured at enqueue via `ActiveJob::Arguments` (records become GlobalIDs, gated by `allowed_global_id_models`), preserved across retries, concurrency-blocked promotion, dead-letter retry and `perform_all_later`; an unserializable attribute raises at `perform_later` with the `except:` fix. The dashboard shows the context on failed-job and dead-letter pages. Details: [Active Job → Current attributes](https://pgbus.zoolutions.llc/docs/active-job).
 
 ### Consumer priority

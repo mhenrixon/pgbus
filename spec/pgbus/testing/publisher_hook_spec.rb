@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "active_job"
 require "pgbus/testing"
 
 RSpec.describe Pgbus::EventBus::Publisher do
@@ -83,6 +84,69 @@ RSpec.describe Pgbus::EventBus::Publisher do
 
       expect(Pgbus::Testing.store.events.size).to eq(1)
       expect(handler_class.handled_events).to be_empty
+    end
+  end
+
+  describe "Current attributes round-trip (issue #431)" do
+    let(:current_class) { Class.new(ActiveSupport::CurrentAttributes) { attribute :tenant } }
+    let(:handler_class) do
+      klass = Class.new(Pgbus::EventBus::Handler) do
+        class << self
+          attr_accessor :seen
+        end
+        self.seen = []
+
+        def handle(_event)
+          self.class.seen << TestingSpecCurrent.tenant
+        end
+      end
+      stub_const("TestCurrentHandler", klass)
+      klass
+    end
+
+    before do
+      stub_const("TestingSpecCurrent", current_class)
+      Pgbus.configuration.current_attributes = ["TestingSpecCurrent"]
+      Pgbus::EventBus::Registry.instance.clear!
+      handler_class.seen = []
+    end
+
+    after do
+      Pgbus.configuration.current_attributes = nil
+      ActiveSupport::CurrentAttributes.clear_all
+      Pgbus::EventBus::Registry.instance.clear!
+    end
+
+    it "fake mode stores the captured context on the event" do
+      Pgbus::Testing.fake!
+      TestingSpecCurrent.tenant = "acme"
+
+      described_class.publish("orders.created", { "id" => 1 })
+
+      expect(Pgbus::Testing.store.events.first.context).to include("TestingSpecCurrent" => hash_including("tenant" => "acme"))
+    end
+
+    it "inline mode restores the context around the handler" do
+      Pgbus::Testing.inline!
+      Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
+      TestingSpecCurrent.tenant = "acme"
+      described_class.publish("orders.created", { "id" => 1 })
+      TestingSpecCurrent.tenant = nil
+
+      expect(handler_class.seen).to eq(["acme"])
+    end
+
+    it "drain! restores the context around the handler" do
+      Pgbus::Testing.fake!
+      Pgbus::EventBus::Registry.instance.subscribe("orders.created", handler_class)
+      TestingSpecCurrent.tenant = "acme"
+      described_class.publish("orders.created", { "id" => 1 })
+      TestingSpecCurrent.tenant = nil
+
+      Pgbus::Testing.store.drain!
+
+      expect(handler_class.seen).to eq(["acme"])
+      expect(TestingSpecCurrent.tenant).to be_nil
     end
   end
 

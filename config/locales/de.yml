@@ -195,6 +195,7 @@ de:
         title: Ereignisse
       pending_table:
         arguments: Nutzlast
+        context: Kontext
         discard: Verwerfen
         discard_confirm: Dieses Ereignis verwerfen? Es wird archiviert.
         edit_payload: Bearbeiten & erneut versuchen

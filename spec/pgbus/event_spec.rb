@@ -36,4 +36,15 @@ RSpec.describe Pgbus::Event do
       expect(event.published_at).to be_within(1).of(Time.now.utc)
     end
   end
+
+  describe "#context (issue #431)" do
+    it "defaults to nil" do
+      expect(described_class.new(event_id: "x", payload: {}).context).to be_nil
+    end
+
+    it "exposes the persisted Current attributes handed in" do
+      ctx = { "Current" => { "tenant" => "t" } }
+      expect(described_class.new(event_id: "x", payload: {}, context: ctx).context).to eq(ctx)
+    end
+  end
 end

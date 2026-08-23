@@ -102,6 +102,27 @@
                       </div>
                     </div>
                   </div>
+                  <%# Persisted Current attributes (issue #431) %>
+                  <% if (event_context = pgbus_job_context(m[:message])) %>
+                    <div class="mb-3" data-testid="job-context">
+                      <span class="text-xs font-medium text-gray-500"><%= t("pgbus.events.pending_table.context") %></span>
+                      <div class="text-xs text-gray-600 bg-white dark:bg-gray-800 rounded p-2 mt-1 space-y-2">
+                        <% event_context.each do |klass_name, attrs| %>
+                          <div>
+                            <p class="font-semibold text-gray-700 dark:text-gray-300 font-mono"><%= klass_name %></p>
+                            <dl class="grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                              <% attrs.each do |name, value| %>
+                                <div class="flex gap-2">
+                                  <dt class="text-gray-500 font-mono"><%= name %></dt>
+                                  <dd class="text-gray-900 dark:text-white font-mono break-all"><%= value %></dd>
+                                </div>
+                              <% end %>
+                            </dl>
+                          </div>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
                   <%# Edit Payload form %>
                   <details class="mt-2">
                     <summary class="text-xs font-medium text-indigo-600 cursor-pointer hover:text-indigo-500"><%= t("pgbus.events.pending_table.edit_payload") %></summary>

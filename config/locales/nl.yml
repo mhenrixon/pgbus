@@ -195,6 +195,7 @@ nl:
         title: Gebeurtenissen
       pending_table:
         arguments: Payload
+        context: Context
         discard: Verwijderen
         discard_confirm: Deze gebeurtenis verwijderen? Deze wordt gearchiveerd.
         edit_payload: Bewerken & Opnieuw Proberen

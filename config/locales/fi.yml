@@ -195,6 +195,7 @@ fi:
         title: Tapahtumat
       pending_table:
         arguments: Kuorma
+        context: Konteksti
         discard: Hylkää
         discard_confirm: Hylätäänkö tämä tapahtuma? Se arkistoidaan.
         edit_payload: Muokkaa ja yritä uudelleen

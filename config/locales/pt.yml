@@ -195,6 +195,7 @@ pt:
         title: Eventos
       pending_table:
         arguments: Payload
+        context: Contexto
         discard: Descartar
         discard_confirm: Descartar este evento? Ele será arquivado.
         edit_payload: Editar e Tentar Novamente

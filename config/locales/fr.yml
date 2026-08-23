@@ -195,6 +195,7 @@ fr:
         title: Événements
       pending_table:
         arguments: Charge utile
+        context: Contexte
         discard: Jeter
         discard_confirm: Jeter cet événement ? Il sera archivé.
         edit_payload: Modifier & Réessayer
