@@ -204,6 +204,49 @@ module Pgbus
       end
     end
 
+    # A retry_on re-enqueue of a job that is already a batch member (issue
+    # #424): same ActiveJob job_id, new PGMQ message. It keeps the ONE
+    # execution row it already has (ON CONFLICT DO NOTHING) and is never
+    # counted again — the batch waits for this job's terminal outcome, not
+    # its first attempt. The backfill after send re-points the row at the new
+    # message.
+    def self.track_retry(payload)
+      return unless executions_migrated?
+
+      batch_id = payload[METADATA_KEY]
+      job_id = payload["job_id"]
+      return unless batch_id && job_id
+
+      BatchExecution.insert_for!(batch_id: batch_id, job_id: job_id, queue_name: payload["queue_name"])
+    end
+
+    # --- "this job re-enqueued itself" bookkeeping ---------------------
+    #
+    # retry_on re-enqueues from INSIDE perform_now and returns normally, so the
+    # executor cannot tell a retried attempt from a successful one. The
+    # adapter records the job_id here after a successful retry send; the
+    # executor consults it after perform and skips the completion signal, then
+    # clears it per execute. Thread.current[] is fiber-local, which is the
+    # right scope under execution_mode: :async — adapter and executor run in
+    # the same fiber during perform.
+    RETRY_REENQUEUED_KEY = :pgbus_batch_retry_reenqueued_job_ids
+
+    def self.note_retry_reenqueued(job_id)
+      (Thread.current[RETRY_REENQUEUED_KEY] ||= Set.new) << job_id
+    end
+
+    def self.forget_retry_reenqueued(job_id)
+      Thread.current[RETRY_REENQUEUED_KEY]&.delete(job_id)
+    end
+
+    def self.retry_reenqueued?(job_id)
+      Thread.current[RETRY_REENQUEUED_KEY]&.include?(job_id) || false
+    end
+
+    def self.clear_retry_reenqueued
+      Thread.current[RETRY_REENQUEUED_KEY] = nil
+    end
+
     # Reverse of track_enqueue for a job that will never run (discarded at
     # enqueue time, or its send raised with no msg_id).
     def self.untrack_enqueue(payload)
