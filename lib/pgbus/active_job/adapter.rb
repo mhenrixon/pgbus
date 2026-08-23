@@ -10,6 +10,7 @@ module Pgbus
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
+        payload_hash = FairShare.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash, active_job: active_job)
 
         if uniqueness_rejected?(active_job, payload_hash, queue: queue)
@@ -25,6 +26,7 @@ module Pgbus
         payload_hash = Serializer.serialize_job_hash(active_job)
         payload_hash = Concurrency.inject_metadata(active_job, payload_hash)
         payload_hash = Uniqueness.inject_metadata(active_job, payload_hash)
+        payload_hash = FairShare.inject_metadata(active_job, payload_hash)
         payload_hash = inject_batch_metadata(payload_hash, active_job: active_job)
         delay = [(timestamp - Time.current.to_f).ceil, 0].max
 
@@ -262,7 +264,9 @@ module Pgbus
       def enqueue_immediate(queue, jobs, priority: nil)
         return if jobs.empty?
 
-        payloads = jobs.map { |j| inject_batch_metadata(Serializer.serialize_job_hash(j), track: false) }
+        payloads = jobs.map do |j|
+          inject_batch_metadata(FairShare.inject_metadata(j, Serializer.serialize_job_hash(j)), track: false)
+        end
         # One guarded increment for the whole bulk, not one per job.
         Batch.track_enqueue(payloads) if Thread.current[:pgbus_batch_id]
         physical = physical_queue(queue, priority)

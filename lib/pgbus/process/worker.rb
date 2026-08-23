@@ -54,6 +54,11 @@ module Pgbus
           raise ArgumentError,
                 "Invalid group_mode: #{@group_mode.inspect}. Must be nil, :fifo, or :round_robin"
         end
+        if FairShare.enabled?(config) && (@group_mode || config.group_mode)
+          raise Pgbus::ConfigurationError,
+                "fair_share and group_mode are mutually exclusive — this worker has group_mode " \
+                "#{(@group_mode || config.group_mode).inspect} while config.fair_share is set"
+        end
         @single_active_consumer = single_active_consumer
         @consumer_priority = consumer_priority
         @lifecycle = Lifecycle.new
@@ -165,6 +170,7 @@ module Pgbus
         setup_signals
         start_heartbeat
         resolve_wildcard_queues
+        ensure_fair_indexes
         start_wake_source
         @lifecycle.transition_to!(:running)
         Pgbus.logger.info do
@@ -284,6 +290,8 @@ module Pgbus
             fetch_prioritized(active_queues, qty)
           elsif @group_mode
             fetch_grouped(active_queues, qty)
+          elsif fair_share_enabled?
+            fetch_fair(active_queues, qty)
           elsif active_queues.size == 1
             queue = active_queues.first
             messages = Pgbus.client.read_batch(queue, qty: qty) || []
@@ -391,6 +399,38 @@ module Pgbus
         results
       end
 
+      # Fair share (issue #426): one weighted-interleave read per queue, in
+      # list order with the remaining capacity — strict priority ACROSS queues
+      # (the capsule DSL contract), fair WITHIN each queue. Same loop shape as
+      # fetch_prioritized; under priority_levels the client composes both.
+      def fetch_fair(active_queues, qty)
+        remaining = qty
+        results = []
+
+        active_queues.each do |queue|
+          break if remaining <= 0
+
+          messages = Pgbus.client.read_batch_fair(queue, qty: remaining) || []
+          messages.each { |m| results << [queue, m] }
+          remaining -= messages.size
+        end
+
+        results
+      end
+
+      def fair_share_enabled?
+        FairShare.enabled?(config)
+      end
+
+      # Build the fair index on every queue this worker serves (idempotent,
+      # memoized in the client, CONCURRENTLY so a populated queue is never
+      # write-locked). Queues created later get theirs at creation time.
+      def ensure_fair_indexes
+        return unless fair_share_enabled?
+
+        queues.each { |q| Pgbus.client.ensure_fair_index(q) }
+      end
+
       def priority_enabled?
         config.priority_levels && config.priority_levels > 1
       end
@@ -448,6 +488,7 @@ module Pgbus
         return if @last_wildcard_resolve && (monotonic_now - @last_wildcard_resolve) < WILDCARD_REFRESH_INTERVAL
 
         resolve_wildcard_queues
+        ensure_fair_indexes
       end
 
       # When a "relation does not exist" error occurs, the queue was deleted.

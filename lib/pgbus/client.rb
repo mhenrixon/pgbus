@@ -12,6 +12,7 @@ require_relative "client/resizable_pool"
 module Pgbus
   class Client
     include ReadAfter
+    include FairRead
     include EnsureStreamQueue
     include NotifyStream
 
@@ -428,10 +429,16 @@ module Pgbus
       # Non-priority fast path delegates to read_batch, which is already gated
       # by the connection-health breaker — no extra guard needed here.
       unless @queue_strategy.priority?
-        return (read_batch(queue_name, qty: qty, vt: vt) || []).map do |m|
-          [config.queue_name(queue_name), m]
-        end
+        msgs = if FairShare.enabled?(config)
+                 read_batch_fair(queue_name, qty: qty, vt: vt)
+               else
+                 read_batch(queue_name, qty: qty, vt: vt)
+               end
+        return (msgs || []).map { |m| [config.queue_name(queue_name), m] }
       end
+
+      # Fair share (issue #426): strict between levels, fair within a level.
+      return read_batch_prioritized_fair(queue_name, qty: qty, vt: vt) if FairShare.enabled?(config)
 
       # The priority loop issues its own reads, so gate the whole loop: an open
       # breaker fails fast before any sub-queue is touched, and the loop as a
@@ -449,6 +456,25 @@ module Pgbus
             end
           end || []
 
+          msgs.each { |m| results << [pq_name, m] }
+          remaining -= msgs.size
+        end
+
+        results
+      end
+    end
+
+    # Priority sub-queues drained p0 → pN, each level read with the fair
+    # interleave. guarded_read wraps the loop as one unit (see above).
+    def read_batch_prioritized_fair(queue_name, qty:, vt: nil)
+      guarded_read do
+        remaining = qty
+        results = []
+
+        config.priority_queue_names(queue_name).each do |pq_name|
+          break if remaining <= 0
+
+          msgs = fair_read_step(QueueNameValidator.sanitize!(pq_name), remaining, vt || config.visibility_timeout)
           msgs.each { |m| results << [pq_name, m] }
           remaining -= msgs.size
         end
@@ -1351,6 +1377,7 @@ module Pgbus
         create_queue_table(full_name)
         enable_notify_if_needed(full_name, NOTIFY_THROTTLE_MS)
         create_fifo_index_if_needed(full_name)
+        create_fair_index_if_needed(full_name)
       end
     end
 

@@ -70,6 +70,14 @@ module Pgbus
     # :round_robin = use read_grouped_rr (fair round-robin across groups).
     attr_reader :group_mode
 
+    # Fair share scheduling across tenants (issue #426). nil = disabled.
+    # Any #call-able receiving the ActiveJob instance at enqueue time and
+    # returning nil (unkeyed), a key (String/Symbol/Integer), or [key, weight]
+    # (weight: positive Numeric, default 1). Keyed jobs are read with
+    # Client#read_batch_fair — a weighted, work-conserving interleave across
+    # keys within each queue. Mutually exclusive with group_mode.
+    attr_reader :fair_share
+
     # Archive compaction. Only the user-facing retention window is configurable;
     # the loop interval and batch size are tuned via constants on
     # Pgbus::Process::Dispatcher.
@@ -268,6 +276,7 @@ module Pgbus
       @priority_levels = nil
       @default_priority = 1
       @group_mode = nil
+      @fair_share = nil
 
       @archive_retention = 7 * 24 * 3600 # 7 days
       @batch_retention = 7 * 24 * 3600 # 7 days
@@ -608,6 +617,15 @@ module Pgbus
       @group_mode = coerced
     end
 
+    def fair_share=(callable)
+      unless callable.nil? || callable.respond_to?(:call)
+        raise Pgbus::ConfigurationError,
+              "fair_share must be nil or respond to #call (got #{callable.class})"
+      end
+
+      @fair_share = callable
+    end
+
     VALID_CONNECTION_GUC_MODES = %i[options session].freeze
 
     def connection_guc_mode=(mode)
@@ -783,6 +801,7 @@ module Pgbus
       validate_job_path_gaps!
       validate_streams!
       validate_metrics_backend!
+      validate_fair_share!
 
       self
     end
@@ -861,6 +880,14 @@ module Pgbus
       return if connects_to.nil? || connects_to.is_a?(Hash)
 
       raise Pgbus::ConfigurationError, "connects_to must be a Hash or nil"
+    end
+
+    def validate_fair_share!
+      return unless fair_share && group_mode
+
+      raise Pgbus::ConfigurationError,
+            "fair_share and group_mode are mutually exclusive — fair_share interleaves across keys " \
+            "within a queue, group_mode serializes PGMQ FIFO groups; pick one"
     end
 
     def validate_streams!
