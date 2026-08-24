@@ -15,13 +15,13 @@ Gem::Specification.new do |spec|
     idempotent event handling, worker memory management, dead letter queues,
     and a built-in dashboard with Hotwire support.
   DESC
-  spec.homepage = "https://github.com/mhenrixon/pgbus"
+  spec.homepage = "https://github.com/zoolutions/pgbus"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.3.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/mhenrixon/pgbus/tree/main"
-  spec.metadata["changelog_uri"] = "https://github.com/mhenrixon/pgbus/blob/main/CHANGELOG.md"
+  spec.metadata["source_code_uri"] = "https://github.com/zoolutions/pgbus/tree/main"
+  spec.metadata["changelog_uri"] = "https://github.com/zoolutions/pgbus/blob/main/CHANGELOG.md"
   spec.metadata["documentation_uri"] = "https://pgbus.zoolutions.llc"
   spec.metadata["rubygems_mfa_required"] = "true"
 
