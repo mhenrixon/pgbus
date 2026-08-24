@@ -1,0 +1,30 @@
+CHANGELOG.md
+  s_5206edb7f68aa0::t_5fe87b8b8b6812 3-6
+spec/pgbus/current_attributes_spec.rb
+  s_5206edb7f68aa0::t_52182a5cb00c9d 115-140,142-170
+  s_5206edb7f68aa0::t_7c118466fc1bde 141
+README.md
+  s_5206edb7f68aa0::t_a8b98468313d0f 677
+docs/app/views/docs/pages/active_job.rb
+  s_5206edb7f68aa0::t_157664396d6fc5 126-130
+lib/pgbus/current_attributes.rb
+  s_5206edb7f68aa0::t_449c269b43f909 132-152
+  s_5206edb7f68aa0::t_ea9e745963283f 11-15
+  s_5206edb7f68aa0::t_9d40b73b105385 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "845815787df1170ef5312a415a7ed339fd5e775d",
+  "prompts": {},
+  "sessions": {
+    "s_5206edb7f68aa0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "350130b6-946e-4a3a-8177-cb146929f249",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
