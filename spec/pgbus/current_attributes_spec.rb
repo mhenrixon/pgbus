@@ -112,6 +112,62 @@ RSpec.describe Pgbus::CurrentAttributes do
       }
     end
 
+    # An unpersisted record cannot round-trip by definition (no id → no
+    # GlobalID), and capture is ambient — the enqueuer never opted into
+    # persisting it per-call — so raising at perform_later punishes the app
+    # for state it cannot control (a dev-mode fallback record, a form-built
+    # model assigned to Current before save). Skip it like an unassigned
+    # attribute; the except: escape hatch stays for genuinely bad values.
+    context "with an unpersisted record in an attribute" do
+      let(:unsaved_tenant_class) do
+        Class.new(tenant_class) do
+          def self.name = "SpecUnsavedTenant"
+          def persisted? = false
+        end
+      end
+
+      before { stub_const("SpecUnsavedTenant", unsaved_tenant_class) }
+
+      it "skips the attribute instead of raising at enqueue, and logs why" do
+        config.current_attributes = ["SpecCurrent"]
+        SpecCurrent.tenant = SpecUnsavedTenant.new(nil)
+        SpecCurrent.request_id = "req-1"
+        messages = []
+        allow(Pgbus.logger).to receive(:debug) { |&blk| messages << blk.call }
+
+        captured = described_class.capture(config)
+
+        expect(captured["SpecCurrent"].except("_aj_symbol_keys").keys).to eq(["request_id"])
+        expect(messages.grep(/SpecCurrent#tenant.*unpersisted SpecUnsavedTenant/).size).to eq(1)
+      end
+
+      it "returns nil when the unpersisted record was the only assigned attribute" do
+        config.current_attributes = ["SpecCurrent"]
+        SpecCurrent.tenant = SpecUnsavedTenant.new(nil)
+
+        expect(described_class.capture(config)).to be_nil
+      end
+
+      it "still captures a record that reports persisted? true" do
+        persisted_class = Class.new(tenant_class) do
+          def self.name = "SpecTenant"
+          def persisted? = true
+        end
+        stub_const("SpecTenant", persisted_class)
+        config.current_attributes = ["SpecCurrent"]
+        SpecCurrent.tenant = SpecTenant.new(42)
+
+        expect(described_class.capture(config)["SpecCurrent"]).to have_key("tenant")
+      end
+
+      it "leaves objects that do not respond to persisted? alone" do
+        config.current_attributes = ["SpecCurrent"]
+        SpecCurrent.tenant = SpecTenant.new(42) # plain GlobalID duck-type, no persisted?
+
+        expect(described_class.capture(config)["SpecCurrent"]).to have_key("tenant")
+      end
+    end
+
     it "warns once and skips an explicitly listed class that does not exist" do
       config.current_attributes = %w[Nope::Current SpecCurrent]
       SpecCurrent.request_id = "r"

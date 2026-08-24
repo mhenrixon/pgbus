@@ -8,8 +8,11 @@ module Pgbus
   # (config.current_attributes: :auto, an explicit list, or per-class
   # only:/except: filters) serialized through ActiveJob::Arguments — so
   # GlobalID models, Symbols, Times round-trip like job arguments and fall
-  # under the allowed_global_id_models allowlist on the way back. `restore`
-  # nests `klass.set(attrs)` for the duration of a block.
+  # under the allowed_global_id_models allowlist on the way back. An
+  # attribute holding an unpersisted record is skipped with a debug log
+  # (no id → no GlobalID → it could never be restored; see
+  # #reject_unpersisted). `restore` nests `klass.set(attrs)` for the
+  # duration of a block.
   #
   # The ActiveJob side (Pgbus::ActiveJob::CurrentAttributes) calls capture
   # from `serialize` and restore around `perform_now`, so the hop works under
@@ -34,7 +37,7 @@ module Pgbus
         captured = {}
         persisted_specs(config, override: override).each do |spec|
           klass = resolve_class(spec[:name]) or next
-          attrs = filter_attrs(klass.attributes, spec)
+          attrs = reject_unpersisted(klass, filter_attrs(klass.attributes, spec))
           next if attrs.empty?
 
           captured[klass.name] = serialize_attrs(klass, attrs)
@@ -124,6 +127,27 @@ module Pgbus
         attrs = attrs.slice(*spec[:only]) if spec[:only]
         attrs = attrs.except(*spec[:except]) if spec[:except]
         attrs
+      end
+
+      # An unpersisted record cannot round-trip by definition — no id, no
+      # GlobalID — and capture is ambient: the enqueuer never opted into
+      # persisting this attribute per-call, so its momentary state (a dev-mode
+      # fallback record, a form-built model assigned to Current before save,
+      # a destroyed record whose locate is guaranteed to fail) must not abort
+      # the enqueue. Skip it like an unassigned attribute. persisted? (not
+      # new_record?) so destroyed-but-id-bearing records are skipped too;
+      # objects without the Active Record duck-type pass through untouched
+      # and still hit serialize_attrs' loud CurrentAttributesError if bad.
+      def reject_unpersisted(klass, attrs)
+        attrs.reject do |name, value|
+          next false unless value.respond_to?(:persisted?) && !value.persisted?
+
+          Pgbus.logger.debug do
+            "[Pgbus] current_attributes: #{klass.name}##{name} holds an unpersisted #{value.class} — " \
+              "skipped (no id to serialize; it could never be restored)"
+          end
+          true
+        end
       end
 
       def serialize_attrs(klass, attrs)
