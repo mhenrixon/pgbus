@@ -1,0 +1,43 @@
+docs/app/views/docs/pages/streams.rb
+  s_8bb679c8581ac2::t_197976ff3ee315 162
+docs/app/views/docs/pages/upgrading_pgbus.rb
+  s_8bb679c8581ac2::t_197976ff3ee315 208,210
+docs/app/views/docs/pages/rolling_restarts.rb
+  s_8bb679c8581ac2::t_197976ff3ee315 186
+docs/app/views/landings/show.rb
+  s_8bb679c8581ac2::t_197976ff3ee315 70
+docs/app/assets/stylesheets/tailwind.sources.css
+  s_8bb679c8581ac2::t_45b35f2451b6c7 3
+docs/Gemfile.lock
+  ai_agent 17-19,23-28,30-34,37-39,47,49-52,55-56,61-62,64-68,70-74,76,99-106,117,126,144,150,159,175,235,245-256,258,263-264,269-271,280,293,295,378,398,421-431,439-446,453,455,464,466,471,477,510,515,517,519,522,526-527,561
+docs/config/initializers/docs_kit.rb
+  s_8bb679c8581ac2::t_c1e0144bb757f7 3
+  s_8bb679c8581ac2::t_ed52644a0d2ab0 39
+docs/AGENTS.md
+  s_8bb679c8581ac2::t_197976ff3ee315 11
+docs/config/deploy.yml
+  s_8bb679c8581ac2::t_0b8900185f5a74 5
+.github/workflows/deploy-docs.yml
+  s_8bb679c8581ac2::t_fbaaa48b590aac 5
+  s_8bb679c8581ac2::t_080394b125e40f 29,31
+docs/Gemfile
+  s_8bb679c8581ac2::t_ca48a474a97e6c 8
+docs/.claude/skills/write-docs-page/SKILL.md
+  s_8bb679c8581ac2::t_197976ff3ee315 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "83a58d1fab46230c279b28228abbeeeeb020be13",
+  "prompts": {},
+  "sessions": {
+    "s_8bb679c8581ac2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0c8b5bf7-4f3c-4f28-9823-4be72b543953",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}

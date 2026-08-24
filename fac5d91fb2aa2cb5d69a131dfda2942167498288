@@ -1,0 +1,68 @@
+spec/pgbus/batch_spec.rb
+  s_10dfdf9ed16486::t_ae5231a062209d 228
+  s_10dfdf9ed16486::t_1a0a03b64e913d 177-188,193-207,209-214,224-227,229-233,238-260
+  s_10dfdf9ed16486::t_baa9f4d73c15b3 189-190,192,234-237
+lib/pgbus/generators/migration_detector.rb
+  s_10dfdf9ed16486::t_a1dba02143b500 82,103,131,247-253
+spec/pgbus/engine_spec.rb
+  s_10dfdf9ed16486::t_190f73e5ef9655 98,107
+spec/pgbus/active_job/executor_spec.rb
+  s_10dfdf9ed16486::t_5d460c7842032d 33-49
+lib/pgbus/active_job/executor.rb
+  s_10dfdf9ed16486::t_3b042db605c9f5 88-91,147-152
+lib/pgbus/engine.rb
+  s_10dfdf9ed16486::t_3b042db605c9f5 77
+spec/generators/pgbus/add_batch_callback_jobs_generator_spec.rb
+  s_10dfdf9ed16486::t_98f52f5ac936b3 1-40
+docs/app/views/docs/pages/batches.rb
+  s_10dfdf9ed16486::t_758b4baa16fbf8 105
+  s_10dfdf9ed16486::t_1e1543a3a9afda 12,14,42-104,106-125
+spec/integration/batch_open_spec.rb
+  s_10dfdf9ed16486::t_ae5231a062209d 21,33
+  s_10dfdf9ed16486::t_36560f67ba24af 177
+  s_10dfdf9ed16486::t_ad91bb668a8630 1-20,22-32,34-176,178-180
+docs/app/views/docs/pages/cli_generators.rb
+  s_10dfdf9ed16486::t_802e9c03d42b63 178,192-193
+CHANGELOG.md
+  s_10dfdf9ed16486::t_d6b0be033310a9 5-6
+lib/pgbus/web/data_source.rb
+  s_10dfdf9ed16486::t_bb103746da6567 685,688-691,1385-1391
+lib/generators/pgbus/add_batch_callback_jobs_generator.rb
+  s_10dfdf9ed16486::t_a1dba02143b500 1-47
+lib/generators/pgbus/templates/migration.rb.erb
+  s_10dfdf9ed16486::t_a1dba02143b500 108-110
+spec/pgbus/generators/migration_detector_spec.rb
+  s_10dfdf9ed16486::t_38e22b4ec9866c 443
+  s_10dfdf9ed16486::t_f38eb4c802a95a 231-251,474-475
+lib/pgbus/batch.rb
+  s_10dfdf9ed16486::t_cff53b3126aeb7 152-167,296-314,316-335,466-467
+  s_10dfdf9ed16486::t_c373fbea131428 35,38-46,48-49,51,57-94,113-117,119-129,131
+  s_10dfdf9ed16486::t_c064f2d95e8630 358-386,391-392,397,399,401-423,452
+spec/integration_helper.rb
+  s_10dfdf9ed16486::t_16fad93138dcc5 158-161
+lib/generators/pgbus/templates/add_batch_callback_jobs.rb.erb
+  s_10dfdf9ed16486::t_a1dba02143b500 1-13
+spec/pgbus/web/batches_data_source_spec.rb
+  s_10dfdf9ed16486::t_59c8d8210ca124 85-99
+spec/pgbus/active_job/batch_id_spec.rb
+  s_10dfdf9ed16486::t_e42da9a8aab75d 1-9,11-73
+  s_10dfdf9ed16486::t_ae5231a062209d 10
+lib/pgbus/active_job/batch_id.rb
+  s_10dfdf9ed16486::t_318261c6fb1aa9 1-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fac5d91fb2aa2cb5d69a131dfda2942167498288",
+  "prompts": {},
+  "sessions": {
+    "s_10dfdf9ed16486": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e125a998-060a-405c-b916-ef1fbf937efe",
+        "model": "claude-opus-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}

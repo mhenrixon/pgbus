@@ -1,0 +1,36 @@
+CHANGELOG.md
+  s_b379727b4542f4::t_5447f0f5fddd32 5-6
+benchmarks/fair_read_bench.rb
+  s_b379727b4542f4::t_6923482f2e65c9 50
+  s_b379727b4542f4::t_dc0f857d1d5be7 1-49,51-86,91-122
+  s_b379727b4542f4::t_887933e44f9e83 87-90
+docs/app/views/docs/pages/routing_ordering.rb
+  s_b379727b4542f4::t_dfe74c06c604b4 4-5,10,14,56-110
+docs/performance.md
+  s_b379727b4542f4::t_5447f0f5fddd32 22,68-94
+Rakefile
+  s_b379727b4542f4::t_86cc62a1f1ebd2 28,63-65
+README.md
+  s_b379727b4542f4::t_dfe74c06c604b4 2192
+  s_b379727b4542f4::t_5447f0f5fddd32 649-661
+docs/app/views/docs/pages/from_sidekiq.rb
+  s_b379727b4542f4::t_dfe74c06c604b4 144-146
+docs/app/models/config_reference.rb
+  s_b379727b4542f4::t_dfe74c06c604b4 28-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "5555193b40efe6e41b058b85dacc9c2f4293e922",
+  "prompts": {},
+  "sessions": {
+    "s_b379727b4542f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a798ab3f-b54b-44ab-8a6f-0223a2dbc59b",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}

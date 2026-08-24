@@ -1,0 +1,26 @@
+spec/integration/batch_flow_spec.rb
+  s_1eeba6533c71c0::t_bc807d5f2ebe77 132-158
+lib/pgbus/active_job/adapter.rb
+  s_1eeba6533c71c0::t_4f87b26a14c44d 162
+  s_1eeba6533c71c0::t_6d57b5ad844432 34-37
+CHANGELOG.md
+  s_1eeba6533c71c0::t_84a0986b9772e3 5-6
+spec/pgbus/active_job/adapter_spec.rb
+  s_1eeba6533c71c0::t_12244b6a9cb728 225-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a7ef7006ca54a0cf36d63a54d5eeb18ed459a91c",
+  "prompts": {},
+  "sessions": {
+    "s_1eeba6533c71c0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4f931c91-b125-4b52-b660-1804e6ed7074",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}

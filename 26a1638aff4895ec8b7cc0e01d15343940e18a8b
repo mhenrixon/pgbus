@@ -1,0 +1,19 @@
+spec/pgbus/event_bus/handler_spec.rb
+  s_69c413620baa86::t_b8ec5bd8445fa1 84-90,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "26a1638aff4895ec8b7cc0e01d15343940e18a8b",
+  "prompts": {},
+  "sessions": {
+    "s_69c413620baa86": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2b35826e-9b76-437f-b009-7dcfcf90e3d0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}

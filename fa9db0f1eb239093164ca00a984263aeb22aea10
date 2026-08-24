@@ -1,0 +1,27 @@
+lib/pgbus/client.rb
+  s_5caa5195eb351e::t_509c3cb25f1ca3 982-995
+  s_5caa5195eb351e::t_36bcf14d46fb42 996
+  s_5caa5195eb351e::t_d1472ad1805e5a 1018
+CHANGELOG.md
+  s_5caa5195eb351e::t_8143604cd89172 5
+spec/pgbus/client_spec.rb
+  s_5caa5195eb351e::t_d86e19ee965bf2 264-275
+  s_5caa5195eb351e::t_f800fa5e82951f 295
+  s_5caa5195eb351e::t_53ee0a1b4b9cae 161-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fa9db0f1eb239093164ca00a984263aeb22aea10",
+  "prompts": {},
+  "sessions": {
+    "s_5caa5195eb351e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "790fb481-8d1b-4510-b01a-6e6ac190364e",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
