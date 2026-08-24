@@ -123,6 +123,11 @@ class Views::Docs::Pages::ActiveJob < DocsUI::Page
         cannot be serialized (`Current.request` holding an `ActionDispatch::Request`,
         say) raises `Pgbus::CurrentAttributesError` at `perform_later` naming the
         class, the attribute and the `except:` fix — nothing is dropped silently.
+        One deliberate exception: an **unpersisted** record (`persisted?` falsey —
+        a dev-mode fallback record, a model captured before `save`, a destroyed
+        record) is skipped with a debug log instead of raising, because with no
+        id it could never be restored anyway and its momentary state should not
+        abort the enqueue.
         Per job class: `self.pgbus_persist_current_attributes = false` (never persist)
         or a list/hash in the config shapes (replace the list for this class).
         Under `execution_mode: :async` remember `CurrentAttributes` is per isolation
