@@ -143,13 +143,21 @@ module Pgbus
         @state_mutex.synchronize { @running }
       end
 
-      # Called ONLY inside a just-forked child (issue #381 hub hygiene): drop
-      # this process's copy of the LISTEN socket fd WITHOUT PQfinish — #close
+      # Called ONLY inside a just-forked child (issues #381 / #437): release
+      # this process's copy of the LISTEN socket WITHOUT PQfinish — #close
       # would send a libpq Terminate over the socket shared with the parent,
-      # killing the parent's LISTEN session. Closing the IO wrapper just
-      # closes the child's fd. The listener thread does not exist in the
-      # child (fork copies only the calling thread), so there is no
-      # concurrent owner and the single-owner rule (#375) does not apply.
+      # killing the parent's LISTEN session.
+      #
+      # Closing the IO wrapper is not enough: pg builds socket_io with
+      # autoclose=false, so IO#close leaves the fd open, and when GC frees the
+      # inherited PG::Connection its PQfinish still writes Terminate on that
+      # fd — i.e. on the PARENT's connection (issue #437, one reconnect per
+      # fork). Repointing the fd at /dev/null (IO#reopen, the ActiveRecord
+      # PostgreSQLAdapter#discard! idiom) makes the eventual PQfinish harmless.
+      #
+      # The listener thread does not exist in the child (fork copies only the
+      # calling thread), so there is no concurrent owner and the single-owner
+      # rule (#375) does not apply.
       def close_inherited_socket!
         conn = @state_mutex.synchronize do
           c = @conn
@@ -157,10 +165,11 @@ module Pgbus
           @running = false
           c
         end
-        conn&.socket_io&.close
+        conn&.socket_io&.reopen(IO::NULL)
       rescue StandardError => e
-        # Best-effort (a lingering fd copy is benign until the parent dies),
-        # but never silent: the child keeps booting either way.
+        # Best-effort but never silent: the child keeps booting either way.
+        # If this fails the child's GC-time PQfinish will hit the parent's
+        # session, which the parent's reconnect! survives.
         @logger.warn do
           "[Pgbus::NotifyListener] inherited socket cleanup failed: #{e.class}: #{e.message}"
         end

@@ -161,33 +161,46 @@ RSpec.describe Pgbus::Process::NotifyListener do
     end
   end
 
-  describe "#close_inherited_socket! (forked-child hygiene, issue #381)" do
+  describe "#close_inherited_socket! (forked-child hygiene, issues #381 / #437)" do
     # A just-forked child holds a COPY of the LISTEN socket fd. PQfinish
     # (#close) would send a libpq Terminate over the socket shared with the
-    # parent, killing the parent's session — the child must close only its
-    # own fd via the IO wrapper.
-    let(:socket_io) { instance_double(IO, close: nil) }
+    # parent, killing the parent's session. Closing the IO wrapper is NOT
+    # enough either: pg builds socket_io with autoclose=false, so the fd stays
+    # open and the inherited PG::Connection's GC-time PQfinish still speaks
+    # Terminate on it (issue #437). The child must repoint the fd at /dev/null
+    # (IO#reopen), the ActiveRecord PostgreSQLAdapter#discard! idiom.
+    let(:socket_io) { instance_double(IO, reopen: nil, close: nil) }
 
     before { allow(fake_pg).to receive(:socket_io).and_return(socket_io) }
 
-    it "closes the socket IO without PQfinish and drops the connection" do
+    it "repoints the socket fd at /dev/null without PQfinish and drops the connection" do
       listener.start
       fake_pg.push_timeout
       wait_until { listener.connected? }
 
       listener.close_inherited_socket!
 
-      expect(socket_io).to have_received(:close)
+      expect(socket_io).to have_received(:reopen).with(IO::NULL)
       expect(fake_pg.close_count).to eq(0)
       expect(listener.connected?).to be false
+    end
+
+    it "never closes the IO wrapper (autoclose=false makes it a no-op on the fd)" do
+      listener.start
+      fake_pg.push_timeout
+      wait_until { listener.connected? }
+
+      listener.close_inherited_socket!
+
+      expect(socket_io).not_to have_received(:close)
     end
 
     it "is a no-op before start" do
       expect { listener.close_inherited_socket! }.not_to raise_error
     end
 
-    it "logs (never raises, never silences) when the socket close fails" do
-      allow(socket_io).to receive(:close).and_raise(IOError, "closed stream")
+    it "logs (never raises, never silences) when the socket reopen fails" do
+      allow(socket_io).to receive(:reopen).and_raise(IOError, "closed stream")
       allow(logger).to receive(:warn)
       listener.start
       fake_pg.push_timeout
