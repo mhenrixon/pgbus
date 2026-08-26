@@ -70,6 +70,48 @@ RSpec.describe Pgbus::Process::Supervisor do
       expect(supervisor).to have_received(:fork)
     end
 
+    # A worker that hits a recycle limit exits 0 by design. Logging that as
+    # "exited unexpectedly" buries real crashes (issue #438).
+    describe "exit logging" do
+      let(:infos) { [] }
+      let(:warnings) { [] }
+
+      before do
+        allow(supervisor).to receive(:schedule_restart)
+        allow(Pgbus.logger).to receive(:info) { |&blk| infos << blk.call }
+        allow(Pgbus.logger).to receive(:warn) { |&blk| warnings << blk.call }
+      end
+
+      it "logs a clean exit at info as a recycle restart" do
+        clean = instance_double(Process::Status, exitstatus: 0, success?: true)
+        allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, clean], nil)
+
+        supervisor.send(:reap_children)
+
+        expect(infos.join).to include("pid=3001", "exited cleanly", "status=0", "restarting")
+        expect(warnings.join).not_to include("exited unexpectedly")
+        expect(supervisor).to have_received(:schedule_restart).with(anything, clean)
+      end
+
+      it "logs a non-zero exit as unexpected" do
+        allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, status_double], nil)
+
+        supervisor.send(:reap_children)
+
+        expect(warnings.join).to include("pid=3001", "exited unexpectedly", "status=1")
+        expect(infos.join).not_to include("exited cleanly")
+      end
+
+      it "names the signal for a signaled exit" do
+        killed = instance_double(Process::Status, exitstatus: nil, success?: nil, signaled?: true, termsig: 9)
+        allow(Process).to receive(:waitpid2).with(-1, Process::WNOHANG).and_return([3001, killed], nil)
+
+        supervisor.send(:reap_children)
+
+        expect(warnings.join).to include("pid=3001", "exited unexpectedly", "signal=9")
+      end
+    end
+
     it "does NOT restart a child when shutting_down is true" do
       supervisor = described_class.new(
         forks: { 3001 => { type: :worker, config: { queues: ["default"] } } },
