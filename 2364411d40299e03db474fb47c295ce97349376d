@@ -1,0 +1,21 @@
+CHANGELOG.md
+  ai_agent 5
+lib/pgbus/process/notify_listener.rb
+  s_e069466e76a69c::t_8fdbe291943861 146-147,149-160,168,170-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2364411d40299e03db474fb47c295ce97349376d",
+  "prompts": {},
+  "sessions": {
+    "s_e069466e76a69c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6b5e63d1-d71d-46e4-9622-d15b816b6816",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
