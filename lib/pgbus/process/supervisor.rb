@@ -613,13 +613,32 @@ module Pgbus
           if @shutting_down
             Pgbus.logger.info { "[Pgbus] Child #{info[:type]} pid=#{pid} exited (status=#{status.exitstatus})" }
           else
-            Pgbus.logger.warn do
-              "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (status=#{status&.exitstatus})"
-            end
+            log_child_exit(info, pid, status)
             schedule_restart(info, status)
           end
         rescue Errno::ECHILD
           break
+        end
+      end
+
+      # A clean exit outside shutdown is a worker/consumer recycle (max_jobs,
+      # max_memory, max_lifetime) — expected, so INFO. Anything else is a
+      # crash: WARN, naming the signal when there is one so an OOM SIGKILL
+      # reads differently from an exit code (issue #438).
+      def log_child_exit(info, pid, status)
+        if status&.success?
+          Pgbus.logger.info do
+            "[Pgbus] Child #{info[:type]} pid=#{pid} exited cleanly (status=0) — restarting (worker recycle)"
+          end
+        else
+          Pgbus.logger.warn do
+            detail = if status && status.exitstatus.nil? && status.signaled?
+                       "signal=#{status.termsig}"
+                     else
+                       "status=#{status&.exitstatus}"
+                     end
+            "[Pgbus] Child #{info[:type]} pid=#{pid} exited unexpectedly (#{detail})"
+          end
         end
       end
 

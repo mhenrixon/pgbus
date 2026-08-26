@@ -59,6 +59,94 @@ RSpec.describe Pgbus::Process::Heartbeat do
       end
     end
 
+    # The row can vanish underneath a live process (stale-process reaper after
+    # a heartbeat gap, manual cleanup, another host's clock skew). update_all
+    # by id then matches 0 rows and raises nothing — the process must
+    # re-register instead of staying invisible forever (issue #438).
+    context "when the process row has been deleted" do
+      let(:heartbeat) do
+        described_class.new(kind: "worker", metadata: { queues: %w[default] }, loop_tick_supplier: -> { 99.5 })
+      end
+      let(:new_record) { double("ProcessEntry", id: 43) }
+      let(:gone_scope) { double("gone scope", update_all: 0) }
+      let(:new_scope) { double("new scope", update_all: 1) }
+      let(:warnings) { [] }
+
+      before do
+        allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record, new_record)
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 42).and_return(gone_scope)
+        allow(Pgbus::ProcessEntry).to receive(:where).with(id: 43).and_return(new_scope)
+        allow(Pgbus.logger).to receive(:warn) { |&blk| warnings << blk.call }
+        heartbeat.start
+      end
+
+      it "re-registers the process" do
+        heartbeat.beat
+
+        expect(Pgbus::ProcessEntry).to have_received(:create!).twice
+      end
+
+      it "logs a warning naming the missing row" do
+        heartbeat.beat
+
+        expect(warnings.join).to include("id=42", "kind=worker", "pid=#{Process.pid}", "re-registering")
+      end
+
+      it "applies this beat's updates to the new row" do
+        heartbeat.beat
+
+        expect(new_scope).to have_received(:update_all) do |args|
+          expect(args[:last_heartbeat_at]).to be_a(Time)
+          expect(args[:metadata]).to include("loop_tick_at" => 99.5)
+        end
+      end
+
+      it "beats against the new row from then on" do
+        heartbeat.beat
+        heartbeat.beat
+
+        expect(gone_scope).to have_received(:update_all).once
+        expect(new_scope).to have_received(:update_all).twice
+      end
+
+      it "deregisters the new row on stop" do
+        allow(new_scope).to receive(:delete_all).and_return(1)
+        heartbeat.beat
+        heartbeat.stop
+
+        expect(new_scope).to have_received(:delete_all)
+      end
+
+      context "when re-registration fails" do
+        before do
+          allow(Pgbus::ProcessEntry).to receive(:create!).and_invoke(
+            ->(**) { process_record },
+            ->(**) { raise StandardError, "db down" }
+          )
+        end
+
+        it "logs and keeps the old id for the next beat" do
+          expect { heartbeat.beat }.not_to raise_error
+          heartbeat.beat
+
+          expect(warnings.join).to include("Process registration failed")
+          expect(gone_scope).to have_received(:update_all).twice
+        end
+      end
+
+      context "when stop has already run" do
+        before { allow(gone_scope).to receive(:delete_all).and_return(1) }
+
+        it "does not resurrect the row" do
+          heartbeat.stop
+          heartbeat.beat
+
+          expect(Pgbus::ProcessEntry).to have_received(:create!).once
+          expect(gone_scope).not_to have_received(:update_all)
+        end
+      end
+    end
+
     context "when update raises an error" do
       before do
         allow(Pgbus::ProcessEntry).to receive(:create!).and_return(process_record)
