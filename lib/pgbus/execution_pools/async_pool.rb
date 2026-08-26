@@ -95,7 +95,7 @@ module Pgbus
               "Add `gem \"async\"` to your Gemfile. Original error: #{e.message}"
       end
 
-      # rubocop:disable Lint/RescueException
+      # rubocop:disable-next Lint/RescueException
       def start_reactor
         Thread.new do
           Thread.current.name = "pgbus-async-reactor-#{object_id}"
@@ -122,7 +122,6 @@ module Pgbus
           raise
         end
       end
-      # rubocop:enable Lint/RescueException
 
       def wait_for_executions(semaphore)
         loop do

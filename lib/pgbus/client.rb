@@ -1753,11 +1753,10 @@ module Pgbus
       timeout = config.read_timeout
       return mapping_statement_timeout(&block) unless timeout&.positive?
 
-      # rubocop:disable Pgbus/NoRubyTimeout -- deliberate last-resort bound; see above
+      # rubocop:disable-next Pgbus/NoRubyTimeout -- deliberate last-resort bound; see above
       Timeout.timeout(timeout + READ_TIMEOUT_SLACK, WedgedReadTimeout) do
         mapping_statement_timeout(&block)
       end
-      # rubocop:enable Pgbus/NoRubyTimeout
     rescue WedgedReadTimeout
       reload_pool_after_wedged_timeout
       raise
