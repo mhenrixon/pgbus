@@ -1,0 +1,23 @@
+lib/pgbus/execution_pools/async_pool.rb
+  s_0b3e7f1e700a4b::t_4457f72cfe0c9e 98
+spec/pgbus/frozen_lockfile_sync_spec.rb
+  s_0b3e7f1e700a4b::t_4457f72cfe0c9e 12
+lib/pgbus/client.rb
+  s_0b3e7f1e700a4b::t_4457f72cfe0c9e 1756
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "2ffa94a9c0294e40df9741ef72d78c9c7f689c52",
+  "prompts": {},
+  "sessions": {
+    "s_0b3e7f1e700a4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fcb8d9a5-e5be-4d5b-aae9-818fcdbd601d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
