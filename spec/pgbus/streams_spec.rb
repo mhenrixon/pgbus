@@ -385,7 +385,7 @@ RSpec.describe Pgbus::Streams do
 
           def open?      = @open
           def closed?    = !@open
-          def after_commit(&block)   = @after_commit << block
+          def after_commit(&block) = @after_commit << block
           def after_rollback(&block) = @after_rollback << block
           def commit!    = @after_commit.each(&:call).then { @open = false }
           def rollback!  = @after_rollback.each(&:call).then { @open = false }
