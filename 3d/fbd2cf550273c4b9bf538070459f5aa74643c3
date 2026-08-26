@@ -1,0 +1,29 @@
+spec/pgbus/process/heartbeat_spec.rb
+  s_0b3e7f1e700a4b::t_5d60402adcc6af 122
+  s_0b3e7f1e700a4b::t_7bf97edd633bc4 137
+  s_0b3e7f1e700a4b::t_23331cef061878 62-121,123-136,138-149
+lib/pgbus/process/heartbeat.rb
+  s_0b3e7f1e700a4b::t_67151b2ef18fbc 21-26,36,38,42,48,69-85
+lib/pgbus/process/supervisor.rb
+  s_0b3e7f1e700a4b::t_4f55d3287336ed 616,624-641
+spec/pgbus/process/supervisor_spec.rb
+  s_0b3e7f1e700a4b::t_394d3ce9657298 73-114
+CHANGELOG.md
+  s_0b3e7f1e700a4b::t_7bf97edd633bc4 5-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "3dfbd2cf550273c4b9bf538070459f5aa74643c3",
+  "prompts": {},
+  "sessions": {
+    "s_0b3e7f1e700a4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fcb8d9a5-e5be-4d5b-aae9-818fcdbd601d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
