@@ -9,7 +9,7 @@ require "spec_helper"
 # spec catches the drift directly — and in the normal rspec run, not just when a
 # frozen CI leg happens to fail. See #338 (the release-task sync) and its fix.
 #
-# rubocop:disable RSpec/DescribeClass -- a repo-hygiene guard, not a class under test
+# rubocop:disable-next RSpec/DescribeClass -- a repo-hygiene guard, not a class under test
 RSpec.describe "Frozen lockfile version sync" do
   %w[gemfiles/rails_7_1.gemfile.lock docs/Gemfile.lock].each do |relative|
     describe relative do
@@ -33,4 +33,3 @@ RSpec.describe "Frozen lockfile version sync" do
     end
   end
 end
-# rubocop:enable RSpec/DescribeClass
