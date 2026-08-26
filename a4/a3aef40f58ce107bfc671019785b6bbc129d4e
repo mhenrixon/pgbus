@@ -1,0 +1,9 @@
+CHANGELOG.md
+  ai_agent 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "a4a3aef40f58ce107bfc671019785b6bbc129d4e",
+  "prompts": {}
+}
