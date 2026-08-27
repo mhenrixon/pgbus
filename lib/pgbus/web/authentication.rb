@@ -44,7 +44,7 @@ module Pgbus
         Pgbus.logger.warn do
           "[Pgbus] Dashboard is accessible without authentication. " \
             "Configure Pgbus.configuration.web_auth to restrict access. " \
-            "See: https://github.com/mhenrixon/pgbus#dashboard-authentication"
+            "See: https://github.com/zoolutions/pgbus#dashboard-authentication"
         end
         Pgbus::Web::Authentication.auth_warned = true
       end
