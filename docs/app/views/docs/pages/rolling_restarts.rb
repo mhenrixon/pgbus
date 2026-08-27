@@ -25,7 +25,7 @@ class Views::Docs::Pages::RollingRestarts < DocsUI::Page
                     description: "Start new, prove healthy, then stop old.") do
       md <<~'MD'
         Orchestrators with per-role health checks — Kamal distributions such as the
-        [`dash` branch](https://github.com/mhenrixon/kamal), or any docker-level
+        [dash](https://github.com/zoolutions/dash), or any docker-level
         `HEALTHCHECK`-driven deploy — replace a job container in three steps: start
         the new container, poll its health check until it reports healthy, and only
         then `docker stop` the old one. If the new container never goes healthy, the
