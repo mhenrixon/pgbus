@@ -6,7 +6,7 @@ PostgreSQL-native job processing and event bus for Rails, built on [PGMQ](https:
 
 📖 **Documentation:** [pgbus.zoolutions.llc](https://pgbus.zoolutions.llc) — guides, flow diagrams, and a full configuration reference. (This README stays the canonical GitHub reference.)
 
-[![Ruby](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml/badge.svg)](https://github.com/mhenrixon/pgbus/actions/workflows/main.yml)
+[![Ruby](https://github.com/zoolutions/pgbus/actions/workflows/main.yml/badge.svg)](https://github.com/zoolutions/pgbus/actions/workflows/main.yml)
 
 ## Table of contents
 
@@ -1220,9 +1220,9 @@ pgbus-health --port 9394              # or PGBUS_HEALTH_PORT=9394 pgbus-health
 pgbus-health --port 9394 --path /livez --timeout 2
 ```
 
-### Rolling restarts (Kamal, docker)
+### Rolling restarts (dash, docker)
 
-Kamal distributions with per-role health checks (for example the [`dash` branch](https://github.com/mhenrixon/kamal)) can rolling-restart a non-proxied job role: start the new container, poll its docker `HEALTHCHECK` until healthy, and only then `docker stop` the old one. Wire the pgbus container into that gate:
+[dash](https://github.com/zoolutions/dash) (per-role health checks) can rolling-restart a non-proxied job role: start the new container, poll its docker `HEALTHCHECK` until healthy, and only then `docker stop` the old one. Wire the pgbus container into that gate:
 
 ```yaml
 # config/deploy.yml
@@ -1253,7 +1253,7 @@ If the orchestrator's stop grace period is *shorter* than `shutdown_timeout`, do
 
 **The overlap window is safe by construction.** Between "new container healthy" and "old container stopped", two supervisors run against the same database. Nothing double-fires: queue claims use `FOR UPDATE SKIP LOCKED`, `single_active_consumer` queues arbitrate via session-level advisory locks (released the instant a killed process's connection dies), two live recurring schedulers dedup on the `(task_key, run_at)` unique record, and dispatcher maintenance is idempotent. "One scheduler per deployment" is a steady-state rule; a deploy window may briefly violate it without consequence.
 
-**What a hard kill still costs.** Jobs killed past the drain window are redelivered after their visibility timeout (at-least-once holds) — but PGMQ's `read_ct` increments exactly like a logical failure, so a long-running job that straddles *repeated* deploy kills can be pushed to the DLQ without its code ever raising. `zombie_detection` logs exactly this pattern (`read_ct > 1` with no recorded failure). Keep jobs shorter than `drain_timeout`, or raise it (and `stop_timeout`) for queues that can't be. For `idempotent!` event handlers there is a separate crash-window caveat tracked in [#385](https://github.com/mhenrixon/pgbus/issues/385).
+**What a hard kill still costs.** Jobs killed past the drain window are redelivered after their visibility timeout (at-least-once holds) — but PGMQ's `read_ct` increments exactly like a logical failure, so a long-running job that straddles *repeated* deploy kills can be pushed to the DLQ without its code ever raising. `zombie_detection` logs exactly this pattern (`read_ct > 1` with no recorded failure). Keep jobs shorter than `drain_timeout`, or raise it (and `stop_timeout`) for queues that can't be. For `idempotent!` event handlers there is a separate crash-window caveat tracked in [#385](https://github.com/zoolutions/pgbus/issues/385).
 
 ### Boot diagnostics banner
 
