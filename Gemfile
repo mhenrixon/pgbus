@@ -54,7 +54,11 @@ group :development, :test do
   gem "activejob", *rails_requirement
   gem "activerecord", *rails_requirement
   gem "globalid", ">= 1.0"
-  gem "mcp", "~> 0.22"
+  # Optional runtime dep for Pgbus::MCP (not in the gemspec). >= 0.23 is the
+  # floor Pgbus::MCP::RackApp needs: that release added the transport's
+  # DNS-rebinding options (allowed_hosts / allowed_origins /
+  # dns_rebinding_protection), which the rack app passes through.
+  gem "mcp", ">= 0.23"
   gem "pg", "~> 1.5"
   # Optional integration — pgbus ships a Phlex-includable pgbus_stream_from
   # helper (Pgbus::Streams::PhlexHelpers) but does NOT depend on phlex-rails.

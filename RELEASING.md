@@ -23,11 +23,15 @@ Run these on `main` (or the branch you're about to merge and release):
       PGMQ schema version. If a new `lib/pgbus/pgmq_schema/pgmq_v*.sql` was vendored
       this cycle, the release notes should remind operators to run
       `rails generate pgbus:upgrade_pgmq` after upgrading.
-- [ ] `docs/Gemfile.lock` pins `pgbus (X.Y.Z)` matching the new
-      `lib/pgbus/version.rb`. The docs site's frozen `bundle install` in CI fails
-      if the lock drifts from `version.rb`. Re-pin with `cd docs && bundle install`
-      and commit it in the release-prep PR. (`rake release` bumps `version.rb` but
-      not the docs lock — keep them in sync yourself.)
+- [ ] The three tracked lockfiles that pin the pgbus path gem — `Gemfile.lock`,
+      `gemfiles/rails_7_1.gemfile.lock`, `docs/Gemfile.lock` — are current.
+      `rake release` bumps their `pgbus (X.Y.Z)` pin in the bump commit (and
+      `spec/pgbus/frozen_lockfile_sync_spec.rb` fails the suite on drift), so
+      you normally don't touch them; if you changed dependencies, re-lock the
+      affected file (`bundle install`, `BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile
+      bundle install`, `cd docs && bundle install`) and commit it in the
+      release-prep PR. All three are installed frozen in CI — a stale one fails
+      `release.yml`'s own `bundle install` before anything is published.
 - [ ] Working directory is clean. `rake release` aborts on any uncommitted change.
 
 ## Release-prep PR (the changelog roll)
@@ -39,10 +43,10 @@ reviewable change, so do it in a PR first:
    (today), and add a fresh empty `## [Unreleased]` above it with the standard
    category stubs (`### Added`, `### Changed`, `### Fixed`, `### Security`). Keep
    entries **user-facing only** — pure chore/test/docs-infra commits get no bullet.
-2. Re-pin the docs lockfile: `cd docs && bundle install`.
-3. Commit both, open a PR, merge it once green.
+2. Commit, open a PR, merge it once green.
 
-Leave `lib/pgbus/version.rb` alone in this PR — `rake release` bumps it.
+Leave `lib/pgbus/version.rb` and the lockfile pins alone in this PR — `rake
+release` bumps them together.
 
 ## Cutting the release
 

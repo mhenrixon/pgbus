@@ -232,9 +232,11 @@ task :release, %i[version force] do |_t, args|
 
   # Step 1b: Regenerate the frozen lockfiles that pin the pgbus path gem, so the
   # bump ships with them in sync. These are installed with `--frozen`/deployment
-  # in CI, so if they still name the OLD version they instant-fail (the Rails 7.1
-  # leg with exit 16, and docs-CI on any docs change). Regenerating here keeps the
-  # version-pin drift out of the release commit instead of surfacing on the next PR.
+  # in CI, so if they still name the OLD version they instant-fail (the root
+  # Gemfile.lock on every main-Gemfile leg AND release.yml's own `bundle install`,
+  # the Rails 7.1 leg with exit 16, and docs-CI on any docs change). Regenerating
+  # here keeps the version-pin drift out of the release commit instead of
+  # surfacing on the next PR — or, worse, in the Release workflow itself.
   header "Frozen lockfiles"
   # The ONLY thing a version bump changes in these frozen lockfiles is the pgbus
   # path-gem pin — so bump exactly that line, in place, with a string edit.
@@ -249,7 +251,7 @@ task :release, %i[version force] do |_t, args|
   # fetch). A targeted pin edit sidesteps all of it, is deterministic on any
   # machine, and produces the minimal 2-line diff (the PATH spec + the
   # DEPENDENCIES pin). See #338/#341 and the surgical-bump fix.
-  frozen_lockfiles = %w[gemfiles/rails_7_1.gemfile.lock docs/Gemfile.lock]
+  frozen_lockfiles = %w[Gemfile.lock gemfiles/rails_7_1.gemfile.lock docs/Gemfile.lock]
   regenerated_lockfiles = []
   frozen_lockfiles.each do |lockfile|
     unless File.exist?(lockfile)

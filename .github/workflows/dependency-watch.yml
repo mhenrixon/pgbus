@@ -9,9 +9,9 @@ name: Dependency watch
 # drift it opens a GitHub issue (the durable, deduplicating record -- dedup is by
 # exact issue title, so a second run with the same drift is a no-op) and a
 # best-effort Slack post via the SLACK_WEBHOOK_URL repo secret. Both checks are
-# plain bash + gh api/curl + jq -- no Ruby application boot -- except for a
-# `bundle lock` to resolve the actual locked pgmq-ruby version, since
-# Gemfile.lock is gitignored for this gem and never committed to the repo.
+# plain bash + gh api/curl + jq -- no Ruby application boot; the locked
+# pgmq-ruby version is read straight from the committed Gemfile.lock with
+# Bundler's lockfile parser.
 on:
   schedule:
     - cron: "0 5 * * *"
@@ -42,13 +42,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
+          # No install: the locked version is parsed from the committed
+          # Gemfile.lock below, so nothing here boots the pgbus application.
           bundler-cache: false
-
-      - name: Resolve locked pgmq-ruby version
-        # `bundle lock` only resolves dependencies and writes Gemfile.lock (which
-        # is gitignored, so a fresh checkout never has one) -- it does not install
-        # gems or boot the pgbus application, keeping this a pure version lookup.
-        run: bundle lock
 
       - name: Check vendored PGMQ SQL against upstream
         id: pgmq

@@ -7,7 +7,6 @@
 /spec/reports/
 /tmp/
 *.gem
-Gemfile.lock
 .rspec_status
 .claude/settings.local.json
 node_modules/

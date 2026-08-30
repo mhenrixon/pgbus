@@ -1035,7 +1035,7 @@ When `config.metrics_enabled = true` (default), the dashboard exposes Prometheus
 
 Pgbus ships an optional, **read-only** [MCP](https://modelcontextprotocol.io) server so an AI agent (or any MCP client) can diagnose pgbus directly — "are queues backed up?", "is `read_ct` advancing?", "are workers heart-beating but not claiming?" — instead of hand-writing `pgmq` / `pg_stat_activity` SQL against production. It is a thin adapter over the same read layer the dashboard uses, so it adds no new database access path.
 
-Add the optional `mcp` gem to your `Gemfile` first (`gem "mcp"`); both entry points below tell you if it's missing.
+Add the optional `mcp` gem to your `Gemfile` first (`gem "mcp"`, 0.23 or newer — 1.x is fully supported); both entry points below tell you if it's missing.
 
 #### Choosing a deployment
 
@@ -1075,8 +1075,13 @@ Options:
 | `token:` | `nil` | Shared secret. When set, requests must send `Authorization: Bearer <token>` (constant-time compared). |
 | `auth:` | `nil` | A callable `->(rack_request) { ... }` returning truthy to allow — mirrors `config.web_auth`. Wins over `token:`. |
 | `allow_payloads:` | `false` | When true, tools honor a per-call `include_payloads` flag (see Security). |
+| `dns_rebinding_protection:` | `nil` | The `mcp` gem's Host/Origin validation (on by default since mcp 0.23, loopback hosts only). `nil` follows the gate: **off when `token:`/`auth:` is set, on when unauthenticated.** `true`/`false` forces it. |
+| `allowed_hosts:` | `nil` | Extra `Host` values accepted when the check is on (`"app.example.com"` matches any port, `"app.example.com:8443"` exactly). |
+| `allowed_origins:` | `nil` | Extra `Origin` values accepted beyond same-origin when the check is on. |
 
 If you set neither `token:` nor `auth:`, pgbus logs a warning — an unauthenticated diagnostic endpoint exposes operational metadata to anyone who can reach it.
+
+> **Why the Host check follows the gate.** DNS-rebinding protection defends a server bound to `localhost` against a browser page whose DNS name was re-pointed at `127.0.0.1`. Such a page can never carry your bearer token (the secret doesn't exist at the attacker's origin), so on a gated mount the check is redundant — and left on, it rejects every request to a real hostname (`https://app.example.com/pgbus/mcp` → `403 Invalid Host header`). Pgbus therefore turns it off when a gate is configured and keeps it on for the (warned-about) unauthenticated mount. If your `auth:` callable trusts something a rebound page *would* have — a source-IP allowlist, say — pass `dns_rebinding_protection: true` plus `allowed_hosts:` for your hostname. Requires `mcp >= 0.23`; older gems raise `Pgbus::Error` naming the floor.
 
 > Clients must send `Accept: application/json` and `Content-Type: application/json` on every POST, or the transport replies `406 Not Acceptable`. MCP clients do this automatically.
 

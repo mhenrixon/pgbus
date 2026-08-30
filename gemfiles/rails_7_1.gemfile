@@ -11,9 +11,8 @@
 #   BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle install
 #   BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle exec rspec spec/pgbus/ spec/generators/
 #
-# The companion lock (rails_7_1.gemfile.lock) IS checked in so CI resolves the
-# exact 7.1.x set. (The root Gemfile.lock is gitignored; this one is not — its
-# basename differs, so the gitignore `Gemfile.lock` rule does not match it.)
+# The companion lock (rails_7_1.gemfile.lock) is checked in — like the root
+# Gemfile.lock — so CI resolves the exact 7.1.x set.
 
 # The main Gemfile reads RAILS_VERSION for its actioncable/activejob/activerecord
 # pins. Set it before eval_gemfile so those gems land on 7.1.x too.

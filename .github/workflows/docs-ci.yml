@@ -50,7 +50,9 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          # Same pin as the gem workflow. The path is repo-relative — `with:`
+          # inputs ignore the job's `working-directory` default.
+          bun-version-file: ".bun-version"
 
       - name: Sync lucide icons
         run: bin/rails g rails_icons:sync --library=lucide --force --quiet

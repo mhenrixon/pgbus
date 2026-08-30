@@ -190,7 +190,123 @@ RSpec.describe Pgbus::MCP::RackApp do
     end
   end
 
+  # mcp >= 0.23 validates the Host (and Origin) header inside the transport —
+  # DNS-rebinding protection, on by default, accepting only loopback hosts. A
+  # pgbus app mounted at https://app.example.com/pgbus/mcp therefore answered
+  # every request with 403 "Invalid Host header" until these options existed.
+  describe "DNS rebinding protection" do
+    let(:bearer) { { "HTTP_AUTHORIZATION" => "Bearer s3cret" } }
+    let(:foreign_host) { { "HTTP_HOST" => "app.example.com" } }
+
+    def error_message(response)
+      JSON.parse(response.body).dig("error", "message")
+    end
+
+    context "when the app is gated (token: or auth:)" do
+      it "accepts a non-loopback Host with a valid bearer token — the gate makes the check redundant" do
+        app = mock_for(token: "s3cret")
+        response = app.post("/", input: health_call, **bearer, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+
+      it "accepts a non-loopback Host through a custom auth callable" do
+        app = mock_for(auth: ->(_req) { true })
+        response = app.post("/", input: health_call, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+
+      it "still 401s an unauthenticated request before any Host check runs" do
+        app = mock_for(token: "s3cret")
+        response = app.post("/", input: health_call, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(401)
+      end
+
+      it "re-enables the transport check with dns_rebinding_protection: true" do
+        app = mock_for(token: "s3cret", dns_rebinding_protection: true)
+        response = app.post("/", input: health_call, **bearer, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(403)
+        expect(error_message(response)).to include("Invalid Host header")
+      end
+
+      it "honours allowed_hosts alongside an explicitly enabled check" do
+        app = mock_for(token: "s3cret", dns_rebinding_protection: true, allowed_hosts: ["app.example.com"])
+        response = app.post("/", input: health_call, **bearer, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+    end
+
+    context "when the app is unauthenticated" do
+      before { allow(Pgbus.logger).to receive(:warn) }
+
+      it "keeps the transport check on: a non-loopback Host is refused with 403" do
+        app = mock_for
+        response = app.post("/", input: health_call, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(403)
+        expect(error_message(response)).to include("Invalid Host header")
+      end
+
+      it "accepts a loopback Host" do
+        app = mock_for
+        response = app.post("/", input: health_call, "HTTP_HOST" => "localhost:3000", **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+
+      it "widens the accepted hosts with allowed_hosts (bare name matches any port)" do
+        app = mock_for(allowed_hosts: ["app.example.com"])
+        response = app.post("/", input: health_call, "HTTP_HOST" => "app.example.com:8443", **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+
+      it "refuses a cross-origin browser request unless the Origin is in allowed_origins" do
+        denied = mock_for.post("/", input: health_call, "HTTP_HOST" => "localhost",
+                                    "HTTP_ORIGIN" => "https://tool.example.com", **json_headers)
+        allowed = mock_for(allowed_origins: ["https://tool.example.com"])
+                  .post("/", input: health_call, "HTTP_HOST" => "localhost",
+                             "HTTP_ORIGIN" => "https://tool.example.com", **json_headers)
+
+        expect(denied.status).to eq(403)
+        expect(error_message(denied)).to include("Invalid Origin header")
+        expect(allowed.status).to eq(200)
+      end
+
+      it "can be switched off explicitly with dns_rebinding_protection: false" do
+        app = mock_for(dns_rebinding_protection: false)
+        response = app.post("/", input: health_call, **foreign_host, **json_headers)
+
+        expect(response.status).to eq(200)
+      end
+    end
+
+    it "raises an actionable error on an mcp gem older than 0.23 (no DNS-rebinding options to pass)" do
+      stub_const("MCP::VERSION", "0.22.0")
+
+      expect { described_class.new(data_source: data_source, token: "s3cret") }
+        .to raise_error(Pgbus::Error, /mcp >= 0\.23.*0\.22\.0/)
+    end
+  end
+
   describe "Pgbus::MCP.rack_app" do
+    it "passes the DNS-rebinding options through to the RackApp" do
+      allow(described_class).to receive(:new).and_call_original
+
+      Pgbus::MCP.rack_app(data_source: data_source, token: "s3cret",
+                          allowed_hosts: ["app.example.com"], allowed_origins: ["https://x.example"],
+                          dns_rebinding_protection: true)
+
+      expect(described_class).to have_received(:new).with(
+        hash_including(allowed_hosts: ["app.example.com"], allowed_origins: ["https://x.example"],
+                       dns_rebinding_protection: true)
+      )
+    end
+
     it "returns a RackApp instance" do
       app = Pgbus::MCP.rack_app(data_source: data_source, token: "s3cret")
       expect(app).to be_a(described_class)
