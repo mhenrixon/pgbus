@@ -1,0 +1,23 @@
+.github/workflows/docs-ci.yml
+  s_5308b0fbbe58dd::t_f5a39fc60c985e 53-55
+.bun-version
+  s_5308b0fbbe58dd::t_b5d95cf24e770a 1
+package.json
+  s_5308b0fbbe58dd::t_c8f9fa9420ab53 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "fa22ad6223e788bddd0019125f2e477694c3d15a",
+  "prompts": {},
+  "sessions": {
+    "s_5308b0fbbe58dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "389f3a72-69d8-43a2-af8d-00cec2845a94",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
