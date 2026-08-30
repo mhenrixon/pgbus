@@ -20,8 +20,24 @@ module Pgbus
     # Security: requests are rejected with 401 unless they carry the configured
     # token (or pass the supplied auth callable). Run it on an internal network
     # / behind your VPN, never internet-exposed.
+    #
+    # DNS-rebinding protection: since mcp 0.23 the transport validates the Host
+    # header (loopback only, by default) and the Origin header (same-origin
+    # only). That defends a server bound to localhost against a browser page
+    # whose DNS name was re-pointed at 127.0.0.1 — a page that can carry no
+    # bearer token, because the secret never reaches the attacker's origin. So
+    # when this app is gated (+token+ or +auth+) the check is redundant, and
+    # left on it rejects every request to a real hostname
+    # (https://app.example.com/pgbus/mcp → 403 "Invalid Host header"). The
+    # default therefore follows the gate: off when gated, on when unauthenticated.
+    # Override with +dns_rebinding_protection:+, and widen the accepted hosts /
+    # origins with +allowed_hosts:+ / +allowed_origins:+ when the check is on.
     class RackApp
       BEARER_PREFIX = "Bearer "
+      # First mcp release with the transport's allowed_hosts / allowed_origins /
+      # dns_rebinding_protection options. Older gems would raise ArgumentError
+      # on the pass-through; fail with the fix spelled out instead.
+      MIN_MCP_VERSION = Gem::Version.new("0.23.0")
       # Only the JSON body string is frozen and reused. The outer response triple
       # and its headers hash MUST be built fresh per call (#unauthorized) so
       # downstream Rack middleware can mutate them — Rack::TempfileReaper assigns
@@ -40,14 +56,27 @@ module Pgbus
       # @param auth [#call, nil] custom authenticator taking a Rack::Request and
       #   returning truthy to allow. Mirrors Pgbus.configuration.web_auth. Takes
       #   precedence over +token+ when both are given.
-      def initialize(data_source: Pgbus::Web::DataSource.new, allow_payloads: false, token: nil, auth: nil)
+      # @param allowed_hosts [Array<String>, nil] extra Host values the
+      #   transport accepts beyond loopback when DNS-rebinding protection is on;
+      #   a bare name matches any port, "host:port" matches exactly.
+      # @param allowed_origins [Array<String>, nil] extra Origin values accepted
+      #   beyond same-origin when DNS-rebinding protection is on.
+      # @param dns_rebinding_protection [Boolean, nil] nil (default) = on only
+      #   when the app is unauthenticated; true/false forces it. See the class
+      #   docs for why the gate makes the check redundant.
+      def initialize(data_source: Pgbus::Web::DataSource.new, allow_payloads: false, token: nil, auth: nil,
+                     allowed_hosts: nil, allowed_origins: nil, dns_rebinding_protection: nil)
+        check_mcp_version!
         @token = token
         @auth = auth
         @server = Server.build(data_source: data_source, allow_payloads: allow_payloads)
         @transport = ::MCP::Server::Transports::StreamableHTTPTransport.new(
-          @server, stateless: true, enable_json_response: true
+          @server,
+          stateless: true, enable_json_response: true,
+          allowed_hosts: allowed_hosts, allowed_origins: allowed_origins,
+          dns_rebinding_protection: dns_rebinding_protection.nil? ? unauthenticated? : dns_rebinding_protection
         )
-        warn_unauthenticated! if @token.nil? && @auth.nil?
+        warn_unauthenticated! if unauthenticated?
       end
 
       # Mount THIS object, never the bare transport. The auth gate lives here
@@ -90,11 +119,24 @@ module Pgbus
         Runner.secure_compare?(@token, header.delete_prefix(BEARER_PREFIX))
       end
 
+      def unauthenticated?
+        @token.nil? && @auth.nil?
+      end
+
       def warn_unauthenticated!
         Pgbus.logger.warn do
           "[Pgbus::MCP] HTTP diagnostic server mounted without authentication. " \
             "Pass token: or auth: to Pgbus::MCP.rack_app, and keep it on an internal network."
         end
+      end
+
+      def check_mcp_version!
+        installed = Gem::Version.new(::MCP::VERSION)
+        return if installed >= MIN_MCP_VERSION
+
+        raise Pgbus::Error,
+              "Pgbus::MCP.rack_app requires mcp >= #{MIN_MCP_VERSION} (the transport's DNS-rebinding " \
+              "options); mcp #{installed} is installed. Run `bundle update mcp`."
       end
     end
 
@@ -102,8 +144,11 @@ module Pgbus
 
     # Build a gated Rack app serving the read-only diagnostic tools over HTTP.
     # See {RackApp} for the parameters and deployment guidance.
-    def rack_app(data_source: Pgbus::Web::DataSource.new, allow_payloads: false, token: nil, auth: nil)
-      RackApp.new(data_source: data_source, allow_payloads: allow_payloads, token: token, auth: auth)
+    def rack_app(data_source: Pgbus::Web::DataSource.new, allow_payloads: false, token: nil, auth: nil,
+                 allowed_hosts: nil, allowed_origins: nil, dns_rebinding_protection: nil)
+      RackApp.new(data_source: data_source, allow_payloads: allow_payloads, token: token, auth: auth,
+                  allowed_hosts: allowed_hosts, allowed_origins: allowed_origins,
+                  dns_rebinding_protection: dns_rebinding_protection)
     end
   end
 end
