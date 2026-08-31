@@ -1,0 +1,13 @@
+Gemfile.lock
+  ai_agent 240-241,527
+gemfiles/rails_7_1.gemfile.lock
+  ai_agent 249-250,553
+docs/Gemfile.lock
+  ai_agent 214-215,506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "edd8fe4d8b2d2fc01aaa078b470e2d962422e44c",
+  "prompts": {}
+}
