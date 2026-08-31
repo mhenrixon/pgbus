@@ -6,18 +6,39 @@ require "json"
 module Pgbus
   class Batch
     class AlreadyFinished < Error; end
+    # Raised by #enqueue when a batch with the same uniqueness_key is still
+    # running and on_conflict: is :reject.
+    class AlreadyRunning < Error; end
 
     METADATA_KEY = "pgbus_batch_id"
 
+    # A unique batch holds one row in pgbus_uniqueness_keys from #enqueue until
+    # the batch finishes. The row's lock_key carries the caller's key under
+    # this prefix (so a job's ensures_uniqueness key never collides with it)
+    # and its queue_name names the owning batch, which is how the reaper
+    # tells a live run from an orphan (see .lock_orphaned?).
+    LOCK_KEY_PREFIX = "batch:"
+    LOCK_QUEUE_PREFIX = "batch:"
+    VALID_CONFLICTS = %i[reject discard log].freeze
+
     attr_reader :batch_id, :properties, :description,
-                :on_finish, :on_success, :on_failure
+                :on_finish, :on_success, :on_failure,
+                :uniqueness_key, :on_conflict
 
     def on_discard
       on_failure
     end
 
-    def initialize(on_finish: nil, on_success: nil, on_discard: nil, on_failure: nil, description: nil, properties: {})
+    # @param uniqueness_key [String, nil] at most one unfinished batch with
+    #   this key may exist; see #enqueue for what happens to the next one
+    # @param on_conflict [Symbol] :reject (raise AlreadyRunning), :discard
+    #   (skip the block silently) or :log (skip the block, warn)
+    def initialize(on_finish: nil, on_success: nil, on_discard: nil, on_failure: nil, description: nil, properties: {},
+                   uniqueness_key: nil, on_conflict: :reject)
       raise ArgumentError, "pass on_failure: only — on_discard: is a deprecated alias" if on_discard && on_failure
+      unless VALID_CONFLICTS.include?(on_conflict)
+        raise ArgumentError, "on_conflict must be one of #{VALID_CONFLICTS.join(", ")}, got #{on_conflict.inspect}"
+      end
 
       if on_discard
         Pgbus.logger.warn do
@@ -31,7 +52,18 @@ module Pgbus
       @on_failure = on_failure || on_discard
       @description = description
       @properties = properties
+      @uniqueness_key = uniqueness_key&.to_s
+      @on_conflict = on_conflict
+      @discarded = false
       @started = false
+    end
+
+    # True when #enqueue found another batch with the same uniqueness_key
+    # still running and skipped this one (on_conflict: :discard or :log).
+    def discarded? = @discarded
+
+    def lock_key
+      "#{LOCK_KEY_PREFIX}#{uniqueness_key}" if uniqueness_key
     end
 
     # Enqueue a group of jobs as a batch. Jobs enqueued inside the block join
@@ -45,8 +77,14 @@ module Pgbus
     # Raises Pgbus::Batch::AlreadyFinished once the batch has finished.
     def enqueue(&)
       return reopen(&) if @started
+      return self unless acquire_lock!
 
-      create_record
+      begin
+        create_record
+      rescue StandardError
+        self.class.release_lock(batch_id)
+        raise
+      end
       @started = true
       count_jobs(&)
       start_processing
@@ -132,6 +170,43 @@ module Pgbus
     # Delete finished batches older than the given threshold.
     def self.cleanup(older_than:)
       BatchEntry.stale(before: older_than).delete_all
+    end
+
+    # --- run-scoped uniqueness lock ------------------------------------
+
+    # queue_name stored on the uniqueness row of a unique batch.
+    def self.lock_queue_name(batch_id)
+      "#{LOCK_QUEUE_PREFIX}#{batch_id}"
+    end
+
+    # True for a pgbus_uniqueness_keys row that belongs to a batch rather
+    # than to a message.
+    def self.lock_row?(queue_name)
+      queue_name.to_s.start_with?(LOCK_QUEUE_PREFIX)
+    end
+
+    # For the dispatcher's reaper: a batch lock is an orphan once its batch
+    # has finished (the release in finish_if_needed failed) or its row is
+    # gone (cleanup). A batch that is still pending/processing keeps the lock
+    # no matter how old it is — a nightly run legitimately holds it for
+    # hours. Any lookup error keeps the lock; the reaper never deletes in
+    # doubt.
+    def self.lock_orphaned?(queue_name)
+      batch_id = queue_name.to_s.delete_prefix(LOCK_QUEUE_PREFIX)
+      record = BatchEntry.find_by(batch_id: batch_id)
+      record.nil? || record.status == "finished"
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus] Batch lock lookup failed for #{queue_name}: #{e.message}" }
+      false
+    end
+
+    # Drop the uniqueness row a batch holds, if any. Fail-soft: the reaper
+    # releases the row once the batch is finished.
+    def self.release_lock(batch_id)
+      UniquenessKey.where(queue_name: lock_queue_name(batch_id)).delete_all
+    rescue StandardError => e
+      Pgbus.logger.debug { "[Pgbus] Batch lock release failed for #{batch_id}: #{e.message}" }
+      0
     end
 
     def self.executions_migrated?
@@ -329,6 +404,9 @@ module Pgbus
 
         fire_callbacks(result[:record])
         instrument_finished(result[:record])
+        # Every finish path (completion, sweep) funnels through here, so this
+        # is the one place a unique batch gives its run lock back.
+        release_lock(result[:record].batch_id) if result[:record].respond_to?(:batch_id)
         result
       end
 
@@ -438,7 +516,32 @@ module Pgbus
       @on_finish = nil
       @on_success = nil
       @on_failure = nil
+      @uniqueness_key = nil
+      @on_conflict = :reject
+      @discarded = false
       @started = true
+    end
+
+    # Take the run lock for a unique batch. Returns true when the batch may
+    # proceed (no key, or the lock was won); false when another batch holds
+    # the key and on_conflict is :discard or :log. :reject raises.
+    def acquire_lock! # rubocop:disable Naming/PredicateMethod
+      return true unless uniqueness_key
+
+      acquired = UniquenessKey.acquire!(lock_key, queue_name: self.class.lock_queue_name(batch_id), msg_id: 0)
+      UniquenessKey.clear_bind_stamp!(lock_key)
+      return true if acquired
+
+      case on_conflict
+      when :reject
+        raise AlreadyRunning, "Batch #{uniqueness_key.inspect} is already running"
+      when :discard
+        Pgbus.logger.info { "[Pgbus] Discarding batch #{uniqueness_key.inspect}: a batch with that key is still running" }
+      else
+        Pgbus.logger.warn { "[Pgbus] Batch #{uniqueness_key.inspect} skipped: a batch with that key is still running" }
+      end
+      @discarded = true
+      false
     end
 
     # Add to an already-created batch. Each job counts itself in (guarded

@@ -461,8 +461,14 @@ module Pgbus
         candidates = keys.select { |key| key.created_at && key.created_at < threshold && key.queue_name }
         return 0 if candidates.empty?
 
+        # A unique batch's lock is judged by its batch, not by any queue: it
+        # is held for the whole run (hours, legitimately) and is an orphan
+        # only once the batch has finished or its row is gone.
+        batch_locks, candidates = candidates.partition { |key| Batch.lock_row?(key.queue_name) }
+        orphaned = batch_locks.select { |key| Batch.lock_orphaned?(key.queue_name) }
+
         bound, unbound = candidates.partition { |key| bound_lock?(key) }
-        orphaned = bound.select { |key| message_gone?(key) }
+        orphaned.concat(bound.select { |key| message_gone?(key) })
         orphaned.concat(gone_unbound_locks(unbound))
 
         return 0 if orphaned.empty?
