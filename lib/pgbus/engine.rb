@@ -76,6 +76,7 @@ module Pgbus
         include Pgbus::Uniqueness
         include Pgbus::ActiveJob::BatchId
         include Pgbus::ActiveJob::CurrentAttributes
+        include Pgbus::VisibilityHeartbeat::JobMixin
       end
     end
 

@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+# Duration examples (10.minutes etc.) must not depend on another spec having
+# loaded ActiveSupport's numeric core_ext first — order-dependent flake.
+require "active_support/core_ext/numeric/time"
 
 RSpec.describe Pgbus::Configuration do
   subject(:config) { described_class.new }
@@ -1535,6 +1538,36 @@ RSpec.describe Pgbus::Configuration do
     it "rejects negative retry_backoff" do
       config.retry_backoff = -1
       expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /retry_backoff must be > 0/)
+    end
+
+    it "defaults the visibility heartbeat to on with a third of the visibility timeout" do
+      config.visibility_timeout = 30
+
+      expect(config.visibility_heartbeat).to be(true)
+      expect(config.visibility_heartbeat_interval).to be_nil
+      expect(config.effective_visibility_heartbeat_interval).to eq(10.0)
+    end
+
+    it "coerces visibility_heartbeat_interval from a Duration and prefers it over the derived default" do
+      config.visibility_timeout = 10.minutes
+      config.visibility_heartbeat_interval = 2.minutes
+
+      expect(config.visibility_heartbeat_interval).to eq(120)
+      expect(config.effective_visibility_heartbeat_interval).to eq(120)
+      expect { config.validate! }.not_to raise_error
+    end
+
+    it "rejects a visibility_heartbeat_interval that is not below visibility_timeout" do
+      config.visibility_timeout = 30
+      config.visibility_heartbeat_interval = 30
+
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /visibility_heartbeat_interval must be > 0 and below/)
+    end
+
+    it "rejects a non-boolean visibility_heartbeat" do
+      config.visibility_heartbeat = "yes"
+
+      expect { config.validate! }.to raise_error(Pgbus::ConfigurationError, /visibility_heartbeat must be true or false/)
     end
 
     it "rejects nil retry_backoff_max" do

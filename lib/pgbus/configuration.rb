@@ -12,7 +12,14 @@ module Pgbus
 
     # Worker settings
     attr_accessor :polling_interval, :prefetch_limit, :execution_mode
-    attr_reader :workers, :visibility_timeout # rubocop:disable Style/AccessorGrouping
+    # visibility_heartbeat / visibility_heartbeat_interval: while a job runs,
+    # its message's visibility timeout is re-armed every interval seconds
+    # (default: a third of visibility_timeout), so a job that outlives the
+    # timeout is not redelivered — and eventually dead-lettered — while it is
+    # still running. The timeout then only fires for a process that is gone.
+    # Set visibility_heartbeat = false to restore plain PGMQ semantics.
+    attr_accessor :visibility_heartbeat
+    attr_reader :workers, :visibility_timeout, :visibility_heartbeat_interval # rubocop:disable Style/AccessorGrouping
 
     # Supervisor role selection.
     # nil = boot all roles (default behavior).
@@ -266,6 +273,8 @@ module Pgbus
       @roles = nil
       @polling_interval = 0.1
       @visibility_timeout = 30
+      @visibility_heartbeat = true
+      @visibility_heartbeat_interval = nil
 
       @prefetch_limit = nil
       @execution_mode = :threads
@@ -762,6 +771,7 @@ module Pgbus
         raise Pgbus::ConfigurationError,
               "visibility_timeout must be > 0"
       end
+      validate_visibility_heartbeat!
       raise Pgbus::ConfigurationError, "max_retries must be >= 0" unless max_retries.is_a?(Integer) && max_retries >= 0
       raise Pgbus::ConfigurationError, "retry_backoff must be > 0" unless retry_backoff.is_a?(Numeric) && retry_backoff.positive?
       unless retry_backoff_max.is_a?(Numeric) && retry_backoff_max.positive?
@@ -1229,6 +1239,27 @@ module Pgbus
     #
     # Numeric values are stored unchanged (preserving Float for sub-second
     # values). Duration values are coerced to Integer seconds via .to_i.
+
+    def visibility_heartbeat_interval=(value)
+      @visibility_heartbeat_interval = coerce_duration!(value, :visibility_heartbeat_interval)
+    end
+
+    # Seconds between two extensions of a running job's visibility timeout:
+    # the configured interval, or a third of visibility_timeout.
+    def effective_visibility_heartbeat_interval
+      visibility_heartbeat_interval || (visibility_timeout / 3.0)
+    end
+
+    def validate_visibility_heartbeat!
+      raise Pgbus::ConfigurationError, "visibility_heartbeat must be true or false" unless [true, false].include?(visibility_heartbeat)
+      return if visibility_heartbeat_interval.nil?
+
+      interval = visibility_heartbeat_interval
+      return if interval.is_a?(Numeric) && interval.positive? && interval < visibility_timeout
+
+      raise Pgbus::ConfigurationError,
+            "visibility_heartbeat_interval must be > 0 and below visibility_timeout (#{visibility_timeout}s)"
+    end
 
     def visibility_timeout=(value)
       @visibility_timeout = coerce_duration!(value, :visibility_timeout)
