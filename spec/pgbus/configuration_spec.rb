@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+# Duration examples (10.minutes etc.) must not depend on another spec having
+# loaded ActiveSupport's numeric core_ext first — order-dependent flake.
+require "active_support/core_ext/numeric/time"
 
 RSpec.describe Pgbus::Configuration do
   subject(:config) { described_class.new }
