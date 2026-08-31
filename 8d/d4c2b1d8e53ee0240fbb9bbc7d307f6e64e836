@@ -1,0 +1,21 @@
+CLAUDE.md
+  ai_agent 45-46
+bin/release
+  s_f71b6bb9cbee8c::t_5052d3c8be0d8a 1-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8dd4c2b1d8e53ee0240fbb9bbc7d307f6e64e836",
+  "prompts": {},
+  "sessions": {
+    "s_f71b6bb9cbee8c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5b99bc4c-bce2-4b92-8bae-58fced7dbe5a",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
