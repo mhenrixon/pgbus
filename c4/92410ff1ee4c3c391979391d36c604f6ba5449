@@ -1,0 +1,19 @@
+docs/app/models/config_reference.rb
+  s_b5fd267d6668ec::t_4f6e9e9864a1de 40-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "c492410ff1ee4c3c391979391d36c604f6ba5449",
+  "prompts": {},
+  "sessions": {
+    "s_b5fd267d6668ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74013669-e10f-4063-a518-f0c8d5ee9541",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
