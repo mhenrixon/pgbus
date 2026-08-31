@@ -168,8 +168,6 @@ it:
         reroute_failed: Impossibile reindirizzare l'evento.
         rerouted: Evento reindirizzato al gestore di destinazione.
       index:
-        discard_all: Scarta tutto
-        discard_all_confirm: Scartare tutti gli eventi in sospeso? Questa operazione non può essere annullata.
         discard_selected: Scarta selezionati
         discard_selected_confirm: Scartare gli eventi selezionati?
         pending_empty: Nessun evento in sospeso

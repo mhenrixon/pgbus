@@ -37,7 +37,9 @@ module ConfigReference
       { name: "execution_mode", type: "Symbol", default: ":threads", desc: "Global execution mode (:threads or :async)." },
       { name: "polling_interval", type: "Numeric", default: "0.1", desc: "Seconds between polls (LISTEN/NOTIFY is primary)." },
       { name: "prefetch_limit", type: "Integer, nil", default: "nil", desc: "Max in-flight messages per worker." },
-      { name: "visibility_timeout", type: "Duration", default: "30", desc: "How long a read message stays invisible before retry." }
+      { name: "visibility_timeout", type: "Duration", default: "30", desc: "How long a read message stays invisible before retry." },
+      { name: "visibility_heartbeat", type: "Boolean", default: "true", desc: "Re-arm a running job's visibility timeout on a heartbeat so a job that outlives it is not redelivered (and eventually dead-lettered) mid-run; the timeout then only fires for a process that is gone. false restores plain PGMQ semantics." },
+      { name: "visibility_heartbeat_interval", type: "Duration, nil", default: "nil (visibility_timeout / 3)", desc: "Seconds between heartbeat re-arms of a running job's message." }
     ],
     "Worker recycling" => [
       { name: "max_jobs_per_worker", type: "Integer, nil", default: "nil", desc: "Recycle a worker after N jobs." },

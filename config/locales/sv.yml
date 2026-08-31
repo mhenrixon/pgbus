@@ -168,8 +168,6 @@ sv:
         reroute_failed: Kunde inte omdirigera händelsen.
         rerouted: Händelsen omdirigerades till målhanteraren.
       index:
-        discard_all: Kassera alla
-        discard_all_confirm: Kassera alla väntande händelser? Detta kan inte ångras.
         discard_selected: Kassera valda
         discard_selected_confirm: Kassera valda händelser?
         pending_empty: Inga väntande händelser

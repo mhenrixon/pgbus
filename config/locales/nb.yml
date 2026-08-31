@@ -168,8 +168,6 @@ nb:
         reroute_failed: Kunne ikke omdirigere hendelse.
         rerouted: Hendelse omdirigert til målbehandler.
       index:
-        discard_all: Forkast alle
-        discard_all_confirm: Forkast alle ventende hendelser? Dette kan ikke angres.
         discard_selected: Forkast valgte
         discard_selected_confirm: Forkast valgte hendelser?
         pending_empty: Ingen ventende hendelser

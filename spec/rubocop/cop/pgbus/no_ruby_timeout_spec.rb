@@ -2,10 +2,21 @@
 
 require "spec_helper"
 require "rubocop"
-require "rubocop/rspec/support"
-require "rubocop/pgbus"
+# Require RuboCop's test-support pieces individually instead of
+# "rubocop/rspec/support": that file calls RSpec.configure and includes
+# CopHelper into EVERY example group, whose #registry/#config methods shadow
+# pgbus specs' own lets and break unrelated specs in a bare full-suite run.
+require "rubocop/rspec/cop_helper"
+require "rubocop/rspec/expect_offense"
+require "rubocop/rspec/shared_contexts"
+require_relative "../../../../rubocop/pgbus"
 
-RSpec.describe RuboCop::Cop::Pgbus::NoRubyTimeout, :config do
+RSpec.describe RuboCop::Cop::Pgbus::NoRubyTimeout do
+  include CopHelper
+  include RuboCop::RSpec::ExpectOffense
+
+  include_context "config"
+
   let(:config) { RuboCop::Config.new }
 
   it "flags Timeout.timeout" do

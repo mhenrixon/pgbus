@@ -168,8 +168,6 @@ da:
         reroute_failed: Kunne ikke omdirigere begivenhed.
         rerouted: Begivenhed omdirigeret til målhandler.
       index:
-        discard_all: Forkast alle
-        discard_all_confirm: Forkast alle ventende begivenheder? Dette kan ikke fortrydes.
         discard_selected: Forkast valgte
         discard_selected_confirm: Forkast valgte begivenheder?
         pending_empty: Ingen ventende begivenheder

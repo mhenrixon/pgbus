@@ -168,8 +168,6 @@ pt:
         reroute_failed: Não foi possível redirecionar o evento.
         rerouted: Evento redirecionado para o manipulador alvo.
       index:
-        discard_all: Descartar Todos
-        discard_all_confirm: Descartar todos os eventos pendentes? Esta ação não pode ser desfeita.
         discard_selected: Descartar Selecionados
         discard_selected_confirm: Descartar eventos selecionados?
         pending_empty: Nenhum evento pendente

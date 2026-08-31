@@ -168,8 +168,6 @@ fi:
         reroute_failed: Tapahtumaa ei voitu uudelleenreitittää.
         rerouted: Tapahtuma uudelleenreititetty kohdekäsittelijälle.
       index:
-        discard_all: Hylkää kaikki
-        discard_all_confirm: Hylätäänkö kaikki odottavat tapahtumat? Tätä ei voi peruuttaa.
         discard_selected: Hylkää valitut
         discard_selected_confirm: Hylätäänkö valitut tapahtumat?
         pending_empty: Ei odottavia tapahtumia

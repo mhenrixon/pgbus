@@ -168,8 +168,6 @@ es:
         reroute_failed: No se pudo redirigir el evento.
         rerouted: Evento redirigido al manejador objetivo.
       index:
-        discard_all: Descartar todo
-        discard_all_confirm: "¿Descartar todos los eventos pendientes? Esto no se puede deshacer."
         discard_selected: Descartar seleccionados
         discard_selected_confirm: "¿Descartar eventos seleccionados?"
         pending_empty: No hay eventos pendientes

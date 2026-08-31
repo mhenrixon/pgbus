@@ -168,8 +168,6 @@ fr:
         reroute_failed: Impossible de rediriger l'événement.
         rerouted: Événement redirigé vers le gestionnaire cible.
       index:
-        discard_all: Tout jeter
-        discard_all_confirm: Jeter tous les événements en attente ? Cette action est irréversible.
         discard_selected: Jeter la sélection
         discard_selected_confirm: Jeter les événements sélectionnés ?
         pending_empty: Aucun événement en attente

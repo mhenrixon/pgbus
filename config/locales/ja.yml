@@ -168,8 +168,6 @@ ja:
         reroute_failed: イベントをルーティングできませんでした。
         rerouted: イベントがターゲットハンドラーにルーティングされました。
       index:
-        discard_all: すべて破棄
-        discard_all_confirm: 保留中のすべてのイベントを破棄しますか？これは元に戻せません。
         discard_selected: 選択を破棄
         discard_selected_confirm: 選択したイベントを破棄しますか？
         pending_empty: 保留中のイベントはありません
