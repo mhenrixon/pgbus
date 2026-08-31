@@ -821,6 +821,13 @@ module Pgbus
                       .map { |row| row["queue_name"] }
           names.each do |name|
             break if found.size == keys.size
+            # A dead-lettered copy still carries the payload's uniqueness key,
+            # but it is not in flight: the executor released the lock when it
+            # moved the message. Counting it as "present" would pin an unbound
+            # lock for as long as the DLQ row exists, and a `:until_executed` +
+            # `on_conflict: :discard` job would then be discarded on every
+            # enqueue until someone purged the DLQ by hand.
+            next if name.end_with?(Pgbus::DEAD_LETTER_SUFFIX)
 
             sanitized = begin
               QueueNameValidator.sanitize!(name)
