@@ -767,6 +767,24 @@ class BatchFinishedJob < ApplicationJob
 end
 ```
 
+#### Unique batches (run-scoped locks)
+
+`ensures_uniqueness` protects one job. A multi-job run — a nightly import that fans out into hundreds of chunk jobs, a pipeline whose jobs enqueue the next stage — has no single job that lives for the whole run, so a lock on the entry job releases the moment that job finishes and the next scheduler tick starts a second run on top of the first. Give the batch the lock instead:
+
+```ruby
+batch = Pgbus::Batch.new(
+  uniqueness_key: "perfecta-daily",
+  on_conflict: :discard,           # :reject (raise AlreadyRunning), :discard, :log
+  on_success: ExportPricesJob
+)
+
+batch.enqueue do
+  ImportChunkJob.perform_later("products", 0)
+end
+```
+
+The lock is taken at `enqueue` and held until the batch finishes — through every open-batch `batch.enqueue` add from inside a running job — then released in the same single-winner finish that fires the callbacks, so completion, the stalled-batch sweep and cleanup all release it. While it is held, another `Pgbus::Batch.new(uniqueness_key: "perfecta-daily").enqueue { ... }` raises `Pgbus::Batch::AlreadyRunning` (`:reject`), or skips its block and returns a batch that answers `discarded?` (`:discard`, `:log`). The row lives in `pgbus_uniqueness_keys` as `batch:<key>`, so it never collides with a job's key and shows up in the dashboard like any other lock; the reaper judges it by the batch's status, never by queue contents.
+
 #### How batches work
 
 1. `Batch.new(...)` creates a tracking row in `pgbus_batches` with `status: "pending"`

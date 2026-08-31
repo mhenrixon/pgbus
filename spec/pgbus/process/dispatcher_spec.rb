@@ -995,6 +995,29 @@ RSpec.describe Pgbus::Process::Dispatcher do
       expect(Pgbus::UniquenessKey).not_to have_received(:where)
     end
 
+    it "keeps a unique batch's lock while its batch is still running, without probing any queue" do
+      running = lock(lock_key: "batch:perfecta-daily", queue_name: "batch:abc", msg_id: 0, created_at: 6.hours.ago)
+      allow(Pgbus::UniquenessKey).to receive(:all).and_return([running])
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "abc").and_return(double(status: "processing"))
+
+      expect(dispatcher.send(:reap_orphaned_uniqueness_keys)).to eq(0)
+      expect(mock_client).not_to have_received(:uniqueness_keys_present)
+      expect(mock_client).not_to have_received(:message_exists?)
+      expect(Pgbus::UniquenessKey).not_to have_received(:where)
+    end
+
+    it "reaps a unique batch's lock once the batch has finished or its row is gone" do
+      finished = lock(lock_key: "batch:perfecta-daily", queue_name: "batch:abc", msg_id: 0)
+      gone = lock(lock_key: "batch:stock-sync", queue_name: "batch:xyz", msg_id: 0)
+      allow(Pgbus::UniquenessKey).to receive(:all).and_return([finished, gone])
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "abc").and_return(double(status: "finished"))
+      allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "xyz").and_return(nil)
+      allow(delete_scope).to receive(:delete_all).and_return(2)
+
+      expect(dispatcher.send(:reap_orphaned_uniqueness_keys)).to eq(2)
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(lock_key: ["batch:perfecta-daily", "batch:stock-sync"])
+    end
+
     it "does not reap locks newer than visibility_timeout * 2" do
       recent = lock(lock_key: "Recent", queue_name: "pending", msg_id: 0, created_at: Time.current)
       allow(Pgbus::UniquenessKey).to receive(:all).and_return([recent])

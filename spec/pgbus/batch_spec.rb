@@ -132,6 +132,136 @@ RSpec.describe Pgbus::Batch do
     end
   end
 
+  describe "uniqueness (run-scoped lock)" do
+    let(:logger) { instance_double(Logger, warn: nil, error: nil, info: nil, debug: nil) }
+    let(:release_scope) { double("scope", delete_all: 1) }
+
+    before do
+      allow(Pgbus).to receive(:logger).and_return(logger)
+      allow(Pgbus::UniquenessKey).to receive_messages(acquire!: true, clear_bind_stamp!: nil)
+      allow(Pgbus::UniquenessKey).to receive(:where).and_return(release_scope)
+    end
+
+    def finished_result(batch_id)
+      attrs = {
+        batch_id: batch_id, status: "finished", total_jobs: 1, completed_jobs: 1, discarded_jobs: 0,
+        on_finish_class: nil, on_success_class: nil, on_discard_class: nil, properties: "{}"
+      }
+      record = double("BatchEntry", **attrs, presence: "{}")
+      { record: record, just_finished: true }
+    end
+
+    it "rejects an unknown on_conflict" do
+      expect { described_class.new(uniqueness_key: "k", on_conflict: :explode) }
+        .to raise_error(ArgumentError, /on_conflict must be one of/)
+    end
+
+    it "takes no lock without a key" do
+      described_class.new.enqueue { nil }
+
+      expect(Pgbus::UniquenessKey).not_to have_received(:acquire!)
+    end
+
+    it "takes the lock at enqueue, keyed by the batch that owns it, and runs the block" do
+      batch = described_class.new(uniqueness_key: "perfecta-daily")
+      ran = false
+
+      batch.enqueue { ran = true }
+
+      expect(Pgbus::UniquenessKey).to have_received(:acquire!)
+        .with("batch:perfecta-daily", queue_name: "batch:#{batch.batch_id}", msg_id: 0)
+      expect(Pgbus::UniquenessKey).to have_received(:clear_bind_stamp!).with("batch:perfecta-daily")
+      expect(ran).to be(true)
+      expect(batch).not_to be_discarded
+      expect(batch.lock_key).to eq("batch:perfecta-daily")
+    end
+
+    it "raises AlreadyRunning and creates nothing when the key is held (:reject)" do
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(false)
+      batch = described_class.new(uniqueness_key: "perfecta-daily")
+
+      expect { batch.enqueue { raise "block must not run" } }.to raise_error(Pgbus::Batch::AlreadyRunning, /perfecta-daily/)
+      expect(Pgbus::BatchEntry).not_to have_received(:create!)
+    end
+
+    it "skips the block quietly when the key is held (:discard)" do
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(false)
+      batch = described_class.new(uniqueness_key: "perfecta-daily", on_conflict: :discard)
+
+      result = batch.enqueue { raise "block must not run" }
+
+      expect(result).to be(batch)
+      expect(batch).to be_discarded
+      expect(Pgbus::BatchEntry).not_to have_received(:create!)
+      expect(logger).to have_received(:info)
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it "skips the block and warns when the key is held (:log)" do
+      allow(Pgbus::UniquenessKey).to receive(:acquire!).and_return(false)
+      batch = described_class.new(uniqueness_key: "perfecta-daily", on_conflict: :log)
+
+      batch.enqueue { raise "block must not run" }
+
+      expect(batch).to be_discarded
+      expect(logger).to have_received(:warn)
+    end
+
+    it "gives the lock back if the batch row cannot be created" do
+      allow(Pgbus::BatchEntry).to receive(:create!).and_raise(ActiveRecord::StatementInvalid, "down")
+      batch = described_class.new(uniqueness_key: "perfecta-daily")
+
+      expect { batch.enqueue { nil } }.to raise_error(ActiveRecord::StatementInvalid)
+
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(queue_name: "batch:#{batch.batch_id}")
+      expect(release_scope).to have_received(:delete_all)
+    end
+
+    it "releases the lock in the finish that fires the callbacks" do
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!).and_return(finished_result("abc"))
+
+      described_class.job_completed("abc")
+
+      expect(Pgbus::UniquenessKey).to have_received(:where).with(queue_name: "batch:abc")
+      expect(release_scope).to have_received(:delete_all)
+    end
+
+    it "does not release anything while the batch is still running" do
+      allow(Pgbus::BatchEntry).to receive(:increment_counter!)
+        .and_return(finished_result("abc").merge(just_finished: false))
+
+      described_class.job_completed("abc")
+
+      expect(Pgbus::UniquenessKey).not_to have_received(:where)
+    end
+
+    describe ".lock_orphaned?" do
+      it "treats a missing batch as an orphan" do
+        allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "gone").and_return(nil)
+
+        expect(described_class.lock_orphaned?("batch:gone")).to be(true)
+      end
+
+      it "treats a finished batch as an orphan" do
+        allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "done").and_return(double(status: "finished"))
+
+        expect(described_class.lock_orphaned?("batch:done")).to be(true)
+      end
+
+      it "keeps the lock of a running batch, however old" do
+        allow(Pgbus::BatchEntry).to receive(:find_by).with(batch_id: "live").and_return(double(status: "processing"))
+
+        expect(described_class.lock_orphaned?("batch:live")).to be(false)
+      end
+
+      it "keeps the lock when the lookup fails" do
+        allow(Pgbus::BatchEntry).to receive(:find_by).and_raise(ActiveRecord::StatementInvalid, "down")
+
+        expect(described_class.lock_orphaned?("batch:live")).to be(false)
+      end
+    end
+  end
+
   describe ".track_enqueue" do
     let(:payload) { { "job_id" => "j-1", "queue_name" => "default", Pgbus::Batch::METADATA_KEY => "b-1" } }
 
