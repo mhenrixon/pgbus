@@ -1664,6 +1664,29 @@ RSpec.describe Pgbus::Client do
       expect(client.uniqueness_keys_present(["ERP::Manager", "Gone"])).to eq(Set["ERP::Manager"])
     end
 
+    it "ignores dead-letter queues so a DLQ copy cannot pin an unbound lock" do
+      allow(conn).to receive(:exec)
+        .with("SELECT queue_name FROM pgmq.meta ORDER BY queue_name")
+        .and_return(
+          [
+            { "queue_name" => "pgbus_test_critical" },
+            { "queue_name" => "pgbus_test_critical#{Pgbus::DEAD_LETTER_SUFFIX}" }
+          ]
+        )
+      # Only the live queue is stubbed: a scan of the DLQ table would hit an
+      # unexpected-arguments error, and is asserted against below as well.
+      allow(conn).to receive(:exec_params).with(
+        a_string_matching(/pgmq\.q_pgbus_test_critical /),
+        ["HeartbeatJob"]
+      ).and_return([])
+
+      expect(client.uniqueness_keys_present(["HeartbeatJob"])).to eq(Set.new)
+      expect(conn).not_to have_received(:exec_params).with(
+        a_string_matching(/pgmq\.q_pgbus_test_critical#{Pgbus::DEAD_LETTER_SUFFIX}/),
+        anything
+      )
+    end
+
     it "skips a missing queue table and keeps keys found in other queues" do
       stub_const("PG::UndefinedTable", Class.new(StandardError))
       allow(conn).to receive(:exec)
