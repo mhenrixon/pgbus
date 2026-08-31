@@ -151,6 +151,15 @@ RSpec.describe Pgbus::Web::Streamer::Heartbeat do
   end
 
   describe "#start and #stop" do
+    it "exposes its thread via #threads while running and none after stop (issue #443)" do
+      expect(heartbeat.threads).to eq([])
+      heartbeat.start
+      expect(heartbeat.threads.size).to eq(1)
+      expect(heartbeat.threads.first).to be_alive
+      heartbeat.stop
+      expect(heartbeat.threads).to eq([])
+    end
+
     it "runs tick in the background and joins cleanly on stop" do
       heartbeat_fast = described_class.new(
         registry: registry,

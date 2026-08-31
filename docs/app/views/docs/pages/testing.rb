@@ -29,13 +29,18 @@ class Views::Docs::Pages::Testing < DocsUI::Page
 
         RSpec.configure do |config|
           config.before { Pgbus::Testing.fake! }
-          config.after do
+          config.append_after do
             Pgbus::Testing.disabled!
             Pgbus::Testing.store.clear!
           end
         end
       RUBY
       md <<~'MD'
+        Use `append_after`, not `after`: config-level `after` hooks run in reverse
+        registration order, so one registered after `capybara/rspec` fires before
+        `Capybara.reset_sessions!` — while the browser page is still open and its
+        stream is still reconnecting. `append_after` runs once the page is closed.
+
         Minitest is the same shape — require `pgbus/testing/minitest` and include
         `Pgbus::Testing::MinitestHelpers`, which hooks the lifecycle automatically.
       MD
@@ -113,6 +118,15 @@ class Views::Docs::Pages::Testing < DocsUI::Page
         code { "streams_test_mode" }
         plain " yourself — activating a testing mode turns it on for you."
       end
+      md <<~'MD'
+        The stub also sends `retry: 86400000`, so an open page does not re-request
+        it every few seconds. If `Pgbus::Testing.disabled!` runs while a page is
+        still open (an `after` hook that fires before Capybara resets the session),
+        a reconnect can start a real streamer inside the test process. Should that
+        streamer's threads then outlive the bounded shutdown, `disabled!` raises
+        `Pgbus::Testing::StreamerLeakError` naming them and the `append_after` fix,
+        instead of letting the suite hang.
+      MD
     end
   end
 end

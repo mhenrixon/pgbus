@@ -1751,7 +1751,12 @@ require "pgbus/testing/rspec"
 
 RSpec.configure do |config|
   config.before { Pgbus::Testing.fake! }
-  config.after do
+  # append_after, not after: config-level `after` hooks run in reverse
+  # registration order, so one registered after `capybara/rspec` runs BEFORE
+  # Capybara.reset_sessions! — while the browser page is still open.
+  # append_after runs once the page is closed and its pending SSE requests
+  # are drained (see "SSE streams in tests" below).
+  config.append_after do
     Pgbus::Testing.disabled!
     Pgbus::Testing.store.clear!
   end
@@ -1763,7 +1768,7 @@ Or scope it to specific groups:
 ```ruby
 RSpec.configure do |config|
   config.before(:each, :pgbus) { Pgbus::Testing.fake! }
-  config.after(:each, :pgbus) do
+  config.append_after(:each, :pgbus) do
     Pgbus::Testing.disabled!
     Pgbus::Testing.store.clear!
   end
@@ -1934,10 +1939,14 @@ HTTP/1.1 200 OK
 Content-Type: text/event-stream
 Cache-Control: no-cache, no-transform
 
+retry: 86400000
+
 : pgbus test mode — connection accepted, no polling
 ```
 
-This is a valid SSE response that the browser's EventSource will accept. No `Streamer` singleton is created, no PG LISTEN connection is opened, and no dispatcher/heartbeat/listener threads are spawned.
+This is a valid SSE response that the browser's EventSource will accept. No `Streamer` singleton is created, no PG LISTEN connection is opened, and no dispatcher/heartbeat/listener threads are spawned. The `retry:` directive tells `EventSource` to wait 24 hours before reconnecting: without it a page left open re-requests the closed stub every ~3 seconds for the whole example, and that reconnect storm is what turns a teardown race into a real streamer running inside the test process.
+
+**Hook ordering with Capybara:** `Pgbus::Testing.disabled!` turns `streams_test_mode` back off. If it runs while the browser page is still open, a reconnect landing in that window takes the real stream path and starts a live `Streamer` — with listener/dispatcher/heartbeat threads and a LISTEN connection — inside your RSpec process. RSpec runs config-level `after` hooks in reverse registration order, so a plain `config.after { Pgbus::Testing.disabled! }` registered after `capybara/rspec` fires *before* `Capybara.reset_sessions!`. Register it with `config.append_after` (as in the snippet above) so the page is closed first. If a live streamer does get started and its threads outlive the bounded shutdown, `disabled!` raises `Pgbus::Testing::StreamerLeakError` with this diagnosis rather than letting the suite hang on a corrupted shared connection; a streamer that shut down cleanly is only logged as a warning, because that is expected inside `Pgbus::Testing.disabled! do ... end` real-stream tests.
 
 **Testing actual stream delivery:** If you need to verify end-to-end SSE message delivery in integration tests, disable `streams_test_mode` and use the `PumaTestHarness` from the pgbus test support:
 

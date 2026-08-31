@@ -135,16 +135,28 @@ module Pgbus
         #
         # Bounded by the configured write deadline per connection; a dead
         # client drops instantly, a slow one stalls for at most write_deadline_ms.
+        #
+        # Every component join is bounded, so a thread blocked in a slow
+        # client write or a libpq call can outlive its #stop. That is not
+        # silent any more (issue #443): the names of the components whose
+        # threads are still alive afterwards are logged once and RETURNED
+        # (empty array = clean shutdown, also on a repeat call). The sentinel
+        # + socket close still run — Connection#close takes the same mutex as
+        # the writer, so it cannot fire mid-write even under a stuck thread.
         def shutdown!
           @shutdown_mutex.synchronize do
-            return unless @started
+            return [] unless @started
 
             @started = false
+            threads = component_threads
             safely { @heartbeat.stop }
             safely { @listener.stop }
             safely { @dispatcher.stop }
             safely { @pump&.stop }
+            leaked = threads.select { |_, list| list.any?(&:alive?) }.keys
+            report_leaked_threads(leaked) if leaked.any?
             close_all_connections
+            leaked
           end
         end
 
@@ -222,6 +234,25 @@ module Pgbus
           yield
         rescue StandardError => e
           @logger.warn { "[Pgbus::Streamer::Instance] component stop raised: #{e.class}: #{e.message}" }
+        end
+
+        # Captured BEFORE the stops: every component nils its thread
+        # reference in #stop whether or not the join succeeded.
+        def component_threads
+          {
+            "heartbeat" => @heartbeat.threads,
+            "listener" => @listener.threads,
+            "dispatcher" => @dispatcher.threads,
+            "pump" => @pump ? @pump.threads : []
+          }
+        end
+
+        def report_leaked_threads(leaked)
+          @logger.error do
+            "[Pgbus::Streamer::Instance] shutdown! finished but the #{leaked.join(", ")} thread(s) are " \
+              "still running past their join budget; they exit on their own once their current blocking " \
+              "call returns. In a test process this means a live streamer was started mid-suite (issue #443)."
+          end
         end
 
         # Off-thread durable fanout writer (issue #321). nil (the default) keeps
