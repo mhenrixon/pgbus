@@ -391,6 +391,35 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       expect(drained).to include('data: {"reason":"worker_restart"}')
     end
 
+    it "returns an empty list when every component thread stopped within its join budget (issue #443)" do
+      streamer.start
+      fake_pg.push_timeout
+      expect(streamer.shutdown!).to eq([])
+    end
+
+    it "names and logs the components whose threads outlived stop instead of returning silently (issue #443)" do
+      log = StringIO.new
+      instance = described_class.new(client: client, config: config, pg_connection: fake_pg, logger: Logger.new(log))
+      instance.start
+      fake_pg.push_timeout
+      stuck = Thread.new { sleep }
+      allow(instance.dispatcher).to receive(:threads).and_return([stuck])
+
+      leaked = instance.shutdown!
+
+      expect(leaked).to eq(["dispatcher"])
+      expect(log.string).to include("dispatcher").and include("still running")
+    ensure
+      stuck&.kill
+    end
+
+    it "returns [] from a second shutdown! call (idempotent) (issue #443)" do
+      streamer.start
+      fake_pg.push_timeout
+      streamer.shutdown!
+      expect(streamer.shutdown!).to eq([])
+    end
+
     it "is idempotent — calling shutdown! twice is a no-op the second time" do
       streamer.start
       fake_pg.push_timeout
@@ -453,6 +482,26 @@ RSpec.describe Pgbus::Web::Streamer::Instance do
       Pgbus::Web::Streamer.reset!
 
       expect(Pgbus::Web::Streamer.instance_variable_get(:@current)).to be_nil
+    end
+
+    it "returns nil when there is no current instance (issue #443)" do
+      expect(Pgbus::Web::Streamer.reset!).to be_nil
+    end
+
+    it "returns the leaked component list reported by shutdown! (issue #443)" do
+      fake_pg2 = fake_pg.class.new
+      instance1 = described_class.new(
+        client: client, config: config, pg_connection: fake_pg2,
+        logger: Logger.new(IO::NULL)
+      ).tap(&:start)
+      fake_pg2.push_timeout
+      allow(instance1).to(receive(:shutdown!).and_wrap_original do |m|
+        m.call
+        ["dispatcher"]
+      end)
+      Pgbus::Web::Streamer.current = instance1
+
+      expect(Pgbus::Web::Streamer.reset!).to eq(["dispatcher"])
     end
 
     it "serialises concurrent first-callers so only one Instance is built" do

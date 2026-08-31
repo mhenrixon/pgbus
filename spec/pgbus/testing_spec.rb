@@ -226,4 +226,38 @@ RSpec.describe Pgbus::Testing do
       end
     end
   end
+
+  describe "streamer teardown in .disabled! (issue #443)" do
+    after { Pgbus.configuration.streams_test_mode = false }
+
+    it "raises StreamerLeakError naming the stuck threads and the append_after fix when shutdown left threads running" do
+      # First call (the example's) reports a leak; the top-level after hook's call must be clean.
+      allow(Pgbus::Web::Streamer).to receive(:reset!).and_return(["dispatcher"], nil)
+
+      expect { described_class.disabled! }
+        .to raise_error(Pgbus::Testing::StreamerLeakError, /dispatcher.*append_after/m)
+    end
+
+    it "still records :disabled as the mode when the teardown raises" do
+      allow(Pgbus::Web::Streamer).to receive(:reset!).and_return(["dispatcher"], nil)
+      described_class.fake!
+
+      expect { described_class.disabled! }.to raise_error(Pgbus::Testing::StreamerLeakError)
+      expect(described_class.mode).to eq(:disabled)
+    end
+
+    it "does not raise when no streamer was live" do
+      allow(Pgbus::Web::Streamer).to receive(:reset!).and_return(nil)
+      expect { described_class.disabled! }.not_to raise_error
+    end
+
+    it "warns (but does not raise) when it tore down a live streamer cleanly" do
+      allow(Pgbus::Web::Streamer).to receive(:reset!).and_return([])
+      log = StringIO.new
+      allow(Pgbus).to receive(:logger).and_return(Logger.new(log))
+
+      expect { described_class.disabled! }.not_to raise_error
+      expect(log.string).to include("live Pgbus::Web::Streamer")
+    end
+  end
 end

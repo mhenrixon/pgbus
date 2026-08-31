@@ -99,6 +99,13 @@ module Pgbus
         # join each worker bounded by the write deadline. Never Thread#kill — a
         # kill mid write_nonblock corrupts IO state (mirrors
         # StreamEventDispatcher#stop). Idempotent.
+        # Snapshot of this component's live thread(s). Instance#shutdown! captures
+        # it BEFORE calling #stop so a join that timed out is still observable
+        # after #stop has cleared the reference (issue #443).
+        def threads
+          @threads.dup
+        end
+
         def stop
           return self unless @started
 

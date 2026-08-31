@@ -277,6 +277,13 @@ RSpec.describe Pgbus::Web::StreamApp do
       expect(joined).to include(": pgbus test mode")
     end
 
+    it "tells EventSource not to reconnect so a teardown race cannot start a live streamer (issue #443)" do
+      env = get_env("/pgbus/streams/#{signed("chat")}")
+      _, _, body = app.call(env)
+      expect(body.join).to start_with("retry: #{described_class::TEST_MODE_RETRY_MS}\n\n")
+      expect(described_class::TEST_MODE_RETRY_MS).to be >= 3_600_000
+    end
+
     it "still validates the signed stream name" do
       env = get_env("/pgbus/streams/not-a-valid-token")
       status, = app.call(env)

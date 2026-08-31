@@ -104,6 +104,19 @@ RSpec.describe Pgbus::Web::Streamer::FailoverListener do
     end
   end
 
+  describe "#threads (issue #443)" do
+    it "reports the hub client's threads in hub mode" do
+      allow(hub_client).to receive(:threads).and_return([:hub_thread])
+      expect(failover.threads).to eq([:hub_thread])
+    end
+
+    it "reports the local listener's threads after failover" do
+      allow(local_listener).to receive(:threads).and_return([:local_thread])
+      failover.fail_over!
+      expect(failover.threads).to eq([:local_thread])
+    end
+  end
+
   describe "#stop" do
     it "stops the hub client in hub mode" do
       failover.stop

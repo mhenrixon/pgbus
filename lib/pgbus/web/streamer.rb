@@ -41,6 +41,9 @@ module Pgbus
           @current_mutex.synchronize { @current&.stream_counter }
         end
 
+        # Tears down the current instance, if any. Returns nil when there was
+        # nothing to reset, otherwise Instance#shutdown!'s list of component
+        # names whose threads survived their bounded joins ([] = clean).
         def reset!
           instance = nil
           @current_mutex.synchronize do

@@ -31,6 +31,8 @@ module Pgbus
     # full request lifecycle.
     class StreamApp
       PATH_PREFIX = "/pgbus/streams"
+      # EventSource reconnect delay handed to the streams_test_mode stub (24h).
+      TEST_MODE_RETRY_MS = 86_400_000
       private_constant :PATH_PREFIX
 
       def initialize(streamer: nil, config: nil, logger: nil, authorize: nil)
@@ -221,8 +223,15 @@ module Pgbus
         [500, { "content-type" => "text/plain" }, ["pgbus: internal error"]]
       end
 
+      # A closed SSE response makes EventSource reconnect every ~3s by default.
+      # In a browser-driven test that storm keeps hitting the endpoint for the
+      # whole example, so a reconnect landing after the harness has turned
+      # streams_test_mode back off (teardown ordering) would start a LIVE
+      # streamer inside the test process (issue #443). Telling the browser to
+      # wait a day before retrying closes that window.
       def test_mode_stub
-        body = ": pgbus test mode — connection accepted, no polling\n\n"
+        retry_line = Pgbus::Streams::Envelope.retry_directive(TEST_MODE_RETRY_MS)
+        body = "#{retry_line}: pgbus test mode — connection accepted, no polling\n\n"
         [200, sse_headers, [body]]
       end
     end

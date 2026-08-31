@@ -205,6 +205,14 @@ RSpec.describe Pgbus::Web::Streamer::OutboundPump do
       pump.stop
       expect { pump.stop }.not_to raise_error
     end
+
+    it "exposes its writer threads via #threads while running and none after stop (issue #443)" do
+      expect(pump.threads).to eq([])
+      pump.start
+      expect(pump.threads.size).to eq(2)
+      pump.stop
+      expect(pump.threads).to eq([])
+    end
   end
 
   describe "buffer limit (streams_writer_buffer_limit)" do

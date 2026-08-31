@@ -98,6 +98,13 @@ module Pgbus
           nil
         end
 
+        # Snapshot of this component's live thread(s). Instance#shutdown! captures
+        # it BEFORE calling #stop so a join that timed out is still observable
+        # after #stop has cleared the reference (issue #443).
+        def threads
+          [@reader].compact
+        end
+
         def stop
           @stopping = true
           close_quietly(@sock)

@@ -150,6 +150,15 @@ RSpec.describe Pgbus::Web::Streamer::Listener do
   end
 
   describe "#start and #stop" do
+    it "exposes its thread via #threads while running and none after stop (issue #443)" do
+      expect(listener.threads).to eq([])
+      listener.start
+      expect(listener.threads.size).to eq(1)
+      fake_pg.push_timeout
+      listener.stop
+      expect(listener.threads).to eq([])
+    end
+
     it "spawns a thread on start and joins it on stop" do
       listener.start
       fake_pg.push_timeout # unblock the wait_for_notify so stop can proceed

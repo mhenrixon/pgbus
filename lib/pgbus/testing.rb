@@ -18,6 +18,11 @@ module Pgbus
     MODES = %i[fake inline disabled].freeze
     MODE_KEY = :__pgbus_test_mode
 
+    # Raised by `disabled!` when a live Pgbus::Web::Streamer had to be torn
+    # down and some of its threads did not stop within their join budget —
+    # a red spec with a diagnosis instead of a hung test process (issue #443).
+    class StreamerLeakError < Pgbus::Error; end
+
     # Thread-safe in-memory store for events captured in fake/inline mode.
     class EventStore
       def initialize
@@ -70,15 +75,17 @@ module Pgbus
       def mode!(mode, &block)
         raise ArgumentError, "Unknown mode: #{mode}. Valid modes: #{MODES.join(", ")}" unless MODES.include?(mode)
 
-        sync_streams_test_mode!(mode)
-
+        # Record the mode BEFORE syncing streams: a StreamerLeakError raised
+        # by the teardown must still leave the process in the requested mode.
         unless block
           Thread.main[MODE_KEY] = mode
+          sync_streams_test_mode!(mode)
           return
         end
 
         old = Thread.current[MODE_KEY]
         Thread.current[MODE_KEY] = mode
+        sync_streams_test_mode!(mode)
         yield
       ensure
         if block
@@ -112,10 +119,33 @@ module Pgbus
 
         if mode == :disabled
           Pgbus.configuration.streams_test_mode = false
-          Pgbus::Web::Streamer.reset! if defined?(Pgbus::Web::Streamer)
+          reset_streamer!
         else
           Pgbus.configuration.streams_test_mode = true
         end
+      end
+
+      # A live streamer at this point is legitimate inside a
+      # `disabled! do ... end` real-stream test, so a clean teardown only
+      # warns. Threads that outlived shutdown! are a different matter: left
+      # alone they share the test's pinned AR connection with the test thread
+      # and the suite hangs with no diagnosis (issue #443) — so raise.
+      def reset_streamer!
+        return unless defined?(Pgbus::Web::Streamer)
+
+        leaked = Pgbus::Web::Streamer.reset!
+        return if leaked.nil?
+
+        if leaked.empty?
+          Pgbus.logger.warn { "[Pgbus::Testing] disabled! tore down a live Pgbus::Web::Streamer that was started during the test" }
+          return
+        end
+
+        raise StreamerLeakError, <<~MSG
+          Pgbus::Testing.disabled! shut down a live Pgbus::Web::Streamer but its #{leaked.join(", ")} thread(s) did not stop within their join budget.
+          A live streamer inside the test process means an SSE request reached the real stream path while streams_test_mode was off — usually because Pgbus::Testing.disabled! ran in an RSpec `after` hook before Capybara reset the browser session (page still open, EventSource still reconnecting).
+          Register the hook with `config.append_after { Pgbus::Testing.disabled! }` so it runs after Capybara.reset_sessions!. See the README section "SSE streams in tests".
+        MSG
       end
     end
   end

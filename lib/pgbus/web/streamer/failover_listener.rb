@@ -115,6 +115,13 @@ module Pgbus
           end
         end
 
+        # Snapshot of this component's live thread(s). Instance#shutdown! captures
+        # it BEFORE calling #stop so a join that timed out is still observable
+        # after #stop has cleared the reference (issue #443).
+        def threads
+          current_impl.threads
+        end
+
         def stop
           current_impl.stop
         end

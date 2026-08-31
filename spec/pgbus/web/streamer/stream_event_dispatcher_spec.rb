@@ -1208,4 +1208,15 @@ RSpec.describe Pgbus::Web::Streamer::StreamEventDispatcher do
       dispatcher.stop
     end
   end
+
+  describe "#threads (issue #443)" do
+    it "exposes its thread while running and none after stop" do
+      expect(dispatcher.threads).to eq([])
+      dispatcher.start
+      expect(dispatcher.threads.size).to eq(1)
+      expect(dispatcher.threads.first).to be_alive
+      dispatcher.stop
+      expect(dispatcher.threads).to eq([])
+    end
+  end
 end

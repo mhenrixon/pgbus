@@ -140,6 +140,14 @@ RSpec.describe Pgbus::Web::Streamer::HubClient do
       expect { client.connect }.to raise_error(described_class::HubUnavailableError)
     end
 
+    it "exposes its reader thread via #threads while connected and none after stop (issue #443)" do
+      expect(client.threads).to eq([])
+      accept_master { client.connect }
+      expect(client.threads.size).to eq(1)
+      client.stop
+      expect(client.threads).to eq([])
+    end
+
     it "does not fire on_failure for a clean stop" do
       accept_master { client.connect }
 
