@@ -1,0 +1,23 @@
+spec/rubocop/cop/pgbus/no_ruby_timeout_spec.rb
+  s_b5fd267d6668ec::t_0517379e07f33c 5-11,14-16,18
+  s_b5fd267d6668ec::t_70d4e42b09e149 12
+  s_b5fd267d6668ec::t_3654c3146d07ac 17
+config/i18n-tasks.yml
+  s_b5fd267d6668ec::t_bf56c239885a04 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "7a4f8a89593c1fec1543ea52e390a59ee05ea305",
+  "prompts": {},
+  "sessions": {
+    "s_b5fd267d6668ec": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "74013669-e10f-4063-a518-f0c8d5ee9541",
+        "model": "claude-fable-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
