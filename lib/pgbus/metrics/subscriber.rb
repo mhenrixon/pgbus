@@ -30,6 +30,7 @@ module Pgbus
             subscribe("pgbus.job_completed") { |event| on_job_completed(event) },
             subscribe("pgbus.job_failed") { |event| on_job_failed(event) },
             subscribe("pgbus.job_dead_lettered") { |event| on_job_dead_lettered(event) },
+            subscribe("pgbus.job_visibility_extended") { |event| on_job_visibility_extended(event) },
             subscribe("pgbus.event_processed") { |event| on_event_processed(event) },
             subscribe("pgbus.event_failed") { |event| on_event_failed(event) },
             subscribe("pgbus.client.send_message") { |event| on_send_message(event) },
@@ -108,6 +109,16 @@ module Pgbus
           backend.increment(
             "#{METRIC_PREFIX}queue_job_count", 1,
             compact(queue: payload[:queue], job_class: payload[:job_class], status: "dead_lettered")
+          )
+        end
+
+        # One increment per re-armed visibility timeout: a job class that
+        # shows up here is one that outlives visibility_timeout.
+        def on_job_visibility_extended(event)
+          payload = event.payload
+          backend.increment(
+            "#{METRIC_PREFIX}visibility_extended", 1,
+            compact(queue: payload[:queue], job_class: payload[:job_class])
           )
         end
 
