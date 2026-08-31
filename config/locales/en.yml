@@ -168,8 +168,6 @@ en:
         reroute_failed: Could not reroute event.
         rerouted: Event rerouted to target handler.
       index:
-        discard_all: Discard All
-        discard_all_confirm: Discard all pending events? This cannot be undone.
         discard_selected: Discard Selected
         discard_selected_confirm: Discard selected events?
         pending_empty: No pending events

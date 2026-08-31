@@ -168,8 +168,6 @@ nl:
         reroute_failed: Kon gebeurtenis niet omleiden.
         rerouted: Gebeurtenis omgeleid naar doelhandler.
       index:
-        discard_all: Alles Verwijderen
-        discard_all_confirm: Alle openstaande gebeurtenissen verwijderen? Dit kan niet ongedaan worden gemaakt.
         discard_selected: Geselecteerde Verwijderen
         discard_selected_confirm: Geselecteerde gebeurtenissen verwijderen?
         pending_empty: Geen openstaande gebeurtenissen

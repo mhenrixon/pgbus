@@ -168,8 +168,6 @@ de:
         reroute_failed: Ereignis konnte nicht umgeleitet werden.
         rerouted: Ereignis an Ziel-Handler umgeleitet.
       index:
-        discard_all: Alle verwerfen
-        discard_all_confirm: Alle ausstehenden Ereignisse verwerfen? Dies kann nicht rückgängig gemacht werden.
         discard_selected: Ausgewählte verwerfen
         discard_selected_confirm: Ausgewählte Ereignisse verwerfen?
         pending_empty: Keine ausstehenden Ereignisse
