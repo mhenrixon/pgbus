@@ -775,6 +775,39 @@ RSpec.describe Pgbus::ActiveJob::Executor do
       end
     end
 
+    describe "visibility heartbeat" do
+      let(:message) { build_message_double(msg_id: 60, message: message_json, read_ct: 1) }
+
+      before { allow(Pgbus::VisibilityHeartbeat).to receive(:track).and_yield }
+
+      it "tracks the message for the duration of perform" do
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::VisibilityHeartbeat).to have_received(:track).with(
+          client: mock_client, queue_name: queue_name, prefixed: true, msg_id: 60,
+          job_class: job_double.class.name, config: config
+        )
+        expect(job_double).to have_received(:perform_now)
+      end
+
+      it "tracks the physical source queue when the message came from a priority sub-queue" do
+        executor.execute(message, queue_name, source_queue: "pgbus_default_p1")
+
+        expect(Pgbus::VisibilityHeartbeat).to have_received(:track).with(
+          hash_including(queue_name: "pgbus_default_p1", prefixed: false, msg_id: 60)
+        )
+      end
+
+      it "skips tracking when the job class opted out" do
+        allow(job_double.class).to receive(:pgbus_visibility_heartbeat_enabled).and_return(false)
+
+        executor.execute(message, queue_name)
+
+        expect(Pgbus::VisibilityHeartbeat).not_to have_received(:track)
+        expect(job_double).to have_received(:perform_now)
+      end
+    end
+
     describe "retry backoff (VT-based retry path)" do
       let(:message) { build_message_double(msg_id: 50, message: message_json, read_ct: 2) }
 

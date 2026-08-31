@@ -575,6 +575,30 @@ class FragileApiJob < ApplicationJob
 end
 ```
 
+### Long-running jobs: visibility heartbeat
+
+PGMQ hands a message to one reader for `visibility_timeout` seconds. Without help, a job that runs longer is redelivered *while it is still running*: a second copy starts, `read_ct` climbs on every redelivery, and after `max_retries` the message is dead-lettered — all without the job ever raising.
+
+Pgbus keeps that from happening. While `perform` runs, a per-process heartbeat thread re-arms the message's visibility timeout every `visibility_heartbeat_interval` seconds (default: a third of `visibility_timeout`), so the timeout only fires for a process that is actually gone — a crash or a `SIGKILL` — which is what it exists for. The heartbeat is dropped before the message is archived or the retry backoff adjusts its VT, so neither path changes.
+
+```ruby
+Pgbus.configure do |config|
+  config.visibility_timeout = 10.minutes
+  config.visibility_heartbeat = true            # default
+  config.visibility_heartbeat_interval = 2.minutes  # default: visibility_timeout / 3
+end
+```
+
+Opt a job class out (a job that must be redelivered if it stalls, for example):
+
+```ruby
+class WatchdogJob < ApplicationJob
+  pgbus_visibility_heartbeat false
+end
+```
+
+Each extension emits `pgbus.job_visibility_extended` and increments the `pgbus_visibility_extended` counter (tags: `queue`, `job_class`) — a job class that shows up there is one that outlives `visibility_timeout`, so you can size the timeout from data instead of guessing. `drain_timeout` still bounds what a graceful shutdown waits for; a job still running past it is redelivered after the timeout, as before. Event-bus handlers are not covered yet.
+
 ### Async execution mode (fibers)
 
 Workers can optionally execute jobs as fibers instead of threads. This is ideal for I/O-bound workloads (HTTP calls, email delivery, LLM API calls) where jobs spend most of their time waiting on network I/O.
@@ -907,6 +931,7 @@ c.metrics_backend = MyOpenTelemetryBackend.new
 | Metric | Type | Tags |
 |--------|------|------|
 | `pgbus_queue_job_count` | counter | `queue`, `job_class`, `status` (`processed`/`failed`/`dead_lettered`) |
+| `pgbus_visibility_extended` | counter | `queue`, `job_class` — one per re-armed visibility timeout; a class listed here outlives `visibility_timeout` |
 | `pgbus_job_duration_ms` | histogram | `queue`, `job_class` |
 | `pgbus_event_count` | counter | `handler`, `routing_key`, `status` |
 | `pgbus_event_duration_ms` | histogram | `handler`, `routing_key` |
@@ -2199,6 +2224,8 @@ Curated headline options for the README. The full operator reference (with types
 | `roles` | `nil` (all) | Supervisor role filter — usually set via CLI flags (`--workers-only` etc.) |
 | `polling_interval` | `0.1` | Seconds between polls (LISTEN/NOTIFY is primary) |
 | `visibility_timeout` | `30` | Time before unacked message becomes visible again. Accepts seconds or `ActiveSupport::Duration` (e.g. `10.minutes`) |
+| `visibility_heartbeat` | `true` | Re-arm a running job's visibility timeout while `perform` runs, so long jobs are not redelivered or dead-lettered mid-run. `false` restores plain PGMQ semantics |
+| `visibility_heartbeat_interval` | `nil` (`visibility_timeout / 3`) | Seconds (or Duration) between two extensions; must stay below `visibility_timeout` |
 | `max_retries` | `5` | Failed reads before routing to dead letter queue |
 | `retry_backoff` | `5` | Base delay in seconds for VT-based retry backoff (exponential: `base * 2^(attempt-1)`) |
 | `retry_backoff_max` | `300` | Maximum retry delay in seconds (caps the exponential curve) |

@@ -844,6 +844,7 @@ module Pgbus
         # proven it won't finish; waiting another full window would push the
         # worker past the supervisor's shutdown_timeout deadline (issue #386).
         @pool.wait_for_termination(POOL_TERMINATION_WAIT)
+        VisibilityHeartbeat.stop
         @stat_buffer&.stop
         @queue_lock&.unlock_all
         @heartbeat&.stop

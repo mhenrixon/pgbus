@@ -16,6 +16,8 @@ module Pgbus
   #   pgbus.job_completed          — job archived successfully
   #   pgbus.job_failed             — job raised; carries :exception_object
   #   pgbus.job_dead_lettered      — job exceeded max_retries and was DLQ-routed
+  #   pgbus.job_visibility_extended — heartbeat re-armed a running job's visibility timeout
+  #                                  payload: queue, job_class, msg_id, vt, extensions
   #   pgbus.event_processed        — event handler succeeded
   #   pgbus.event_failed           — event handler raised; carries :exception_object
   #   pgbus.stream.broadcast       — stream broadcast (sync or deferred)

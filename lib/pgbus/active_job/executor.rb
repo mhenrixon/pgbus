@@ -96,7 +96,7 @@ module Pgbus
           # `batch` (and `batch.enqueue` for open batches) work inside a job.
           assign_batch_id(job, payload)
           Pgbus.logger.debug { "[Pgbus::Executor] running #{tag} job_class=#{job_class}" }
-          execute_job(job)
+          with_visibility_heartbeat(job, queue_name, msg_id, source_queue) { execute_job(job) }
           # retry_on re-enqueues from inside perform_now and returns normally:
           # this attempt is done (archive it) but the job is not — the retry
           # message carries the batch tag and signals on its own outcome.
@@ -172,6 +172,20 @@ module Pgbus
         Uniqueness.release_lock(key)
       rescue StandardError => e
         Pgbus.logger.warn { "[Pgbus] Uniqueness release failed: #{e.message}" }
+      end
+
+      # Keep the message invisible while perform runs (see VisibilityHeartbeat).
+      # Wraps only the perform: the heartbeat must be gone before archive or
+      # the retry backoff touches the same message's VT.
+      def with_visibility_heartbeat(job, queue_name, msg_id, source_queue, &)
+        klass = job.class
+        per_job = klass.respond_to?(:pgbus_visibility_heartbeat_enabled) ? klass.pgbus_visibility_heartbeat_enabled : nil
+        return yield if per_job == false
+
+        VisibilityHeartbeat.track(
+          client: client, queue_name: source_queue || queue_name, prefixed: source_queue.nil?,
+          msg_id: msg_id, job_class: klass.name, config: config, &
+        )
       end
 
       def execute_job(job)
