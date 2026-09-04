@@ -114,6 +114,8 @@ module Pgbus
       end
 
       def handle_client(client)
+        # IO#timeout= is core Ruby since 3.2 (below this gem's 3.3 floor) — no
+        # require, and there is no "io/timeout" file to require.
         client.timeout = @read_timeout
         method, path = read_request_line(client)
         return unless method
