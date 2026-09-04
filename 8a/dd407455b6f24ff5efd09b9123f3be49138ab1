@@ -1,0 +1,19 @@
+lib/pgbus/web/health_server.rb
+  s_e1584a0c2fd090::t_282d9e14b8285b 117-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "8add407455b6f24ff5efd09b9123f3be49138ab1",
+  "prompts": {},
+  "sessions": {
+    "s_e1584a0c2fd090": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f32a42b3-38c2-4529-9062-8dff1fecc61c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
