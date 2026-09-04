@@ -26,6 +26,17 @@ module Pgbus
       MAX_REQUEST_LINE = 8_192
       private_constant :MAX_REQUEST_LINE
 
+      # Per-connection I/O deadline. A client that connects and sends nothing
+      # would otherwise park the single accept loop forever and starve every
+      # later probe. Kept under HealthProbe::DEFAULT_TIMEOUT (2s) so one wedged
+      # connection still can't push the next probe past its own deadline.
+      READ_TIMEOUT = 1
+      private_constant :READ_TIMEOUT
+
+      # How long #stop waits for the accept loop before killing it.
+      JOIN_TIMEOUT = 2
+      private_constant :JOIN_TIMEOUT
+
       STATUS_TEXT = {
         200 => "OK", 404 => "Not Found", 405 => "Method Not Allowed", 503 => "Service Unavailable"
       }.freeze
@@ -36,11 +47,12 @@ module Pgbus
       #   nil before #start.
       attr_reader :port
 
-      def initialize(port:, bind: "127.0.0.1", app: nil, logger: nil)
+      def initialize(port:, bind: "127.0.0.1", app: nil, logger: nil, read_timeout: READ_TIMEOUT)
         @configured_port = port
         @bind = bind
         @app = app || HealthApp.new
         @logger = logger
+        @read_timeout = read_timeout
         @server = nil
         @thread = nil
         @port = nil
@@ -63,12 +75,24 @@ module Pgbus
         server = @server
         @server = nil
         close_socket(server)
-        @thread&.join(2)
+        stop_thread(@thread)
         @thread = nil
         @port = nil
       end
 
       private
+
+      # A loop parked on an already-accepted client never sees the listening
+      # socket close, so kill it rather than return "stopped" while it is still
+      # running. Thread#kill is asynchronous — join again so #stop only returns
+      # once the thread is really gone.
+      def stop_thread(thread)
+        return unless thread
+        return if thread.join(JOIN_TIMEOUT)
+
+        thread.kill
+        thread.join(JOIN_TIMEOUT)
+      end
 
       # accept blocks until stop closes the socket, which raises here and ends
       # the loop. Any per-connection error is logged and swallowed so one bad
@@ -90,6 +114,7 @@ module Pgbus
       end
 
       def handle_client(client)
+        client.timeout = @read_timeout
         method, path = read_request_line(client)
         return unless method
 
@@ -103,7 +128,9 @@ module Pgbus
 
       # Read and parse only the first line: "METHOD PATH HTTP/x.y". Returns
       # [method, path] or [nil, nil] when the line is missing/garbage so the
-      # caller drops the connection without dispatching.
+      # caller drops the connection without dispatching. A client that stays
+      # silent past the deadline raises IO::TimeoutError (an IOError, so the
+      # caller's rescue StandardError logs it and frees the loop).
       def read_request_line(client)
         line = client.gets("\r\n", MAX_REQUEST_LINE)
         return [nil, nil] if line.nil?
