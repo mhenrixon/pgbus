@@ -1,0 +1,26 @@
+CHANGELOG.md
+  s_e1584a0c2fd090::t_c77fd29cc6f4d4 5
+spec/pgbus/web/health_server_spec.rb
+  s_e1584a0c2fd090::t_f807aea57a21b9 101-120,122-127,129-154,158-159,161,164
+  s_e1584a0c2fd090::t_ccf324a7bfe213 121,128
+  s_e1584a0c2fd090::t_79d7713d7f67c7 155-157,160,162-163
+lib/pgbus/web/health_server.rb
+  s_e1584a0c2fd090::t_a31ba95bce5fee 29-39,50,55,117,131-133
+  s_e1584a0c2fd090::t_bbb15540a81f01 78,85-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.2",
+  "base_commit_sha": "1329ee8f0966be694015d6cab792d84bed405dd9",
+  "prompts": {},
+  "sessions": {
+    "s_e1584a0c2fd090": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f32a42b3-38c2-4529-9062-8dff1fecc61c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "mhenrixon <mikael@mhenrixon.com>"
+    }
+  }
+}
