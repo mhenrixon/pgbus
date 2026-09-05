@@ -98,4 +98,68 @@ RSpec.describe Pgbus::Web::HealthServer do
       expect(http_get("/livez")).to include("200")
     end
   end
+
+  describe "a client that connects and never sends a request line" do
+    # Without a bounded read the accept loop parks in gets forever and every
+    # later probe queues behind it — the container goes unhealthy for good.
+    # These specs hang (rather than fail) if the timeout regresses.
+    subject(:server) do
+      described_class.new(port: 0, bind: "127.0.0.1", app: app, read_timeout: 0.2)
+    end
+
+    it "does not starve a later probe" do
+      server.start
+      silent = TCPSocket.new("127.0.0.1", server.port)
+
+      begin
+        expect(http_get("/livez")).to include("200")
+      ensure
+        silent.close
+      end
+    end
+
+    it "keeps serving once the silent client has timed out" do
+      server.start
+      silent = TCPSocket.new("127.0.0.1", server.port)
+
+      begin
+        http_get("/livez")
+
+        expect(http_get("/livez")).to include("200")
+      ensure
+        silent.close
+      end
+    end
+  end
+
+  describe "#stop with a client parked mid-read" do
+    # A read timeout longer than the join deadline: #stop must kill the thread
+    # rather than return while it is still running.
+    subject(:server) do
+      described_class.new(port: 0, bind: "127.0.0.1", app: app, read_timeout: 60)
+    end
+
+    it "leaves no live accept-loop thread behind" do
+      server.start
+      silent = TCPSocket.new("127.0.0.1", server.port)
+      wait_for_parked_reader(server)
+      thread = server.instance_variable_get(:@thread)
+
+      server.stop
+      silent.close
+
+      expect(thread).not_to be_alive
+    end
+  end
+
+  # Blocked in accept and blocked in the client read are both "sleep", so wait
+  # on the backtrace instead — otherwise #stop's socket close would free the
+  # loop and the kill path would never be exercised.
+  def wait_for_parked_reader(server)
+    thread = server.instance_variable_get(:@thread)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+
+    sleep(0.01) until thread.backtrace.to_a.any? { |f| f.include?("read_request_line") } ||
+                      Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+  end
 end
