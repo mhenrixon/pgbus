@@ -11,6 +11,9 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
   end
 
   before do
+    # Client#initialize probes PG.library_version when read_timeout is set
+    # (default 30s) and TCP_USER_TIMEOUT exists. Unit specs don't load libpq.
+    stub_pg_library_version
     # Stub the class method that loads pgmq so the faked PGMQ::Client stands;
     # a clean per-example stub, unlike stubbing global Kernel#require.
     allow(Pgbus::Client).to receive(:load_pgmq_gem!)

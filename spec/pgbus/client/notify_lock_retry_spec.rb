@@ -8,8 +8,8 @@ require "spec_helper"
 # the check-then-act still races. getzazu/app#3817 / #3827.
 RSpec.describe Pgbus::Client::NotifyLockRetry do
   def ensure_pg_error_class(name)
-    stub_const("PG", Module.new) unless defined?(PG)
-    return if defined?(PG) && PG.const_defined?(name, false)
+    stub_pg_library_version
+    return if PG.const_defined?(name, false)
 
     stub_const("PG::#{name}", Class.new(StandardError))
   end
@@ -69,18 +69,18 @@ RSpec.describe Pgbus::Client::NotifyLockRetry do
       # so a DROP TRIGGER waiter dies as QueryCanceled, not LockWaitTimeout.
       expect(described_class.retryable?(statement_timeout_lock_error)).to be(true)
       expect(described_class.retryable?(
-        PG::QueryCanceled.new(
-          "ERROR:  canceling statement due to statement timeout\nCONTEXT:  while locking tuple"
-        )
-      )).to be(true)
+               PG::QueryCanceled.new(
+                 "ERROR:  canceling statement due to statement timeout\nCONTEXT:  while locking tuple"
+               )
+             )).to be(true)
     end
 
     it "does not treat a bare statement timeout as retryable" do
       expect(described_class.retryable?(
-        PGMQ::Errors::ConnectionError.new(
-          "Database connection error: ERROR:  canceling statement due to statement timeout"
-        )
-      )).to be(false)
+               PGMQ::Errors::ConnectionError.new(
+                 "Database connection error: ERROR:  canceling statement due to statement timeout"
+               )
+             )).to be(false)
     end
 
     it "treats PG::TRDeadlockDetected and PG::LockNotAvailable as retryable" do
@@ -107,8 +107,8 @@ RSpec.describe Pgbus::Client::NotifyLockRetry do
 
     it "does not treat a permission ConnectionError as retryable" do
       expect(described_class.retryable?(
-        PGMQ::Errors::ConnectionError.new("permission denied for schema pgmq")
-      )).to be(false)
+               PGMQ::Errors::ConnectionError.new("permission denied for schema pgmq")
+             )).to be(false)
     end
 
     it "does not treat generic StandardError as retryable" do
@@ -121,8 +121,7 @@ RSpec.describe Pgbus::Client::NotifyLockRetry do
       Class.new do
         include Pgbus::Client::NotifyLockRetry
 
-        def sleep(*)
-        end
+        def sleep(*) = nil
       end.new
     end
 
@@ -131,8 +130,8 @@ RSpec.describe Pgbus::Client::NotifyLockRetry do
       allow(Pgbus.logger).to receive(:warn)
     end
 
-    def retry_notify
-      host.send(:with_notify_lock_retry, "pl_metrics") { yield }
+    def retry_notify(&)
+      host.send(:with_notify_lock_retry, "pl_metrics", &)
     end
 
     it "returns the block result when the first attempt succeeds" do
@@ -241,7 +240,7 @@ RSpec.describe Pgbus::Client::NotifyLockRetry do
       end
 
       expect(warnings.first).to match(
-        /Retrying stream-queue notify setup after a Postgres lock failure.*attempt 1\/3 stream=pl_metrics/
+        %r{Retrying stream-queue notify setup after a Postgres lock failure.*attempt 1/3 stream=pl_metrics}
       )
     end
   end
