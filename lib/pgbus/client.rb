@@ -4,6 +4,7 @@ require "json"
 require "socket"
 require "timeout"
 require_relative "client/read_after"
+require_relative "client/notify_lock_retry"
 require_relative "client/ensure_stream_queue"
 require_relative "client/notify_stream"
 require_relative "client/connection_health"
@@ -13,6 +14,7 @@ module Pgbus
   class Client
     include ReadAfter
     include FairRead
+    include NotifyLockRetry
     include EnsureStreamQueue
     include NotifyStream
 

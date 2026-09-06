@@ -87,13 +87,23 @@ module Pgbus
         # Override the throttle to 0 specifically for stream queues.
         # Use the idempotent path to avoid deadlocks when multiple
         # processes race to set up the same stream queue.
-        synchronized { enable_notify_if_needed(full_name, 0) }
+        enable_stream_notify(full_name, stream_name)
       rescue PGMQ::Errors::ConnectionError => e
         raise unless missing_pgmq_queue_error?(e)
 
         forget_stream_queue_memo!(full_name, stream_name)
         ensure_single_queue(full_name)
-        synchronized { enable_notify_if_needed(full_name, 0) }
+        enable_stream_notify(full_name, stream_name)
+      end
+
+      # Wrap only notify-insert setup. Sleeps in with_notify_lock_retry
+      # run *after* synchronized releases @pgmq_mutex. Do not pull the
+      # sleep inside synchronized, and do not fold these errors into
+      # with_stale_connection_retry (idle-socket / no-SQL-sent only).
+      def enable_stream_notify(full_name, stream_name)
+        with_notify_lock_retry(stream_name) do
+          synchronized { enable_notify_if_needed(full_name, 0) }
+        end
       end
 
       def forget_stream_queue_memo!(full_name, stream_name)
