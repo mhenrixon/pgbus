@@ -16,8 +16,14 @@ module Pgbus
     #
     # Sleep here — in the rescue, *outside* the yielded block — so the
     # backoff never runs while `synchronized` holds `@pgmq_mutex`. Callers
-    # must wrap only the notify-setup path, not hold the mutex across this
-    # method. Missing-queue and permission errors stay unretried.
+    # wrap the full stream-queue tables attempt (create-path 250ms notify
+    # plus the stream 0ms override), not hold the mutex across this method.
+    # Missing-queue errors stay outside this policy (one-time recreation
+    # in `ensure_stream_queue_tables`); permission errors fail fast.
+    # On the shared-AR path a lock error inside the caller's transaction
+    # aborts that transaction — retrying on the same connection would
+    # raise "current transaction is aborted" and hide the lock error, so
+    # we re-raise the original instead.
     module NotifyLockRetry
       ATTEMPTS = 3
       DELAYS = [0.05, 0.15, 0.35].freeze
@@ -76,6 +82,11 @@ module Pgbus
         rescue StandardError => e
           attempts += 1
           raise unless attempts < ATTEMPTS && NotifyLockRetry.retryable?(e)
+          # Shared-AR connection already inside (or aborted by) the caller's
+          # transaction: a retry on the same socket cannot recover and would
+          # mask this lock error with "current transaction is aborted".
+          # Dedicated-pool and idle after_commit paths still retry.
+          raise if notify_lock_retry_blocked_by_caller_transaction?
 
           # Sleep here — in the rescue, *outside* the yielded block — so the
           # backoff never runs while @pgmq_mutex is held: on the shared-
@@ -91,6 +102,12 @@ module Pgbus
           end
           retry
         end
+      end
+
+      def notify_lock_retry_blocked_by_caller_transaction?
+        queue_ddl_rides_caller_transaction?
+      rescue StandardError
+        false
       end
     end
   end
