@@ -315,6 +315,30 @@ RSpec.describe Pgbus::Client::EnsureStreamQueue do
         expect(client).not_to have_received(:sleep)
       end
 
+      it "lock-retries a deadlock after missing-queue recovery without re-running recreate" do
+        missing = PGMQ::Errors::ConnectionError.new(
+          'Queue "pgbus_test_chat" does not exist. Create it first using pgmq.create()'
+        )
+        calls = 0
+        allow(mock_pgmq).to receive(:enable_notify_insert) do
+          calls += 1
+          raise missing if calls == 1
+          raise deadlock_error if calls == 2
+
+          nil
+        end
+        allow(client).to receive(:forget_stream_queue_memo!).and_call_original
+
+        expect { client.ensure_stream_queue("chat") }.not_to raise_error
+        expect(calls).to eq(3)
+        expect(client).to have_received(:sleep).once
+        # Recovery (forget + recreate) stays outside the lock-retry budget.
+        # The third ensure_single_queue is the lock-retry of recovery setup,
+        # not a second forget+recreate.
+        expect(client).to have_received(:forget_stream_queue_memo!).once
+        expect(client).to have_received(:ensure_single_queue).exactly(3).times
+      end
+
       it "re-raises after the retry budget is exhausted" do
         allow(mock_pgmq).to receive(:enable_notify_insert).and_raise(deadlock_error)
 

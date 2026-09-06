@@ -78,12 +78,23 @@ module Pgbus
       # peer process's memo. The memoized path then skips `pgmq.create` and
       # `enable_notify_insert` raises "Queue does not exist".
       def ensure_stream_queue_tables(full_name, stream_name)
-        # Wrap the whole attempt: ensure_single_queue → create_queue_physically
-        # also runs enable_notify_if_needed(..., NOTIFY_THROTTLE_MS) before
-        # the stream override to 0ms, and that first DROP TRIGGER can
-        # deadlock the same way. Sleeps in with_notify_lock_retry run
-        # *after* synchronized releases @pgmq_mutex. Do not fold these
-        # errors into with_stale_connection_retry (idle-socket only).
+        # Lock-retry wraps one setup attempt (create-path 250ms notify
+        # plus the stream 0ms override). Missing-queue recovery stays
+        # *outside* that budget so a later lock error cannot re-run
+        # forget+recreate up to ATTEMPTS times. The recovery attempt
+        # gets its own lock-retry — the DROP TRIGGER race can still
+        # happen after we recreate. Sleeps run after synchronized
+        # releases @pgmq_mutex. Do not fold these errors into
+        # with_stale_connection_retry (idle-socket only).
+        setup_stream_queue_tables(full_name, stream_name)
+      rescue PGMQ::Errors::ConnectionError => e
+        raise unless missing_pgmq_queue_error?(e)
+
+        forget_stream_queue_memo!(full_name, stream_name)
+        setup_stream_queue_tables(full_name, stream_name)
+      end
+
+      def setup_stream_queue_tables(full_name, stream_name)
         with_notify_lock_retry(stream_name) do
           ensure_single_queue(full_name)
 
@@ -92,12 +103,6 @@ module Pgbus
           # sensitive and need every broadcast to fire a NOTIFY, even
           # when several are batched within a single millisecond.
           # Override the throttle to 0 specifically for stream queues.
-          synchronized { enable_notify_if_needed(full_name, 0) }
-        rescue PGMQ::Errors::ConnectionError => e
-          raise unless missing_pgmq_queue_error?(e)
-
-          forget_stream_queue_memo!(full_name, stream_name)
-          ensure_single_queue(full_name)
           synchronized { enable_notify_if_needed(full_name, 0) }
         end
       end
